@@ -47,8 +47,10 @@ Exposes the following tools to the calling agent:
   (when a registration shows ``confirmation: "code"``)
 
 Every tool sets explicit ``ToolAnnotations`` hints (read-only, destructive,
-idempotent, open-world) and a human title; ``tests/test_tool_annotations.py``
-fails when a new tool is left unclassified.
+idempotent, open-world) and a human title, set both on the tool and as
+``annotations.title`` (directory listings read the latter);
+``tests/test_tool_annotations.py`` fails when a new tool is left
+unclassified.
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, how modes combine,
@@ -83,7 +85,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -92,7 +94,7 @@ from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
-from pydantic import StrictBool, ValidationError
+from pydantic import StrictBool, ValidationError, WithJsonSchema
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
@@ -764,6 +766,17 @@ _VERIFICATION_PURPOSES = ("number", "sms")
 _PURPOSE_ERROR = "purpose must be 'number' or 'sms'"
 
 
+# Typed in the JSON schema only. Validation stays ``Any`` so FastMCP never
+# echoes a submitted value; ``_verification_shape_error`` checks the shape.
+_JsonObject = Annotated[Any, WithJsonSchema({"type": "object"})]
+_JsonObjectList = Annotated[
+    Any, WithJsonSchema({"type": "array", "items": {"type": "object"}})
+]
+_JsonObjectOrNone = Annotated[
+    Any, WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "null"}]})
+]
+
+
 def _verification_shape_error(
     fields: Any, documents: Any, files: Any, address: Any
 ) -> str | None:
@@ -1270,6 +1283,7 @@ def register_tools(
         name="place_call",
         title="Place a phone call",
         annotations=ToolAnnotations(
+            title="Place a phone call",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1382,6 +1396,7 @@ def register_tools(
         name="send_email",
         title="Send an email",
         annotations=ToolAnnotations(
+            title="Send an email",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1495,6 +1510,7 @@ def register_tools(
         name="upload_email_attachment",
         title="Upload an email attachment",
         annotations=ToolAnnotations(
+            title="Upload an email attachment",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1533,6 +1549,7 @@ def register_tools(
         name="get_call",
         title="Get a call",
         annotations=ToolAnnotations(
+            title="Get a call",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1558,6 +1575,7 @@ def register_tools(
         name="list_calls",
         title="List calls",
         annotations=ToolAnnotations(
+            title="List calls",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1592,6 +1610,7 @@ def register_tools(
         name="send_sms",
         title="Send a text message",
         annotations=ToolAnnotations(
+            title="Send a text message",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1666,6 +1685,7 @@ def register_tools(
         name="get_sms",
         title="Get a text message",
         annotations=ToolAnnotations(
+            title="Get a text message",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1690,6 +1710,7 @@ def register_tools(
         name="list_sms",
         title="List text messages",
         annotations=ToolAnnotations(
+            title="List text messages",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1722,6 +1743,7 @@ def register_tools(
         name="get_email",
         title="Get an email",
         annotations=ToolAnnotations(
+            title="Get an email",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1749,6 +1771,7 @@ def register_tools(
         name="list_emails",
         title="List emails",
         annotations=ToolAnnotations(
+            title="List emails",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1797,6 +1820,7 @@ def register_tools(
         name="get_email_raw",
         title="Get raw email",
         annotations=ToolAnnotations(
+            title="Get raw email",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1822,6 +1846,7 @@ def register_tools(
         name="get_email_attachment",
         title="Get an email attachment",
         annotations=ToolAnnotations(
+            title="Get an email attachment",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1851,6 +1876,7 @@ def register_tools(
         name="get_email_events",
         title="Get email events",
         annotations=ToolAnnotations(
+            title="Get email events",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1891,6 +1917,7 @@ def register_tools(
         name="get_email_stats",
         title="Get email stats",
         annotations=ToolAnnotations(
+            title="Get email stats",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1935,6 +1962,7 @@ def register_tools(
         name="get_events",
         title="Get events",
         annotations=ToolAnnotations(
+            title="Get events",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1986,6 +2014,7 @@ def register_tools(
         name="list_agents",
         title="List agents",
         annotations=ToolAnnotations(
+            title="List agents",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2012,6 +2041,7 @@ def register_tools(
         name="create_agent",
         title="Create an agent",
         annotations=ToolAnnotations(
+            title="Create an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -2091,6 +2121,7 @@ def register_tools(
         name="route_number",
         title="Route a number to an agent",
         annotations=ToolAnnotations(
+            title="Route a number to an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=True,
@@ -2133,6 +2164,7 @@ def register_tools(
         name="quote_numbers",
         title="Quote phone numbers",
         annotations=ToolAnnotations(
+            title="Quote phone numbers",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2199,6 +2231,7 @@ def register_tools(
         name="acquire_number",
         title="Buy a phone number",
         annotations=ToolAnnotations(
+            title="Buy a phone number",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2253,6 +2286,7 @@ def register_tools(
         name="list_numbers",
         title="List numbers",
         annotations=ToolAnnotations(
+            title="List numbers",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2282,6 +2316,7 @@ def register_tools(
         name="list_number_regions",
         title="List number search regions",
         annotations=ToolAnnotations(
+            title="List number search regions",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2305,6 +2340,7 @@ def register_tools(
         name="get_number",
         title="Get a number",
         annotations=ToolAnnotations(
+            title="Get a number",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2331,6 +2367,7 @@ def register_tools(
         name="release_number",
         title="Release a number",
         annotations=ToolAnnotations(
+            title="Release a number",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2370,6 +2407,7 @@ def register_tools(
         name="get_verification_requirements",
         title="Get verification requirements",
         annotations=ToolAnnotations(
+            title="Get verification requirements",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2425,6 +2463,7 @@ def register_tools(
         name="submit_verification",
         title="Submit a verification",
         annotations=ToolAnnotations(
+            title="Submit a verification",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
@@ -2435,12 +2474,12 @@ def register_tools(
         ctx: Context,
         country_code: str,
         number_type: str,
-        fields: Any,
-        documents: Any,
-        files: Any,
+        fields: _JsonObject,
+        documents: _JsonObject,
+        files: _JsonObjectList,
         attest_authorized: StrictBool,
         subject_type: str = "person",
-        address: Any = None,
+        address: _JsonObjectOrNone = None,
         provider: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
@@ -2512,6 +2551,7 @@ def register_tools(
         name="list_verifications",
         title="List verifications",
         annotations=ToolAnnotations(
+            title="List verifications",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2547,6 +2587,7 @@ def register_tools(
         name="get_verification",
         title="Get a verification",
         annotations=ToolAnnotations(
+            title="Get a verification",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2582,6 +2623,7 @@ def register_tools(
         name="cancel_verification",
         title="Cancel a verification",
         annotations=ToolAnnotations(
+            title="Cancel a verification",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
@@ -2618,6 +2660,7 @@ def register_tools(
         name="confirm_verification",
         title="Confirm a verification with a code",
         annotations=ToolAnnotations(
+            title="Confirm a verification with a code",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -2650,6 +2693,7 @@ def register_tools(
         name="get_agent",
         title="Get an agent",
         annotations=ToolAnnotations(
+            title="Get an agent",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2677,6 +2721,7 @@ def register_tools(
         name="update_agent",
         title="Update an agent",
         annotations=ToolAnnotations(
+            title="Update an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=True,
@@ -2761,6 +2806,7 @@ def register_tools(
         name="delete_agent",
         title="Delete an agent",
         annotations=ToolAnnotations(
+            title="Delete an agent",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2797,6 +2843,7 @@ def register_tools(
         name="list_contacts",
         title="List contacts",
         annotations=ToolAnnotations(
+            title="List contacts",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2829,6 +2876,7 @@ def register_tools(
         name="lookup_contact",
         title="Look up a contact",
         annotations=ToolAnnotations(
+            title="Look up a contact",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2855,6 +2903,7 @@ def register_tools(
         name="list_email_domains",
         title="List email domains",
         annotations=ToolAnnotations(
+            title="List email domains",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2897,6 +2946,7 @@ def register_tools(
         name="whoami",
         title="Who am I",
         annotations=ToolAnnotations(
+            title="Who am I",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2928,6 +2978,7 @@ def register_tools(
         name="create_contact",
         title="Create a contact",
         annotations=ToolAnnotations(
+            title="Create a contact",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,

@@ -8,6 +8,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.
 
+### Fixed
+
+- MCP: every tool now sets `annotations.title`, and `submit_verification` declares types for `fields`, `documents`, `files` and `address`, so MCP directories list them correctly.
+
 ## [0.30.0] (2026-10-20)
 
 Sender ID SMS to about 110 countries, voice suggestions by language, and call
