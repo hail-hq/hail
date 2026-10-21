@@ -1,0 +1,16 @@
+{
+  "name": "hail",
+  "displayName": "Hail",
+  "version": "1.0.0",
+  "description": "Give your AI assistant a phone number and an email inbox. Make calls, send texts and email, and read replies.",
+  "author": {
+    "name": "Hail",
+    "email": "hi@hail.so"
+  },
+  "homepage": "https://hail.so/mcp/cursor",
+  "repository": "https://github.com/hail-hq/hail",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["communication", "email", "sms", "voice", "mcp"],
+  "logo": "docs/assets/hail-messenger.svg",
+  "mcpServers": "mcp.json"
+}

@@ -69,6 +69,39 @@ Authentication differs by deployment:
 
 Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks](docs/public/webhooks.md) · [MCP](docs/public/mcp.md) · [operations](docs/public/self-host/operations.md)
 
+## Cursor plugin
+
+From a checkout that includes the plugin, copy its files into Cursor's
+local plugin directory:
+
+```bash
+mkdir -p ~/.cursor/plugins/local/hail
+git archive HEAD .cursor-plugin mcp.json README.md LICENSE \
+  docs/assets/hail-messenger.svg | tar -x -C ~/.cursor/plugins/local/hail
+```
+
+Reload Cursor and open Customize to find the Hail MCP server.
+Enterprise administrators must allow local plugin imports first.
+The plugin connects to `https://mcp.hail.so`
+using OAuth. Sign in to Hail when Cursor asks. No API key or local MCP
+runtime is needed. Start with a read-only request:
+
+```text
+Use Hail to show my account details. Do not send messages, place calls,
+buy numbers, or change settings.
+```
+
+Calls and messages require account credit and recipient permission.
+Marketing sends also require a record of that permission. Use your own
+approved email and SMS copy. Review the recipient and cost before sending.
+
+The plugin manifest is [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json).
+Its [MCP configuration](mcp.json) uses the hosted service. The source license
+does not make Hail Cloud usage free. Refer to the
+[Cursor setup guide](https://hail.so/mcp/cursor),
+[pricing](https://hail.so/pricing), and
+[privacy policy](https://hail.so/legal/privacy). Contact `hi@hail.so` for help.
+
 ## Install the CLI
 
 On macOS or Linux with [Homebrew](https://brew.sh):
