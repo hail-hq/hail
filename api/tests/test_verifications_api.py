@@ -967,6 +967,78 @@ async def test_requirements_and_create_default_to_the_configured_carrier(
     assert resp.json()["provider"] == "fake"
 
 
+async def _raw_quote(async_session, org_id, carrier_name: str) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.core.models import NumberOffer
+
+    quote = NumberOffer(
+        organization_id=org_id,
+        offer={"provider": carrier_name, "e164": "+447700900001"},
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    async_session.add(quote)
+    await async_session.commit()
+    return str(quote.id)
+
+
+async def test_quote_id_picks_the_quoted_carrier(
+    client, org_and_key, carrier, async_session
+) -> None:
+    """A client that never sees the carrier name verifies for an offer."""
+    org_id, _, key = org_and_key
+    # No default carrier: only the quote can name "fake".
+    app.dependency_overrides[get_default_provider_name] = lambda: None
+    quote_id = await _raw_quote(async_session, org_id, "fake")
+    resp = await client.get(
+        "/verifications/requirements",
+        params={"country_code": "GB", "number_type": "mobile", "quote_id": quote_id},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/verifications",
+        data=_submission(provider="", quote_id=quote_id),
+        files=_passport(),
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["provider"] == "fake"
+
+
+async def test_quote_id_must_belong_to_the_org(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    other_org, _, _ = await insert_org_and_key(async_session)
+    quote_id = await _raw_quote(async_session, other_org, "fake")
+    for q in (quote_id, str(uuid.uuid4())):
+        resp = await client.get(
+            "/verifications/requirements",
+            params={"country_code": "GB", "number_type": "mobile", "quote_id": q},
+            headers=_auth(key),
+        )
+        assert resp.status_code == 404
+
+
+async def test_quote_id_rejects_a_different_provider(
+    client, org_and_key, carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    quote_id = await _raw_quote(async_session, org_id, "fake")
+    resp = await client.get(
+        "/verifications/requirements",
+        params={
+            "country_code": "GB",
+            "number_type": "mobile",
+            "quote_id": quote_id,
+            "provider": "other",
+        },
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422
+
+
 async def test_no_configured_carrier_is_404(client, org_and_key, carrier) -> None:
     _, _, key = org_and_key
     app.dependency_overrides[get_default_provider_name] = lambda: None

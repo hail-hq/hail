@@ -4383,7 +4383,9 @@ paths:
 
         `purpose=sms` is for registering to send SMS in the US; without
 
-        `provider` it uses the carrier of your US numbers. Build your form
+        `provider` it uses the carrier of your US numbers. For `purpose=number`,
+
+        pass the offer's `quote_id` to get that offer's carrier. Build your form
 
         from it."
       operationId: get_verification_requirements
@@ -4427,6 +4429,21 @@ paths:
             type: string
             default: number
             title: Purpose
+        - name: quote_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            description:
+              quote_id of an offer from POST /numbers/quotes that needs verification.
+              The carrier is read from it.
+            title: Quote Id
+          description:
+            quote_id of an offer from POST /numbers/quotes that needs verification.
+            The carrier is read from it.
         - name: authorization
           in: header
           required: false
@@ -4444,8 +4461,8 @@ paths:
                 $ref: "#/components/schemas/Requirements"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate ceiling.
+            Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -4485,6 +4502,10 @@ paths:
 
         (optional; for `sms` it defaults to the carrier of your US numbers),
 
+        `quote_id` (optional, for `number`: the offer to verify for; its carrier
+
+        is used),
+
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 
         (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
@@ -4518,8 +4539,8 @@ paths:
                 $ref: "#/components/schemas/VerificationResponse"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate ceiling.
+            Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -4581,8 +4602,8 @@ paths:
                 title: Response List Verifications
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate ceiling.
+            Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.

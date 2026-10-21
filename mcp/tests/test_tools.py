@@ -1647,6 +1647,9 @@ async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -
     }
     assert result["offers"][0]["monthly_cents"] == 115
     assert result["offers"][0]["readiness"] == "ready"
+    # Agents never learn which carrier backs an offer.
+    assert "provider" not in result["offers"][0]
+    assert "unavailable_providers" not in result
     assert result["recommended_quote_id"] == result["offers"][0]["quote_id"]
 
 
@@ -1692,7 +1695,6 @@ async def test_quote_numbers_sends_city_and_region(client: HailClient) -> None:
         {"country_code": "USA"},
         {"country_code": "US", "capabilities": []},
         {"country_code": "US", "capabilities": ["fax"]},
-        {"country_code": "US", "provider": "acme"},
         {"country_code": "US", "area_code": "4-80"},
         {"country_code": "US", "region": "AZ"},
     ],
@@ -1761,6 +1763,7 @@ async def test_acquire_number_sends_expected_total_and_returns_number_and_key(
     }
     assert _UUID_RE.match(captured["key"])
     assert result["e164"] == "+14155550100"
+    assert "provider" not in result
     assert result["idempotency_key"] == captured["key"]
 
 
@@ -1957,6 +1960,7 @@ async def test_list_numbers_sends_limit_and_cursor(client: HailClient) -> None:
     assert params == {"limit": "5", "cursor": "zzz"}
     assert result["next_cursor"] == "abc"
     assert result["items"][0]["e164"] == "+14155550100"
+    assert "provider" not in result["items"][0]
 
 
 @respx.mock
@@ -1988,6 +1992,7 @@ async def test_get_number_returns_row(client: HailClient) -> None:
     result = await tools.get_number(client=client, number_id=nid)
     assert result["id"] == nid
     assert result["provisioning_state"] == "active"
+    assert "provider" not in result
 
 
 @respx.mock

@@ -561,6 +561,26 @@ async def create_agent(*, client: HailClient, **fields: Any) -> dict[str, Any]:
         return _format_api_error(exc)
 
 
+# Hail does not tell agents which carrier backs a number, an offer or a
+# verification. The carrier is read server-side from the quote instead.
+_CARRIER_KEYS = frozenset({"provider", "unavailable_providers"})
+
+
+def _drop_carrier(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    return {k: v for k, v in value.items() if k not in _CARRIER_KEYS}
+
+
+def _without_carrier(result: Any) -> Any:
+    result = _drop_carrier(result)
+    if isinstance(result, dict):
+        for key in ("offers", "items"):
+            if isinstance(result.get(key), list):
+                result[key] = [_drop_carrier(item) for item in result[key]]
+    return result
+
+
 async def route_number(
     *,
     client: HailClient,
@@ -574,12 +594,14 @@ async def route_number(
     if number_id_ is None:
         return _not_uuid("number_id")
     try:
-        return await client.route_number(
-            number_id_,
-            voice_agent_id=voice_agent_id,
-            sms_agent_id=sms_agent_id,
-            clear_voice=clear_voice,
-            clear_sms=clear_sms,
+        return _without_carrier(
+            await client.route_number(
+                number_id_,
+                voice_agent_id=voice_agent_id,
+                sms_agent_id=sms_agent_id,
+                clear_voice=clear_voice,
+                clear_sms=clear_sms,
+            )
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -593,7 +615,6 @@ async def quote_numbers(
     country_code: str,
     capabilities: list[str] | None = None,
     number_type: str | None = None,
-    provider: str = "auto",
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
@@ -601,7 +622,7 @@ async def quote_numbers(
     fields: dict[str, Any] = {
         "country_code": country_code,
         "capabilities": ["voice", "sms"] if capabilities is None else capabilities,
-        "provider": provider,
+        "provider": "auto",
     }
     if number_type is not None:
         fields["number_type"] = number_type
@@ -612,7 +633,7 @@ async def quote_numbers(
     if region is not None:
         fields["region"] = region
     try:
-        return await client.quote_numbers(**fields)
+        return _without_carrier(await client.quote_numbers(**fields))
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -626,7 +647,6 @@ async def acquire_number(
     country_code: str,
     number_type: str,
     confirm_total_cents: int,
-    provider: str = "auto",
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     quote_id_ = _as_uuid(quote_id)
@@ -639,7 +659,7 @@ async def acquire_number(
             quote_id=quote_id_,
             country_code=country_code,
             number_type=number_type,
-            provider=provider,
+            provider="auto",
             expected_total_cents=confirm_total_cents,
             idempotency_key=idempotency_key,
         )
@@ -662,14 +682,14 @@ async def acquire_number(
         return error
     # Echo the key so the agent can retry this exact purchase safely.
     result.setdefault("idempotency_key", idempotency_key)
-    return result
+    return _without_carrier(result)
 
 
 async def list_numbers(
     *, client: HailClient, limit: int = 50, cursor: str | None = None
 ) -> dict[str, Any]:
     try:
-        return await client.list_numbers(limit=limit, cursor=cursor)
+        return _without_carrier(await client.list_numbers(limit=limit, cursor=cursor))
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -686,7 +706,7 @@ async def get_number(*, client: HailClient, number_id: str) -> dict[str, Any]:
     if number_id_ is None:
         return _not_uuid("number_id")
     try:
-        return await client.get_number(number_id_)
+        return _without_carrier(await client.get_number(number_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -880,18 +900,22 @@ async def get_verification_requirements(
     country_code: str,
     number_type: str,
     subject_type: str = "person",
-    provider: str | None = None,
+    quote_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return _not_uuid("quote_id")
     try:
-        return await client.get_verification_requirements(
-            country_code=country_code,
-            number_type=number_type,
-            subject_type=subject_type,
-            provider=provider,
-            purpose=purpose,
+        return _without_carrier(
+            await client.get_verification_requirements(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                quote_id=quote_id,
+                purpose=purpose,
+            )
         )
     except HailAPIError as exc:
         return _format_api_error(exc)
@@ -907,7 +931,7 @@ async def list_verifications(
     if purpose is not None and purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
     try:
-        return await client.list_verifications(purpose=purpose)
+        return _without_carrier(await client.list_verifications(purpose=purpose))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -923,7 +947,7 @@ async def get_verification(
     if verification_id_ is None:
         return _not_uuid("verification_id")
     try:
-        return await client.get_verification(verification_id_)
+        return _without_carrier(await client.get_verification(verification_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -940,7 +964,7 @@ async def cancel_verification(
     if verification_id_ is None:
         return _not_uuid("verification_id")
     try:
-        return await client.cancel_verification(verification_id_)
+        return _without_carrier(await client.cancel_verification(verification_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -959,7 +983,9 @@ async def confirm_verification(
     if not isinstance(code, str) or not 4 <= len(code.strip()) <= 10:
         return {"error": "code must be the 4 to 10 characters the carrier texted"}
     try:
-        return await client.confirm_verification(verification_id_, code.strip())
+        return _without_carrier(
+            await client.confirm_verification(verification_id_, code.strip())
+        )
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -979,11 +1005,13 @@ async def submit_verification(
     attest_authorized: bool,
     subject_type: str = "person",
     address: Any = None,
-    provider: str | None = None,
+    quote_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return {"error": "quote_id must be a UUID. Nothing was sent."}
     if attest_authorized is not True:
         return {
             "error": "attest_authorized must be true. Pass true only if the "
@@ -1017,16 +1045,18 @@ async def submit_verification(
     if error:
         return {"error": f"{error}. Nothing was sent."}
     try:
-        return await client.submit_verification(
-            country_code=country_code,
-            number_type=number_type,
-            subject_type=subject_type,
-            fields=fields,
-            documents=documents,
-            files=decoded,
-            address=address,
-            provider=provider,
-            purpose=purpose,
+        return _without_carrier(
+            await client.submit_verification(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                fields=fields,
+                documents=documents,
+                files=decoded,
+                address=address,
+                quote_id=quote_id,
+                purpose=purpose,
+            )
         )
     except httpx.TransportError:
         return {
@@ -1636,8 +1666,8 @@ def register_tools(
         carrier delivers a dynamic alphanumeric sender ID unchanged (about
         110 countries, see core/hailhq/core/sender_id_corridors.py) use
         your organization's sender ID
-        (or ``HAIL``, the platform default); Australia (+61) always uses
-        ``HAIL`` when that carrier is Twilio; every other destination,
+        (or ``HAIL``, the platform default); Australia (+61) may always use
+        ``HAIL``; every other destination,
         including the US and Canada,
         uses your organization's oldest active SMS-capable number and the
         API returns 422 when there is none.
@@ -2176,7 +2206,6 @@ def register_tools(
         country_code: str,
         capabilities: list[str] | None = None,
         number_type: str | None = None,
-        provider: str = "auto",
         area_code: str | None = None,
         city: str | None = None,
         region: str | None = None,
@@ -2187,8 +2216,7 @@ def register_tools(
         ``country_code`` is an ISO alpha-2 code such as ``"US"``.
         ``capabilities`` is ``["voice"]``, ``["sms"]`` or both (default).
         ``number_type`` is ``local``, ``mobile``, ``national`` or
-        ``toll_free``; omit it to compare all types. ``provider`` is
-        ``auto`` (compare all carriers), ``twilio``, ``telnyx`` or ``didww``.
+        ``toll_free``; omit it to compare all types.
         ``area_code`` is an area code or the first digits of the number, as
         dialed in the country: ``"020"`` (London), ``"480"`` (Arizona).
         ``city`` is a city name such as ``"London"``. Each offer has
@@ -2197,8 +2225,8 @@ def register_tools(
         with ``city``) is a US/CA state code; list_number_regions lists them.
         Omit all three to search the whole country.
 
-        Returns ``{"offers": [...], "recommended_quote_id", "unavailable_providers",
-        "expires_at"}``. Each offer has ``e164``, ``provider``, ``number_type``,
+        Returns ``{"offers": [...], "recommended_quote_id", "expires_at"}``.
+        Each offer has ``e164``, ``number_type``,
         ``capabilities``, ``monthly_cents``, ``setup_cents``, ``readiness``,
         ``requirements`` and ``quote_id``. Money fields are cents (USD).
         Quotes expire in 10 minutes (``expires_at``); quote again after that.
@@ -2206,8 +2234,8 @@ def register_tools(
         An offer with ``readiness == "verification_required"`` cannot be
         bought until the organization is verified. Call
         get_verification_requirements, ask the user for the details, then
-        submit_verification and poll get_verification (review takes business
-        days). ``requirements`` lists what the carrier needs. Prefer an offer whose
+        submit_verification, both with the offer's ``quote_id``, and poll
+        get_verification (review takes business days). ``requirements`` lists what the carrier needs. Prefer an offer whose
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
 
@@ -2219,7 +2247,6 @@ def register_tools(
                     country_code=country_code,
                     capabilities=capabilities,
                     number_type=number_type,
-                    provider=provider,
                     area_code=area_code,
                     city=city,
                     region=region,
@@ -2244,7 +2271,6 @@ def register_tools(
         country_code: str,
         number_type: str,
         confirm_total_cents: int,
-        provider: str = "auto",
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Buys a real phone number. It charges the setup fee and the first
@@ -2259,8 +2285,7 @@ def register_tools(
         quote_id and idempotency_key, or check list_numbers. Never request a
         new quote after a timeout.
 
-        ``provider`` is ``auto`` (the quoted carrier) or the quoted carrier's
-        name. ``idempotency_key`` is optional; to retry after a timeout or a
+        ``idempotency_key`` is optional; to retry after a timeout or a
         5xx, pass the ``idempotency_key`` that result returned, so the number
         is bought once. A 4xx error returns no key: the API remembers that
         failure under it, so drop it and quote again.
@@ -2276,7 +2301,6 @@ def register_tools(
                     country_code=country_code,
                     number_type=number_type,
                     confirm_total_cents=confirm_total_cents,
-                    provider=provider,
                     idempotency_key=idempotency_key,
                 )
         except RuntimeError as exc:
@@ -2303,7 +2327,7 @@ def register_tools(
         ``limit`` is 1..200 (default 50). Pass the returned ``next_cursor``
         as ``cursor`` for the next page.
 
-        Returns ``{"items": [{"id", "e164", "provider", "country_code",
+        Returns ``{"items": [{"id", "e164", "country_code",
         "number_type", "capabilities", "provisioning_state", "voice_agent_id",
         "sms_agent_id", ...}], "next_cursor"}``, or ``{"error": "<message>"}``."""
         try:
@@ -2419,7 +2443,7 @@ def register_tools(
         country_code: str,
         number_type: str,
         subject_type: str = "person",
-        provider: str | None = None,
+        quote_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Read what the carrier needs to verify the organization before it
@@ -2429,8 +2453,9 @@ def register_tools(
         ``country_code`` is ISO alpha-2 (for example ``"GB"``). ``number_type``
         is ``local``, ``mobile``, ``national`` or ``toll_free``.
         ``subject_type`` is ``person`` (default) or ``business``; the result's
-        ``subject_types`` lists what the carrier accepts. ``provider`` is
-        optional.
+        ``subject_types`` lists what the carrier accepts. ``quote_id`` is the
+        offer's ``quote_id`` from quote_numbers: pass it for
+        ``purpose='number'`` so the form matches that offer.
 
         ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
         ``purpose='sms'`` registers the organization to text US numbers from a
@@ -2453,7 +2478,7 @@ def register_tools(
                     country_code=country_code,
                     number_type=number_type,
                     subject_type=subject_type,
-                    provider=provider,
+                    quote_id=quote_id,
                     purpose=purpose,
                 )
         except RuntimeError as exc:
@@ -2480,7 +2505,7 @@ def register_tools(
         attest_authorized: StrictBool,
         subject_type: str = "person",
         address: _JsonObjectOrNone = None,
-        provider: str | None = None,
+        quote_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Send the user's personal or company details and identity documents
@@ -2497,7 +2522,8 @@ def register_tools(
         registers the organization to text US numbers from a US number
         (country_code US, number_type local). The carrier fee is debited from
         credit at filing. Pass the same ``purpose`` to
-        get_verification_requirements.
+        get_verification_requirements. For ``purpose='number'``, pass the
+        same ``quote_id`` you passed to get_verification_requirements.
 
         Steps: 1) call get_verification_requirements. 2) Ask the user for each
         field and file. 3) Call this once. Do not submit twice: a 409 means
@@ -2540,7 +2566,7 @@ def register_tools(
                     attest_authorized=attest_authorized,
                     subject_type=subject_type,
                     address=address,
-                    provider=provider,
+                    quote_id=quote_id,
                     purpose=purpose,
                 )
         except RuntimeError:
@@ -2567,7 +2593,7 @@ def register_tools(
         Omit to see every registration. ``purpose='sms'`` lists the
         registrations to text US numbers from a US number.
 
-        Returns ``{"items": [{"id", "provider", "country_code", "number_type",
+        Returns ``{"items": [{"id", "country_code", "number_type",
         "subject_type", "purpose", "state", "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation"}]}``.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
@@ -2640,9 +2666,9 @@ def register_tools(
         Works in state ``awaiting_review`` or ``rejected``, and for an
         ``approved`` US SMS registration (``purpose: "sms"``): its numbers
         leave the campaign, US-to-US texts from them fail again, and its
-        monthly fee stops after the current month. Telnyx bills at least 3
-        monthly fees from approval, so a Telnyx registration cancelled sooner
-        is still charged for 3 months. Ask the user first. A
+        monthly fee stops after the current month. Some registrations bill at
+        least 3 monthly fees from approval, so cancelling sooner can still
+        charge 3 months. Ask the user first. A
         ``submitting`` or ``submitted`` verification is under review and
         cannot be cancelled (409): wait for the result with get_verification.
 

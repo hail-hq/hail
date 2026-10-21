@@ -173,7 +173,7 @@ async def test_requirements_sends_query(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_requirements_sends_provider_and_subject_type(
+async def test_requirements_sends_quote_id_and_subject_type(
     client: HailClient,
 ) -> None:
     route = respx.get(f"{_BASE_URL}/verifications/requirements").mock(
@@ -184,11 +184,30 @@ async def test_requirements_sends_provider_and_subject_type(
         country_code="GB",
         number_type="mobile",
         subject_type="business",
-        provider="didww",
+        quote_id="8b1f0c2e-0000-4000-8000-000000000002",
     )
     params = dict(route.calls[0].request.url.params)
     assert params["subject_type"] == "business"
-    assert params["provider"] == "didww"
+    assert params["quote_id"] == "8b1f0c2e-0000-4000-8000-000000000002"
+    assert "provider" not in params
+
+
+async def test_requirements_rejects_a_bad_quote_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        client=client, country_code="GB", number_type="mobile", quote_id="nope"
+    )
+    assert "quote_id" in result["error"]
+
+
+@respx.mock
+async def test_requirements_hide_the_carrier(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/verifications/requirements").mock(
+        return_value=httpx.Response(200, json=_requirements())
+    )
+    result = await tools.get_verification_requirements(
+        client=client, country_code="GB", number_type="mobile"
+    )
+    assert "provider" not in result
 
 
 @respx.mock
@@ -367,7 +386,7 @@ async def test_submit_builds_multipart(client: HailClient) -> None:
         **_kwargs(
             client,
             files=[_file(data=payload, ct="image/jpeg")],
-            provider="didww",
+            quote_id="8b1f0c2e-0000-4000-8000-000000000002",
         )
     )
     assert result["id"] == vid
@@ -377,7 +396,8 @@ async def test_submit_builds_multipart(client: HailClient) -> None:
     assert parts["country_code"]["body"] == b"GB"
     assert parts["number_type"]["body"] == b"mobile"
     assert parts["subject_type"]["body"] == b"person"
-    assert parts["provider"]["body"] == b"didww"
+    assert parts["quote_id"]["body"] == b"8b1f0c2e-0000-4000-8000-000000000002"
+    assert "provider" not in parts
     assert json.loads(parts["fields"]["body"]) == {"first_name": _FIELD_VALUE}
     assert json.loads(parts["address"]["body"])["customer_name"] == _NAME
     assert json.loads(parts["documents"]["body"]) == {
@@ -402,6 +422,7 @@ async def test_submit_omits_optional_parts(client: HailClient) -> None:
     await tools.submit_verification(**_kwargs(client, address=None))
     assert "address" not in captured["parts"]
     assert "provider" not in captured["parts"]
+    assert "quote_id" not in captured["parts"]
 
 
 @respx.mock
@@ -412,7 +433,6 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
     result = await tools.submit_verification(**_kwargs(client))
     assert set(result) == {
         "id",
-        "provider",
         "country_code",
         "number_type",
         "subject_type",

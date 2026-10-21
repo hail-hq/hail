@@ -3686,12 +3686,15 @@ type CreateVerificationParams struct {
 
 // GetVerificationRequirementsParams defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParams struct {
-	CountryCode   string                                        `form:"country_code" json:"country_code"`
-	NumberType    string                                        `form:"number_type" json:"number_type"`
-	SubjectType   *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
-	Provider      *string                                       `form:"provider,omitempty" json:"provider,omitempty"`
-	Purpose       *string                                       `form:"purpose,omitempty" json:"purpose,omitempty"`
-	Authorization *string                                       `json:"authorization,omitempty"`
+	CountryCode string                                        `form:"country_code" json:"country_code"`
+	NumberType  string                                        `form:"number_type" json:"number_type"`
+	SubjectType *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
+	Provider    *string                                       `form:"provider,omitempty" json:"provider,omitempty"`
+	Purpose     *string                                       `form:"purpose,omitempty" json:"purpose,omitempty"`
+
+	// QuoteId quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
+	QuoteId       *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
+	Authorization *string             `json:"authorization,omitempty"`
 }
 
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
@@ -9197,6 +9200,22 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 		if params.Purpose != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "purpose", *params.Purpose, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.QuoteId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "quote_id", *params.QuoteId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
