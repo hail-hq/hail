@@ -2,7 +2,7 @@
   "name": "hail",
   "displayName": "Hail",
   "version": "1.0.0",
-  "description": "Build with phone numbers across 100+ countries. Use one Hail MCP connection for number search, registration, calls, texts, and email.",
+  "description": "Build with phone numbers in 120 countries. Handle number registration, US A2P 10DLC, calls, texts, and email through one Hail MCP connection.",
   "author": {
     "name": "Hail",
     "email": "hi@hail.so"
