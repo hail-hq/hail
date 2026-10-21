@@ -4924,9 +4924,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits the workspace recording choice; false disables
-            recording for this agent. A workspace that disables recording cannot be
-            overridden.
+            Null inherits the workspace recording choice; true or false sets
+            recording for this agent's calls, whatever the workspace setting.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5097,9 +5096,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits the workspace recording choice; false disables
-            recording for this agent. A workspace that disables recording cannot be
-            overridden.
+            Null inherits the workspace recording choice; true or false sets
+            recording for this agent's calls, whatever the workspace setting.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5217,8 +5215,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits workspace recording; false disables it for this
-            agent.
+            Null inherits workspace recording; true or false sets it for this
+            agent's calls.
         ai_disclosure:
           anyOf:
             - type: boolean
@@ -5400,10 +5398,10 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Request best-effort audio recording. Requires workspace recording
-            enabled. Null inherits the agent/workspace. Recording failure never prevents
-            the call. The recording-enabled call rate applies regardless of capture
-            outcome.
+            Best-effort audio recording for this call. true records and false does
+            not, whatever the workspace setting. Null inherits the agent, then the
+            workspace. Recording failure never prevents the call. The
+            recording-enabled call rate applies regardless of capture outcome.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure

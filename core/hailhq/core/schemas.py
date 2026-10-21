@@ -255,7 +255,7 @@ class CallCreate(ConsentAttestationMixin):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.",
+        description="Best-effort audio recording for this call. true records and false does not, whatever the workspace setting. Null inherits the agent, then the workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.",
     )
     ai_disclosure: bool = Field(
         default=True,
@@ -874,7 +874,7 @@ class AgentCreate(BaseModel):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+        description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
     )
     ai_disclosure: bool = Field(
         default=True,
@@ -964,7 +964,7 @@ class AgentUpdate(BaseModel):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits workspace recording; false disables it for this agent.",
+        description="Null inherits workspace recording; true or false sets it for this agent's calls.",
     )
     ai_disclosure: bool | None = Field(
         default=None, description="Whether the AI line is spoken first."
@@ -1026,7 +1026,7 @@ class AgentResponse(BaseModel):
     first_message: str | None = Field(description="Opening line, or null to wait.")
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+        description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
     )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
     ai_disclosure_line: str | None = Field(

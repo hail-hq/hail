@@ -1365,7 +1365,7 @@ type AgentCreate struct {
 	// Name Display name, unique per organization.
 	Name string `json:"name"`
 
-	// RecordingEnabled Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.
+	// RecordingEnabled Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SmsEnabled Answer texts on numbers that route texts to this agent.
@@ -1443,7 +1443,7 @@ type AgentResponse struct {
 	// OrganizationId Organization that owns this agent.
 	OrganizationId openapi_types.UUID `json:"organization_id"`
 
-	// RecordingEnabled Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.
+	// RecordingEnabled Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SmsEnabled Whether the agent answers texts.
@@ -1496,7 +1496,7 @@ type AgentUpdate struct {
 	// Name New display name.
 	Name *string `json:"name,omitempty"`
 
-	// RecordingEnabled Null inherits workspace recording; false disables it for this agent.
+	// RecordingEnabled Null inherits workspace recording; true or false sets it for this agent's calls.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SmsEnabled Whether the agent answers texts.
@@ -1559,7 +1559,7 @@ type CallCreate struct {
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
 	RecipientConsent bool `json:"recipient_consent"`
 
-	// RecordingEnabled Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.
+	// RecordingEnabled Best-effort audio recording for this call. true records and false does not, whatever the workspace setting. Null inherits the agent, then the workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
 
 	// SystemPrompt Task instructions for the agent, sent as its leading system message. At least one of system_prompt or llm is required; both together is also valid.

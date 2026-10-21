@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls: `recording_enabled` on a call or agent now wins in both directions. `true` records even when the workspace has recording off, and `false` turns it off.
+
 ### Added
 
 - MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.

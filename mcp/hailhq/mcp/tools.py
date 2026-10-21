@@ -1338,6 +1338,10 @@ def register_tools(
         artificial-voice calls (47 CFR 64.1200(b)(1)) and several AI
         bot-disclosure laws require it, and Hail does not verify this.
         The agent still identifies itself as an AI if asked.
+        ``recording_enabled``: omit it to follow the agent, then the
+        workspace recording setting. ``true`` records this call and
+        ``false`` does not, whatever the workspace setting. Pass it only
+        when the user asked for or against a recording.
         ``metadata`` is free-form JSON attached to the call record.
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.

@@ -5,8 +5,9 @@ Recording is on for every workspace unless an owner turns it off. Retention is
 **7 days**, **30 days** or **1 year**; the default is 30 days. A call keeps the retention saved when it
 starts, so later changes apply to future calls only.
 
-Agents and individual calls can opt out with `recording_enabled: false`. They
-cannot turn recording on for a workspace that has it off.
+Agents and individual calls can set `recording_enabled`. `true` records the
+call and `false` does not, whatever the workspace setting. Omit it to follow
+the agent, then the workspace.
 
 Recording never blocks a call. If capture fails, the call continues and the
 recording status is `unavailable` or `failed`.

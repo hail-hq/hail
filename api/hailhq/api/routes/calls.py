@@ -517,6 +517,10 @@ async def create_call(
             # Compliance-relevant: record when a caller opted out of the
             # spoken AI disclosure, so the decision is attributable later.
             "ai_disclosure": body.ai_disclosure,
+            # The per-call or agent choice (null = follow the workspace) and
+            # the result, so "why no recording?" is answerable later.
+            "recording_override": body.recording_enabled,
+            "recording_enabled": call.recording_enabled,
             "compliance": gate.checks,
         },
         actor_user_id=actor_user_id,
