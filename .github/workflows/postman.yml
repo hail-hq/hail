@@ -6,6 +6,8 @@ on:
       - "openapi/openapi.yaml"
       - "postman/**"
       - "scripts/postman/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/postman.yml"
   push:
     branches: [main]
@@ -13,11 +15,13 @@ on:
       - "openapi/openapi.yaml"
       - "postman/**"
       - "scripts/postman/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/postman.yml"
   workflow_dispatch:
     inputs:
       publish:
-        description: "Update the two existing Postman collections (main only)"
+        description: "Update the existing Postman collection (main only)"
         type: boolean
         default: false
 
@@ -36,22 +40,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: scripts/postman/package-lock.json
-      - run: npm ci --prefix scripts/postman
-      - run: npm test --prefix scripts/postman
-      - run: npm run generate --prefix scripts/postman
+      - run: corepack enable
+      # Install only the root workspace's tools, not web or docs-site.
+      - run: pnpm install --frozen-lockfile --filter hail-hq
+      - run: pnpm postman:test
+      - run: pnpm postman:generate
       - uses: actions/upload-artifact@v4
         with:
           name: hail-postman-collections
           path: postman/*.postman_collection.json
-      - name: Update existing public collections
+      - name: Update the existing public collection
         if: >-
           github.ref == 'refs/heads/main' &&
           ((github.event_name == 'push' && vars.POSTMAN_AUTO_SYNC == 'true') ||
           (github.event_name == 'workflow_dispatch' && inputs.publish))
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
-          POSTMAN_REFERENCE_COLLECTION_UID: ${{ vars.POSTMAN_REFERENCE_COLLECTION_UID }}
-          POSTMAN_QUICKSTART_COLLECTION_UID: ${{ vars.POSTMAN_QUICKSTART_COLLECTION_UID }}
-        run: npm run publish --prefix scripts/postman
+          POSTMAN_COLLECTION_UID: ${{ vars.POSTMAN_COLLECTION_UID }}
+        run: pnpm postman:publish

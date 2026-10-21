@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { root } from "./generate.mjs";
+import { collectionName, root } from "./generate.mjs";
 
 // Preserve existing Postman item identities so request links survive updates.
 export function preserveIds(next, previous) {
@@ -64,23 +64,18 @@ export async function updateCollection(
 }
 
 async function publish() {
-  const apiKey = process.env.POSTMAN_API_KEY;
-  const targets = [
-    ["hail-api-reference", process.env.POSTMAN_REFERENCE_COLLECTION_UID],
-    ["hail-start-here", process.env.POSTMAN_QUICKSTART_COLLECTION_UID],
-  ];
-  if (targets.some(([, uid]) => !uid))
-    throw new Error("Both Postman collection UIDs are required");
-  for (const [name, uid] of targets) {
-    const collection = JSON.parse(
-      await readFile(
-        new URL(`postman/${name}.postman_collection.json`, root),
-        "utf8",
-      ),
-    );
-    await updateCollection(collection, uid, apiKey);
-    console.log(`Updated ${collection.info.name}`);
-  }
+  const collection = JSON.parse(
+    await readFile(
+      new URL("postman/hail-api.postman_collection.json", root),
+      "utf8",
+    ),
+  );
+  await updateCollection(
+    collection,
+    process.env.POSTMAN_COLLECTION_UID,
+    process.env.POSTMAN_API_KEY,
+  );
+  console.log(`Updated ${collectionName}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

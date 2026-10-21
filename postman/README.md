@@ -11,18 +11,18 @@ answer calls and texts, and track delivery through one API.
 ## Get started
 
 1. Create a Hail account and get an API key from the console or `hail auth token`.
-2. Fork the **Hail API: Start here** collection into your own workspace.
+2. Fork the **Hail API** collection into your own workspace.
 3. Add your Hail key to your local Postman Vault as `hail-api-key`.
    The collection's `api_key` variable contains the reference `{{vault:hail-api-key}}`.
    Keep that reference when sharing the collection. Your key stays in your vault.
-4. Send **Check API health**, then **List my agents**. Neither spends credit.
-5. Use **Get number quotes** to see live offers. Fill in the request bodies for the actions you want to try.
+4. Open the **Start here** folder. Send **Check API health**, then **List my agents**. Neither spends credit.
+5. Continue through the steps in order. Each step saves the IDs that the next steps use.
 
 Hail uses prepaid credit, with no platform subscription. Add credit before
 sending messages or making calls. Dedicated numbers have monthly rent and may
 have a setup fee. Buying a number charges the setup fee and first month's rent.
 
-The quickstart skips requests that spend credit unless `enable_paid_requests`
+**Start here** skips requests that spend credit unless `enable_paid_requests`
 is `true`. Turn it on only when you are ready to send those requests.
 Use your own test phone and email, and send only with the recipient's consent.
 
@@ -41,16 +41,17 @@ through the API and MCP, but is not yet part of that built-in shared history.
 Custom domains need DNS verification. Some numbers need carrier approval, and
 US long-code texting needs an approved SMS registration.
 
-## Collections
+## What is in the collection
 
-**Hail API: Start here** has a short set of examples with editable variables.
-It starts with read-only requests. It does not submit identity documents or
-release numbers.
+**Start here** is the first folder: six steps, from checking your key to
+placing a call. It starts with read-only requests. It does not submit identity
+documents or release numbers.
 
-**Hail API Reference** is generated from Hail's OpenAPI definition. It includes
-the current request descriptions, fields, and response examples. Edit the
-placeholder values before sending a request. The reference includes write
-and delete operations; use individual requests rather than running it in full.
+The other folders list every public API route, grouped by area, generated from
+Hail's OpenAPI definition. They include the current request descriptions,
+fields, and response examples. Edit the placeholder values before sending a
+request. They include write and delete operations; use individual requests
+rather than running them in full.
 
 ## Use MCP instead
 
@@ -59,10 +60,10 @@ See the [MCP setup guide](https://hail.so/mcp).
 
 ## Keep this workspace current
 
-The OpenAPI specification in Hail's source repository drives the API Reference.
-The repository's Postman workflow generates both collections, checks them,
-and can update the published collections after changes reach `main`.
+The OpenAPI specification in Hail's source repository drives the route folders.
+The repository's Postman workflow generates the collection, checks it,
+and can update the published collection after changes reach `main`.
 
-This overview is also used as both collections' introduction. Changes to it
-reach their documentation on the next sync. Postman's separate workspace
+This overview is also used as the collection's introduction. Changes to it
+reach its documentation on the next sync. Postman's separate workspace
 overview must be updated manually from this file.

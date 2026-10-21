@@ -13,14 +13,14 @@ status: drafted
 
 - [x] Confirm public workspace and collection requirements.
 - [x] Prepare workspace copy and a signup link.
-- [x] Generate a reference collection from the current OpenAPI specification.
-- [x] Prepare a short collection for trying the API with a user's own key.
+- [x] Generate one collection from the current OpenAPI specification, with a
+      **Start here** folder for trying the API with a user's own key.
 - [x] Implement generation, validation, and optional collection updates in CI.
 - [ ] Owner creates a Postman account and Hail team.
-- [ ] Import and try both collections in Postman.
+- [ ] Import and try the collection in Postman.
 - [ ] Make the Hail workspace public.
 - [ ] Record the public workspace URL here.
-- [ ] Enable automatic updates after reviewing the published collections.
+- [ ] Enable automatic updates after reviewing the published collection.
 
 ## Steps to submit
 
@@ -30,20 +30,20 @@ status: drafted
    preparing it, then change its visibility to public when ready.
 3. Add the summary and overview from **Content** below. Use the Hail logo at
    `hail-website/public/assets/monogram-512.png` for the team avatar.
-4. Generate the collections from the `hail` repository:
+4. Generate the collection from the `hail` repository:
 
    ```sh
-   npm ci --prefix scripts/postman
-   npm test --prefix scripts/postman
-   npm run generate --prefix scripts/postman
+   pnpm install
+   pnpm postman:test
+   pnpm postman:generate
    ```
 
-5. In Postman, choose **Import**, then import these files:
-   - `postman/hail-start-here.postman_collection.json`
-   - `postman/hail-api-reference.postman_collection.json`
-6. Fork **Hail API: Start here** to a separate test workspace. Store your Hail
-   API key in your local Postman Vault as `hail-api-key`. Send **Check API
-   health**, then **List my agents**. No credit is spent by those requests.
+5. In Postman, choose **Import**, then import
+   `postman/hail-api.postman_collection.json`. Keep its name **Hail API**:
+   automatic updates refuse a collection with another name.
+6. Fork **Hail API** to a separate test workspace. Store your Hail
+   API key in your local Postman Vault as `hail-api-key`. In **Start here**, send
+   **Check API health**, then **List my agents**. No credit is spent by those requests.
    **List my agents** must return 200: this checks that the collection
    variable `api_key = {{vault:hail-api-key}}` resolves through the
    collection bearer auth. Postman's vault docs do not confirm this setup.
@@ -55,22 +55,21 @@ status: drafted
    vault references and placeholders, never your API key or customer data.
 8. Open **Workspace overview → Settings**, change the workspace type to
    **Public**, and save. A team approval request may be needed depending on
-   the account plan and role. Once public, the workspace and collections are
+   the account plan and role. Once public, the workspace and collection are
    listed on the Postman API Network. This is not a separate directory form.
-9. Record the public workspace URL and each collection's UID in **Notes**.
-10. To keep both collections current, create a Postman API key with access to
-    the two collections. This is a **Postman key**, not a Hail API key. In the
+9. Record the public workspace URL and the collection UID in **Notes**.
+10. To keep the collection current, create a Postman API key with access to
+    it. This is a **Postman key**, not a Hail API key. In the
     Hail GitHub repository, configure:
     - Secret `POSTMAN_API_KEY`.
-    - Variable `POSTMAN_REFERENCE_COLLECTION_UID`.
-    - Variable `POSTMAN_QUICKSTART_COLLECTION_UID`.
+    - Variable `POSTMAN_COLLECTION_UID`.
 11. After approving the sync setup, set repository variable
     `POSTMAN_AUTO_SYNC` to `true`. Future relevant changes on `main` then
-    update the two existing collections. To test publication manually, run
+    update the existing collection. To test publication manually, run
     **Postman collections** on `main` with **publish** selected. Neither
     mechanism creates a team or changes workspace visibility.
 
-The workflow generates downloadable import files on pull requests and on
+The workflow generates a downloadable import file on pull requests and on
 relevant pushes even when publication is disabled. The collection overview,
 API fields, descriptions, and examples update from repository sources.
 The separate workspace overview requires manual changes; copy it again from
@@ -92,15 +91,16 @@ Summary:
 
 > Try calls, texts, email, phone numbers, and AI assistants with your own Hail API key.
 
-Overview: copy [postman/README.md](../../postman/README.md). Both generated
-collections include the same introduction and signup link.
+Overview: copy [postman/README.md](../../postman/README.md). The generated
+collection includes the same introduction and signup link.
 
-Collections:
+Collection **Hail API**:
 
-- **Hail API: Start here**: a short, editable introduction to number quotes,
-  agents, routing, verification status, domains, email delivery, calls, and SMS.
-- **Hail API Reference**: all public operations generated from
-  [openapi/openapi.yaml](../../openapi/openapi.yaml), grouped by API tag.
+- **Start here** folder: six steps through number quotes, agents, routing,
+  verification status, domains, email delivery, calls, and SMS. Each step
+  saves the IDs the next steps use.
+- One folder per API tag: all public operations generated from
+  [openapi/openapi.yaml](../../openapi/openapi.yaml).
 
 ### Optional MCP collection
 
@@ -125,16 +125,15 @@ No email has been sent.
 - Status: prepared locally; not imported or published.
 - Account/team: not created.
 - Workspace URL: pending.
-- Reference collection UID: pending.
-- Quickstart collection UID: pending.
+- Collection UID: pending.
 - Auto-sync: disabled until configured. No GitHub secrets or variables changed.
-- Local validation: both files pass the official Postman v2.1 JSON schema;
-  5 tests pass for current API fields, stable request IDs, paid-request opt-in,
-  and publication target/error handling. The public API health request returns
-  HTTP 200. The pinned dependency audit reports no vulnerabilities.
+- Local validation: the file passes the official Postman v2.1 JSON schema;
+  6 tests pass for current API fields, stable request IDs, saved IDs between
+  steps, paid-request opt-in, and publication target/error handling. The public API health request returns
+  HTTP 200.
 - Postman import/runtime results: pending account creation. Local validation
   does not replace this check. No paid Hail requests have been sent.
-- Updates replace the contents of these two collections from repository
+- Updates replace the contents of this collection from repository
   sources. Make edits here, or use a fork for custom examples.
 - Existing request and response IDs are preserved when updating matching
   operations, so unchanged request links can survive a sync.

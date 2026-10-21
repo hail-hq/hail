@@ -5,10 +5,10 @@ import { generate, root, walk } from "./generate.mjs";
 import { updateCollection } from "./publish.mjs";
 import { resolve } from "./reference.mjs";
 
-const { reference, quickstart, spec } = await generate();
+const { collection, start, spec } = await generate();
 
-test("quickstart requests use current public routes, fields, and query parameters", () => {
-  for (const { request } of walk(quickstart.item)) {
+test("Start here requests use current public routes, fields, and query parameters", () => {
+  for (const { request } of walk(start.item)) {
     const raw = request.url.raw ?? request.url;
     const [path, query] = raw.replace("{{baseUrl}}", "").split("?");
     const template = path.replace(/\{\{([^}]+)\}\}/g, "{$1}");
@@ -54,37 +54,104 @@ function checkBody(value, input, where) {
   }
 }
 
-test("exports have unique stable IDs and no internal requests or fake auth headers", async () => {
+test("export has unique stable IDs and no internal requests or fake auth headers", async () => {
   const repeated = await generate();
-  for (const [name, collection] of [
-    ["reference", reference],
-    ["quickstart", quickstart],
-  ]) {
-    const items = walk(collection.item);
-    assert.equal(new Set(items.map((i) => i.id)).size, items.length);
-    assert.deepEqual(
-      items.map((i) => i.id),
-      walk(repeated[name].item).map((i) => i.id),
+  const items = walk(collection.item);
+  assert.equal(new Set(items.map((i) => i.id)).size, items.length);
+  assert.deepEqual(
+    items.map((i) => i.id),
+    walk(repeated.collection.item).map((i) => i.id),
+  );
+  assert.equal(collection.item[0].name, "Start here");
+  assert.equal(collection.auth.bearer[0].value, "{{api_key}}");
+  assert.equal(
+    collection.variable.find((v) => v.key === "api_key").value,
+    "{{vault:hail-api-key}}",
+  );
+  for (const { request } of items) {
+    const url = request.url.raw ?? request.url;
+    assert.doesNotMatch(url, /\/(internal|admin|superadmin)(\/|$)/);
+    assert.ok(
+      !request.header.some((h) => h.key.toLowerCase() === "authorization"),
     );
-    assert.equal(collection.auth.bearer[0].value, "{{api_key}}");
-    assert.equal(
-      collection.variable.find((v) => v.key === "api_key").value,
-      "{{vault:hail-api-key}}",
-    );
-    for (const { request } of items) {
-      const url = request.url.raw ?? request.url;
-      assert.doesNotMatch(url, /\/(internal|admin|superadmin)(\/|$)/);
-      assert.ok(
-        !request.header.some((h) => h.key.toLowerCase() === "authorization"),
-      );
-    }
   }
-  assert.match(reference.info.description, /https:\/\/hail.so\/signup/);
+  assert.match(collection.info.description, /https:\/\/hail.so\/signup/);
   const source = await readFile(new URL("postman/README.md", root), "utf8");
-  assert.equal(reference.info.description, source);
+  assert.equal(collection.info.description, source);
 });
 
-test("a full quickstart run cannot spend credit without opting in", () => {
+// Run a Start here script against a fake Postman sandbox.
+function run(name, listen, { response, enabled } = {}) {
+  const saved = {};
+  let skipped = false;
+  const script = walk(start.item)
+    .find((i) => i.name === name)
+    .event.find((e) => e.listen === listen)
+    .script.exec.join("\n");
+  new Function("pm", "console", script)(
+    {
+      variables: { get: () => enabled },
+      collectionVariables: { set: (key, value) => (saved[key] = value) },
+      execution: {
+        skipRequest: () => {
+          skipped = true;
+        },
+      },
+      response: response && {
+        code: response.code,
+        json: () => response.body,
+      },
+    },
+    { warn() {} },
+  );
+  return { saved, skipped };
+}
+
+test("Start here saves IDs for the next steps", () => {
+  const offers = [
+    {
+      quote_id: "q1",
+      number_type: "local",
+      monthly_cents: 100,
+      setup_cents: 0,
+    },
+    {
+      quote_id: "q2",
+      number_type: "mobile",
+      monthly_cents: 300,
+      setup_cents: 50,
+    },
+  ];
+  assert.deepEqual(
+    run("Get number quotes", "test", {
+      response: { code: 200, body: { offers, recommended_quote_id: "q2" } },
+    }).saved,
+    { quote_id: "q2", number_type: "mobile", expected_total_cents: 350 },
+  );
+  for (const [name, key] of [
+    ["Get a quoted number", "number_id"],
+    ["Create an assistant", "agent_id"],
+    ["Register my own domain", "domain_id"],
+    ["Send a test email", "email_id"],
+  ]) {
+    assert.deepEqual(
+      run(name, "test", { response: { code: 201, body: { id: "x" } } }).saved,
+      { [key]: "x" },
+    );
+    assert.deepEqual(
+      run(name, "test", { response: { code: 422, body: {} } }).saved,
+      {},
+    );
+  }
+  assert.deepEqual(
+    run("List verification submissions", "test", {
+      response: { code: 200, body: [{ id: "v1" }] },
+    }).saved,
+    { verification_id: "v1" },
+  );
+});
+
+test("a full Start here run cannot spend credit without opting in", () => {
   const paid = [
     "Get a quoted number",
     "Send a test email",
@@ -92,26 +159,12 @@ test("a full quickstart run cannot spend credit without opting in", () => {
     "Call with my assistant",
   ];
   assert.equal(
-    quickstart.variable.find((v) => v.key === "enable_paid_requests").value,
+    collection.variable.find((v) => v.key === "enable_paid_requests").value,
     "false",
   );
   for (const name of paid) {
-    const script = walk(quickstart.item)
-      .find((i) => i.name === name)
-      .event[0].script.exec.join("\n");
     for (const enabled of [undefined, "false", "true"]) {
-      let skipped = false;
-      new Function("pm", "console", script)(
-        {
-          variables: { get: () => enabled },
-          execution: {
-            skipRequest: () => {
-              skipped = true;
-            },
-          },
-        },
-        { warn() {} },
-      );
+      const { skipped } = run(name, "prerequest", { enabled });
       assert.equal(skipped, enabled !== "true", `${name}: ${enabled}`);
     }
   }
@@ -119,15 +172,16 @@ test("a full quickstart run cannot spend credit without opting in", () => {
 
 const uid = "12345-12345678-1234-4234-a234-123456789012";
 const key = "test-secret-never-send-to-Hail";
-const existing = structuredClone(reference);
+const existing = structuredClone(collection);
 existing.info._postman_id = uid.slice(6);
 existing.item[0].id = "server-folder-id";
-walk(existing.item)[0].id = "server-request-id";
-walk(existing.item)[0].request.url.raw += "?old_parameter=value";
+// Change a reference request: those have structured URLs.
+walk(existing.item.slice(1))[0].id = "server-request-id";
+walk(existing.item.slice(1))[0].request.url.raw += "?old_parameter=value";
 
 test("publishing preserves request IDs and only sends credentials to Postman", async () => {
   const calls = [];
-  await updateCollection(reference, uid, key, async (url, options) => {
+  await updateCollection(collection, uid, key, async (url, options) => {
     calls.push({ url, options });
     return {
       ok: true,
@@ -146,7 +200,7 @@ test("publishing preserves request IDs and only sends credentials to Postman", a
   const sent = JSON.parse(calls[1].options.body).collection;
   assert.equal(sent.info._postman_id, existing.info._postman_id);
   assert.equal(sent.item[0].id, "server-folder-id");
-  assert.equal(walk(sent.item)[0].id, "server-request-id");
+  assert.equal(walk(sent.item.slice(1))[0].id, "server-request-id");
   assert.ok(!calls[1].options.body.includes(key));
 });
 
@@ -161,11 +215,11 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
     };
   };
   await assert.rejects(
-    updateCollection(reference, uid, key, wrong),
+    updateCollection(collection, uid, key, wrong),
     /refusing to replace/,
   );
   await assert.rejects(
-    updateCollection(reference, "https://example.com", key, wrong),
+    updateCollection(collection, "https://example.com", key, wrong),
     /valid Postman collection UID/,
   );
   assert.equal(writes, 0);
@@ -179,7 +233,7 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
             json: async () => ({ collection: existing }),
           };
     await assert.rejects(
-      updateCollection(reference, uid, key, failed),
+      updateCollection(collection, uid, key, failed),
       new RegExp(`HTTP ${status}`),
     );
   }
