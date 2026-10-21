@@ -260,7 +260,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint included with each Hail deployment
-  - Stdio entry point included in the MCP container; see [MCP setup](docs/public/mcp.md#stdio)
+  - [x] Stdio entry point included in the MCP container; see [MCP setup](docs/public/mcp.md#stdio)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 

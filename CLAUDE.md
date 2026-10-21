@@ -21,7 +21,7 @@ web/        — Next.js workspace for the interactive costs surface (/costs, /co
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
-**MCP distribution**: remote Streamable HTTP only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/public/mcp.md](docs/public/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the remote HTTP endpoint".
+**MCP distribution**: remote Streamable HTTP is the main path. The MCP container also has a stdio entry point (`python -m hailhq.mcp.stdio`, `HAIL_API_KEY` mode only) for hosts that require stdio; see [docs/public/mcp.md](docs/public/mcp.md#stdio). We do **not** publish a stdio package on PyPI.
 
 Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 

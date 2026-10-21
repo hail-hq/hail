@@ -187,11 +187,12 @@ The MCP service selects its auth mode from env at boot. For the full env-var con
 
 ## Stdio
 
-For hosts that require stdio, use the entry point included in the MCP container:
+For hosts that require stdio, run the entry point in the self-hosted MCP container. From your Hail checkout:
 
 ```sh
-python -u -m hailhq.mcp.stdio
+docker compose run --rm -T mcp python -u -m hailhq.mcp.stdio
 ```
 
-Set `HAIL_API_URL` to your API URL and `HAIL_API_KEY` to your API key.
-Leave `HAIL_AUTH_URL` unset. Stdio uses the same tools as the HTTP service.
+The container reads `HAIL_API_KEY` from `.env` and calls the API at `http://api:8080`.
+`HAIL_AUTH_URL` must be empty in `.env`, not only in your shell: stdio reads `.env` and refuses to start when it is set.
+Stdio uses the same tools as the HTTP service.
