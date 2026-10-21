@@ -71,6 +71,20 @@ Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks]
 
 ## Cursor plugin
 
+Build phone features without opening several carrier accounts or writing
+a separate integration for each provider.
+
+Use Hail from Cursor to find numbers across 100+ countries, compare prices,
+and read local registration requirements. Cursor can submit the details and
+documents you supply, check approval, and order a number after you confirm
+the cost. Carriers make the approval decision. Availability and local
+requirements vary.
+
+Use the same account for inbound and outbound calls, texts, and email.
+Query delivery records through MCP. Use signed API webhooks when your app
+needs communication events. Build with the API, CLI, or Python SDK when
+you are ready to connect your app.
+
 From a checkout that includes the plugin, copy its files into Cursor's
 local plugin directory:
 
@@ -87,10 +101,13 @@ using OAuth. Sign in to Hail when Cursor asks. No API key or local MCP
 runtime is needed. Start with a read-only request:
 
 ```text
-Use Hail to show my account details. Do not send messages, place calls,
-buy numbers, or change settings.
+Find call-capable Hail numbers in the UK, France, and Canada. Compare
+monthly fees, setup fees, and registration requirements. Do not buy
+numbers or submit documents.
 ```
 
+Number purchases and paid registrations require account credit.
+Review the required documents and fees before approving a registration.
 Calls and messages require account credit and recipient permission.
 Marketing sends also require a record of that permission. Use your own
 approved email and SMS copy. Review the recipient and cost before sending.
