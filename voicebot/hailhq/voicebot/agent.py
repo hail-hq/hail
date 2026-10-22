@@ -2279,6 +2279,7 @@ async def _run_call(
     # job until :50.700, then "entrypoint did not exit in time").
     confirmation_result = None
     pickup_disclosed = False
+    probe_heard = False
     if inbound:
         # The caller dialed us: a person is on the line, no machine to detect.
         amd_result = None
@@ -2324,9 +2325,11 @@ async def _run_call(
                 if disclosure:
                     prompt = f"{disclosure} {prompt}"
                     pickup_disclosed = True
-                confirmation_result = await confirm_pickup(
+                confirmation_result, probe_heard = await confirm_pickup(
                     session, llm=classifier, prompt=prompt
                 )
+                # A failed or interrupted probe did not deliver the disclosure.
+                pickup_disclosed = pickup_disclosed and probe_heard
         finally:
             if models is not None:
                 await models.aclose()
@@ -2364,11 +2367,12 @@ async def _run_call(
     ):
         return
     if confirmation_result is not None:
-        if confirmation_result.category != AMDCategory.MACHINE_IVR:
-            # The probe already identified us to this listener; the business
-            # opening stays pending, including an explicit first_message. A
-            # phone tree is not a person, so the IVR path keeps the
-            # disclosure for whoever the tree hands us to.
+        if confirmation_result.category != AMDCategory.MACHINE_IVR and probe_heard:
+            # The probe played in full and already identified us to this
+            # listener; the business opening stays pending, including an
+            # explicit first_message. A phone tree is not a person, so the
+            # IVR path keeps the disclosure for whoever the tree hands us to.
+            # A failed or interrupted probe keeps the disclosure too.
             metadata = {**metadata, "ai_disclosure": False}
         if confirmation_result.reason == UNAVAILABLE_REASON:
             # The reply could not be judged. When in doubt, talk.

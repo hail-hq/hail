@@ -145,7 +145,7 @@ async def test_confirmation_does_not_unlock_automatic_or_preemptive_replies(
                 "user_input_transcribed",
                 Mock(is_final=True, transcript="Who is calling?"),
             )
-            assert (await confirmation).is_human
+            assert (await confirmation)[0].is_human
             # A positive classifier result alone cannot release normal turns.
             await session.run(user_input="Yes, I hear you")
             conversation.chat.assert_not_called()

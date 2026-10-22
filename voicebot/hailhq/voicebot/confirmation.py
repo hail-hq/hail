@@ -107,8 +107,11 @@ def probe_line(language: str | None) -> str:
 
 async def confirm_pickup(
     session: AgentSession, *, llm: LLM | None, prompt: str
-) -> AMDPredictionEvent:
+) -> tuple[AMDPredictionEvent, bool]:
     """Ask a short probe and judge the reply; automatic replies stay held.
+
+    Returns the verdict and whether the probe played to the end without an
+    interruption. Only then did the listener hear any disclosure in it.
 
     Follows LiveKit's AMD guidance: uncertain is treated as a person.
     Only full silence returns ``UNANSWERED_REASON`` (the caller hangs up).
@@ -132,6 +135,7 @@ async def confirm_pickup(
     changed = asyncio.Event()
     words: list[str] = []
     closed = False
+    probe_heard = False
     started = time.monotonic()
 
     def transcribed(event: Any) -> None:
@@ -153,14 +157,17 @@ async def confirm_pickup(
         heard.set()
         changed.set()
 
-    def prediction(category: AMDCategory, reason: str) -> AMDPredictionEvent:
-        return AMDPredictionEvent(
+    def prediction(
+        category: AMDCategory, reason: str
+    ) -> tuple[AMDPredictionEvent, bool]:
+        event = AMDPredictionEvent(
             category=category,
             reason=reason,
             transcript=" ".join(words)[-2000:],
             speech_duration=0.0,
             delay=time.monotonic() - started,
         )
+        return event, probe_heard
 
     async def classify() -> AMDCategory | None:
         """The category for every word so far, or None when it failed."""
@@ -185,7 +192,9 @@ async def confirm_pickup(
             async with asyncio.timeout(
                 PROBE_TIMEOUT_SECONDS + len(prompt) / PROBE_CHARS_PER_SECOND
             ):
-                await session.say(prompt, allow_interruptions=True)
+                handle = await session.say(prompt, allow_interruptions=True)
+            # A person who talks over the probe may have missed part of it.
+            probe_heard = getattr(handle, "interrupted", False) is not True
         except Exception as exc:
             if closed:
                 return prediction(AMDCategory.UNCERTAIN, UNANSWERED_REASON)

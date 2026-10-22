@@ -506,6 +506,7 @@ async def _drive_entrypoint(
     answered: bool = False,
     confirmation_category: str = "uncertain",
     confirmation_reason: str = "pickup_confirmation",
+    probe_heard: bool = True,
     metadata_overrides: dict | None = None,
     stt: bool = True,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
@@ -523,10 +524,12 @@ async def _drive_entrypoint(
 
     async def _confirm(_session, *, llm, prompt):
         models.aclose.assert_not_awaited()
-        await _session.say(prompt)
-        return _prediction(confirmation_category).model_copy(
+        if probe_heard:
+            await _session.say(prompt)
+        result = _prediction(confirmation_category).model_copy(
             update={"reason": confirmation_reason}
         )
+        return result, probe_heard
 
     session.confirm = AsyncMock(side_effect=_confirm)
 
@@ -913,6 +916,35 @@ async def test_any_reply_or_unjudged_check_opens_the_call(
         f"{AI_DISCLOSURE_LINE} Can you hear me?",
         "Is this a good time?",
     ]
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+
+
+@pytest.mark.parametrize("category", ["human", "uncertain"])
+@pytest.mark.parametrize("first_message", [None, "Is this a good time?"])
+async def test_unheard_probe_keeps_the_disclosure(
+    async_session, monkeypatch, category, first_message
+):
+    """say() failed or was talked over: the disclosure was never heard."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+    from hailhq.voicebot.confirmation import UNAVAILABLE_REASON
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        confirmation_category=category,
+        confirmation_reason=(
+            UNAVAILABLE_REASON if category == "uncertain" else "pickup_confirmation"
+        ),
+        probe_heard=False,
+        metadata_overrides={"first_message": first_message},
+    )
+    if first_message:
+        assert session.say_calls == [f"{AI_DISCLOSURE_LINE} {first_message}"]
+    else:
+        assert session.say_calls == [AI_DISCLOSURE_LINE]
+        assert len(session.replies) == 1
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
 

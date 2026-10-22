@@ -56,7 +56,7 @@ async def test_silence_and_empty_transcripts_hang_up(text):
     session.transcribe(text)
     session.transcribe("Yes, I can hear you", final=False)
     session.emit("user_state_changed", SimpleNamespace(new_state="listening"))
-    result = await task
+    result, _heard = await task
     assert result.category == AMDCategory.UNCERTAIN
     assert result.reason == confirmation.UNANSWERED_REASON
     assert llm.calls == []
@@ -69,7 +69,7 @@ async def test_voice_without_a_transcript_opens_the_call():
     llm = Classifier('{"label":"human"}')
     task = await start(session, llm)
     session.speak()
-    result = await task
+    result, _heard = await task
     assert result.category == AMDCategory.UNCERTAIN
     assert result.reason == confirmation.HEARD_REASON
     assert llm.calls == []
@@ -85,7 +85,7 @@ async def test_voice_stops_the_no_speech_timer(monkeypatch):
     await asyncio.sleep(0.1)
     assert not task.done()
     session.transcribe("Hallå?")
-    assert (await task).category == AMDCategory.HUMAN
+    assert (await task)[0].category == AMDCategory.HUMAN
 
 
 @pytest.mark.parametrize("text", ["Hello?", "Hej", "Bonjour"])
@@ -94,7 +94,7 @@ async def test_greeting_reply_opens_the_call(text):
     llm = Classifier('{"label":"human"}')
     task = await start(session, llm)
     session.transcribe(text)
-    result = await task
+    result, _heard = await task
     assert result.is_human
     assert f'"{text}"' in confirmation.CONFIRMATION_PROMPT
     assert '"Bonjour" -> human' in confirmation.CONFIRMATION_PROMPT
@@ -104,7 +104,7 @@ async def test_uncertain_reply_opens_the_call():
     session = Session()
     task = await start(session, Classifier('{"label":"uncertain"}'))
     session.transcribe("Hello, you have reached Sam")
-    result = await task
+    result, _heard = await task
     assert result.category == AMDCategory.UNCERTAIN
     assert result.reason == "pickup_confirmation"
 
@@ -125,9 +125,10 @@ async def test_only_classified_responses_unlock_their_matching_path(category, te
     llm = Classifier(json.dumps({"label": category}))
     task = await start(session, llm)
     session.transcribe(text)
-    result = await task
+    result, _heard = await task
     assert result.category.value == category
     assert result.transcript == text
+    assert _heard
     session.say.assert_awaited_once_with("Can you hear me?", allow_interruptions=True)
     assert llm.calls[0]["conn_options"].timeout >= 10
     assert llm.calls[0]["conn_options"].max_retry == 0
@@ -137,7 +138,7 @@ async def test_words_from_before_probe_are_not_confirmation():
     session = Session()
     llm = Classifier('{"label":"human"}')
     session.transcribe("Yes")
-    result = await (await start(session, llm))
+    result, _heard = await (await start(session, llm))
     assert result.category == AMDCategory.UNCERTAIN
     assert llm.calls == []
 
@@ -151,7 +152,7 @@ async def test_human_can_answer_during_probe():
         await asyncio.sleep(0)
 
     session.say.side_effect = say
-    result = await (await start(session, llm))
+    result, _heard = await (await start(session, llm))
     assert result.category == AMDCategory.HUMAN
 
 
@@ -171,7 +172,7 @@ async def test_deadline_starts_after_probe_playback():
     finish.set()
     await asyncio.sleep(0)
     session.transcribe("Yes, I hear you")
-    assert (await task).category == AMDCategory.HUMAN
+    assert (await task)[0].category == AMDCategory.HUMAN
 
 
 async def test_new_words_during_classification_prevent_stale_human_verdict():
@@ -191,7 +192,7 @@ async def test_new_words_during_classification_prevent_stale_human_verdict():
     llm.chat = chat
     task = await start(session, llm)
     session.transcribe("Hello")
-    result = await task
+    result, _heard = await task
     assert result.category == AMDCategory.MACHINE_VM
     assert "Hello" in result.transcript
     assert "Leave a message" in result.transcript
@@ -227,7 +228,7 @@ async def test_cap_never_cancels_a_running_classifier():
     llm.chat = lambda **kwargs: SlowStream(original(**kwargs))
     task = await start(session, llm)
     session.transcribe("Leave a message after the tone.")
-    result = await asyncio.wait_for(task, timeout=1.0)
+    result, _heard = await asyncio.wait_for(task, timeout=1.0)
     assert result.category == AMDCategory.MACHINE_VM
     assert not cancelled.is_set()
 
@@ -250,8 +251,9 @@ async def test_shutdown_provider_errors_and_cancellation(failure):
         with pytest.raises(asyncio.CancelledError):
             await task
     else:
-        result = await task
+        result, _heard = await task
         assert result.category == AMDCategory.UNCERTAIN
+        assert _heard == (failure != "tts")
         # Only a closed session hangs up; a TTS or classifier error talks.
         assert result.reason == (
             confirmation.UNANSWERED_REASON
@@ -261,11 +263,22 @@ async def test_shutdown_provider_errors_and_cancellation(failure):
     assert_detached(session)
 
 
+async def test_interrupted_probe_is_not_heard():
+    """Talked over mid-probe: the listener may have missed the disclosure."""
+    session = Session()
+    session.say.return_value = SimpleNamespace(interrupted=True)
+    task = await start(session, Classifier('{"label":"human"}'))
+    session.transcribe("Hello? Who is this?")
+    result, heard = await task
+    assert result.is_human
+    assert not heard
+
+
 async def test_bad_label_is_unavailable_not_unanswered():
     session = Session()
     task = await start(session, Classifier('{"label":"robot"}'))
     session.transcribe("Yes, I can hear you")
-    result = await task
+    result, _heard = await task
     assert result.category == AMDCategory.UNCERTAIN
     assert result.reason == confirmation.UNAVAILABLE_REASON
 
@@ -283,7 +296,7 @@ async def test_person_who_keeps_talking_is_still_confirmed():
     llm.chat = chat
     task = await start(session, llm)
     session.transcribe("Yes? Who is this?")
-    result = await asyncio.wait_for(task, timeout=0.5)
+    result, _heard = await asyncio.wait_for(task, timeout=0.5)
     assert result.category == AMDCategory.HUMAN
 
 
@@ -297,7 +310,7 @@ async def test_long_probe_gets_time_to_play(monkeypatch):
         session.transcribe("Yes")
 
     session.say.side_effect = say
-    result = await confirmation.confirm_pickup(
+    result, _heard = await confirmation.confirm_pickup(
         session, llm=Classifier('{"label":"human"}'), prompt="x" * 20
     )
     assert result.category == AMDCategory.HUMAN
