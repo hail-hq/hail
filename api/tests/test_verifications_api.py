@@ -273,8 +273,22 @@ def pinned_catalog(tmp_path, monkeypatch):
         ],
         "a2p_10dlc": [],
     }
-    (tmp_path / "twilio.json").write_text(json.dumps(data))
+    pt_national = {
+        "country_code": "PT",
+        "number_type": "national",
+        "usd_per_month": "1.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+    }
+    # Twilio sells PT national numbers; DIDWW lists them by request only.
+    (tmp_path / "twilio.json").write_text(
+        json.dumps({**data, "numbers": [*data["numbers"], pt_national]})
+    )
     (tmp_path / "telnyx.json").write_text(json.dumps({**data, "numbers": []}))
+    (tmp_path / "didww.json").write_text(
+        json.dumps({**data, "numbers": [{**pt_national, "by_request": True}]})
+    )
     (tmp_path / "sms-registration.json").write_text(
         json.dumps(
             {
@@ -1054,6 +1068,37 @@ async def test_number_verification_without_quote_id_is_422(
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"][0]["loc"] == ["body", "quote_id"]
     assert carrier.drafts == []
+
+
+async def test_by_request_number_without_quote_id_files_with_that_carrier(
+    client, org_and_key, async_session
+) -> None:
+    """Support orders a by_request number by hand, so it has no quote: the
+    one carrier that lists it by request is used."""
+    _, _, key = org_and_key
+    fake = FakeCarrier()
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": (
+            fake if name == "didww" and purpose == "number" else None
+        )
+    )
+    try:
+        params = {"country_code": "PT", "number_type": "national"}
+        resp = await client.get(
+            "/verifications/requirements", params=params, headers=_auth(key)
+        )
+        assert resp.status_code == 200, resp.text
+        assert "provider" not in resp.json()
+        resp = await client.post(
+            "/verifications",
+            data=_submission(quote_id="", provider="", **params),
+            files=_passport(),
+            headers=_auth(key),
+        )
+        assert resp.status_code == 201, resp.text
+        assert await _row_provider(async_session, resp.json()["id"]) == "didww"
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
 
 
 async def _raw_quote(async_session, org_id, carrier_name: str) -> str:

@@ -3617,7 +3617,7 @@ type GetVerificationRequirementsParams struct {
 	Provider *string `form:"provider,omitempty" json:"provider,omitempty"`
 	Purpose  *string `form:"purpose,omitempty" json:"purpose,omitempty"`
 
-	// QuoteId Required for purpose=number: quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
+	// QuoteId For purpose=number: quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it. Required unless support orders this kind of number by hand.
 	QuoteId *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
 
 	// NumberId For purpose=sms: id of one of your US numbers. The carrier is read from it. Needed when your US numbers are with more than one carrier.

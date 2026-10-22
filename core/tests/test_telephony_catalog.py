@@ -195,3 +195,40 @@ def test_sells_in_ignores_receive_only_and_by_request(tmp_path, monkeypatch):
         assert telephony_catalog.sells_in("PT", "didww") is False
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_by_request_carrier_needs_exactly_one_carrier(tmp_path, monkeypatch):
+    def row(kind, **over):
+        return {
+            "country_code": "PT",
+            "number_type": kind,
+            "usd_per_month": "3.50",
+            "voice": True,
+            "sms": False,
+            "mms": False,
+            **over,
+        }
+
+    (tmp_path / "twilio.json").write_text(
+        json.dumps({"numbers": [row("national"), row("local", by_request=True)]})
+    )
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {
+                "numbers": [
+                    row("national", by_request=True),
+                    row("local", by_request=True),
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        assert telephony_catalog.by_request_carrier("PT", "national") == "didww"
+        # Two carriers list it by request: no single carrier to pick.
+        assert telephony_catalog.by_request_carrier("PT", "local") is None
+        assert telephony_catalog.by_request_carrier("PT", "mobile") is None
+    finally:
+        telephony_catalog._load.cache_clear()

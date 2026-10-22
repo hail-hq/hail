@@ -4391,9 +4391,9 @@ paths:
 
         an address is needed. `purpose=number` (default) is for buying a number;
 
-        it requires the offer's `quote_id` (422 without it) and returns the form
+        pass the offer's `quote_id` to get the form for that offer (422 without
 
-        for that offer. `purpose=sms`
+        it, unless support orders this kind of number by hand). `purpose=sms`
 
         is for registering to send SMS in the US; it uses the carrier of your US
 
@@ -4458,12 +4458,14 @@ paths:
                 format: uuid
               - type: "null"
             description:
-              "Required for purpose=number: quote_id of an offer from POST
-              /numbers/quotes that needs verification. The carrier is read from it."
+              "For purpose=number: quote_id of an offer from POST /numbers/quotes
+              that needs verification. The carrier is read from it. Required unless
+              support orders this kind of number by hand."
             title: Quote Id
           description:
-            "Required for purpose=number: quote_id of an offer from POST
-            /numbers/quotes that needs verification. The carrier is read from it."
+            "For purpose=number: quote_id of an offer from POST /numbers/quotes
+            that needs verification. The carrier is read from it. Required unless
+            support orders this kind of number by hand."
         - name: number_id
           in: query
           required: false
@@ -4535,7 +4537,9 @@ paths:
 
         the filing fee), `country_code`, `number_type`, `subject_type`,
 
-        `quote_id` (required for `number`: the offer to verify for), `number_id`
+        `quote_id` (for `number`: the offer to verify for; required unless
+
+        support orders this kind of number by hand), `number_id`
 
         (optional, for `sms`: one of your US numbers; needed when your US numbers
 
