@@ -5465,8 +5465,8 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the call and echoed back
-            on reads. Not interpreted by Hail. Keys starting with 'recording_' are
-            reserved and rejected.
+            on reads. Not interpreted by Hail. Keys starting with 'recording_' and
+            the key 'failure_code' are reserved and rejected.
         tools:
           anyOf:
             - items:
@@ -5659,6 +5659,12 @@ components:
           description:
             When the call ended, ISO 8601 timestamp. Null while still in
             progress.
+        failure_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Failure Message
+          description: Human-readable explanation for a failed call. Null for other statuses.
       type: object
       required:
         - id

@@ -40,6 +40,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.directory import find_by_phone
@@ -102,7 +103,8 @@ from livekit.plugins import silero
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-from sqlalchemy import select, update
+from sqlalchemy import cast, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 
 
@@ -1032,12 +1034,14 @@ async def reconcile_sip_rejection(
         return
     try:
         async with asyncio.timeout(4):
-            result = await TwilioVoiceProvider(timeout=3).get_call_status(sid)
+            provider = TwilioVoiceProvider(timeout=3)
+            result = await provider.get_call_status(sid)
     except Exception:
         logger.warning(
             "call_id=%s could not resolve carrier rejection", call_id, exc_info=True
         )
         return
+    error_code = None
     if (
         result.status == "failed"
         and captured["status"] == "busy"
@@ -1046,10 +1050,35 @@ async def reconcile_sip_rejection(
     ):
         captured["status"] = "failed"
         captured["end_reason"] = CallEndReason.SIP_TRUNK_FAILURE.value
+        # Keep the confirmed failure even if diagnostic lookup times out.
+        try:
+            async with asyncio.timeout(2):
+                error_code = await provider.get_call_error_code(sid)
+        except Exception:
+            logger.warning(
+                "call_id=%s carrier failure details unavailable", call_id, exc_info=True
+            )
+        if (
+            error_code == "32205"
+            and captured["status"] == "failed"
+            and captured["end_reason"] == CallEndReason.SIP_TRUNK_FAILURE.value
+            and captured.get("twilio_call_sid") == sid
+        ):
+            captured["failure_code"] = DESTINATION_NOT_ALLOWED
+    logger.info(
+        "call_id=%s carrier rejection result=%s error_code=%s",
+        call_id,
+        result.status,
+        error_code,
+    )
+    message = call_failure_message(captured["status"] or "", captured)
     await write_call_event(
         call_id,
-        "carrier_status",
-        {"provider": "twilio", "provider_call_sid": sid, "status": result.status},
+        "connection_result",
+        {
+            "status": captured["status"],
+            **({"failure_message": message} if message else {}),
+        },
     )
 
 
@@ -1122,6 +1151,9 @@ def handle_sip_disconnect(
     human = bridge_state.get("human")
     status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
     if status is not None:
+        # A later SIP outcome invalidates details derived from the previous leg.
+        captured.pop("failure_code", None)
+        captured.pop("twilio_call_sid", None)
         captured["status"] = status
         captured["end_reason"] = end_reason
         if status == "busy":
@@ -1536,6 +1568,8 @@ async def on_call_end(
     room_name: str,
     status_override: str | None = None,
     end_reason_override: str | None = None,
+    *,
+    failure_code: str | None = None,
 ) -> None:
     """Finalize the ``Call`` row when the session ends.
 
@@ -1629,6 +1663,17 @@ async def on_call_end(
         # force-closed this call (or a prior shutdown finalized it), this write
         # must lose cleanly rather than overwrite the recorded outcome. Whether
         # the row actually transitioned gates the event + the bill below.
+        failure_values = {}
+        if (
+            final_status == "failed"
+            and final_end_reason == CallEndReason.SIP_TRUNK_FAILURE.value
+            and failure_code == DESTINATION_NOT_ALLOWED
+        ):
+            failure_values["metadata_"] = Call.metadata_.op("||")(
+                cast({"failure_code": failure_code}, JSONB)
+            )
+            call_metadata = {**(call_metadata or {}), "failure_code": failure_code}
+        failure_message = call_failure_message(final_status, call_metadata or {})
         result = await session.execute(
             update(Call)
             .where(Call.id == call_id, Call.status.not_in(TERMINAL_CALL_STATUSES))
@@ -1637,6 +1682,7 @@ async def on_call_end(
                 end_reason=final_end_reason,
                 ended_at=now,
                 # Egress writes recording metadata independently.
+                **failure_values,
             )
         )
         transitioned = (result.rowcount or 0) > 0
@@ -1653,6 +1699,11 @@ async def on_call_end(
                         "from": prior_status,
                         "to": final_status,
                         "reason": final_end_reason,
+                        **(
+                            {"failure_message": failure_message}
+                            if failure_message
+                            else {}
+                        ),
                     },
                 )
             )
@@ -1671,6 +1722,11 @@ async def on_call_end(
                         "to": to_e164,
                         "agent_id": str(agent_id) if agent_id else None,
                         "end_reason": final_end_reason,
+                        **(
+                            {"failure_message": failure_message}
+                            if failure_message
+                            else {}
+                        ),
                     },
                 )
         # Idempotent and order-independent, free the pool number regardless of
@@ -2278,6 +2334,7 @@ async def _run_call(
                 room_name,
                 status_override=captured["status"],
                 end_reason_override=captured["end_reason"],
+                failure_code=captured.get("failure_code"),
             )
         finally:
             if telemetry_span is not None:

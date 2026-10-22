@@ -140,6 +140,22 @@ async def test_get_call_status_in_progress_has_nullable_fields(
 
 
 @responses.activate
+async def test_get_call_error_code_uses_exact_calls_notifications(provider) -> None:
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/Calls/CA_failed/Notifications.json",
+        json={
+            "notifications": [{"error_code": "32205", "call_sid": "CA_failed"}],
+            "next_page_uri": None,
+        },
+        status=200,
+    )
+    assert await provider.get_call_error_code("CA_failed") == "32205"
+    query = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert query["Log"] == ["0"]
+
+
+@responses.activate
 async def test_get_failed_call_with_bounded_timeout() -> None:
     provider = TwilioVoiceProvider(
         account_sid=ACCOUNT_SID, auth_token=AUTH_TOKEN, timeout=3

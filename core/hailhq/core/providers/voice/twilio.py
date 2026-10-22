@@ -107,6 +107,16 @@ class TwilioVoiceProvider(VoiceProvider):
             duration_seconds=duration_seconds,
         )
 
+    async def get_call_error_code(self, provider_call_sid: str) -> str | None:
+        """Call errors live on Notifications, not the Call resource itself."""
+        notifications = await asyncio.to_thread(
+            self._client.calls(provider_call_sid).notifications.list, log=0, limit=20
+        )
+        codes = [str(n.error_code) for n in notifications if n.error_code]
+        return next(
+            (code for code in codes if code == "32205"), codes[0] if codes else None
+        )
+
     async def hangup_call(self, provider_call_sid: str) -> None:
         await asyncio.to_thread(
             self._client.calls(provider_call_sid).update, status="completed"

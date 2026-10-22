@@ -152,6 +152,7 @@ class CallResponse(BaseModel):
     started_at: datetime | None = None
     answered_at: datetime | None = None
     ended_at: datetime | None = None
+    failure_message: str | None = None
 
 
 class CallListResponse(BaseModel):

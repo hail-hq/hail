@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
+from hailhq.core.call_failures import call_failure_message
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
     ARRAY,
@@ -793,6 +794,10 @@ class Call(Base):
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )
+
+    @property
+    def failure_message(self) -> str | None:
+        return call_failure_message(self.status, self.metadata_ or {})
 
     @property
     def recording_enabled(self) -> bool:

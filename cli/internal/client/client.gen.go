@@ -1553,7 +1553,7 @@ type CallCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *CallCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' are reserved and rejected.
+	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' and the key 'failure_code' are reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -1601,6 +1601,9 @@ type CallResponse struct {
 
 	// EndedAt When the call ended, ISO 8601 timestamp. Null while still in progress.
 	EndedAt *time.Time `json:"ended_at"`
+
+	// FailureMessage Human-readable explanation for a failed call. Null for other statuses.
+	FailureMessage *string `json:"failure_message,omitempty"`
 
 	// FromE164 Caller-id phone number used, E.164 format.
 	FromE164 string `json:"from_e164"`

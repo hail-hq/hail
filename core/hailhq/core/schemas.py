@@ -283,7 +283,7 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the call and echoed back on "
             "reads. Not interpreted by Hail. Keys starting with "
-            "'recording_' are reserved and rejected."
+            "'recording_' and the key 'failure_code' are reserved and rejected."
         ),
     )
 
@@ -296,7 +296,8 @@ class CallCreate(ConsentAttestationMixin):
         bad = sorted(
             k
             for k in v
-            if isinstance(k, str) and k.startswith(RESERVED_CALL_METADATA_PREFIX)
+            if isinstance(k, str)
+            and (k.startswith(RESERVED_CALL_METADATA_PREFIX) or k == "failure_code")
         )
         if bad:
             raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")
@@ -431,6 +432,10 @@ class CallResponse(BaseModel):
     )
     ended_at: datetime | None = Field(
         description="When the call ended, ISO 8601 timestamp. Null while still in progress."
+    )
+    failure_message: str | None = Field(
+        default=None,
+        description="Human-readable explanation for a failed call. Null for other statuses.",
     )
 
 
