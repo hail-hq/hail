@@ -4,7 +4,7 @@ slug: postman-api-network
 category: dev-directory
 url: https://www.postman.com/explore
 score: 9
-status: drafted
+status: submitted
 ---
 
 # Postman API Network
@@ -16,11 +16,12 @@ status: drafted
 - [x] Generate one collection from the current OpenAPI specification, with a
       **Start here** folder for trying the API with a user's own key.
 - [x] Implement generation, validation, and optional collection updates in CI.
-- [ ] Owner creates a Postman account and Hail team.
-- [ ] Import and try the collection in Postman.
-- [ ] Make the Hail workspace public.
-- [ ] Record the public workspace URL here.
-- [ ] Enable automatic updates after reviewing the published collection.
+- [x] Owner creates a Postman account and Hail team.
+- [x] Import and try the collection in Postman.
+- [x] Make the Hail workspace public.
+- [x] Record the public workspace URL here.
+- [x] Enable automatic updates after reviewing the published collection.
+- [ ] Pin **Hail API** under **Featured collections** on the workspace **Docs** tab.
 
 ## Steps to submit
 
@@ -123,17 +124,22 @@ No email has been sent.
 
 ## Notes
 
-- Status: prepared locally; not imported or published.
-- Account/team: not created.
-- Workspace URL: pending.
-- Collection UID: pending.
-- Auto-sync: disabled until configured. No GitHub secrets or variables changed.
+- Status: public on 2026-10-22.
+- Team profile: <https://www.postman.com/hail-hq>.
+- Workspace URL: <https://www.postman.com/hail-hq/hail-api>.
+- Collection UID: stored in the repository variable `POSTMAN_COLLECTION_UID`.
+- Auto-sync: on (`POSTMAN_AUTO_SYNC=true`). The first manual publish run
+  succeeded on 2026-10-22.
+- Signed-out visitors see a lock next to the collection: they can read and
+  fork it, not edit it.
 - Local validation: the file passes the official Postman v2.1 JSON schema;
   6 tests pass for current API fields, stable request IDs, saved IDs between
   steps, paid-request opt-in, and publication target/error handling. The public API health request returns
   HTTP 200.
-- Postman import/runtime results: pending account creation. Local validation
-  does not replace this check. No paid Hail requests have been sent.
+- Postman runtime: a `{{vault:...}}` reference inside a plain collection
+  variable returned 401, so the collection does not use the vault. Users
+  paste their key into `api_key`.
+  No paid Hail requests have been sent.
 - Updates replace the contents of this collection from repository
   sources. Make edits here, or use a fork for custom examples.
 - Existing request and response IDs are preserved when updating matching
