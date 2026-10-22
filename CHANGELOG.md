@@ -4,10 +4,6 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
-### Changed
-
-- Calls: `recording_enabled` on a call or agent now wins in both directions. `true` records even when the workspace has recording off, and `false` turns it off.
-
 ### Added
 
 - Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id` (for `purpose=number`) or one of your `number_id`s (for `purpose=sms`).
@@ -17,6 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
+- Calls: `recording_enabled` on a call or agent now wins in both directions. `true` records even when the workspace has recording off, and `false` turns it off.
 - MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` or `number_id` instead of `provider`.
 - **Breaking.** API responses no longer name the carrier or carry carrier ids or carrier error text. `provider` in requests is ignored; see the OpenAPI spec.
 - **Breaking.** Number verifications need the offer's `quote_id` (422 without it). Quotes also list numbers support orders by hand (`by_request: true`).
