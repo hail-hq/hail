@@ -66,7 +66,9 @@ async def test_rejected_sip_leg_uses_twilio_outcome(
         {
             "status": expected_status,
             **(
-                {"failure_message": "The call failed. Try again or contact support."}
+                {
+                    "failure_message": "We could not complete your call. Please try again in a few minutes."
+                }
                 if expected_status == "failed"
                 else {}
             ),
@@ -272,9 +274,9 @@ async def test_failed_rejection_emits_failed_webhook_without_usage(
     )
     assert call.answered_at is None
     message = (
-        "The call failed. Try again or contact support."
+        "We could not complete your call. Please try again in a few minutes."
         if later_reason
-        else "Calling this destination is currently disabled. Try another destination or contact support."
+        else "We cannot call this destination right now. Please try a number in another country or region."
     )
     assert CallResponse.model_validate(call).failure_message == message
     assert (await async_session.execute(select(UsageEvent))).scalars().all() == []

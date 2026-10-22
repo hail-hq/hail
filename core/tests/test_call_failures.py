@@ -21,7 +21,7 @@ def test_call_response_explains_blocked_destinations_without_carrier_errors():
         metadata_={"failure_code": "destination_not_allowed"},
     )
     assert CallResponse.model_validate(call).failure_message == (
-        "Calling this destination is currently disabled. Try another destination or contact support."
+        "We cannot call this destination right now. Please try a number in another country or region."
     )
 
 

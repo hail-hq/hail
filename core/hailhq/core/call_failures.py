@@ -8,7 +8,7 @@ def call_failure_message(status: str, metadata: dict) -> str | None:
         return None
     if metadata.get("failure_code") == DESTINATION_NOT_ALLOWED:
         return (
-            "Calling this destination is currently disabled. "
-            "Try another destination or contact support."
+            "We cannot call this destination right now. "
+            "Please try a number in another country or region."
         )
-    return "The call failed. Try again or contact support."
+    return "We could not complete your call. Please try again in a few minutes."
