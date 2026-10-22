@@ -459,3 +459,54 @@ async def test_late_progress_after_uncertain_verdict_keeps_its_deadline(monkeypa
         menu.on_human.assert_not_awaited()
     finally:
         await menu.aclose()
+
+
+async def _greet_with(monkeypatch, agent, speak):
+    from uuid import UUID
+
+    from .test_amd import _FakeAmdSession
+
+    async def write(*args):
+        pass
+
+    monkeypatch.setattr(agent_mod, "write_call_event", write)
+    monkeypatch.setattr(agent_mod, "speak_greeting", speak)
+    greeted = []
+    agent_mod.arm_deferred_greeting(
+        _FakeAmdSession(),
+        {},
+        UUID(int=1),
+        set(),
+        on_greeted=lambda: greeted.append(True),
+        agent=agent,
+        on_machine=AsyncMock(),
+    )
+    turn_ctx = ChatContext()
+    await agent.on_user_turn_completed(
+        turn_ctx, ChatMessage(role="user", content=["Hello, reception."])
+    )
+    return turn_ctx, greeted
+
+
+async def test_reply_to_the_person_knows_the_greeting_was_spoken(monkeypatch):
+    agent = SpeechSanitizingAgent(instructions="test")
+
+    async def speak(session, metadata, **kwargs):
+        agent._chat_ctx.add_message(role="assistant", content=["Hi, I'm an AI."])
+        kwargs["on_opened"]()
+
+    turn_ctx, greeted = await _greet_with(monkeypatch, agent, speak)
+    assert [m.text_content for m in turn_ctx.messages()] == ["Hi, I'm an AI."]
+    assert greeted == [True]
+
+
+async def test_failed_deferred_greeting_does_not_escape_the_turn_hook(monkeypatch):
+    agent = SpeechSanitizingAgent(instructions="test")
+
+    async def speak(session, metadata, **kwargs):
+        kwargs["on_opened"]()
+        raise RuntimeError("session closed")
+
+    _, greeted = await _greet_with(monkeypatch, agent, speak)
+    assert greeted == []
+    assert not agent._opening_pending

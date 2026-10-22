@@ -251,6 +251,13 @@ class SpeechSanitizingAgent(Agent):
             self.release_opening()
             if category in (AMDCategory.MACHINE_VM, AMDCategory.MACHINE_UNAVAILABLE):
                 raise StopResponse()
+            if category == AMDCategory.HUMAN:
+                # The SDK copied turn_ctx before this hook, so it lacks the
+                # greeting just spoken. Add it, or the reply introduces us again.
+                known = {item.id for item in turn_ctx.items}
+                turn_ctx.items.extend(
+                    item for item in self.chat_ctx.copy().items if item.id not in known
+                )
 
     async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
         if self._opening_pending:
@@ -855,9 +862,17 @@ def arm_deferred_greeting(
         marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
-        await speak_greeting(
-            session, metadata, generate_opening=False, on_opened=agent.release_opening
-        )
+        try:
+            await speak_greeting(
+                session,
+                metadata,
+                generate_opening=False,
+                on_opened=agent.release_opening,
+            )
+        except Exception:
+            # The session can close while the greeting plays.
+            logger.exception("call_id=%s deferred greeting failed after IVR", call_id)
+            return
         if on_greeted is not None:
             on_greeted()
 

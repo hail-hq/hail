@@ -25,7 +25,13 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from livekit import rtc
-from livekit.agents.llm import ChatChunk, ChoiceDelta, FunctionToolCall, LLMStream
+from livekit.agents.llm import (
+    ChatChunk,
+    ChatContext,
+    ChoiceDelta,
+    FunctionToolCall,
+    LLMStream,
+)
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from sqlalchemy import select
@@ -436,7 +442,7 @@ class _FakeAmdSession:
         agent = self.start_options.get("agent")
         if agent is not None and agent.phone_menu is not None:
             task = asyncio.create_task(
-                agent.on_user_turn_completed(SimpleNamespace(), item)
+                agent.on_user_turn_completed(ChatContext(), item)
             )
             self.turn_tasks.add(task)
             task.add_done_callback(self.turn_tasks.discard)
