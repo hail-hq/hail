@@ -14,7 +14,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["by_request_carrier", "capabilities", "sells_in"]
+__all__ = ["capabilities", "sells_in"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -84,17 +84,3 @@ def sells_in(country_code: str, provider: str = "auto") -> bool:
         if caps is not None and caps["voice"]:
             return True
     return False
-
-
-def by_request_carrier(country_code: str, number_type: str) -> str | None:
-    """The one carrier whose catalog row for this kind of number is
-    ``by_request`` (support orders it by hand, so it has no quote), or None
-    when no carrier or more than one has such a row."""
-    from hailhq.core.number_offers import PROVIDERS
-
-    names = [
-        name
-        for name in PROVIDERS
-        if (_load(name).get((country_code, number_type)) or {}).get("by_request")
-    ]
-    return names[0] if len(names) == 1 else None

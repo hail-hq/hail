@@ -35,7 +35,7 @@ from hailhq.api.sms_registration import (
     registered_numbers,
 )
 from hailhq.api.superadmin import require_superadmin
-from hailhq.core import sms_registration_fees, sms_setup, telephony_catalog
+from hailhq.core import sms_registration_fees, sms_setup
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
@@ -106,20 +106,13 @@ def get_default_sms_provider_name() -> str | None:
     return default_verification_provider_name("sms")
 
 
-def _number_provider_name(country_code: str, number_type: str, where: str) -> str:
-    """The carrier for a number verification sent without a quote: only a
-    kind of number that support orders by hand (``by_request`` in exactly one
-    carrier's catalog) has no offer to verify for. Otherwise 422 on
-    ``quote_id``."""
-    name = telephony_catalog.by_request_carrier(country_code.upper(), number_type)
-    if name is None:
-        raise unprocessable(
-            "quote_id is required for purpose=number: get offers from "
-            "POST /numbers/quotes and pass the quote_id of the offer to "
-            "verify for",
-            loc=[where, "quote_id"],
-        )
-    return name
+def _quote_required(where: str) -> HTTPException:
+    """422 for a number verification sent without the offer's quote_id."""
+    return unprocessable(
+        "quote_id is required for purpose=number: get offers from "
+        "POST /numbers/quotes and pass the quote_id of the offer to verify for",
+        loc=[where, "quote_id"],
+    )
 
 
 async def _quote_provider_name(
@@ -594,10 +587,9 @@ async def get_requirements(
     quote_id: Annotated[
         UUID | None,
         Query(
-            description="For purpose=number: quote_id of an offer from "
-            "POST /numbers/quotes that needs verification. The carrier is "
-            "read from it. Required unless support orders this kind of "
-            "number by hand."
+            description="Required for purpose=number: quote_id of an offer "
+            "from POST /numbers/quotes that needs verification. The carrier "
+            "is read from it."
         ),
     ] = None,
     number_id: Annotated[
@@ -611,8 +603,8 @@ async def get_requirements(
 ) -> VerificationRequirements:
     """What the carrier needs from you: the fields, the documents, and whether
     an address is needed. `purpose=number` (default) is for buying a number;
-    pass the offer's `quote_id` to get the form for that offer (422 without
-    it, unless support orders this kind of number by hand). `purpose=sms`
+    it requires the offer's `quote_id` (422 without it) and returns the form
+    for that offer. `purpose=sms`
     is for registering to send SMS in the US; it uses the carrier of your US
     numbers, or of the number passed as `number_id`. Build your form from it.
     `provider` is ignored."""
@@ -640,7 +632,7 @@ async def get_requirements(
             "query",
         )
     else:
-        name = _number_provider_name(country_code, number_type, "query")
+        raise _quote_required("query")
     requirements = await _requirements(
         _provider_or_404(registry, name, purpose),
         country_code,
@@ -761,8 +753,7 @@ async def create_verification(
     Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
     in the US; `sms` takes `country_code=US` and `number_type=local` and charges
     the filing fee), `country_code`, `number_type`, `subject_type`,
-    `quote_id` (for `number`: the offer to verify for; required unless
-    support orders this kind of number by hand), `number_id`
+    `quote_id` (required for `number`: the offer to verify for), `number_id`
     (optional, for `sms`: one of your US numbers; needed when your US numbers
     are with more than one carrier),
     `fields` (JSON object), `address` (JSON object, when required), `documents`
@@ -828,7 +819,7 @@ async def create_verification(
             "body",
         )
     else:
-        provider_name = _number_provider_name(sub.country_code, sub.number_type, "body")
+        raise _quote_required("body")
     provider = _provider_or_404(registry, provider_name, sub.purpose)
 
     if sub.purpose == "sms":

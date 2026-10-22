@@ -14,8 +14,8 @@ order is placed, so Hail cannot quote and sell it
 2. If the row has `verification_required: true`, the customer first files
    their papers. The console's **Verify** button needs an offer, and these
    rows have none, so they file through the API: `GET
-/v1/verifications/requirements` then `POST /v1/verifications`
-   ([OpenAPI](../../openapi/openapi.yaml)). Wait for the Hail
+/v1/verifications/requirements` then `POST /v1/verifications` with
+   `provider=didww` ([OpenAPI](../../openapi/openapi.yaml)). Wait for the Hail
    verification to be `approved`.
 3. Order in the DIDWW panel: **my.didww.com → Buy Numbers → \<country\> →
    \<type\>**, pick the area, quantity 1, metered plan (0 channels). Link the

@@ -18,7 +18,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` or `number_id` instead of `provider`.
 - **Breaking.** API responses no longer name the carrier or carry carrier ids or carrier error text. `provider` in requests is ignored; see the OpenAPI spec.
-- **Breaking.** Number verifications (`purpose=number`) require the offer's `quote_id`, except numbers support orders by hand; without it the API returns 422.
+- **Breaking.** Number verifications (`purpose=number`) require the offer's `quote_id`; without it the API returns 422.
 - `hail-sdk` 0.21.0 and the CLI drop `provider`. `hail numbers register-sms` takes `--number-id`.
 
 ### Fixed

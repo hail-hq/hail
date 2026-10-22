@@ -256,18 +256,14 @@ async def test_requirements_maps_422(client: HailClient) -> None:
     assert "error" in result
 
 
-@respx.mock
-async def test_requirements_without_quote_id_leaves_it_to_the_api(
-    client: HailClient,
-) -> None:
-    """The API decides: a by-hand number needs no quote, any other is 422."""
-    route = respx.get(f"{_BASE_URL}/verifications/requirements").mock(
-        return_value=httpx.Response(200, json=_requirements())
+async def test_number_verification_needs_a_quote_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        client=client, country_code="GB", number_type="mobile"
     )
-    await tools.get_verification_requirements(
-        client=client, country_code="PT", number_type="national"
-    )
-    assert "quote_id" not in dict(route.calls[0].request.url.params)
+    assert "quote_id is required" in result["error"]
+    result = await tools.submit_verification(**_kwargs(client, quote_id=None))
+    assert "quote_id is required" in result["error"]
+    assert "Nothing was sent" in result["error"]
 
 
 # --------------------------------------------------------------------------- #
