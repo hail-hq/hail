@@ -683,3 +683,60 @@ func TestNumberRegisterSms_RequiresSubjectType(t *testing.T) {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)
 	}
 }
+
+func TestNumberAcquire_VerificationIDIsSentAndNamePrinted(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+447700900001", []string{"voice"})
+	business := client.PhoneNumberResponseSubjectType("business")
+	name := "Acme Ltd"
+	vid := openapi_types.UUID(uuid.MustParse("3c9a7d10-0000-4000-8000-000000000001"))
+	bought.SubjectType, bought.SubjectName, bought.VerificationId = &business, &name, &vid
+	srv := newAcquireServer(t, nil, bought)
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap,
+		"--verification-id", vid.String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.NumberAcquireRequest
+	if err := json.Unmarshal(srv.buyBody, &body); err != nil {
+		t.Fatalf("buy body: %v", err)
+	}
+	if body.VerificationId == nil || *body.VerificationId != vid {
+		t.Fatalf("VerificationId = %v, want %s", body.VerificationId, vid)
+	}
+	if !strings.Contains(stdout, "Verified for: Acme Ltd (company)") {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	bad := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": bad.URL},
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap,
+		"--verification-id", "nope",
+	); err == nil {
+		t.Fatal("expected an error for a bad --verification-id")
+	}
+	if bad.buys != 0 {
+		t.Errorf("expected no purchase, got %d", bad.buys)
+	}
+}
+
+func TestNumberGet_PrintsVerifiedName(t *testing.T) {
+	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+447700900001", []string{"voice"})
+	person := client.PhoneNumberResponseSubjectType("person")
+	name := "Ada Lovelace"
+	resp.SubjectType, resp.SubjectName = &person, &name
+	srv := newFakeServer(t, http.StatusOK, resp)
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "get", resp.Id.String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "Verified for: Ada Lovelace (person)") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}

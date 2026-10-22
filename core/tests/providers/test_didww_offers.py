@@ -175,18 +175,35 @@ async def test_offers_ready_with_approved_address():
     _static()
     _inventory()
     _approved_addresses("addr-0", "addr-1")
-    person = Approval(row_id=uuid4(), verification_id="addr-1", address_id="addr-1")
-    business = Approval(row_id=uuid4(), verification_id="addr-9", address_id="addr-9")
+    person = Approval(
+        row_id=uuid4(),
+        subject_type="person",
+        verification_id="addr-1",
+        address_id="addr-1",
+    )
+    # A second person of the same org: several per kind are allowed.
+    other = Approval(
+        row_id=uuid4(),
+        subject_type="person",
+        verification_id="addr-0",
+        address_id="addr-0",
+    )
+    business = Approval(
+        row_id=uuid4(),
+        subject_type="business",
+        verification_id="addr-9",
+        address_id="addr-9",
+    )
     (o,) = await didww_offers(
         ORG,
         "PT",
         "national",
         ["voice"],
-        approvals={"person": person, "business": business},
+        approvals=[person, other, business],
     )
     assert o.readiness == "ready"
     assert o.subject_types == ["business", "person"]
-    assert o.approvals == {"person": person}
+    assert o.approvals == [person, other]
     assert "filter%5Bexternal_reference_id%5D=hail%3A" in responses.calls[3].request.url
 
 
@@ -199,7 +216,7 @@ async def test_offers_ignore_an_approval_with_no_hail_row():
     _approved_addresses("addr-1")
     (o,) = await didww_offers(ORG, "PT", "national", ["voice"])
     assert o.readiness == "verification_required"
-    assert o.approvals == {}
+    assert o.approvals == []
     assert len(responses.calls) == 3  # no address lookup without approvals
 
 
@@ -216,10 +233,13 @@ async def test_offers_list_who_may_register(identity, kinds):
     _static()
     _inventory(identity_type=identity)
     _approved_addresses("addr-1")
-    person = Approval(row_id=uuid4(), verification_id="addr-1", address_id="addr-1")
-    (o,) = await didww_offers(
-        ORG, "PT", "national", ["voice"], approvals={"person": person}
+    person = Approval(
+        row_id=uuid4(),
+        subject_type="person",
+        verification_id="addr-1",
+        address_id="addr-1",
     )
+    (o,) = await didww_offers(ORG, "PT", "national", ["voice"], approvals=[person])
     assert o.subject_types == kinds
     # A person's approval does not count where only a business may register.
     assert o.readiness == ("ready" if "person" in kinds else "verification_required")

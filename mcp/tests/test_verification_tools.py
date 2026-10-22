@@ -518,6 +518,7 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "country_code",
         "number_type",
         "subject_type",
+        "subject_name",
         "purpose",
         "state",
         "rejection_reason",
@@ -787,6 +788,24 @@ async def test_submit_409_duplicate_surfaces_detail(client: HailClient) -> None:
     result = await tools.submit_verification(**_kwargs(client))
     assert vid in result["error"]
     assert "already exists" in result["error"]
+
+
+@respx.mock
+async def test_submit_409_named_duplicate_does_not_echo_the_name(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "detail": "You already have a verification for Zelda Quixote "
+                "as a person for this number type."
+            },
+        )
+    )
+    result = await tools.submit_verification(**_kwargs(client))
+    assert "Zelda" not in result["error"] and "Quixote" not in result["error"]
+    assert "same name already exists" in result["error"]
 
 
 @respx.mock

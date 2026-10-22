@@ -31,6 +31,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.voice.base import CarrierNotConfigured
 from hailhq.core.providers.voice.didww import (
     _by_id,
@@ -66,6 +67,14 @@ _KINDS = {"phone_number": "phone"}
 # Identity attributes DIDWW accepts, next to the mandatory fields the
 # requirement itself names; everything else stays in Hail's form only.
 _IDENTITY_ATTRS = frozenset(_LABELS) - {"service_description"}
+
+
+def _name_from(values: dict, subject_type: SubjectType) -> str | None:
+    """``company_name`` for a business, ``first_name`` and ``last_name``
+    for a person."""
+    if subject_type == "business":
+        return display_name(values.get("company_name"))
+    return display_name(values.get("first_name"), values.get("last_name"))
 
 
 def draft_address_ref(org: str, country: str, kind: str) -> str:
@@ -519,6 +528,33 @@ class DidwwVerificationProvider(VerificationProvider):
             return await asyncio.to_thread(run)
         except DidwwApiError as exc:
             raise VerificationProviderError("DIDWW request failed") from exc
+
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The identity fields (``company_name``, or ``first_name`` and
+        ``last_name``), else the address's ``customer_name``."""
+        return _name_from(fields, requirements.subject_type) or display_name(
+            address.customer_name if address else None
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The identity's own name fields."""
+        if not refs.get("identity_id"):
+            return None
+        try:
+            identity = await asyncio.to_thread(
+                self._client.get, f"identities/{refs['identity_id']}"
+            )
+        except DidwwApiError as exc:
+            raise VerificationProviderError("DIDWW request failed") from exc
+        return _name_from(identity["data"]["attributes"], subject_type)
 
     async def purchase_handle(self, refs: dict) -> dict:
         # DIDWW registers the end user by the address: it is both ids.

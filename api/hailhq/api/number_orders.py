@@ -17,6 +17,7 @@ from hailhq.api.funds import BILLING_URL
 from hailhq.api.routes.verifications import approved_handles
 from hailhq.core import sms_setup, telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
+from hailhq.core.carrier_offer import Approval
 from hailhq.core.carrier_routing import Outcome, carrier
 from hailhq.core.db import org_lock, session_scope
 from hailhq.core.models import (
@@ -481,11 +482,12 @@ async def acquire_offer(
     billed: bool,
     expected_total_cents: int | None = None,
     subject_type: str | None = None,
+    verification_id: UUID | None = None,
 ) -> PhoneNumber:
     """Buy the quoted number. ``kind`` is the number type the client sent, or
     None to take it from the quote; a different explicit type is a 422.
-    ``subject_type`` picks the approved verification to buy with
-    (``pick_subject_type``)."""
+    ``verification_id`` and ``subject_type`` pick the approved verification
+    to buy with (``pick_approval``)."""
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
@@ -529,12 +531,14 @@ async def acquire_offer(
         )
     if subject_type is not None and offer.subject_types:
         _check_subject_type(offer, subject_type)
+    if verification_id is not None and offer.subject_types:
+        await _check_verification_id(db, org, offer, verification_id, subject_type)
     if offer.readiness != "ready":
         raise unprocessable(
             "Complete this organization's regulatory verification first",
             loc=["body", "quote_id"],
         )
-    chosen = pick_subject_type(offer, subject_type)
+    approval = pick_approval(offer, subject_type, verification_id)
     total = offer.monthly_cents + offer.setup_cents
     no_funds = HTTPException(
         status_code=402,
@@ -575,13 +579,12 @@ async def acquire_offer(
         # The carrier lookup failed; that says nothing about the quote. The
         # route does not cache this response, so a retry can succeed.
         raise RetryableError("Carrier lookup unavailable; try again shortly")
-    approval = offer.approvals.get(chosen) if chosen else None
     if (
         fresh is None
         or fresh.readiness != "ready"
         or (fresh.monthly_cents, fresh.setup_cents, fresh.subject_types)
         != (offer.monthly_cents, offer.setup_cents, offer.subject_types)
-        or (fresh.approvals.get(chosen) if chosen else None) != approval
+        or (approval is not None and _ids(approval) not in map(_ids, fresh.approvals))
     ):
         raise HTTPException(
             status_code=409,
@@ -589,7 +592,8 @@ async def acquire_offer(
         )
     # The purchase uses the chosen approval's carrier ids, and the number
     # remembers which verification it used.
-    offer.subject_type = chosen
+    offer.subject_type = approval.subject_type if approval else None
+    offer.subject_name = approval.subject_name if approval else None
     offer.verification_row_id = approval.row_id if approval else None
     offer.verification_id = approval.verification_id if approval else None
     offer.address_id = approval.address_id if approval else None
@@ -735,28 +739,84 @@ def _check_subject_type(offer: CarrierOffer, subject_type: str) -> None:
             f"This number cannot be bought with a verification as {who}.",
             loc=["body", "subject_type"],
         )
-    if subject_type not in offer.approvals:
+    if not any(a.subject_type == subject_type for a in offer.approvals):
         raise unprocessable(
             f"Verify as {who} first",
             loc=["body", "subject_type"],
         )
 
 
-def pick_subject_type(offer: CarrierOffer, subject_type: str | None) -> str | None:
-    """The subject type of the approved verification this purchase uses, or
-    None when the number needs none. Without ``subject_type``, the one
-    approved kind is used; two approved kinds are a 422."""
-    if not offer.subject_types:
-        return None  # No verification needed: subject_type is ignored.
-    if subject_type is not None:
-        return subject_type  # _check_subject_type already passed.
-    kinds = [k for k in offer.subject_types if k in offer.approvals]
-    if len(kinds) > 1:
+async def _check_verification_id(
+    db: AsyncSession,
+    org: UUID,
+    offer: CarrierOffer,
+    verification_id: UUID,
+    subject_type: str | None,
+) -> None:
+    """422 on ``verification_id`` unless it is one of this org's approved
+    number verifications that the carrier still accepts for this offer, of
+    ``subject_type`` when one was passed."""
+    row = await db.get(CarrierVerification, verification_id)
+    if (
+        row is None
+        or row.organization_id != org
+        or row.purpose != "number"
+        or (row.provider, row.country_code, row.number_type)
+        != (offer.provider, offer.country_code, offer.number_type)
+    ):
         raise unprocessable(
-            "You are verified as a person and as a company. Pass subject_type.",
-            loc=["body", "subject_type"],
+            "This verification is not one of yours for this number. "
+            "Pass an id from the quote's verifications.",
+            loc=["body", "verification_id"],
         )
-    return kinds[0] if kinds else None
+    if row.state != "approved":
+        raise unprocessable(
+            "This verification is not approved yet.",
+            loc=["body", "verification_id"],
+        )
+    if subject_type is not None and row.subject_type != subject_type:
+        raise unprocessable(
+            f"This verification is not as {_WHO[subject_type]}.",
+            loc=["body", "verification_id"],
+        )
+    if all(a.row_id != verification_id for a in offer.approvals):
+        raise unprocessable(
+            "This verification cannot be used for this number. "
+            "Request new quotes and pick one of its verifications.",
+            loc=["body", "verification_id"],
+        )
+
+
+def _ids(a: Approval) -> tuple:
+    """What must not change between quote and purchase: the Hail row and
+    the carrier ids the order passes."""
+    return (a.row_id, a.verification_id, a.address_id)
+
+
+def pick_approval(
+    offer: CarrierOffer, subject_type: str | None, verification_id: UUID | None
+) -> Approval | None:
+    """The approved verification this purchase uses, or None when the number
+    needs none. ``verification_id`` names it (already checked); else the
+    one approval left after the ``subject_type`` filter is used, and more
+    than one is a 422."""
+    if not offer.subject_types:
+        return None  # No verification needed: both are ignored.
+    if verification_id is not None:
+        return next(a for a in offer.approvals if a.row_id == verification_id)
+    left = [
+        a
+        for a in offer.approvals
+        if a.subject_type in offer.subject_types
+        and (subject_type is None or a.subject_type == subject_type)
+    ]
+    if len(left) > 1:
+        raise unprocessable(
+            "You have more than one verification for this number. "
+            "Pass verification_id.",
+            loc=["body", "verification_id"],
+        )
+    return left[0] if left else None
 
 
 async def purchase_number(
@@ -777,6 +837,7 @@ async def purchase_number(
         billed=principal.auth_kind != "shared",
         expected_total_cents=body.expected_total_cents,
         subject_type=body.subject_type,
+        verification_id=body.verification_id,
     )
     if number.provisioning_state == "failed":
         # The hold was refunded; nothing is owed. Say so instead of a 201.

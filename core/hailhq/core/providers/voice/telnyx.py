@@ -164,15 +164,15 @@ async def telnyx_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     """Live Telnyx inventory. ``approvals`` are the org's approved Hail
-    verifications per subject type; one counts while its requirement group
-    is still approved at Telnyx for this country and type. Telnyx does not
-    tie a group to a subject type, so either kind is accepted."""
+    verifications; one counts while its requirement group is still approved
+    at Telnyx for this country and type. Telnyx does not tie a group to a
+    subject type, so either kind is accepted."""
     if not settings.telnyx_api_key:
         return []
-    approvals = approvals or {}
+    approvals = approvals or []
     if "voice" in capabilities and not all(
         (
             settings.telnyx_connection_id,
@@ -199,7 +199,7 @@ async def telnyx_offers(
     )
     if not quotes:
         return []
-    valid: dict[str, Approval] = {}
+    valid: list[Approval] = []
     if approvals:
         groups = (
             await api.request(
@@ -223,13 +223,11 @@ async def telnyx_offers(
             and g.get("phone_number_type") == kind
             and g.get("action") == "ordering"
         }
-        valid = {
-            k: a
-            for k, a in sorted(approvals.items())
-            if a.verification_id and a.verification_id in approved
-        }
+        valid = [
+            a for a in approvals if a.verification_id and a.verification_id in approved
+        ]
     # Any approved group answers which rules are left; they are kind-blind.
-    group = next(iter(valid.values()), None)
+    group = next(iter(valid), None)
     results = []
     for q in quotes:
         monthly_cents = cents(q.monthly_cost)
@@ -292,7 +290,7 @@ async def telnyx_offers(
                 # With a group passed, Telnyx may list no rules left; the
                 # number still needs that group at purchase.
                 subject_types=(["business", "person"] if requirements or group else []),
-                approvals=valid if requirements or group else {},
+                approvals=valid if requirements or group else [],
                 locality=q.locality,
                 region=q.region,
             )
@@ -399,7 +397,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await telnyx_offers(
         org,

@@ -321,6 +321,27 @@ class VerificationProvider(ABC):
     async def discard(self, refs: dict) -> None:
         """Delete a draft. Best effort; never raises."""
 
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The name of the person or company this verification is for, taken
+        from what the customer typed in the form. No carrier call. None when
+        the form holds no name. Hail stores it and shows it to the customer;
+        it is never logged."""
+        return None
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The same name, read back from the carrier's record (``refs``).
+        Used once, by the operator backfill for rows made before Hail kept
+        the name. None when the carrier record holds no name."""
+        return None
+
 
 class SmsRegistrationProvider(VerificationProvider):
     """A carrier's US A2P 10DLC registration, driven through the same

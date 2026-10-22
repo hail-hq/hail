@@ -194,8 +194,12 @@ async def test_live_portugal_rules_and_org_group(
 
     # Hail's approved rows: the business one names this group, the person
     # one a group Telnyx does not list. Each is matched by its own id.
-    business = Approval(row_id=uuid4(), verification_id=group_id)
-    person = Approval(row_id=uuid4(), verification_id=str(uuid4()))
+    business = Approval(
+        row_id=uuid4(), subject_type="business", verification_id=group_id
+    )
+    person = Approval(
+        row_id=uuid4(), subject_type="person", verification_id=str(uuid4())
+    )
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
         result = await telnyx_offers(
             org,
@@ -203,7 +207,7 @@ async def test_live_portugal_rules_and_org_group(
             "local",
             ["voice"],
             http,
-            approvals={"person": person, "business": business},
+            approvals=[person, business],
         )
     assert len(result) == 1
     assert result[0].regulatory_friction == (
@@ -211,9 +215,7 @@ async def test_live_portugal_rules_and_org_group(
     )
     assert result[0].readiness == expected
     assert result[0].subject_types == ["business", "person"]
-    assert result[0].approvals == (
-        {"business": business} if expected == "ready" else {}
-    )
+    assert result[0].approvals == ([business] if expected == "ready" else [])
     assert result[0].monthly_cents == 230
     assert result[0].setup_cents == 100
 
@@ -329,13 +331,13 @@ async def test_twilio_person_bundle_makes_the_offer_ready(monkeypatch):
             )
         ],
     )
-    person = Approval(row_id=uuid4(), verification_id="BU_person")
-    (offer,) = await twilio_offers(
-        org, "GB", "mobile", ["voice"], approvals={"person": person}
+    person = Approval(
+        row_id=uuid4(), subject_type="person", verification_id="BU_person"
     )
+    (offer,) = await twilio_offers(org, "GB", "mobile", ["voice"], approvals=[person])
     assert offer.readiness == "ready"
     assert offer.subject_types == ["business", "person"]
-    assert offer.approvals == {"person": person}
+    assert offer.approvals == [person]
     kwargs = api.numbers.v2.regulatory_compliance.regulations.list.call_args.kwargs
     assert "end_user_type" not in kwargs
 
@@ -366,10 +368,12 @@ async def test_twilio_approval_must_match_its_bundle_and_kind(monkeypatch):
         "GB",
         "mobile",
         ["voice"],
-        approvals={"person": Approval(row_id=uuid4(), verification_id="BU_mixed")},
+        approvals=[
+            Approval(row_id=uuid4(), subject_type="person", verification_id="BU_mixed")
+        ],
     )
     assert offer.readiness == "verification_required"
-    assert offer.approvals == {}
+    assert offer.approvals == []
     (offer,) = await twilio_offers(org, "GB", "mobile", ["voice"])
     assert offer.readiness == "verification_required"
 

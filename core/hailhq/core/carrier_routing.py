@@ -112,8 +112,8 @@ class Carrier:
     async_orders: bool
     # Live inventory: (org, country, number type, capabilities, exact e164,
     # national digits the number starts with, city, US/CA state code, the
-    # org's approved Hail verifications for this carrier per subject type).
-    # The carrier only confirms an approval is still valid; it never finds
+    # org's approved Hail verifications for this carrier, newest first).
+    # The carrier only confirms each approval is still valid; it never finds
     # one Hail has no row for.
     offers: Callable[
         [
@@ -125,7 +125,7 @@ class Carrier:
             str | None,
             str | None,
             str | None,
-            dict[str, Approval],
+            list[Approval],
         ],
         Awaitable[list[CarrierOffer]],
     ]

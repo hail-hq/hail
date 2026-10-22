@@ -184,9 +184,9 @@ def _offers_sync(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
-    approvals = approvals or {}
+    approvals = approvals or []
     client = didww_client()
     country_id, types = lookup_ids(country)
     type_id = types.get(kind)
@@ -244,7 +244,7 @@ def _offers_sync(
             index.get(("address_requirements", req_ref["id"])) if req_ref else None
         )
         subject_types = _subject_types(requirement) if needs_registration else []
-        wanted = {k: a for k, a in approvals.items() if k in subject_types}
+        wanted = [a for a in approvals if a.subject_type in subject_types]
         if wanted and approved_ids is None:
             # Every address of this org whose registration passed, person's
             # and business's alike: each approval is matched by its own id.
@@ -259,11 +259,11 @@ def _offers_sync(
                     },
                 )["data"]
             }
-        valid = {
-            k: a
-            for k, a in wanted.items()
+        valid = [
+            a
+            for a in wanted
             if a.address_id and a.address_id in (approved_ids or set())
-        }
+        ]
         ready = not needs_registration or bool(valid)
         city_ref = group["relationships"].get("city", {}).get("data")
         region_ref = group["relationships"].get("region", {}).get("data")
@@ -310,7 +310,7 @@ async def didww_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     """Live DIDWW inventory for one country and number type. Voice only:
     an ``sms`` request never gets a DIDWW offer. No offer without the
@@ -616,7 +616,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await didww_offers(
         org,

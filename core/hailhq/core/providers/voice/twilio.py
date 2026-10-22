@@ -189,14 +189,14 @@ async def twilio_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     """Live Twilio inventory. ``approvals`` are the org's approved Hail
-    verifications per subject type; one counts while its bundle is still
-    approved at Twilio and was made for this country, type and subject type."""
+    verifications; one counts while its bundle is still approved at Twilio
+    and was made for this country, type and the approval's subject type."""
     if not settings.twilio_account_sid or not settings.twilio_auth_token:
         return []
-    approvals = approvals or {}
+    approvals = approvals or []
 
     prefix = number_prefix(country, area_code) if area_code else None
 
@@ -269,8 +269,8 @@ async def twilio_offers(
         # Regulation sid -> the subject type it is for.
         subject_of = {r.sid: _TWILIO_TO_SUBJECT[r.end_user_type] for r in rules}
         subject_types = sorted(set(subject_of.values()))
-        valid: dict[str, Approval] = {}
-        wanted = {k: a for k, a in approvals.items() if k in subject_types}
+        valid: list[Approval] = []
+        wanted = [a for a in approvals if a.subject_type in subject_types]
         if wanted:
             bundles = compliance.bundles.list(
                 status="twilio-approved", friendly_name=f"hail-{org}", limit=100
@@ -280,11 +280,12 @@ async def twilio_offers(
                 for b in bundles
                 if b.friendly_name == f"hail-{org}"
             }
-            valid = {
-                k: a
-                for k, a in wanted.items()
-                if a.verification_id and approved.get(a.verification_id) == k
-            }
+            valid = [
+                a
+                for a in wanted
+                if a.verification_id
+                and approved.get(a.verification_id) == a.subject_type
+            ]
         result = []
         for n in inventory:
             address_required = n.address_requirements not in (None, "none")
@@ -384,7 +385,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, Approval] | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await twilio_offers(
         org,

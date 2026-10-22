@@ -2590,14 +2590,17 @@ type NumberAcquireRequest struct {
 	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
 	QuoteId openapi_types.UUID `json:"quote_id"`
 
-	// SubjectType Which approved verification to buy with: 'person' (you) or 'business' (your company). Needed only when you are verified as both for this number (422 without it); with one approved verification it is used. Ignored when the number needs no verification.
+	// SubjectType Buy with an approved verification of this kind only: 'person' (you) or 'business' (your company). With `verification_id` it must match that verification. Ignored when the number needs no verification.
 	SubjectType *NumberAcquireRequestSubjectType `json:"subject_type,omitempty"`
+
+	// VerificationId Hail id of the approved verification to buy with, from the quote's `verifications`. Needed when you have more than one approved verification for this number (422 without it); with one it is used. 422 when it is not one of your approved verifications for this number. Ignored when the number needs no verification.
+	VerificationId *openapi_types.UUID `json:"verification_id,omitempty"`
 }
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
 
-// NumberAcquireRequestSubjectType Which approved verification to buy with: 'person' (you) or 'business' (your company). Needed only when you are verified as both for this number (422 without it); with one approved verification it is used. Ignored when the number needs no verification.
+// NumberAcquireRequestSubjectType Buy with an approved verification of this kind only: 'person' (you) or 'business' (your company). With `verification_id` it must match that verification. Ignored when the number needs no verification.
 type NumberAcquireRequestSubjectType string
 
 // NumberQuoteRequest defines model for NumberQuoteRequest.
@@ -2694,6 +2697,9 @@ type OfferVerification struct {
 	// State State of that verification, such as draft, submitted or approved.
 	State string `json:"state"`
 
+	// SubjectName Name of the person or company that verification is for, as typed in the verification form. Null when unknown.
+	SubjectName *string `json:"subject_name,omitempty"`
+
 	// SubjectType Who that verification is for: 'person' (you) or 'business' (your company).
 	SubjectType OfferVerificationSubjectType `json:"subject_type"`
 }
@@ -2739,8 +2745,14 @@ type PhoneNumberResponse struct {
 	// SmsAgentId Agent that answers texts to this number. Null: texts only reach your webhooks.
 	SmsAgentId *openapi_types.UUID `json:"sms_agent_id,omitempty"`
 
+	// SubjectName Name of the person or company the verification used to buy this number is for. Null when no verification was used or the name is unknown.
+	SubjectName *string `json:"subject_name,omitempty"`
+
 	// SubjectType Who the verification used to buy this number is for: 'person' or 'business'. Null when no verification was used.
 	SubjectType *PhoneNumberResponseSubjectType `json:"subject_type,omitempty"`
+
+	// VerificationId Hail id of the verification used to buy this number. Null when no verification was used.
+	VerificationId *openapi_types.UUID `json:"verification_id,omitempty"`
 
 	// VoiceAgentId Agent that answers calls to this number. Null: calls ring out.
 	VoiceAgentId *openapi_types.UUID `json:"voice_agent_id,omitempty"`
@@ -2905,10 +2917,10 @@ type QuoteOffer struct {
 	// SubjectTypes Who can verify for this number: 'person' (you), 'business' (your company), or both. Empty when no verification is needed.
 	SubjectTypes *[]QuoteOfferSubjectTypes `json:"subject_types,omitempty"`
 
-	// Verification Deprecated: read `verifications`. The verification a purchase without subject_type would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.
+	// Verification Deprecated: read `verifications`. The verification a purchase without verification_id would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.
 	Verification *OfferVerification `json:"verification,omitempty"`
 
-	// Verifications Your organization's newest verification per subject type for this offer's country and number type, leaving out cancelled and rejected ones.
+	// Verifications Every verification of your organization for this offer's country and number type, leaving out cancelled and rejected ones: approved first, then newest first. Pass one's `id` as `verification_id` to POST /numbers to buy with it.
 	Verifications *[]OfferVerification `json:"verifications,omitempty"`
 }
 
@@ -3137,7 +3149,8 @@ type VerificationRequirementsSubjectType string
 // VerificationRequirementsSubjectTypes defines model for VerificationRequirements.SubjectTypes.
 type VerificationRequirementsSubjectTypes string
 
-// VerificationResponse A carrier verification. Holds state only; no personal data.
+// VerificationResponse A carrier verification: its state and the name of the person or
+// company it is for. No other personal data.
 type VerificationResponse struct {
 	// ApprovedAt When the carrier approved it.
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
@@ -3165,6 +3178,9 @@ type VerificationResponse struct {
 
 	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
 	State string `json:"state"`
+
+	// SubjectName Name of the person or company this verification is for, taken from the form (for example the business name, or the first and last name). Null when unknown.
+	SubjectName *string `json:"subject_name,omitempty"`
 
 	// SubjectType 'person' or 'business'.
 	SubjectType string `json:"subject_type"`

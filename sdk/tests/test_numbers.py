@@ -600,3 +600,49 @@ async def test_quotes_expose_subject_types_and_verifications(
     (got,) = quotes.offers
     assert got.subject_types == ["business", "person"]
     assert got.verifications[0].subject_type == "person"
+
+
+@respx.mock
+async def test_numbers_acquire_sends_verification_id_and_reads_the_name(
+    base_url: str, api_key: str
+) -> None:
+    vid = uuid4()
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                **make_phone_number_response(),
+                "subject_type": "person",
+                "verification_id": str(vid),
+                "subject_name": "Ada Lovelace",
+            },
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        number = await c.numbers.acquire(
+            country="GB", quote_id=uuid4(), verification_id=vid
+        )
+        assert json.loads(route.calls.last.request.content)["verification_id"] == (
+            str(vid)
+        )
+        assert number.verification_id == vid
+        assert number.subject_name == "Ada Lovelace"
+        await c.numbers.acquire(country="GB", quote_id=uuid4())
+        assert "verification_id" not in json.loads(route.calls.last.request.content)
+
+
+@respx.mock
+async def test_quotes_expose_verification_names(base_url: str, api_key: str):
+    ada = {
+        "id": str(uuid4()),
+        "state": "approved",
+        "subject_type": "person",
+        "subject_name": "Ada Lovelace",
+    }
+    offer = {**_offer(uuid4()), "subject_types": ["person"], "verifications": [ada]}
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response([offer])
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        quotes = await c.numbers.quotes(country="GB", capabilities=["voice"])
+    assert quotes.offers[0].verifications[0].subject_name == "Ada Lovelace"

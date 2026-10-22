@@ -21,6 +21,7 @@ Database migrations run on deploy.
 - MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.
 - Numbers: quotes return `incomplete` and, per offer, your matching `verification` (`id`, `state`). `GET /verifications/sms-fees` takes an optional `number_id`.
 - Numbers: an organization may hold a verification as a person and one as a business for the same number type. Each quote offer lists `subject_types` and your `verifications` per subject type; `POST /numbers` takes `subject_type`, and numbers return the `subject_type` they were bought with.
+- Verifications carry `subject_name`, the person's or company's name from the form. An organization may hold several verifications of each kind; quote offers list all of them, `POST /numbers` takes `verification_id`, and numbers return `verification_id` and `subject_name`. SDK: `numbers.acquire(verification_id=...)`. CLI: `hail numbers acquire --verification-id`.
 
 ### Changed
 

@@ -46,15 +46,16 @@ async def seed_quote(
     """A ready DIDWW quote. With ``address_id``, the org's approved person
     verification (``verification_row_id``, or a made-up id) is on it."""
     approvals = (
-        {
-            "person": Approval(
+        [
+            Approval(
                 row_id=verification_row_id or uuid4(),
+                subject_type="person",
                 verification_id=address_id,
                 address_id=address_id,
             )
-        }
+        ]
         if address_id
-        else {}
+        else []
     )
     offer = CarrierOffer(
         provider="didww",
@@ -385,14 +386,20 @@ async def test_rejected_registration_rejects_only_the_verification_used(
     offer = offer.model_copy(
         update={
             "subject_types": ["business", "person"],
-            "approvals": {
-                "person": Approval(
-                    row_id=person.id, verification_id="addr-1", address_id="addr-1"
+            "approvals": [
+                Approval(
+                    row_id=person.id,
+                    subject_type="person",
+                    verification_id="addr-1",
+                    address_id="addr-1",
                 ),
-                "business": Approval(
-                    row_id=business.id, verification_id="addr-2", address_id="addr-2"
+                Approval(
+                    row_id=business.id,
+                    subject_type="business",
+                    verification_id="addr-2",
+                    address_id="addr-2",
                 ),
-            },
+            ],
         }
     )
     quote.offer = offer.model_dump(mode="json")
@@ -452,6 +459,8 @@ async def test_rejected_registration_of_an_older_number_with_two_rows(
     from hailhq.api.number_orders import rejected_registration
 
     await rejected_registration(async_session, number, None)
+    # The caller commits (reconcile_order); refresh would drop the change.
+    await async_session.commit()
     states = set()
     for row in (first, second):
         await async_session.refresh(row)

@@ -37,6 +37,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import (
     address_complete,
+    display_name,
     pick_option,
     validate_input,
 )
@@ -399,6 +400,53 @@ class TelnyxVerificationProvider(VerificationProvider):
         if state == "pending-approval":
             return ProviderStatus(state="pending")
         return ProviderStatus(state="draft")
+
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The address's ``customer_name`` (Telnyx files it as the business
+        name, or the first and last name). Telnyx's text fields are keyed by
+        requirement id and some are free text ("Name, Business Name, Phone
+        Number"), so without an address only a business's field whose label
+        starts with "Company name" or "Business name" is used."""
+        name = display_name(address.customer_name if address else None)
+        if name or requirements.subject_type != "business":
+            return name
+        return next(
+            (
+                n
+                for f in requirements.fields
+                if f.label.lower().startswith(("company name", "business name"))
+                and (n := display_name(fields.get(f.name)))
+            ),
+            None,
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The name on the address the group holds."""
+        if not refs.get("address_id"):
+            return None
+        try:
+            addr = (
+                await self._api.request(
+                    "GET", f"/addresses/{path_id(refs['address_id'])}"
+                )
+            )["data"]
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Telnyx request failed") from exc
+        if subject_type == "business":
+            return display_name(addr.get("business_name")) or display_name(
+                addr.get("first_name"), addr.get("last_name")
+            )
+        return display_name(addr.get("first_name"), addr.get("last_name")) or (
+            display_name(addr.get("business_name"))
+        )
 
     async def purchase_handle(self, refs: dict) -> dict:
         return {"verification_id": refs["group_id"], "address_id": None}

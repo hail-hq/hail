@@ -128,7 +128,7 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
    The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again.
 
 6. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-7. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold one approved verification as a person and one as a business. When the offer's `verifications` has both approved, pass `subject_type` to `acquire_number` (ask the user which).
+7. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
 8. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
@@ -148,7 +148,7 @@ To register the organization to text US numbers from a US number, pass `purpose:
 }
 ```
 
-Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country, number type and `subject_type` returns 409 while one exists.
+Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country, number type, `subject_type` and name returns 409 while one exists.
 
 > **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
 

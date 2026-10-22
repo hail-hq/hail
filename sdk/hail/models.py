@@ -238,6 +238,8 @@ class OfferVerification(BaseModel):
     state: str
     # "person" or "business". Default for an API that predates the field.
     subject_type: Literal["person", "business"] | None = None
+    # Name of the person or company, from the verification form.
+    subject_name: str | None = None
 
 
 class NumberOffer(BaseModel):
@@ -262,10 +264,11 @@ class NumberOffer(BaseModel):
     # Who may verify for this number: "person", "business", or both. Empty
     # when no verification is needed.
     subject_types: list[Literal["person", "business"]] = Field(default_factory=list)
-    # Your newest live verification per subject type.
+    # All your live verifications for this offer: approved first, then
+    # newest. Pass one's ``id`` as ``verification_id`` to ``acquire``.
     verifications: list[OfferVerification] = Field(default_factory=list)
     # Deprecated: read ``verifications``. The one a purchase without
-    # subject_type would use.
+    # verification_id would use.
     verification: OfferVerification | None = None
     by_request: bool = False
 
@@ -311,6 +314,9 @@ class PhoneNumberResponse(BaseModel):
     inbound_registered: bool = False
     # Who the verification used to buy it is for. None when none was used.
     subject_type: Literal["person", "business"] | None = None
+    # Hail id of that verification, and the person's or company's name.
+    verification_id: UUID | None = None
+    subject_name: str | None = None
 
 
 class PhoneNumberListResponse(BaseModel):

@@ -1991,9 +1991,11 @@ paths:
 
         A number that needs verification is bought with one of your approved
 
-        verifications. When you are verified both as a person and as a company
+        verifications. With one, it is used. With more than one (several people
 
-        for it, pass `subject_type`; with one, it is used."
+        or companies), pass `verification_id`: the `id` of one of the quote's
+
+        `verifications`, which carry the person's or company's name."
       operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
@@ -2052,9 +2054,11 @@ paths:
           description:
             "quote_id is missing (request one from POST /numbers/quotes),
             the quote does not match the country or type, the offer is by_request
-            (ask support for it), or subject_type is needed or not approved: you
-            are verified as a person and as a company (pass subject_type), or not
-            as the one you passed."
+            (ask support for it), or the verification to buy with is unclear or
+            not usable: you have more than one approved verification for this number
+            (pass verification_id), verification_id is not one of your approved
+            verifications for it, or you are not verified as the subject_type you
+            passed."
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -2521,11 +2525,13 @@ paths:
 
         Each offer lists `subject_types` (who may verify for it: a person, a
 
-        business, or both) and your `verifications` per subject type. It is
+        business, or both) and all your `verifications` for it that are not
 
-        `ready` when one of your approved verifications of an accepted subject
+        cancelled or rejected, each with the name of its person or company
 
-        type is still valid."
+        (`subject_name`), approved first. It is `ready` when one of your
+
+        approved verifications of an accepted subject type is still valid."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -4592,9 +4598,15 @@ paths:
         `GET /verifications/requirements`.
 
 
-        For a number you may hold one verification as a person and one as a
+        The name of the person or company comes from the form you send (for
 
-        business at once; a second live one of the same subject type is a 409.
+        example the business name, or the first and last name) and is shown
+
+        back as `subject_name`. For a number you may hold several verifications
+
+        of each subject type (several people, several companies); a second live
+
+        one of the same subject type and the same name is a 409.
 
 
         The carrier checks the details right away. Problems come back as 422 with
@@ -7830,10 +7842,22 @@ components:
                 - business
             - type: "null"
           title: Subject Type
-          description: "Which approved verification to buy with: 'person' (you)
-            or 'business' (your company). Needed only when you are verified as
-            both for this number (422 without it); with one approved verification
-            it is used. Ignored when the number needs no verification."
+          description:
+            "Buy with an approved verification of this kind only: 'person'
+            (you) or 'business' (your company). With `verification_id` it must
+            match that verification. Ignored when the number needs no verification."
+        verification_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Verification Id
+          description:
+            Hail id of the approved verification to buy with, from the
+            quote's `verifications`. Needed when you have more than one approved
+            verification for this number (422 without it); with one it is used. 422
+            when it is not one of your approved verifications for this number. Ignored
+            when the number needs no verification.
       additionalProperties: false
       type: object
       required:
@@ -8051,6 +8075,14 @@ components:
           description:
             "Who that verification is for: 'person' (you) or 'business'
             (your company)."
+        subject_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Subject Name
+          description:
+            Name of the person or company that verification is for, as
+            typed in the verification form. Null when unknown.
       type: object
       required:
         - id
@@ -8152,6 +8184,23 @@ components:
           description:
             "Who the verification used to buy this number is for: 'person'
             or 'business'. Null when no verification was used."
+        verification_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Verification Id
+          description: Hail id of the verification used to buy this number. Null
+            when no verification was used.
+        subject_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Subject Name
+          description:
+            Name of the person or company the verification used to buy
+            this number is for. Null when no verification was used or the name is
+            unknown.
       type: object
       required:
         - id
@@ -8500,17 +8549,17 @@ components:
             $ref: "#/components/schemas/OfferVerification"
           type: array
           title: Verifications
-          description:
-            Your organization's newest verification per subject type for
-            this offer's country and number type, leaving out cancelled and rejected
-            ones.
+          description: "Every verification of your organization for this offer's
+            country and number type, leaving out cancelled and rejected ones: approved
+            first, then newest first. Pass one's `id` as `verification_id` to POST
+            /numbers to buy with it."
         verification:
           anyOf:
             - $ref: "#/components/schemas/OfferVerification"
             - type: "null"
           description:
             "Deprecated: read `verifications`. The verification a purchase
-            without subject_type would use: your one approved verification, else
+            without verification_id would use: your one approved verification, else
             the newest one that is not cancelled or rejected; null when there is
             none."
         by_request:
@@ -8982,11 +9031,21 @@ components:
         number_type:
           type: string
           title: Number Type
-          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or
+            'national'."
         subject_type:
           type: string
           title: Subject Type
           description: "'person' or 'business'."
+        subject_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Subject Name
+          description:
+            Name of the person or company this verification is for, taken
+            from the form (for example the business name, or the first and last name).
+            Null when unknown.
         purpose:
           type: string
           title: Purpose
@@ -9049,7 +9108,10 @@ components:
         - created_at
         - updated_at
       title: VerificationResponse
-      description: A carrier verification. Holds state only; no personal data.
+      description: "A carrier verification: its state and the name of the person
+        or
+
+        company it is for. No other personal data."
     VoiceConfig:
       properties:
         tts:

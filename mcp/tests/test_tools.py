@@ -1654,7 +1654,12 @@ async def test_quote_numbers_keeps_verification_and_incomplete(
     client: HailClient,
 ) -> None:
     body = _quotes_response()
-    verification = {"id": str(uuid4()), "state": "submitted", "subject_type": "person"}
+    verification = {
+        "id": str(uuid4()),
+        "state": "submitted",
+        "subject_type": "person",
+        "subject_name": "Ada Lovelace",
+    }
     body["offers"][0]["verification"] = verification
     body["offers"][0]["verifications"] = [verification]
     body["offers"][0]["subject_types"] = ["business", "person"]
@@ -1810,6 +1815,39 @@ async def test_acquire_number_sends_subject_type(client: HailClient) -> None:
         client=client, subject_type="company", **_ACQUIRE_ARGS
     )
     assert "ask the user" in result["error"]
+
+
+@respx.mock
+async def test_acquire_number_sends_verification_id(client: HailClient) -> None:
+    captured: dict = {}
+    vid = uuid4()
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        return httpx.Response(
+            201,
+            json={
+                **_number_response(),
+                "subject_type": "person",
+                "verification_id": str(vid),
+                "subject_name": "Ada Lovelace",
+            },
+        )
+
+    route = respx.post(f"{_BASE_URL}/numbers").mock(side_effect=_handler)
+    result = await tools.acquire_number(
+        client=client, verification_id=str(vid).upper(), **_ACQUIRE_ARGS
+    )
+    assert captured["body"]["verification_id"] == str(vid)
+    assert result["verification_id"] == str(vid)
+    assert result["subject_name"] == "Ada Lovelace"
+    calls = route.call_count
+    result = await tools.acquire_number(
+        client=client, verification_id="Ada Lovelace", **_ACQUIRE_ARGS
+    )
+    # Never echoed, and nothing is sent.
+    assert result == {"error": "verification_id must be a UUID"}
+    assert route.call_count == calls
 
 
 @respx.mock

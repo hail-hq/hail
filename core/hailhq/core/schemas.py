@@ -615,10 +615,20 @@ class NumberAcquireRequest(BaseModel):
     subject_type: Literal["person", "business"] | None = Field(
         default=None,
         description=(
-            "Which approved verification to buy with: 'person' (you) or "
-            "'business' (your company). Needed only when you are verified as "
-            "both for this number (422 without it); with one approved "
-            "verification it is used. Ignored when the number needs no "
+            "Buy with an approved verification of this kind only: 'person' "
+            "(you) or 'business' (your company). With `verification_id` it "
+            "must match that verification. Ignored when the number needs no "
+            "verification."
+        ),
+    )
+    verification_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Hail id of the approved verification to buy with, from the "
+            "quote's `verifications`. Needed when you have more than one "
+            "approved verification for this number (422 without it); with one "
+            "it is used. 422 when it is not one of your approved "
+            "verifications for this number. Ignored when the number needs no "
             "verification."
         ),
     )
@@ -792,6 +802,21 @@ class PhoneNumberResponse(BaseModel):
         description=(
             "Who the verification used to buy this number is for: 'person' "
             "or 'business'. Null when no verification was used."
+        ),
+    )
+    verification_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Hail id of the verification used to buy this number. Null when "
+            "no verification was used."
+        ),
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the person or company the verification used to buy this "
+            "number is for. Null when no verification was used or the name "
+            "is unknown."
         ),
     )
 
@@ -2656,7 +2681,8 @@ class ProviderValidateResult(BaseModel):
 
 
 class VerificationResponse(BaseModel):
-    """A carrier verification. Holds state only; no personal data."""
+    """A carrier verification: its state and the name of the person or
+    company it is for. No other personal data."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -2666,6 +2692,14 @@ class VerificationResponse(BaseModel):
         description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
     )
     subject_type: str = Field(description="'person' or 'business'.")
+    subject_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the person or company this verification is for, taken "
+            "from the form (for example the business name, or the first and "
+            "last name). Null when unknown."
+        ),
+    )
     purpose: str = Field(
         description=(
             "'number': permission to buy a number in this country. "

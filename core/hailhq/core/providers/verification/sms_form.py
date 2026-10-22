@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from hailhq.core.providers.verification.base import (
+    Address,
     FieldOption,
     FieldSpec,
     Problem,
     Requirements,
     SubjectType,
 )
+from hailhq.core.providers.verification.forms import display_name
 
 _BUSINESS_TYPES = (
     FieldOption(key="PRIVATE_PROFIT", label="Private company"),
@@ -143,6 +145,18 @@ def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
         address_required=True,
         subject_types=("person", "business"),
     )
+
+
+def sms_subject_name(
+    fields: dict[str, str], address: Address | None, subject_type: SubjectType
+) -> str | None:
+    """``legal_name`` for a business, ``first_name`` and ``last_name`` for a
+    person, else the address's ``customer_name``."""
+    if subject_type == "business":
+        name = display_name(fields.get("legal_name"))
+    else:
+        name = display_name(fields.get("first_name"), fields.get("last_name"))
+    return name or display_name(address.customer_name if address else None)
 
 
 def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Problem]:

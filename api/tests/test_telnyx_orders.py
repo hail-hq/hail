@@ -843,6 +843,7 @@ async def test_quote_route_shows_the_live_verification(
         "id": str(live.id),
         "state": "submitted",
         "subject_type": "business",
+        "subject_name": None,
     }
     assert by_carrier["telnyx"]["verifications"] == [
         by_carrier["telnyx"]["verification"]
@@ -856,12 +857,13 @@ async def test_quote_route_shows_the_live_verification(
     assert (stored.provider, stored.e164) == ("telnyx", offer.e164)
 
 
-async def test_quote_route_lists_one_verification_per_subject_type(
+async def test_quote_route_lists_every_live_verification(
     client, async_session, org_and_key, monkeypatch
 ):
     """A person and a business verification may both be live. The offer
-    lists both; the deprecated ``verification`` is the one approved row the
-    carrier accepts, which a purchase without subject_type would use."""
+    lists both, approved first; the deprecated ``verification`` is the one
+    approved row the carrier accepts, which a purchase without
+    verification_id would use."""
     from hailhq.core.carrier_offer import Approval
 
     org, _, key = org_and_key
@@ -875,19 +877,67 @@ async def test_quote_route_lists_one_verification_per_subject_type(
     offer = offer.model_copy(
         update={
             "subject_types": ["business", "person"],
-            "approvals": {"person": Approval(row_id=person.id, verification_id="g")},
+            "approvals": [
+                Approval(row_id=person.id, subject_type="person", verification_id="g")
+            ],
         }
     )
     result = await _quote(client, key, monkeypatch, [offer])
     (got,) = result["offers"]
     assert got["subject_types"] == ["business", "person"]
     assert [(v["subject_type"], v["state"]) for v in got["verifications"]] == [
-        ("business", "submitted"),
         ("person", "approved"),
+        ("business", "submitted"),
     ]
     assert got["verification"]["id"] == str(person.id)
     # The carrier ids never leave the server.
     assert "approvals" not in got and "verification_id" not in got
+
+
+async def test_quote_route_lists_several_people_with_their_names(
+    client, async_session, org_and_key, monkeypatch
+):
+    """Several live verifications of one kind: all listed with their names,
+    approved first, then newest. With two approved, a purchase needs
+    verification_id, so the deprecated ``verification`` falls back to the
+    newest live row."""
+    from hailhq.core.carrier_offer import Approval
+
+    org, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    ada = _verification(
+        org, "approved", subject_name="Ada", created_at=now - timedelta(days=3)
+    )
+    grace = _verification(
+        org, "approved", subject_name="Grace", created_at=now - timedelta(days=2)
+    )
+    acme = _verification(org, "submitted", subject_name="Acme", created_at=now)
+    gone = _verification(org, "cancelled", subject_name="Old", created_at=now)
+    for row in (ada, grace):
+        row.subject_type = "person"
+    async_session.add_all([ada, grace, acme, gone])
+    await async_session.commit()
+    _, offer = await seed_quote(async_session, org)
+    offer = offer.model_copy(
+        update={
+            "subject_types": ["business", "person"],
+            "approvals": [
+                Approval(row_id=r.id, subject_type="person", verification_id="g")
+                for r in (grace, ada)
+            ],
+        }
+    )
+    result = await _quote(client, key, monkeypatch, [offer])
+    (got,) = result["offers"]
+    assert [
+        (v["id"], v["state"], v["subject_type"], v["subject_name"])
+        for v in got["verifications"]
+    ] == [
+        (str(grace.id), "approved", "person", "Grace"),
+        (str(ada.id), "approved", "person", "Ada"),
+        (str(acme.id), "submitted", "business", "Acme"),
+    ]
+    assert got["verification"]["id"] == str(acme.id)
 
 
 async def test_quote_route_verification_is_null_without_a_live_row(

@@ -65,11 +65,11 @@ async def discover_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
-    approvals: dict[str, dict[str, Approval]] | None = None,
+    approvals: dict[str, list[Approval]] | None = None,
 ) -> tuple[list[CarrierOffer], list[str]]:
     """Live offers from ``providers`` (every carrier by default) and the
     carriers whose lookup failed. ``approvals`` is the org's approved Hail
-    verifications per carrier and subject type (``approved_handles``)."""
+    verifications per carrier (``approved_handles``)."""
     asked = [p for p in PROVIDERS if p in providers]
     approvals = approvals or {}
     results = await asyncio.gather(
@@ -83,7 +83,7 @@ async def discover_offers(
                 area_code,
                 city,
                 region,
-                approvals.get(p, {}),
+                approvals.get(p, []),
             )
             for p in asked
         ),

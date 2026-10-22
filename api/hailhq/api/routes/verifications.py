@@ -3,8 +3,10 @@ carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
 Files and details pass through this process in memory to the carrier. Nothing
-identifying is written to the database, disk or logs (see the design spec).
-One exception: when the carrier rejects a verification, its own reason is
+identifying is written to the database, disk or logs (see the design spec),
+except the name of the person or company (``subject_name``), which the
+database keeps so the customer can tell verifications apart. It is never
+logged. One more exception: when the carrier rejects a verification, its own reason is
 kept in the audit row (``payload.carrier_reason``), never in logs and never
 shown to the customer. That text can quote a value the customer sent.
 The multipart body is parsed here with an in-memory parser and a hard size cap,
@@ -64,7 +66,7 @@ from hailhq.core.providers.verification import (
 )
 from hailhq.core.schemas import VerificationResponse
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -534,11 +536,12 @@ async def approved_handles(
     country_code: str,
     number_type: str,
     providers: list[str] | tuple[str, ...],
-) -> dict[str, dict[str, Approval]]:
+) -> dict[str, list[Approval]]:
     """The org's approved number verifications for this country and number
-    type, per carrier and subject type, with the carrier ids a purchase
-    needs. Hail's rows decide which approval a purchase uses; the carrier
-    only confirms it is still valid (``Carrier.offers``).
+    type, per carrier and newest first, with the carrier ids a purchase
+    needs. An org may hold several of one subject type (several people or
+    companies). Hail's rows decide which approvals exist; the carrier only
+    confirms each is still valid (``Carrier.offers``).
 
     Approved rows only, and no carrier call: the purchase route must not
     wait on the carrier here. A submitted verification becomes approved
@@ -554,22 +557,23 @@ async def approved_handles(
                 CarrierVerification.purpose == "number",
                 CarrierVerification.state == "approved",
             )
-            .order_by(CarrierVerification.created_at.desc())
+            .order_by(CarrierVerification.created_at.desc(), CarrierVerification.id)
         )
     ).scalars()
-    out: dict[str, dict[str, Approval]] = {}
+    out: dict[str, list[Approval]] = {}
     for row in rows:
-        kinds = out.setdefault(row.provider, {})
-        if row.subject_type in kinds:
-            continue  # newest wins; the live index allows only one
         provider = registry(row.provider, "number")
         if provider is None:
             continue
         handle = await provider.purchase_handle(row.provider_refs)
-        kinds[row.subject_type] = Approval(
-            row_id=row.id,
-            verification_id=handle.get("verification_id"),
-            address_id=handle.get("address_id"),
+        out.setdefault(row.provider, []).append(
+            Approval(
+                row_id=row.id,
+                subject_type=row.subject_type,
+                subject_name=row.subject_name,
+                verification_id=handle.get("verification_id"),
+                address_id=handle.get("address_id"),
+            )
         )
     return out
 
@@ -722,9 +726,17 @@ class _Submission(BaseModel):
     documents: dict[str, _DocumentPart] = Field(default_factory=dict)
 
 
-def _duplicate_detail(subject_type: str) -> str:
+def _duplicate_detail(subject_type: str, subject_name: str | None) -> str:
+    """The 409 for a second live verification of the same kind and name. It
+    names the person or company back to the customer who typed it; the
+    detail is not logged."""
     who = "a person" if subject_type == "person" else "a company"
-    return f"You already have a verification as {who} for this number type."
+    if subject_name is None:
+        return f"You already have a verification as {who} for this number type."
+    return (
+        f"You already have a verification for {subject_name} as {who} "
+        "for this number type."
+    )
 
 
 def _text_part(form, name: str, default: str = "") -> str:
@@ -825,8 +837,11 @@ async def create_verification(
     part per slot named `file.<slot>`. Get the slot and field names from
     `GET /verifications/requirements`.
 
-    For a number you may hold one verification as a person and one as a
-    business at once; a second live one of the same subject type is a 409.
+    The name of the person or company comes from the form you send (for
+    example the business name, or the first and last name) and is shown
+    back as `subject_name`. For a number you may hold several verifications
+    of each subject type (several people, several companies); a second live
+    one of the same subject type and the same name is a 409.
 
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
@@ -899,29 +914,6 @@ async def create_verification(
         # waits here, then sees the first row and gets 409 before any
         # carrier call (two filings would register two brands).
         await org_lock(db, principal.organization_id)
-    # One live number verification per subject type; one SMS registration
-    # (the live unique indexes on carrier_verifications).
-    live = select(CarrierVerification).where(
-        CarrierVerification.organization_id == principal.organization_id,
-        CarrierVerification.provider == provider_name,
-        CarrierVerification.purpose == sub.purpose,
-        CarrierVerification.country_code == sub.country_code,
-        CarrierVerification.number_type == sub.number_type,
-        CarrierVerification.state.in_(_LIVE_STATES),
-    )
-    if sub.purpose == "number":
-        live = live.where(CarrierVerification.subject_type == sub.subject_type)
-    existing = (await db.execute(live)).scalars().first()
-    if existing is not None:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                _duplicate_detail(sub.subject_type)
-                if sub.purpose == "number"
-                else f"a verification already exists ({existing.state}); id {existing.id}"
-            ),
-        )
-
     requirements = await _requirements(
         provider, sub.country_code, sub.number_type, sub.subject_type, where="body"
     )
@@ -940,6 +932,43 @@ async def create_verification(
                 await _read_file(upload)
                 if upload is not None and hasattr(upload, "read")
                 else None
+            ),
+        )
+    # The name the customer typed, as the plug-in reads it from this form.
+    # Stored on the row; never logged.
+    subject_name = provider.subject_name(
+        requirements, sub.fields, sub.address, documents
+    )
+
+    # Number: several live verifications per subject type, but not the same
+    # name twice. SMS: one live registration. (The live unique indexes on
+    # carrier_verifications.)
+    live = select(CarrierVerification).where(
+        CarrierVerification.organization_id == principal.organization_id,
+        CarrierVerification.provider == provider_name,
+        CarrierVerification.purpose == sub.purpose,
+        CarrierVerification.country_code == sub.country_code,
+        CarrierVerification.number_type == sub.number_type,
+        CarrierVerification.state.in_(_LIVE_STATES),
+    )
+    if sub.purpose == "number":
+        # Without a name there is nothing to compare: no 409.
+        live = live.where(
+            CarrierVerification.subject_type == sub.subject_type,
+            func.lower(CarrierVerification.subject_name) == func.lower(subject_name),
+        )
+    existing = (
+        (await db.execute(live)).scalars().first()
+        if sub.purpose != "number" or subject_name is not None
+        else None
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                _duplicate_detail(sub.subject_type, subject_name)
+                if sub.purpose == "number"
+                else f"a verification already exists ({existing.state}); id {existing.id}"
             ),
         )
 
@@ -999,6 +1028,7 @@ async def create_verification(
         country_code=sub.country_code,
         number_type=sub.number_type,
         subject_type=sub.subject_type,
+        subject_name=subject_name,
         state="awaiting_review",
         provider_refs=draft.refs,
         requirements_version=requirements.version,
@@ -1029,7 +1059,7 @@ async def create_verification(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    _duplicate_detail(sub.subject_type)
+                    _duplicate_detail(sub.subject_type, subject_name)
                     if sub.purpose == "number"
                     else "a verification already exists for this number type"
                 ),

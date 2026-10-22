@@ -569,7 +569,9 @@ _CARRIER_KEYS = frozenset(
         "provider",
         "unavailable_providers",
         "messaging_service_sid",
-        "verification_id",
+        # Not ``verification_id``: on a number it is Hail's own verification
+        # id. Responses are parsed with the public models, which carry no
+        # carrier id under that name.
         "address_id",
     }
 )
@@ -657,10 +659,16 @@ async def acquire_number(
     confirm_total_cents: int,
     idempotency_key: str | None = None,
     subject_type: str | None = None,
+    verification_id: str | None = None,
 ) -> dict[str, Any]:
     quote_id_ = _as_uuid(quote_id)
     if quote_id_ is None:
         return _not_uuid("quote_id")
+    verification_id_ = None
+    if verification_id is not None:
+        verification_id_ = _as_uuid(verification_id)
+        if verification_id_ is None:
+            return _not_uuid("verification_id")
     if subject_type is not None and subject_type not in _SUBJECT_TYPES:
         return {"error": f"{_SUBJECT_TYPE_ERROR}."}
     if idempotency_key is None:
@@ -673,6 +681,7 @@ async def acquire_number(
             expected_total_cents=confirm_total_cents,
             idempotency_key=idempotency_key,
             **({"subject_type": subject_type} if subject_type else {}),
+            **({"verification_id": verification_id_} if verification_id_ else {}),
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -1115,6 +1124,15 @@ def _submit_error(exc: HailAPIError) -> dict[str, Any]:
             "error": "the carrier or the API rejected the submission; nothing "
             "was stored. Fix the listed problems with the user and submit again.",
             "problems": exc.problems or [],
+        }
+    if exc.status == 409 and str(exc.detail).startswith(
+        "You already have a verification"
+    ):
+        # This 409 names the person or company; never echo it.
+        return {
+            "error": "a live verification with the same subject type and the "
+            "same name already exists; nothing new was stored. Call "
+            "list_verifications to see it."
         }
     if exc.status in (401, 404, 409, 429, 503):
         return _format_api_error(exc)
@@ -2274,8 +2292,13 @@ def register_tools(
 
         ``subject_types`` says who may verify for the number: ``person``
         (the user), ``business`` (the user's company), or both; empty when no
-        verification is needed. ``verifications`` lists the organization's
-        verification per subject type (``id``, ``state``, ``subject_type``).
+        verification is needed. ``verifications`` lists every verification
+        of the organization for the offer that is not cancelled or rejected
+        (``id``, ``state``, ``subject_type``, ``subject_name``), approved
+        first. ``subject_name`` is the person's or company's name from the
+        verification form. When several are approved, show the user the
+        names and ask which one buys the number; pass its ``id`` as
+        ``verification_id`` to acquire_number.
 
         An offer with ``readiness == "verification_required"`` cannot be
         bought until the organization is verified. Ask the user "you or your
@@ -2326,6 +2349,7 @@ def register_tools(
         confirm_total_cents: int,
         idempotency_key: str | None = None,
         subject_type: str | None = None,
+        verification_id: str | None = None,
     ) -> dict[str, Any]:
         """Buys a real phone number. It charges the setup fee and the first
         month now and renews monthly. Call quote_numbers first. Pass the
@@ -2344,14 +2368,17 @@ def register_tools(
         is bought once. A 4xx error returns no key: the API remembers that
         failure under it, so drop it and quote again.
 
-        ``subject_type`` (``person`` or ``business``) picks which approved
-        verification buys a number that needs one. Pass it only when the
-        offer's ``verifications`` has an approved one of each: then ask the
-        user "you or your company?". With one approved, it is used. A 422
-        "Verify as a person first" (or "a company") means that kind is not
-        approved for this number.
+        ``verification_id`` picks which approved verification buys a number
+        that needs one: the ``id`` of an approved entry in the offer's
+        ``verifications``. Pass it when more than one is approved: show the
+        user each ``subject_name`` (the person's or company's name) and ask
+        which. With one approved, it is used. ``subject_type`` (``person`` or
+        ``business``) is optional: it keeps only that kind. A 422 on
+        ``verification_id`` means several are approved and none was picked,
+        or the id is not an approved verification for this number.
 
-        Returns the number (``id``, ``e164``, ``provisioning_state``, ...)
+        Returns the number (``id``, ``e164``, ``provisioning_state``,
+        ``verification_id``, ``subject_name``, ...)
         plus ``idempotency_key``, or ``{"error": "<message>",
         "idempotency_key": ...}``."""
         try:
@@ -2364,6 +2391,7 @@ def register_tools(
                     confirm_total_cents=confirm_total_cents,
                     idempotency_key=idempotency_key,
                     subject_type=subject_type,
+                    verification_id=verification_id,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -2603,9 +2631,15 @@ def register_tools(
         get_verification_requirements. Never guess it: ask the user "you or
         your company?".
 
+        The verification is named after the person or company in the form
+        (for example the business name, or the first and last name); it
+        comes back as ``subject_name``. The organization may hold several
+        verifications of one subject type (several people or companies).
+
         Steps: 1) call get_verification_requirements. 2) Ask the user for each
         field and file. 3) Call this once. Do not submit twice: a 409 means
-        one of that subject type already exists (see list_verifications).
+        one with the same subject type and name already exists (see
+        list_verifications).
 
         Arguments, as listed by get_verification_requirements:
         ``fields`` is ``{field name: value}``. ``address`` is
@@ -2621,7 +2655,7 @@ def register_tools(
         most 20 files and 20 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
 
-        Returns the verification: ``id`` and ``state`` (no personal data).
+        Returns the verification: ``id``, ``state`` and ``subject_name``.
         Review takes business days and nothing notifies you: poll
         get_verification. If the carrier finds a problem you get
         ``{"error", "problems": [{"loc", "msg"}]}`` and nothing is stored:
@@ -2673,7 +2707,8 @@ def register_tools(
         registrations to text US numbers from a US number.
 
         Returns ``{"items": [{"id", "country_code", "number_type",
-        "subject_type", "purpose", "state", "rejection_reason", "created_at",
+        "subject_type", "subject_name", "purpose", "state",
+        "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation"}]}``.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a

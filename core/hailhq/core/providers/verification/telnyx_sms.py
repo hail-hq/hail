@@ -24,10 +24,12 @@ from hailhq.core.providers.verification.base import (
     SmsRegistrationProvider,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
     sms_requirements,
+    sms_subject_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -309,6 +311,30 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def purchase_handle(self, refs) -> dict:
         return {}
+
+    def subject_name(self, requirements, fields, address, documents) -> str | None:
+        """``legal_name`` for a business, ``first_name`` and ``last_name``
+        for a person, else the address's ``customer_name``."""
+        return sms_subject_name(fields, address, requirements.subject_type)
+
+    async def fetch_subject_name(self, refs, subject_type) -> str | None:
+        """The brand: ``firstName`` and ``lastName`` for a person, else
+        ``companyName`` (Hail files the same name as ``displayName``)."""
+        if not refs.get("brand_id"):
+            return None
+        try:
+            brand = await self._api.request(
+                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}"
+            )
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Telnyx request failed") from exc
+        if subject_type == "person":
+            name = display_name(brand.get("firstName"), brand.get("lastName"))
+            if name:
+                return name
+        return display_name(brand.get("companyName")) or display_name(
+            brand.get("displayName")
+        )
 
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
         """Unlink a number from its 10DLC campaign. Never raises. The

@@ -9,7 +9,7 @@ from uuid import UUID
 
 import phonenumbers
 from hailhq.core.schemas import NumberType
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SubjectType = Literal["person", "business"]
 
@@ -24,6 +24,10 @@ class OfferVerification(BaseModel):
     subject_type: SubjectType = Field(
         description="Who that verification is for: 'person' (you) or 'business' (your company)."
     )
+    subject_name: str | None = Field(
+        default=None,
+        description="Name of the person or company that verification is for, as typed in the verification form. Null when unknown.",
+    )
 
 
 class Approval(BaseModel):
@@ -31,6 +35,12 @@ class Approval(BaseModel):
     holds the carrier's own ids and is never returned by the public API."""
 
     row_id: UUID = Field(description="Hail verification id.")
+    subject_type: SubjectType | None = Field(
+        default=None, description="Who that verification is for."
+    )
+    subject_name: str | None = Field(
+        default=None, description="Name of that person or company, when known."
+    )
     verification_id: str | None = Field(
         default=None, description="Carrier id passed with the purchase."
     )
@@ -93,11 +103,11 @@ class QuoteOffer(BaseModel):
     )
     verifications: list[OfferVerification] = Field(
         default_factory=list,
-        description="Your organization's newest verification per subject type for this offer's country and number type, leaving out cancelled and rejected ones.",
+        description="Every verification of your organization for this offer's country and number type, leaving out cancelled and rejected ones: approved first, then newest first. Pass one's `id` as `verification_id` to POST /numbers to buy with it.",
     )
     verification: OfferVerification | None = Field(
         default=None,
-        description="Deprecated: read `verifications`. The verification a purchase without subject_type would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.",
+        description="Deprecated: read `verifications`. The verification a purchase without verification_id would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.",
     )
     by_request: bool = Field(
         default=False,
@@ -121,9 +131,9 @@ class CarrierOffer(QuoteOffer):
         default=None,
         description="Server-selected verified address identifier, when supported; null otherwise.",
     )
-    approvals: dict[SubjectType, Approval] = Field(
-        default_factory=dict,
-        description="The org's approved verifications per subject type that the carrier still accepts for this number.",
+    approvals: list[Approval] = Field(
+        default_factory=list,
+        description="The org's approved verifications that the carrier still accepts for this number, newest first.",
     )
     subject_type: SubjectType | None = Field(
         default=None,
@@ -133,6 +143,19 @@ class CarrierOffer(QuoteOffer):
         default=None,
         description="Hail verification the purchase used; set at purchase.",
     )
+    subject_name: str | None = Field(
+        default=None,
+        description="Name on the verification the purchase used; set at purchase.",
+    )
+
+    @field_validator("approvals", mode="before")
+    @classmethod
+    def _approvals_list(cls, value):
+        """Offers stored before approvals became a list held one approval
+        per subject type: {"person": {...}}. Read them as a list."""
+        if isinstance(value, dict):
+            return [{**a, "subject_type": k} for k, a in value.items()]
+        return value
 
 
 def number_prefix(country: str, area_code: str) -> str:
