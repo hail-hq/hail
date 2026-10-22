@@ -1135,3 +1135,112 @@ async def test_by_request_quote_files_a_verification_with_didww_and_is_not_sold(
             select(NumberOffer.number_id).where(NumberOffer.id == quote_id)
         )
     ).scalar_one() is None
+
+
+@pytest.fixture()
+def de_by_request_catalog(tmp_path):
+    """DE local: only DIDWW lists it, by request. No carrier sells it."""
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": [], "a2p_10dlc": []}))
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {
+                "numbers": [
+                    {
+                        "country_code": "DE",
+                        "number_type": "local",
+                        "usd_per_month": "1.50",
+                        "voice": True,
+                        "sms": False,
+                        "mms": False,
+                        "by_request": True,
+                        "verification_required": True,
+                    }
+                ]
+            }
+        )
+    )
+    telephony_catalog._load.cache_clear()
+
+
+@pytest.mark.usefixtures("de_by_request_catalog")
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"area_code": "30", "capabilities": ["voice"]},
+        {"city": "Berlin", "capabilities": ["voice"]},
+        {"capabilities": ["voice", "sms"]},
+    ],
+)
+async def test_quotes_refuse_a_by_request_kind_when_no_offer_comes_back(
+    client, org_and_key, monkeypatch, didww_verification, extra
+):
+    """A place search or SMS leaves the by-request offer out. No carrier
+    sells DE local, so the answer is the old 422, not an empty list."""
+    _, _, key = org_and_key
+    discover = AsyncMock(return_value=([], []))
+    monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
+    resp = await client.post(
+        "/numbers/quotes",
+        json={"country_code": "DE", "number_type": "local", **extra},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "we don't offer a local number in DE" in resp.json()["detail"][0]["msg"]
+    discover.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("de_by_request_catalog")
+async def test_quotes_refuse_a_country_with_only_by_request_kinds_and_no_offer(
+    client, org_and_key, monkeypatch, didww_verification
+):
+    _, _, key = org_and_key
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=([], [])),
+    )
+    resp = await client.post(
+        "/numbers/quotes",
+        json={"country_code": "DE", "area_code": "30", "capabilities": ["voice"]},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "we don't offer numbers in DE" in resp.json()["detail"][0]["msg"]
+
+
+@pytest.mark.usefixtures("de_by_request_catalog")
+async def test_quotes_refuse_a_by_request_kind_when_its_carrier_is_not_configured(
+    client, org_and_key, monkeypatch
+):
+    _, _, key = org_and_key
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.get_verification_provider", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=([], [])),
+    )
+    resp = await client.post(
+        "/numbers/quotes",
+        json={"country_code": "DE", "number_type": "local", "capabilities": ["voice"]},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.usefixtures("de_by_request_catalog")
+async def test_quotes_list_a_by_request_kind_no_carrier_sells(
+    client, org_and_key, monkeypatch, didww_verification
+):
+    _, _, key = org_and_key
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=([], [])),
+    )
+    resp = await client.post(
+        "/numbers/quotes",
+        json={"country_code": "DE", "number_type": "local", "capabilities": ["voice"]},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200, resp.text
+    (offer,) = resp.json()["offers"]
+    assert offer["by_request"] is True and offer["e164"] is None

@@ -40,6 +40,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
 from hailhq.core.carrier_offer import (
+    CarrierOffer,
     NumberQuotesResponse,
     OfferVerification,
     QuoteOffer,
@@ -705,19 +706,38 @@ async def quote_numbers(
     `area_code` or `city` only.
     """
 
-    # Only number types some carrier's catalog lists, for sale or by request,
-    # are searched. ``body.provider`` is deprecated and ignored.
+    # Numbers support orders by hand: catalog offers, not live stock, so a
+    # place search (area code or city) leaves them out. Only carriers Hail
+    # can file a verification with.
+    def asked_by_request(kind: str) -> list[CarrierOffer]:
+        if body.area_code or body.city:
+            return []
+        return by_request_offers(
+            body.country_code,
+            kind,
+            body.capabilities,
+            [p for p in PROVIDERS if get_verification_provider(p) is not None],
+        )
+
+    # Only number types some carrier sells, or lists by request with an
+    # offer for this search, are searched. A kind with neither is not
+    # offered: 422, never an empty list. ``body.provider`` is deprecated and
+    # ignored.
+    by_request_by_kind: dict[str, list[CarrierOffer]] = {}
     if body.number_type:
-        if not _listed_by_request(body.country_code, body.number_type):
+        by_request_by_kind[body.number_type] = asked_by_request(body.number_type)
+        if not by_request_by_kind[body.number_type]:
             catalog_capabilities(body.country_code, body.number_type, "auto")
         kinds = [body.number_type]
     else:
-        kinds = [
-            k
-            for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k, "auto") is not None
-            or _listed_by_request(body.country_code, k)
-        ]
+        kinds = []
+        for k in ("local", "mobile", "national", "toll_free"):
+            by_request_by_kind[k] = asked_by_request(k)
+            if (
+                telephony_catalog.capabilities(body.country_code, k, "auto") is not None
+                or by_request_by_kind[k]
+            ):
+                kinds.append(k)
         if not kinds:
             raise unprocessable(
                 f"we don't offer numbers in {body.country_code} yet",
@@ -749,23 +769,7 @@ async def quote_numbers(
             for kind in kinds
         )
     )
-    # Numbers support orders by hand: catalog offers, not live stock, so a
-    # place search (area code or city) leaves them out. Only carriers Hail
-    # can file a verification with.
-    by_request = (
-        []
-        if body.area_code or body.city
-        else [
-            offer
-            for kind in kinds
-            for offer in by_request_offers(
-                body.country_code,
-                kind,
-                body.capabilities,
-                [p for p in PROVIDERS if get_verification_provider(p) is not None],
-            )
-        ]
-    )
+    by_request = [offer for kind in kinds for offer in by_request_by_kind[kind]]
     offers = rank_offers(
         [offer for batch, _ in batches for offer in batch] + by_request
     )
@@ -815,14 +819,6 @@ async def quote_numbers(
         recommended_quote_id=recommended.quote_id if recommended else None,
         incomplete=bool(unavailable),
         expires_at=expires,
-    )
-
-
-def _listed_by_request(country: str, kind: str) -> bool:
-    """True when some carrier lists this kind of number by request only."""
-    return any(
-        telephony_catalog.by_request_row(country, kind, p) is not None
-        for p in PROVIDERS
     )
 
 
