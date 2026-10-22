@@ -130,6 +130,9 @@ No email has been sent.
 - Collection UID: stored in the repository variable `POSTMAN_COLLECTION_UID`.
 - Auto-sync: on (`POSTMAN_AUTO_SYNC=true`). The first manual publish run
   succeeded on 2026-10-22.
+- Publisher verification: domain proven with a `postman-domain-verification`
+  TXT record on `hail.so` and a Run in Postman button on the API reference.
+  Submitted for review on 2026-10-22. Keep the TXT record.
 - Signed-out visitors see a lock next to the collection: they can read and
   fork it, not edit it.
 - Local validation: the file passes the official Postman v2.1 JSON schema;
