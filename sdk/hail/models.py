@@ -230,6 +230,13 @@ class SuppressionListResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class OfferVerification(BaseModel):
+    """Your organization's Hail verification that applies to an offer."""
+
+    id: UUID
+    state: str
+
+
 class NumberOffer(BaseModel):
     """One live carrier offer. Mirrors ``CarrierOffer`` in openapi/openapi.yaml."""
 
@@ -251,6 +258,7 @@ class NumberOffer(BaseModel):
     locality: str | None = None
     region: str | None = None
     quote_id: UUID | None = None
+    verification: OfferVerification | None = None
 
 
 class NumberRegion(BaseModel):
@@ -267,6 +275,7 @@ class NumberQuotesResponse(BaseModel):
     offers: list[NumberOffer]
     recommended_quote_id: UUID | None
     unavailable_providers: list[str]
+    incomplete: bool = False
     expires_at: datetime
 
 
@@ -871,6 +880,7 @@ __all__ = [
     "NumberRegionsResponse",
     "NumberType",
     "ObservedDnsRecord",
+    "OfferVerification",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
     "ProviderConfigEntry",

@@ -39,7 +39,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
-from hailhq.core.carrier_offer import NumberQuotesResponse
+from hailhq.core.carrier_offer import NumberQuotesResponse, OfferVerification
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
@@ -736,6 +736,13 @@ async def quote_numbers(
         [offer for batch, _ in batches for offer in batch], body.provider
     )
     unavailable = sorted({p for _, failures in batches for p in failures})
+    if unavailable:
+        logger.warning(
+            "number quotes incomplete for org %s: no answer from %s",
+            principal.organization_id,
+            ", ".join(unavailable),
+        )
+    verifications = await _offer_verifications(db, principal.organization_id)
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -751,14 +758,44 @@ async def quote_numbers(
         )
         db.add(row)
         offer.quote_id = row.id
+        offer.verification = verifications.get(
+            (offer.provider, offer.country_code, offer.number_type)
+        )
     await db.commit()
     recommended = next((o for o in offers if o.readiness == "ready"), None)
     return {
         "offers": offers,
         "recommended_quote_id": recommended.quote_id if recommended else None,
         "unavailable_providers": unavailable,
+        "incomplete": bool(unavailable),
         "expires_at": expires,
     }
+
+
+async def _offer_verifications(
+    db: AsyncSession, organization_id: UUID
+) -> dict[tuple[str, str, str], OfferVerification]:
+    """The org's newest number verification per carrier, country and number
+    type, leaving out cancelled and rejected ones. The console picks the same
+    row for an offer."""
+    rows = (
+        await db.execute(
+            select(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.purpose == "number",
+                CarrierVerification.state.not_in(("cancelled", "rejected")),
+            )
+            .order_by(CarrierVerification.created_at.desc())
+        )
+    ).scalars()
+    out: dict[tuple[str, str, str], OfferVerification] = {}
+    for r in rows:
+        out.setdefault(
+            (r.provider, r.country_code, r.number_type),
+            OfferVerification(id=r.id, state=r.state),
+        )
+    return out
 
 
 __all__ = ["release_org_number", "router"]

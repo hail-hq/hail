@@ -1399,6 +1399,43 @@ async def test_sms_fees_endpoint_shows_a_carrier_minimum(
     assert resp.json()["fake"]["person"]["minimum_months"] == 3
 
 
+async def test_sms_fees_for_one_number_lists_only_its_carrier(
+    client, async_session, org_and_key, sms_carrier
+) -> None:
+    org_id, _, key = org_and_key
+    mine = await _us_number(async_session, org_id)
+    resp = await client.get(
+        "/verifications/sms-fees",
+        params={"number_id": str(mine.id)},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200, resp.text
+    assert list(resp.json()) == ["fake"]
+    # Without number_id every carrier with a fee is listed.
+    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
+    assert set(resp.json()) == set(sms_registration_fees.providers())
+
+
+async def test_sms_fees_for_a_number_that_is_not_yours_is_404(
+    client, async_session, org_and_key, sms_carrier
+) -> None:
+    org_id, _, key = org_and_key
+    other_org, _, _ = await insert_org_and_key(async_session)
+    theirs = await _us_number(async_session, other_org, e164="+15125550199")
+    voice_only = await _us_number(
+        async_session, org_id, e164="+15125550198", resource="PN2"
+    )
+    voice_only.capabilities = ["voice"]
+    await async_session.commit()
+    for number_id in (theirs.id, voice_only.id, uuid.uuid4()):
+        resp = await client.get(
+            "/verifications/sms-fees",
+            params={"number_id": str(number_id)},
+            headers=_auth(key),
+        )
+        assert resp.status_code == 404, resp.text
+
+
 async def test_sms_registration_rejects_non_us(
     client, org_and_key, sms_carrier
 ) -> None:

@@ -4651,13 +4651,30 @@ paths:
       tags:
         - verifications
       summary: Get Sms Fees
-      description:
-        "Fees for US SMS registration, per carrier and subject type, in
-        cents.
+      description: "Fees for US SMS registration, per carrier and subject type,
+        in cents.
 
-        Passed through at cost."
+        Passed through at cost. Pass `number_id` to get only the fees for that
+
+        number; 404 when it is not one of your active US local numbers that can
+
+        text."
       operationId: get_sms_registration_fees
       parameters:
+        - name: number_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: uuid
+              - type: "null"
+            description: One of your active US local numbers that can text. When
+              given, only the fees that apply to this number are returned.
+            title: Number Id
+          description:
+            One of your active US local numbers that can text. When given,
+            only the fees that apply to this number are returned.
         - name: authorization
           in: header
           required: false
@@ -5803,6 +5820,14 @@ components:
           description:
             Organization-bound quote identifier to pass to POST /numbers
             before expiry.
+        verification:
+          anyOf:
+            - $ref: "#/components/schemas/OfferVerification"
+            - type: "null"
+          description:
+            Your organization's verification for this offer's country,
+            number type and carrier that is not cancelled or rejected; null when
+            there is none.
       type: object
       required:
         - provider
@@ -7986,6 +8011,12 @@ components:
           description:
             Carriers whose inventory, price, or regulatory lookup failed;
             comparison may be incomplete.
+        incomplete:
+          type: boolean
+          title: Incomplete
+          description: True when some carriers did not answer, so the offers may
+            not be complete. Search again later for a full comparison.
+          default: false
         expires_at:
           type: string
           format: date-time
@@ -8079,6 +8110,22 @@ components:
       description:
         One record from EmailDomainResponse.dns_records, with a live DNS
         observation.
+    OfferVerification:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Hail verification id. Read it with GET /v1/verifications/{verification_id}.
+        state:
+          type: string
+          title: State
+          description: State of that verification, such as draft, submitted or approved.
+      type: object
+      required:
+        - id
+        - state
+      title: OfferVerification
     PhoneNumberListResponse:
       properties:
         items:

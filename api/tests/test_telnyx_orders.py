@@ -15,7 +15,12 @@ from hailhq.api.number_orders import (
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import carrier
-from hailhq.core.models import AccountCredit, NumberOffer, PhoneNumber
+from hailhq.core.models import (
+    AccountCredit,
+    CarrierVerification,
+    NumberOffer,
+    PhoneNumber,
+)
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
 from sqlalchemy import select, text
@@ -750,6 +755,107 @@ async def test_quote_route_stores_the_requested_capabilities(
     quote_id = response.json()["offers"][0]["quote_id"]
     row = await async_session.get(NumberOffer, UUID(quote_id))
     assert row.offer["requested_capabilities"] == ["voice"]
+
+
+async def _quote(client, key, monkeypatch, offers, unavailable=()):
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=(offers, list(unavailable))),
+    )
+    response = await client.post(
+        "/numbers/quotes",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"country_code": "PT", "number_type": "local", "capabilities": ["voice"]},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.parametrize("unavailable", [[], ["twilio"]])
+async def test_quote_route_says_when_a_carrier_did_not_answer(
+    client, async_session, org_and_key, monkeypatch, caplog, unavailable
+):
+    org, _, key = org_and_key
+    _, offer = await seed_quote(async_session, org)
+    with caplog.at_level("WARNING", logger="hailhq.api.routes.numbers"):
+        result = await _quote(client, key, monkeypatch, [offer], unavailable)
+    assert result["incomplete"] is bool(unavailable)
+    assert result["unavailable_providers"] == unavailable
+    logged = [r.getMessage() for r in caplog.records if "incomplete" in r.getMessage()]
+    if unavailable:
+        assert logged == [
+            f"number quotes incomplete for org {org}: no answer from twilio"
+        ]
+    else:
+        assert logged == []
+
+
+def _verification(org, state, provider="telnyx", **over):
+    return CarrierVerification(
+        organization_id=org,
+        provider=provider,
+        country_code=over.pop("country_code", "PT"),
+        number_type=over.pop("number_type", "local"),
+        subject_type="business",
+        state=state,
+        provider_refs={},
+        requirements_version="1",
+        **over,
+    )
+
+
+async def test_quote_route_shows_the_live_verification(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    other_org, _, _ = await insert_org_and_key(async_session)
+    _, offer = await seed_quote(async_session, org, readiness="verification_required")
+    twilio_offer = offer.model_copy(
+        update={"provider": "twilio", "e164": "+351211234568"}
+    )
+    now = datetime.now(timezone.utc)
+    # One live row per carrier, country and type (a unique index); cancelled
+    # and rejected rows never win, even when newer.
+    live = _verification(org, "submitted", created_at=now - timedelta(days=2))
+    async_session.add_all(
+        [
+            live,
+            _verification(org, "cancelled", created_at=now - timedelta(days=1)),
+            _verification(org, "rejected", created_at=now),
+            # Another type, another country, an SMS registration and another
+            # organization's row do not match.
+            _verification(org, "approved", number_type="mobile", created_at=now),
+            _verification(org, "approved", country_code="ES", created_at=now),
+            _verification(org, "approved", purpose="sms", created_at=now),
+            _verification(other_org, "approved", created_at=now),
+            _verification(other_org, "approved", provider="twilio", created_at=now),
+        ]
+    )
+    await async_session.commit()
+
+    result = await _quote(client, key, monkeypatch, [offer, twilio_offer])
+    by_carrier = {o["provider"]: o for o in result["offers"]}
+    assert by_carrier["telnyx"]["verification"] == {
+        "id": str(live.id),
+        "state": "submitted",
+    }
+    # A verification with one carrier says nothing about another's offer.
+    assert by_carrier["twilio"]["verification"] is None
+    # The stored quote still reads as an offer the purchase understands.
+    row = await async_session.get(NumberOffer, UUID(by_carrier["telnyx"]["quote_id"]))
+    stored = CarrierOffer.model_validate(row.offer)
+    assert (stored.provider, stored.e164) == ("telnyx", offer.e164)
+
+
+async def test_quote_route_verification_is_null_without_a_live_row(
+    client, async_session, org_and_key, monkeypatch
+):
+    org, _, key = org_and_key
+    _, offer = await seed_quote(async_session, org)
+    async_session.add(_verification(org, "cancelled"))
+    await async_session.commit()
+    result = await _quote(client, key, monkeypatch, [offer])
+    assert result["offers"][0]["verification"] is None
 
 
 async def _stub_order(monkeypatch, offer, *responses):

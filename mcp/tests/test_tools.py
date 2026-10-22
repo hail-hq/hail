@@ -1656,6 +1656,29 @@ async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -
 
 
 @respx.mock
+async def test_quote_numbers_keeps_verification_and_incomplete(
+    client: HailClient,
+) -> None:
+    body = _quotes_response()
+    verification = {"id": str(uuid4()), "state": "submitted"}
+    body["offers"][0]["verification"] = verification
+    body["offers"][0]["verification_id"] = "BU123"
+    body["unavailable_providers"] = ["telnyx"]
+    body["incomplete"] = True
+    respx.post(f"{_BASE_URL}/numbers/quotes").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+
+    result = await tools.quote_numbers(client=client, country_code="US")
+
+    # Hail's own verification is kept; the carrier's id and names are not.
+    assert result["offers"][0]["verification"] == verification
+    assert "verification_id" not in result["offers"][0]
+    assert result["incomplete"] is True
+    assert "unavailable_providers" not in result
+
+
+@respx.mock
 async def test_quote_numbers_omits_number_type_when_none(client: HailClient) -> None:
     route = respx.post(f"{_BASE_URL}/numbers/quotes").mock(
         return_value=httpx.Response(200, json=_quotes_response())

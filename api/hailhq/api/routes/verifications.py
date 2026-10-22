@@ -1142,11 +1142,27 @@ class SmsFee(BaseModel):
 )
 async def get_sms_fees(
     principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    number_id: Annotated[
+        UUID | None,
+        Query(
+            description="One of your active US local numbers that can text. "
+            "When given, only the fees that apply to this number are returned."
+        ),
+    ] = None,
 ) -> dict[str, dict[str, SmsFee]]:
     """Fees for US SMS registration, per carrier and subject type, in cents.
-    Passed through at cost."""
+    Passed through at cost. Pass `number_id` to get only the fees for that
+    number; 404 when it is not one of your active US local numbers that can
+    text."""
+    providers = sms_registration_fees.providers()
+    if number_id is not None:
+        carrier = await _sms_provider_name(
+            db, principal.organization_id, None, number_id, "query"
+        )
+        providers = [p for p in providers if p == carrier]
     out: dict[str, dict[str, SmsFee]] = {}
-    for provider in sms_registration_fees.providers():
+    for provider in providers:
         out[provider] = {
             subject: SmsFee(
                 filing_cents=sms_registration_fees.filing_fee_cents(provider, subject),

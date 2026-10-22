@@ -492,3 +492,35 @@ async def test_calls_create_with_agent_id(base_url: str, api_key: str) -> None:
     sent = json.loads(route.calls.last.request.content)
     assert sent["agent_id"] == str(agent_id)
     assert "system_prompt" not in sent
+
+
+@respx.mock
+async def test_quotes_expose_incomplete_and_verification(base_url: str, api_key: str):
+    verification_id = uuid4()
+    offer = {
+        **_offer(uuid4(), readiness="verification_required"),
+        "verification": {"id": str(verification_id), "state": "submitted"},
+    }
+    body = json.loads(_quotes_response([offer, _offer(uuid4())]).content)
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=httpx.Response(200, json={**body, "incomplete": True})
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        quotes = await c.numbers.quotes(country="US", capabilities=["voice"])
+    assert quotes.incomplete is True
+    assert quotes.offers[0].verification.id == verification_id
+    assert quotes.offers[0].verification.state == "submitted"
+    assert quotes.offers[1].verification is None
+
+
+@respx.mock
+async def test_quotes_default_when_the_api_omits_new_fields(
+    base_url: str, api_key: str
+):
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response([_offer(uuid4())])
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        quotes = await c.numbers.quotes(country="US", capabilities=["voice"])
+    assert quotes.incomplete is False
+    assert quotes.offers[0].verification is None

@@ -12,6 +12,15 @@ from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
 
 
+class OfferVerification(BaseModel):
+    id: UUID = Field(
+        description="Hail verification id. Read it with GET /v1/verifications/{verification_id}."
+    )
+    state: str = Field(
+        description="State of that verification, such as draft, submitted or approved."
+    )
+
+
 class CarrierOffer(BaseModel):
     provider: Literal["twilio", "telnyx", "didww"] = Field(
         description="Carrier supplying this exact number."
@@ -66,6 +75,10 @@ class CarrierOffer(BaseModel):
         default=None,
         description="Organization-bound quote identifier to pass to POST /numbers before expiry.",
     )
+    verification: OfferVerification | None = Field(
+        default=None,
+        description="Your organization's verification for this offer's country, number type and carrier that is not cancelled or rejected; null when there is none.",
+    )
 
 
 def number_prefix(country: str, area_code: str) -> str:
@@ -89,6 +102,10 @@ class NumberQuotesResponse(BaseModel):
     )
     unavailable_providers: list[str] = Field(
         description="Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete."
+    )
+    incomplete: bool = Field(
+        default=False,
+        description="True when some carriers did not answer, so the offers may not be complete. Search again later for a full comparison.",
     )
     expires_at: datetime = Field(
         description="UTC expiry of these persisted quotes; request fresh offers afterward."

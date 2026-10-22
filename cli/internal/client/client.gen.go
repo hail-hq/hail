@@ -1698,6 +1698,9 @@ type CarrierOffer struct {
 	// SetupCents One-time setup charge in USD cents, payable with the first month.
 	SetupCents int `json:"setup_cents"`
 
+	// Verification Your organization's verification for this offer's country, number type and carrier that is not cancelled or rejected; null when there is none.
+	Verification *OfferVerification `json:"verification,omitempty"`
+
 	// VerificationId Server-selected organization-bound approved bundle or requirement-group identifier, if any.
 	VerificationId *string `json:"verification_id,omitempty"`
 }
@@ -2691,6 +2694,9 @@ type NumberQuotesResponse struct {
 	// ExpiresAt UTC expiry of these persisted quotes; request fresh offers afterward.
 	ExpiresAt time.Time `json:"expires_at"`
 
+	// Incomplete True when some carriers did not answer, so the offers may not be complete. Search again later for a full comparison.
+	Incomplete *bool `json:"incomplete,omitempty"`
+
 	// Offers Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins.
 	Offers []CarrierOffer `json:"offers"`
 
@@ -2740,6 +2746,15 @@ type ObservedDnsRecord struct {
 
 // ObservedDnsRecordType DNS record type: 'CNAME' (DKIM), 'MX' (MAIL FROM), or 'TXT' (SPF).
 type ObservedDnsRecordType string
+
+// OfferVerification defines model for OfferVerification.
+type OfferVerification struct {
+	// Id Hail verification id. Read it with GET /v1/verifications/{verification_id}.
+	Id openapi_types.UUID `json:"id"`
+
+	// State State of that verification, such as draft, submitted or approved.
+	State string `json:"state"`
+}
 
 // PhoneNumberListResponse defines model for PhoneNumberListResponse.
 type PhoneNumberListResponse struct {
@@ -3705,7 +3720,9 @@ type GetVerificationRequirementsParamsSubjectType string
 
 // GetSmsRegistrationFeesParams defines parameters for GetSmsRegistrationFees.
 type GetSmsRegistrationFeesParams struct {
-	Authorization *string `json:"authorization,omitempty"`
+	// NumberId One of your active US local numbers that can text. When given, only the fees that apply to this number are returned.
+	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
+	Authorization *string             `json:"authorization,omitempty"`
 }
 
 // CancelVerificationParams defines parameters for CancelVerification.
@@ -9291,6 +9308,28 @@ func NewGetSmsRegistrationFeesRequest(server string, params *GetSmsRegistrationF
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.NumberId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "number_id", *params.NumberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
