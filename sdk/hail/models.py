@@ -271,7 +271,8 @@ class NumberRegionsResponse(BaseModel):
 class NumberQuotesResponse(BaseModel):
     offers: list[NumberOffer]
     recommended_quote_id: UUID | None
-    incomplete: bool
+    # Default for an API that predates the field.
+    incomplete: bool = False
     expires_at: datetime
 
 

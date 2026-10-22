@@ -420,7 +420,8 @@ class TelnyxVerificationProvider(VerificationProvider):
 
 
 def _rejection(response: httpx.Response) -> str | None:
-    """Telnyx's own words for a 4xx, without the payload. Logged only."""
+    """Telnyx's own words for a 4xx, without the payload. Never logged or
+    shown to the customer (see ``Problem.raw``)."""
     try:
         errors = response.json().get("errors") or []
     except ValueError:

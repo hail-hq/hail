@@ -105,6 +105,12 @@ def get_default_provider_name() -> str | None:
     return default_verification_provider_name()
 
 
+def get_default_sms_provider_name() -> str | None:
+    """First configured US SMS registration carrier. Dependency so tests can
+    swap it."""
+    return default_verification_provider_name("sms")
+
+
 def _resolve_provider_name(name: str | None, default: str | None) -> str:
     resolved = name or default
     if not resolved:
@@ -1237,7 +1243,7 @@ class SmsFees(BaseModel):
 async def get_sms_fees(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
+    default_provider: Annotated[str | None, Depends(get_default_sms_provider_name)],
     number_id: Annotated[
         UUID | None,
         Query(

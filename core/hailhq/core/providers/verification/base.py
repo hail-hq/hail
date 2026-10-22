@@ -242,8 +242,9 @@ class Problem(BaseModel):
     (a field name, a slot name, or ``address``), or ``""`` for a general one.
 
     ``message`` is Hail's own wording and is shown to the customer. ``raw`` is
-    the carrier's own text, if any: it is logged for the operator and never
-    sent to the customer."""
+    the carrier's own text, if any. It is never logged and never sent to the
+    customer: a background refusal keeps it in the audit row, a superadmin
+    approve shows it to the superadmin, and a refusal at creation drops it."""
 
     field: str
     message: str
@@ -265,8 +266,8 @@ class ProviderStatus(BaseModel):
     state: Literal["draft", "pending", "approved", "rejected"]
     # Shown to the customer: Hail's own wording.
     reason: str | None = None
-    # The carrier's own text for a rejection. Logged and kept in the audit
-    # log; never shown to the customer.
+    # The carrier's own text for a rejection. Kept in the audit log only;
+    # never logged, never shown to the customer.
     raw_reason: str | None = None
 
 

@@ -533,7 +533,8 @@ def _evaluation_message(ev) -> str:
 
 
 def _brand_reason(brand) -> str | None:
-    """The carrier's feedback on a refused brand. Logged only."""
+    """The carrier's feedback on a refused brand. Kept in the audit log
+    only (see ``ProviderStatus.raw_reason``)."""
     fb = getattr(brand, "brand_feedback", None) or []
     return "; ".join(str(f) for f in fb) or None
 

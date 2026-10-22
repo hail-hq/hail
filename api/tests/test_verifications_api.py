@@ -16,6 +16,7 @@ from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
     get_default_provider_name,
+    get_default_sms_provider_name,
     get_verification_registry,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -235,9 +236,11 @@ def sms_carrier():
     app.dependency_overrides[get_verification_registry] = lambda: registry
     verifications_routes._last_polled.clear()
     app.dependency_overrides[get_default_provider_name] = lambda: "fake"
+    app.dependency_overrides[get_default_sms_provider_name] = lambda: "fake"
     yield fake
     app.dependency_overrides.pop(get_verification_registry, None)
     app.dependency_overrides.pop(get_default_provider_name, None)
+    app.dependency_overrides.pop(get_default_sms_provider_name, None)
 
 
 @pytest.fixture(autouse=True)
@@ -1509,7 +1512,7 @@ async def test_sms_fees_follow_the_carrier_of_the_us_numbers(
 ) -> None:
     org_id, _, key = org_and_key
     # The default carrier has no fees: only the org's number can pick "fake".
-    app.dependency_overrides[get_default_provider_name] = lambda: "none"
+    app.dependency_overrides[get_default_sms_provider_name] = lambda: "none"
     resp = await client.get("/verifications/sms-fees", headers=_auth(key))
     assert resp.status_code == 404, resp.text
     mine = await _us_number(async_session, org_id)
