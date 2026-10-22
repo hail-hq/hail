@@ -815,16 +815,17 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
 
 
-@pytest.mark.parametrize("category", [None, "uncertain"])
-async def test_unconfirmed_pickup_ends_without_business_message(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, category
+async def test_silent_pickup_ends_without_business_message(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+    from hailhq.voicebot.confirmation import UNANSWERED_REASON
 
     call_id, ctx, session = await _drive_entrypoint(
         async_session,
         monkeypatch,
-        amd_result=_prediction(category) if category else None,
+        amd_result=_prediction("uncertain"),
+        confirmation_reason=UNANSWERED_REASON,
     )
 
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Can you hear me?"]
@@ -888,15 +889,25 @@ async def test_probe_into_phone_tree_keeps_disclosure_for_the_person(
     ]
 
 
-async def test_unavailable_pickup_check_opens_the_call(async_session, monkeypatch):
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "pickup_confirmation",
+        "pickup_confirmation_heard",
+        "pickup_confirmation_unavailable",
+    ],
+)
+async def test_any_reply_or_unjudged_check_opens_the_call(
+    async_session, monkeypatch, reason
+):
+    """Uncertain is treated as a person; only silence hangs up."""
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
-    from hailhq.voicebot.confirmation import UNAVAILABLE_REASON
 
     _, ctx, session = await _drive_entrypoint(
         async_session,
         monkeypatch,
-        amd_result=None,
-        confirmation_reason=UNAVAILABLE_REASON,
+        amd_result=_prediction("uncertain"),
+        confirmation_reason=reason,
     )
     assert session.say_calls == [
         f"{AI_DISCLOSURE_LINE} Can you hear me?",
@@ -910,11 +921,26 @@ async def test_no_stt_skips_the_probe_and_opens_the_call(async_session, monkeypa
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _, ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=None, stt=False
+        async_session, monkeypatch, amd_result=_prediction("uncertain"), stt=False
     )
     session.confirm.assert_not_awaited()
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
     assert ctx.delete_room_calls == 0
+
+
+async def test_failed_detection_skips_the_probe_and_opens_the_call(
+    async_session, monkeypatch
+):
+    """AMD down is not evidence of anything: talk, as before the probe."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=None
+    )
+    session.confirm.assert_not_awaited()
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
 
 
 async def test_probe_speaks_the_call_language(async_session, monkeypatch):
@@ -926,7 +952,7 @@ async def test_probe_speaks_the_call_language(async_session, monkeypatch):
         amd_result=_prediction("uncertain"),
         metadata_overrides={"voice_config": {"language": "sv"}},
     )
-    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Hör du mig?"]
+    assert session.say_calls[0] == f"{AI_DISCLOSURE_LINE} Hör du mig?"
 
 
 @pytest.mark.parametrize(
@@ -998,9 +1024,4 @@ async def test_amd_result_event_written_when_detection_failed(
         "transcript": None,
         "reason": "detection_failed",
         "delay": None,
-        "confirmation": {
-            "category": "uncertain",
-            "reason": "pickup_confirmation",
-            "delay": 0.1,
-        },
     }

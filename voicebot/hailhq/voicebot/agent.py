@@ -83,6 +83,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.confirmation import (
+    UNANSWERED_REASON,
     UNAVAILABLE_REASON,
     confirm_pickup,
     probe_line,
@@ -2266,8 +2267,9 @@ async def _run_call(
 
     # Answering machine detection: classify the greeting before we say
     # anything. The event is written on every call, machine or not, so
-    # classification quality is observable per call. Uncertain/failed detection
-    # gets a neutral conversational check before the business opening.
+    # classification quality is observable per call. An uncertain verdict gets
+    # a neutral conversational check before the business opening; failed
+    # detection (None) opens the call as before that check existed.
     #
     # Skipped outright when the SIP leg is already gone. `captured["status"]`
     # is only ever set by the participant-disconnect handler above, so a
@@ -2310,7 +2312,8 @@ async def _run_call(
                 not shutting_down
                 and captured["status"] is None
                 and captured["end_reason"] is None
-                and (amd_result is None or amd_result.category == AMDCategory.UNCERTAIN)
+                and amd_result is not None
+                and amd_result.category == AMDCategory.UNCERTAIN
             ):
                 classifier = models.llm if models is not None else session.llm
             # Without a classifier or transcripts the reply cannot be judged,
@@ -2370,8 +2373,8 @@ async def _run_call(
         if confirmation_result.reason == UNAVAILABLE_REASON:
             # The reply could not be judged. When in doubt, talk.
             logger.info("call_id=%s pickup check unavailable, opening", call_id)
-        elif confirmation_result.category == AMDCategory.UNCERTAIN:
-            # No positive machine evidence: do not label this voicemail.
+        elif confirmation_result.reason == UNANSWERED_REASON:
+            # Full silence after the probe: do not label this voicemail.
             captured["status"] = "no_answer"
             captured["end_reason"] = CallEndReason.USER_UNAVAILABLE.value
             try:

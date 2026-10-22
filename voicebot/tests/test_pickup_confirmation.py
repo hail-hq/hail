@@ -1,4 +1,4 @@
-"""Uncertain pickup must earn a conversational reply before the opening."""
+"""Uncertain pickup gets a short probe; only full silence hangs up."""
 
 import asyncio
 import json
@@ -25,10 +25,14 @@ class Session(EventEmitter):
             SimpleNamespace(transcript=text, is_final=final),
         )
 
+    def speak(self):
+        self.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
+
 
 @pytest.fixture(autouse=True)
 def short_deadline(monkeypatch):
     monkeypatch.setattr(confirmation, "RESPONSE_TIMEOUT_SECONDS", 0.08)
+    monkeypatch.setattr(confirmation, "SPEECH_CAP_SECONDS", 0.08)
 
 
 async def start(session, llm):
@@ -39,18 +43,70 @@ async def start(session, llm):
     return task
 
 
+def assert_detached(session):
+    for event in ("user_input_transcribed", "user_state_changed", "close"):
+        assert not session._events.get(event)
+
+
 @pytest.mark.parametrize("text", ["", "   "])
-async def test_silence_empty_transcripts_and_noise_never_confirm(text):
+async def test_silence_and_empty_transcripts_hang_up(text):
     session = Session()
     llm = Classifier('{"label":"human"}')
     task = await start(session, llm)
     session.transcribe(text)
     session.transcribe("Yes, I can hear you", final=False)
-    session.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
+    session.emit("user_state_changed", SimpleNamespace(new_state="listening"))
     result = await task
     assert result.category == AMDCategory.UNCERTAIN
+    assert result.reason == confirmation.UNANSWERED_REASON
     assert llm.calls == []
-    assert not session._events.get("user_input_transcribed")
+    assert_detached(session)
+
+
+async def test_voice_without_a_transcript_opens_the_call():
+    """STT is one language per call; the person may speak another."""
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    task = await start(session, llm)
+    session.speak()
+    result = await task
+    assert result.category == AMDCategory.UNCERTAIN
+    assert result.reason == confirmation.HEARD_REASON
+    assert llm.calls == []
+    assert_detached(session)
+
+
+async def test_voice_stops_the_no_speech_timer(monkeypatch):
+    monkeypatch.setattr(confirmation, "RESPONSE_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(confirmation, "SPEECH_CAP_SECONDS", 0.3)
+    session = Session()
+    task = await start(session, Classifier('{"label":"human"}'))
+    session.speak()
+    await asyncio.sleep(0.1)
+    assert not task.done()
+    session.transcribe("Hallå?")
+    assert (await task).category == AMDCategory.HUMAN
+
+
+@pytest.mark.parametrize("text", ["Hello?", "Hej", "Bonjour"])
+async def test_greeting_reply_opens_the_call(text):
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    task = await start(session, llm)
+    session.transcribe(text)
+    result = await task
+    assert result.is_human
+    assert f'"{text}"' in confirmation.CONFIRMATION_PROMPT
+    assert '"Bonjour" -> human' in confirmation.CONFIRMATION_PROMPT
+
+
+async def test_uncertain_reply_opens_the_call():
+    session = Session()
+    task = await start(session, Classifier('{"label":"uncertain"}'))
+    session.transcribe("Hello, you have reached Sam")
+    result = await task
+    assert result.category == AMDCategory.UNCERTAIN
+    assert result.reason == "pickup_confirmation"
 
 
 @pytest.mark.parametrize(
@@ -118,25 +174,6 @@ async def test_deadline_starts_after_probe_playback():
     assert (await task).category == AMDCategory.HUMAN
 
 
-async def test_ongoing_unclassified_audio_cannot_reset_deadline():
-    session = Session()
-    llm = Classifier('{"label":"uncertain"}')
-    task = await start(session, llm)
-
-    async def noise():
-        while not task.done():
-            session.transcribe("Hello")
-            await asyncio.sleep(0.005)
-
-    producer = asyncio.create_task(noise())
-    try:
-        result = await asyncio.wait_for(task, timeout=0.3)
-        assert result.category == AMDCategory.UNCERTAIN
-    finally:
-        producer.cancel()
-        await asyncio.gather(producer, return_exceptions=True)
-
-
 async def test_new_words_during_classification_prevent_stale_human_verdict():
     session = Session()
     llm = Classifier('{"label":"human"}')
@@ -160,36 +197,43 @@ async def test_new_words_during_classification_prevent_stale_human_verdict():
     assert "Leave a message" in result.transcript
 
 
-async def test_slow_classifier_cannot_extend_response_deadline():
+async def test_cap_never_cancels_a_running_classifier():
+    """The classifier ends under its own provider timeout, not the cap."""
     session = Session()
-    llm = Classifier('{"label":"human"}')
-    entered, cancelled = asyncio.Event(), asyncio.Event()
+    llm = Classifier('{"label":"machine-vm"}')
+    original = llm.chat
+    cancelled = asyncio.Event()
 
     class SlowStream:
+        def __init__(self, stream):
+            self.stream = stream
+
         async def __aenter__(self):
+            await self.stream.__aenter__()
             return self
 
         async def collect(self):
-            entered.set()
             try:
-                await asyncio.Future()
-            finally:
+                # Longer than the 0.08 s cap.
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
                 cancelled.set()
+                raise
+            return await self.stream.collect()
 
         async def __aexit__(self, *args):
-            pass
+            await self.stream.__aexit__(*args)
 
-    llm.chat = lambda **kwargs: SlowStream()
+    llm.chat = lambda **kwargs: SlowStream(original(**kwargs))
     task = await start(session, llm)
-    session.transcribe("Yes, I hear you")
-    await entered.wait()
-    result = await asyncio.wait_for(task, timeout=0.3)
-    assert result.category == AMDCategory.UNCERTAIN
-    assert cancelled.is_set()
+    session.transcribe("Leave a message after the tone.")
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert result.category == AMDCategory.MACHINE_VM
+    assert not cancelled.is_set()
 
 
 @pytest.mark.parametrize("failure", ["closed", "tts", "cancelled", "llm"])
-async def test_shutdown_provider_errors_and_cancellation_keep_opening_blocked(failure):
+async def test_shutdown_provider_errors_and_cancellation(failure):
     session = Session()
     llm = Classifier('{"label":"human"}')
     if failure == "tts":
@@ -208,13 +252,13 @@ async def test_shutdown_provider_errors_and_cancellation_keep_opening_blocked(fa
     else:
         result = await task
         assert result.category == AMDCategory.UNCERTAIN
+        # Only a closed session hangs up; a TTS or classifier error talks.
         assert result.reason == (
-            confirmation.UNAVAILABLE_REASON
-            if failure == "llm"
-            else confirmation.UNANSWERED_REASON
+            confirmation.UNANSWERED_REASON
+            if failure == "closed"
+            else confirmation.UNAVAILABLE_REASON
         )
-    assert not session._events.get("user_input_transcribed")
-    assert not session._events.get("close")
+    assert_detached(session)
 
 
 async def test_bad_label_is_unavailable_not_unanswered():
@@ -227,7 +271,7 @@ async def test_bad_label_is_unavailable_not_unanswered():
 
 
 async def test_person_who_keeps_talking_is_still_confirmed():
-    """Every verdict is superseded by newer words until the deadline."""
+    """Every verdict is superseded by newer words until the cap."""
     session = Session()
     llm = Classifier('{"label":"human"}')
     original = llm.chat
