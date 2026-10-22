@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     Address,
     Problem,
     VerificationProviderError,
@@ -203,7 +205,8 @@ async def test_status_rejected_brand() -> None:
         )
     )
     st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
-    assert st.state == "rejected" and "EIN" in st.reason
+    assert st.state == "rejected" and st.reason == BRAND_REJECTED
+    assert "EIN" in st.raw_reason
 
 
 async def test_status_approved_and_rejected_from_campaign() -> None:
@@ -234,7 +237,8 @@ async def test_status_approved_and_rejected_from_campaign() -> None:
         }
     )
     st = await p.status(refs)
-    assert st.state == "rejected" and "opt-out" in st.reason
+    assert st.state == "rejected" and st.reason == CAMPAIGN_REJECTED
+    assert "opt-out" in st.raw_reason
 
 
 async def test_status_server_error_raises() -> None:

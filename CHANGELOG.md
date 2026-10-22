@@ -17,6 +17,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` or `number_id` instead of `provider`.
+- **Breaking.** The API no longer says which carrier backs a number. Removed from responses: `provider`, `verification_id` and `address_id` on quote offers; `unavailable_providers` on quotes (use `incomplete`); `provider` and `messaging_service_sid` on numbers; `provider` on verifications and verification requirements. `provider` on `POST /numbers/quotes`, `POST /numbers`, `GET /verifications/requirements` and `POST /verifications` is deprecated and ignored: Hail picks the carrier. `GET /verifications/sms-fees` returns one fee object (`person`, `business`) for the carrier of your US numbers; pass `number_id` when they are with more than one carrier. Carrier error text no longer reaches responses: errors keep the field and use Hail's own wording.
+- `hail-sdk` 0.21.0: `NumberOffer`, `NumberQuotesResponse` and `PhoneNumberResponse` drop the carrier fields above; `client.numbers.quotes()` and `client.numbers.acquire()` no longer take `provider`. CLI: `hail numbers acquire` drops `--provider`, `hail numbers register-sms` takes `--number-id` instead of `--provider`, and number output drops the `Messaging:` line.
 
 ### Fixed
 

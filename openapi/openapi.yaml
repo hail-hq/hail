@@ -2039,8 +2039,8 @@ paths:
           description: The quote does not exist for this organization.
         "422":
           description:
-            quote_id is missing (request one from POST /numbers/quotes)
-            or the quote does not match the country, type or provider.
+            quote_id is missing (request one from POST /numbers/quotes) or the
+            quote does not match the country or type.
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -2398,15 +2398,22 @@ paths:
       tags:
         - numbers
       summary: Enable Sms
-      description:
-        "Attach a dedicated number to the org's shared SMS Messaging Service.\n\
-        \nHail does this itself when an sms-capable number becomes active and when\n\
-        a texts agent is assigned, so this call is only needed to repair a number\n\
-        whose setup failed, or an older one whose service lacks the inbound\ntext\
-        \ settings. Idempotent \u2014 an already-enabled number gets those settings\n\
-        set again and returns its current state. A US long code is also put on\nthe\
-        \ org's approved US SMS registration. Fails with 422 for a released\nnumber\
-        \ or one that lacks sms capability."
+      description: "Set up a dedicated number for SMS at its carrier.
+
+
+        Hail does this itself when an sms-capable number becomes active and when
+
+        a texts agent is assigned, so this call is only needed to repair a number
+
+        whose setup failed, or an older one whose service lacks the inbound
+
+        text settings. Idempotent — an already-enabled number gets those settings
+
+        set again and returns its current state. A US long code is also put on
+
+        the org's approved US SMS registration. Fails with 422 for a released
+
+        number or one that lacks sms capability."
       operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:
         - name: number_id
@@ -2476,10 +2483,13 @@ paths:
         rent.
 
 
-        Auto recommends a ready offer with the lowest monthly rent, then setup
+        Recommends a ready offer with the lowest monthly rent, then setup cost.
 
-        cost. On a tie the first carrier listed wins. Blocked offers sort by verification
-        effort. SMS capability does not waive messaging registration requirements."
+        Blocked offers sort by verification effort. SMS capability does not waive
+
+        messaging registration requirements. `provider` is ignored: Hail compares
+
+        every carrier."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -4381,15 +4391,13 @@ paths:
 
         an address is needed. `purpose=number` (default) is for buying a number;
 
-        `purpose=sms` is for registering to send SMS in the US; without
+        pass the offer's `quote_id` to get the form for that offer. `purpose=sms`
 
-        `provider` it uses the carrier of your US numbers, or of the number
+        is for registering to send SMS in the US; it uses the carrier of your US
 
-        passed as `number_id`. For `purpose=number`,
+        numbers, or of the number passed as `number_id`. Build your form from it.
 
-        pass the offer's `quote_id` to get that offer's carrier. Build your form
-
-        from it."
+        `provider` is ignored."
       operationId: get_verification_requirements
       parameters:
         - name: country_code
@@ -4423,7 +4431,15 @@ paths:
             anyOf:
               - type: string
               - type: "null"
+            description:
+              Deprecated and ignored. Hail picks the carrier from quote_id,
+              number_id or its default.
+            deprecated: true
             title: Provider
+          description:
+            Deprecated and ignored. Hail picks the carrier from quote_id,
+            number_id or its default.
+          deprecated: true
         - name: purpose
           in: query
           required: false
@@ -4455,8 +4471,8 @@ paths:
                 format: uuid
               - type: "null"
             description:
-              "For purpose=sms: id of one of your US numbers. The carrier is
-              read from it. Needed when your US numbers are with more than one carrier."
+              "For purpose=sms: id of one of your US numbers. The carrier
+              is read from it. Needed when your US numbers are with more than one carrier."
             title: Number Id
           description:
             "For purpose=sms: id of one of your US numbers. The carrier is
@@ -4475,7 +4491,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Requirements"
+                $ref: "#/components/schemas/VerificationRequirements"
         "429":
           description:
             Rate limited. This caller exceeded the general request-rate ceiling.
@@ -4515,15 +4531,13 @@ paths:
 
         in the US; `sms` takes `country_code=US` and `number_type=local` and charges
 
-        the filing fee), `country_code`, `number_type`, `subject_type`, `provider`
+        the filing fee), `country_code`, `number_type`, `subject_type`,
 
-        (optional; for `sms` it defaults to the carrier of your US numbers),
+        `quote_id` (optional, for `number`: the offer to verify for), `number_id`
 
-        `quote_id` (optional, for `number`: the offer to verify for; its carrier
+        (optional, for `sms`: one of your US numbers; needed when your US numbers
 
-        is used), `number_id` (optional, for `sms`: one of your US numbers; its
-
-        carrier is used),
+        are with more than one carrier),
 
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 
@@ -4538,7 +4552,9 @@ paths:
 
         the field named, and nothing is kept. When it passes, the verification is
 
-        submitted to the carrier for its review; read it back to follow the state.'
+        submitted to the carrier for its review; read it back to follow the state.
+
+        A `provider` part is deprecated and ignored: Hail picks the carrier.'
       operationId: create_verification
       parameters:
         - name: authorization
@@ -4651,14 +4667,20 @@ paths:
       tags:
         - verifications
       summary: Get Sms Fees
-      description: "Fees for US SMS registration, per carrier and subject type,
-        in cents.
+      description:
+        "Fees for US SMS registration, per subject type, in cents. Passed
 
-        Passed through at cost. Pass `number_id` to get only the fees for that
+        through at cost. They are the fees for the carrier of your US numbers
 
-        number; 404 when it is not one of your active US local numbers that can
+        that can text, or of `number_id` when given (404 when it is not one of
 
-        text."
+        your active US local numbers that can text). When your US numbers are
+
+        with more than one carrier, pass `number_id` (422 otherwise). With no US
+
+        number yet, the fees are those of the carrier a new US number is
+
+        registered with by default."
       operationId: get_sms_registration_fees
       parameters:
         - name: number_id
@@ -4669,12 +4691,13 @@ paths:
               - type: string
                 format: uuid
               - type: "null"
-            description: One of your active US local numbers that can text. When
-              given, only the fees that apply to this number are returned.
+            description:
+              One of your active US local numbers that can text. Needed when
+              your US numbers are with more than one carrier.
             title: Number Id
           description:
-            One of your active US local numbers that can text. When given,
-            only the fees that apply to this number are returned.
+            One of your active US local numbers that can text. Needed when
+            your US numbers are with more than one carrier.
         - name: authorization
           in: header
           required: false
@@ -4689,12 +4712,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties:
-                  type: object
-                  additionalProperties:
-                    $ref: "#/components/schemas/SmsFee"
-                title: Response Get Sms Registration Fees
+                $ref: "#/components/schemas/SmsFees"
         "429":
           description:
             Rate limited. This caller exceeded the general request-rate
@@ -4716,12 +4734,12 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "404":
+          description:
+            number_id is not one of your active US local numbers that can
+            text, or SMS registration is not available.
         "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+          description: "Your US numbers are with more than one carrier: pass number_id."
   /v1/verifications/{verification_id}:
     get:
       tags:
@@ -4788,8 +4806,7 @@ paths:
         - verifications
       summary: Cancel Verification
       description:
-        "Withdraw a verification that has not been sent for review, or
-        dismiss
+        "Withdraw a verification that has not been sent for review, or dismiss
 
         a rejected one. The draft is discarded either way. One that is under
 
@@ -4804,13 +4821,13 @@ paths:
 
         and US-to-US texts from those numbers get 422 again. Its monthly fee is
 
-        charged through the month of the cancellation, then stops. Telnyx bills
+        charged through the month of the cancellation, then stops. Some carriers
 
-        at least 3 monthly fees from approval (`minimum_months` in
+        bill a minimum number of monthly fees from approval (`minimum_months` in
 
-        GET /verifications/sms-fees), so a Telnyx registration cancelled sooner
+        GET /verifications/sms-fees): a registration cancelled sooner is still
 
-        is still charged for 3 months."
+        charged for that many months."
       operationId: cancel_verification
       parameters:
         - name: verification_id
@@ -5694,151 +5711,6 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
-    CarrierOffer:
-      properties:
-        provider:
-          type: string
-          enum:
-            - twilio
-            - telnyx
-            - didww
-          title: Provider
-          description: Carrier supplying this exact number.
-        e164:
-          type: string
-          title: E164
-          description: Available phone number in E.164 format.
-        country_code:
-          type: string
-          title: Country Code
-          description: ISO alpha-2 country code of the number.
-        number_type:
-          type: string
-          enum:
-            - local
-            - mobile
-            - toll_free
-            - national
-          title: Number Type
-          description: Local, mobile, national, or toll-free number type.
-        capabilities:
-          items:
-            type: string
-          type: array
-          title: Capabilities
-          description:
-            Voice/SMS capabilities reported by live carrier inventory;
-            SMS registration may still be required.
-        monthly_cents:
-          type: integer
-          minimum: 1.0
-          title: Monthly Cents
-          description:
-            Monthly number rental in USD cents, charged from organization
-            credits.
-        setup_cents:
-          type: integer
-          minimum: 0.0
-          title: Setup Cents
-          description:
-            One-time setup charge in USD cents, payable with the first
-            month.
-        currency:
-          type: string
-          const: USD
-          title: Currency
-          description: Currency of the quoted rental and setup amounts.
-          default: USD
-        readiness:
-          type: string
-          enum:
-            - ready
-            - verification_required
-          title: Readiness
-          description:
-            Whether regulatory preflight permits purchase for this organization;
-            rechecked at purchase.
-        regulatory_friction:
-          type: string
-          enum:
-            - none
-            - information
-            - documents
-            - unknown
-          title: Regulatory Friction
-          description:
-            "Remaining verification effort derived from live requirements:
-            none, information/address entry, document uploads, or unknown. This does
-            not establish legal eligibility."
-          default: unknown
-        requirements:
-          items:
-            type: string
-          type: array
-          title: Requirements
-          description:
-            Carrier regulatory requirement labels associated with this
-            offer.
-        verification_id:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Verification Id
-          description:
-            Server-selected organization-bound approved bundle or requirement-group
-            identifier, if any.
-        address_id:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Address Id
-          description:
-            Server-selected verified address identifier, when supported;
-            null otherwise.
-        locality:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Locality
-          description:
-            City or area the carrier lists for this number, such as Phoenix
-            or London; null when unknown.
-        region:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Region
-          description:
-            State, province or region the carrier lists, such as AZ or
-            England; null when unknown.
-        quote_id:
-          anyOf:
-            - type: string
-              format: uuid
-            - type: "null"
-          title: Quote Id
-          description:
-            Organization-bound quote identifier to pass to POST /numbers
-            before expiry.
-        verification:
-          anyOf:
-            - $ref: "#/components/schemas/OfferVerification"
-            - type: "null"
-          description:
-            Your organization's verification for this offer's country,
-            number type and carrier that is not cancelled or rejected; null when
-            there is none.
-      type: object
-      required:
-        - provider
-        - e164
-        - country_code
-        - number_type
-        - capabilities
-        - monthly_cents
-        - setup_cents
-        - readiness
-      title: CarrierOffer
     ConfirmRequest:
       properties:
         code:
@@ -7856,17 +7728,14 @@ components:
             "Unexpired organization-bound quote from POST /numbers/quotes.
             Required: without it the request is a 422; get a quote first."
         provider:
-          type: string
-          enum:
-            - auto
-            - twilio
-            - telnyx
-            - didww
+          anyOf:
+            - type: string
+            - type: "null"
           title: Provider
           description:
-            Carrier restriction for the quote. Auto accepts the quoted
-            carrier; twilio, telnyx, or didww must match it.
-          default: auto
+            Deprecated and ignored. Hail buys the quoted number from the carrier
+            it picked.
+          deprecated: true
         country_code:
           type: string
           maxLength: 2
@@ -7936,18 +7805,14 @@ components:
             Required channels; every returned offer must support all requested
             capabilities.
         provider:
-          type: string
-          enum:
-            - auto
-            - twilio
-            - telnyx
-            - didww
+          anyOf:
+            - type: string
+            - type: "null"
           title: Provider
           description:
-            Carrier restriction; twilio, telnyx, or didww returns that
-            carrier's offers only. auto compares all by readiness, remaining verification
-            effort, and rental/setup costs; Twilio wins equivalent ties.
-          default: auto
+            Deprecated and ignored. Hail compares every carrier by readiness,
+            remaining verification effort, and rental and setup costs.
+          deprecated: true
         area_code:
           anyOf:
             - type: string
@@ -7987,36 +7852,24 @@ components:
       properties:
         offers:
           items:
-            $ref: "#/components/schemas/CarrierOffer"
+            $ref: "#/components/schemas/QuoteOffer"
           type: array
           title: Offers
           description:
-            Live carrier offers ordered by readiness, remaining verification
-            effort, monthly price and setup price. On a tie the first carrier listed
-            wins.
+            Live offers ordered by readiness, remaining verification effort,
+            monthly price and setup price.
         recommended_quote_id:
           anyOf:
             - type: string
               format: uuid
             - type: "null"
           title: Recommended Quote Id
-          description:
-            Recommended ready offer matching the requested carrier preference,
-            or null if none qualifies.
-        unavailable_providers:
-          items:
-            type: string
-          type: array
-          title: Unavailable Providers
-          description:
-            Carriers whose inventory, price, or regulatory lookup failed;
-            comparison may be incomplete.
+          description: Recommended ready offer, or null if none qualifies.
         incomplete:
           type: boolean
           title: Incomplete
           description: True when some carriers did not answer, so the offers may
             not be complete. Search again later for a full comparison.
-          default: false
         expires_at:
           type: string
           format: date-time
@@ -8028,7 +7881,7 @@ components:
       required:
         - offers
         - recommended_quote_id
-        - unavailable_providers
+        - incomplete
         - expires_at
       title: NumberQuotesResponse
     NumberRegion:
@@ -8148,13 +8001,6 @@ components:
       title: PhoneNumberListResponse
     PhoneNumberResponse:
       properties:
-        provider:
-          type: string
-          title: Provider
-          description:
-            Carrier that owns and routes this number, such as twilio or
-            telnyx.
-          default: twilio
         id:
           type: string
           format: uuid
@@ -8190,14 +8036,6 @@ components:
           description:
             True if this number is owned by the organization. False for
             shared-pool numbers.
-        messaging_service_sid:
-          anyOf:
-            - type: string
-            - type: "null"
-          title: Messaging Service Sid
-          description:
-            Provider messaging-service identifier once SMS has been enabled
-            on this number. Null until then.
         voice_agent_id:
           anyOf:
             - type: string
@@ -8450,71 +8288,129 @@ components:
         - message
       title: ProviderValidateResult
       description: Outcome of a live provider-key probe.
-    Requirements:
+    QuoteOffer:
       properties:
-        provider:
+        e164:
           type: string
-          title: Provider
-          description: The carrier these requirements come from.
+          title: E164
+          description: Available phone number in E.164 format.
         country_code:
           type: string
           title: Country Code
-          description: ISO alpha-2 country code.
+          description: ISO alpha-2 country code of the number.
         number_type:
           type: string
-          title: Number Type
-          description: "'local', 'mobile', 'toll_free', or 'national'."
-        subject_type:
-          type: string
           enum:
-            - person
-            - business
-          title: Subject Type
-          description: "'person' or 'business'."
-        required:
-          type: boolean
-          title: Required
-          description: False when the carrier needs no verification for this combination.
-        fields:
-          items:
-            $ref: "#/components/schemas/FieldSpec"
-          type: array
-          title: Fields
-          description: Values to collect about the person or business.
-          default: []
-        documents:
-          items:
-            $ref: "#/components/schemas/DocumentSlot"
-          type: array
-          title: Documents
-          description: Documents to collect. Skip slots with `needs_input` false.
-          default: []
-        address_required:
-          type: boolean
-          title: Address Required
-          description: True when an address must be collected.
-          default: false
-        subject_types:
+            - local
+            - mobile
+            - toll_free
+            - national
+          title: Number Type
+          description: Local, mobile, national, or toll-free number type.
+        capabilities:
           items:
             type: string
-            enum:
-              - person
-              - business
           type: array
-          title: Subject Types
+          title: Capabilities
           description:
-            Subject types the carrier accepts here, so you can offer the
-            choice.
-          default: []
+            Voice/SMS capabilities reported by live carrier inventory;
+            SMS registration may still be required.
+        monthly_cents:
+          type: integer
+          minimum: 1.0
+          title: Monthly Cents
+          description:
+            Monthly number rental in USD cents, charged from organization
+            credits.
+        setup_cents:
+          type: integer
+          minimum: 0.0
+          title: Setup Cents
+          description:
+            One-time setup charge in USD cents, payable with the first
+            month.
+        currency:
+          type: string
+          const: USD
+          title: Currency
+          description: Currency of the quoted rental and setup amounts.
+          default: USD
+        readiness:
+          type: string
+          enum:
+            - ready
+            - verification_required
+          title: Readiness
+          description:
+            Whether regulatory preflight permits purchase for this organization;
+            rechecked at purchase.
+        regulatory_friction:
+          type: string
+          enum:
+            - none
+            - information
+            - documents
+            - unknown
+          title: Regulatory Friction
+          description:
+            "Remaining verification effort derived from live requirements:
+            none, information/address entry, document uploads, or unknown. This does
+            not establish legal eligibility."
+          default: unknown
+        requirements:
+          items:
+            type: string
+          type: array
+          title: Requirements
+          description:
+            Carrier regulatory requirement labels associated with this
+            offer.
+        locality:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Locality
+          description:
+            City or area the carrier lists for this number, such as Phoenix
+            or London; null when unknown.
+        region:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Region
+          description:
+            State, province or region the carrier lists, such as AZ or
+            England; null when unknown.
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
+          description:
+            Organization-bound quote identifier to pass to POST /numbers
+            before expiry.
+        verification:
+          anyOf:
+            - $ref: "#/components/schemas/OfferVerification"
+            - type: "null"
+          description: Your organization's verification for this offer's country
+            and number type that is not cancelled or rejected; null when there is
+            none.
       type: object
       required:
-        - provider
+        - e164
         - country_code
         - number_type
-        - subject_type
-        - required
-      title: Requirements
-      description: What a carrier needs for one (country, number type, subject type).
+        - capabilities
+        - monthly_cents
+        - setup_cents
+        - readiness
+      title: QuoteOffer
+      description:
+        "One number offer as the public API shows it. It never names the
+
+        carrier or carries a carrier-issued id: Hail picks the carrier."
     SenderIdPatch:
       properties:
         custom_sender_id:
@@ -8595,18 +8491,16 @@ components:
             - type: "null"
           title: From
           description:
-            "Sender phone number, E.164 format. Must be an active number
-            owned by the organization with the SMS capability. Omitted: destinations
-            where the sender-ID carrier delivers a dynamic alphanumeric sender ID
-            unchanged (about 110 countries: most of Europe, Africa, the Middle East,
-            Asia-Pacific and the Caribbean; one table per carrier in
-            core/hailhq/core/sender_id_corridors.py) use the organization's sender
-            ID, or the platform default 'HAIL' when none
-            is set; Australia (+61) always uses 'HAIL' when that carrier is Twilio.
-            Every other destination,
-            including the US and Canada, uses the organization's oldest active
-            SMS-capable number; if none exists the request fails with 422. SMS never
-            uses the shared pool."
+            "Sender phone number, E.164 format. Must be an active number owned
+            by the organization with the SMS capability. Omitted: destinations where the
+            sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about
+            110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the
+            Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py)
+            use the organization's sender ID, or the platform default 'HAIL' when none
+            is set; Australia (+61) may always use 'HAIL', depending on the carrier.
+            Every other destination, including the US and Canada, uses the organization's
+            oldest active SMS-capable number; if none exists the request fails with 422.
+            SMS never uses the shared pool."
         body:
           type: string
           maxLength: 1600
@@ -8649,6 +8543,19 @@ components:
         - monthly_cents
         - minimum_months
       title: SmsFee
+    SmsFees:
+      properties:
+        person:
+          $ref: "#/components/schemas/SmsFee"
+          description: Fees for a person's registration.
+        business:
+          $ref: "#/components/schemas/SmsFee"
+          description: Fees for a business's registration.
+      type: object
+      required:
+        - person
+        - business
+      title: SmsFees
     SmsListResponse:
       properties:
         items:
@@ -8873,6 +8780,70 @@ components:
         - msg
         - type
       title: ValidationError
+    VerificationRequirements:
+      properties:
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 country code.
+        number_type:
+          type: string
+          title: Number Type
+          description: "'local', 'mobile', 'toll_free', or 'national'."
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "'person' or 'business'."
+        required:
+          type: boolean
+          title: Required
+          description: False when the carrier needs no verification for this combination.
+        fields:
+          items:
+            $ref: "#/components/schemas/FieldSpec"
+          type: array
+          title: Fields
+          description: Values to collect about the person or business.
+          default: []
+        documents:
+          items:
+            $ref: "#/components/schemas/DocumentSlot"
+          type: array
+          title: Documents
+          description: Documents to collect. Skip slots with `needs_input` false.
+          default: []
+        address_required:
+          type: boolean
+          title: Address Required
+          description: True when an address must be collected.
+          default: false
+        subject_types:
+          items:
+            type: string
+            enum:
+              - person
+              - business
+          type: array
+          title: Subject Types
+          description:
+            Subject types the carrier accepts here, so you can offer the
+            choice.
+          default: []
+      type: object
+      required:
+        - country_code
+        - number_type
+        - subject_type
+        - required
+      title: VerificationRequirements
+      description:
+        "What the carrier needs for one (country, number type, subject
+        type),
+
+        as the public API shows it: without the carrier's name."
     VerificationResponse:
       properties:
         id:
@@ -8880,10 +8851,6 @@ components:
           format: uuid
           title: Id
           description: Unique identifier for this verification.
-        provider:
-          type: string
-          title: Provider
-          description: The carrier this verification is with.
         country_code:
           type: string
           title: Country Code
@@ -8950,7 +8917,6 @@ components:
       type: object
       required:
         - id
-        - provider
         - country_code
         - number_type
         - subject_type

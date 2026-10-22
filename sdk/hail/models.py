@@ -238,9 +238,8 @@ class OfferVerification(BaseModel):
 
 
 class NumberOffer(BaseModel):
-    """One live carrier offer. Mirrors ``CarrierOffer`` in openapi/openapi.yaml."""
+    """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml."""
 
-    provider: Literal["twilio", "telnyx", "didww"]
     e164: str
     country_code: str
     number_type: NumberType
@@ -253,8 +252,6 @@ class NumberOffer(BaseModel):
         "unknown"
     )
     requirements: list[str] = Field(default_factory=list)
-    verification_id: str | None = None
-    address_id: str | None = None
     locality: str | None = None
     region: str | None = None
     quote_id: UUID | None = None
@@ -274,8 +271,7 @@ class NumberRegionsResponse(BaseModel):
 class NumberQuotesResponse(BaseModel):
     offers: list[NumberOffer]
     recommended_quote_id: UUID | None
-    unavailable_providers: list[str]
-    incomplete: bool = False
+    incomplete: bool
     expires_at: datetime
 
 
@@ -296,8 +292,6 @@ class PhoneNumberResponse(BaseModel):
     capabilities: list[str]
     provisioning_state: str
     is_dedicated: bool
-    messaging_service_sid: str | None = None
-    provider: str = "twilio"
     # Who answers. None: calls ring out / texts reach webhooks only.
     voice_agent_id: UUID | None = None
     sms_agent_id: UUID | None = None

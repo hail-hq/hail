@@ -4,6 +4,9 @@ carrier did not take at creation.
 
 Files and details pass through this process in memory to the carrier. Nothing
 identifying is written to the database, disk or logs (see the design spec).
+One exception: when the carrier refuses something, its own error text is
+logged (with the org and verification ids) and kept in the audit log, never
+shown to the customer. That text can quote a value the customer sent.
 The multipart body is parsed here with an in-memory parser and a hard size cap,
 so no part is ever spooled to a temporary file.
 """
@@ -54,6 +57,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     VerificationProvider,
     VerificationProviderError,
+    VerificationRequirements,
     default_verification_provider_name,
     get_verification_provider,
 )
@@ -115,7 +119,6 @@ async def _quote_provider_name(
     db: AsyncSession,
     organization_id: UUID,
     quote_id: UUID,
-    name: str | None,
     country_code: str,
     number_type: str,
     where: str,
@@ -144,24 +147,14 @@ async def _quote_provider_name(
             "quote_id is for a different country_code or number_type",
             loc=[where, "quote_id"],
         )
-    carrier = offer["provider"]
-    if name and name != carrier:
-        raise unprocessable(
-            "provider does not match the quote", loc=[where, "provider"]
-        )
-    return carrier
+    return offer["provider"]
 
 
-async def _sms_provider_name(
-    db: AsyncSession,
-    organization_id: UUID,
-    name: str | None,
-    number_id: UUID | None,
-    where: str,
-) -> str:
-    """The carrier for an SMS registration: the one named, else the carrier
-    of the number passed as ``number_id``, else the carrier of the org's
-    active US long codes that can text."""
+async def _sms_carriers(
+    db: AsyncSession, organization_id: UUID, number_id: UUID | None
+) -> list[str]:
+    """The carriers behind the org's active US long codes that can text, or
+    the one behind ``number_id`` (404 when it is not such a number)."""
     query = select(PhoneNumber.provider).where(
         PhoneNumber.organization_id == organization_id,
         PhoneNumber.provisioning_state == "active",
@@ -179,19 +172,12 @@ async def _sms_provider_name(
                 detail="Number not found among your active US local numbers "
                 "that can text",
             )
-        if name and name != carrier:
-            raise unprocessable(
-                "provider does not match the number", loc=[where, "provider"]
-            )
-        return carrier
-    if name:
-        return name
-    carriers = (await db.execute(query.distinct())).scalars().all()
-    if not carriers:
-        raise unprocessable(
-            "Buy a US number first, then register it for texting.",
-            loc=[where, "provider"],
-        )
+        return [carrier]
+    return list((await db.execute(query.distinct())).scalars().all())
+
+
+def _one_carrier(carriers: list[str], where: str) -> str:
+    """422 when the org's US numbers are with more than one carrier."""
     if len(carriers) > 1:
         raise unprocessable(
             "Your US numbers are with more than one carrier. Pass number_id: "
@@ -199,6 +185,21 @@ async def _sms_provider_name(
             loc=[where, "number_id"],
         )
     return carriers[0]
+
+
+async def _sms_provider_name(
+    db: AsyncSession, organization_id: UUID, number_id: UUID | None, where: str
+) -> str:
+    """The carrier for an SMS registration: the carrier of the number passed
+    as ``number_id``, else the carrier of the org's active US long codes that
+    can text."""
+    carriers = await _sms_carriers(db, organization_id, number_id)
+    if not carriers:
+        raise unprocessable(
+            "Buy a US number first, then register it for texting.",
+            loc=[where, "number_id"],
+        )
+    return _one_carrier(carriers, where)
 
 
 router = APIRouter(
@@ -228,7 +229,31 @@ def _provider_or_404(
     return provider
 
 
-def _problems_422(problems: list[Problem]) -> HTTPException:
+def _log_carrier_text(
+    problems: list[Problem], organization_id: UUID, verification_id: UUID | None
+) -> None:
+    """Log the carrier's own words for each problem. Only for the operator:
+    the customer gets ``Problem.message``."""
+    for p in problems:
+        if p.raw:
+            logger.warning(
+                "carrier refused verification details (org %s, verification %s, "
+                "field %r): %s",
+                organization_id,
+                verification_id,
+                p.field,
+                p.raw,
+            )
+
+
+def _problems_422(
+    problems: list[Problem],
+    organization_id: UUID,
+    verification_id: UUID | None = None,
+) -> HTTPException:
+    """422 with one entry per problem: the field as ``loc`` and Hail's own
+    wording as ``msg``. The carrier's text is logged, never returned."""
+    _log_carrier_text(problems, organization_id, verification_id)
     return HTTPException(
         status_code=422,
         detail=[
@@ -378,10 +403,40 @@ async def _poll_and_apply(
     the JSONB column does not track in-place changes, so mark it)."""
     status = await _settle_sms_approval(db, row, status, registry)
     changed = _apply_status(row, status)
+    if changed and status is not None and status.state == "rejected":
+        await _audit_carrier_rejection(row, status.raw_reason)
     if row.provider_refs != refs_before:
         flag_modified(row, "provider_refs")
         changed = True
     return changed
+
+
+async def _audit_carrier_rejection(
+    row: CarrierVerification, raw_reason: str | None
+) -> None:
+    """The carrier rejected a submitted verification. The row holds Hail's
+    wording for the customer; the carrier's own text is logged and kept in
+    the audit row."""
+    logger.warning(
+        "carrier rejected verification %s (org %s): %s",
+        row.id,
+        row.organization_id,
+        raw_reason,
+    )
+    await write_audit_log(
+        row.organization_id,
+        None,
+        "verification.reject",
+        "carrier_verification",
+        row.id,
+        {
+            "rejected_by": None,
+            "reason": row.rejection_reason,
+            "carrier_reason": raw_reason,
+        },
+        actor_user_id=None,
+        actor_kind="system",
+    )
 
 
 async def _lock_for_poll(db: AsyncSession, row: CarrierVerification) -> bool:
@@ -506,7 +561,7 @@ async def approved_purchase_handle(
 
 @router.get(
     "/requirements",
-    response_model=Requirements,
+    response_model=VerificationRequirements,
     operation_id="get_verification_requirements",
 )
 async def get_requirements(
@@ -517,7 +572,14 @@ async def get_requirements(
     number_type: str,
     default_provider: Annotated[str | None, Depends(get_default_provider_name)],
     subject_type: SubjectType = "person",
-    provider: str | None = None,
+    provider: Annotated[
+        str | None,
+        Query(
+            deprecated=True,
+            description="Deprecated and ignored. Hail picks the carrier from "
+            "quote_id, number_id or its default.",
+        ),
+    ] = None,
     purpose: str = "number",
     quote_id: Annotated[
         UUID | None,
@@ -534,14 +596,13 @@ async def get_requirements(
             "more than one carrier."
         ),
     ] = None,
-) -> Requirements:
+) -> VerificationRequirements:
     """What the carrier needs from you: the fields, the documents, and whether
     an address is needed. `purpose=number` (default) is for buying a number;
-    `purpose=sms` is for registering to send SMS in the US; without
-    `provider` it uses the carrier of your US numbers, or of the number
-    passed as `number_id`. For `purpose=number`,
-    pass the offer's `quote_id` to get that offer's carrier. Build your form
-    from it."""
+    pass the offer's `quote_id` to get the form for that offer. `purpose=sms`
+    is for registering to send SMS in the US; it uses the carrier of your US
+    numbers, or of the number passed as `number_id`. Build your form from it.
+    `provider` is ignored."""
     if purpose not in PURPOSES:
         raise unprocessable("unknown purpose", loc=["query", "purpose"])
     if purpose == "sms" and quote_id is not None:
@@ -554,25 +615,28 @@ async def get_requirements(
         )
     if purpose == "sms":
         name = await _sms_provider_name(
-            db, principal.organization_id, provider, number_id, "query"
+            db, principal.organization_id, number_id, "query"
         )
     elif quote_id is not None:
         name = await _quote_provider_name(
             db,
             principal.organization_id,
             quote_id,
-            provider,
             country_code,
             number_type,
             "query",
         )
     else:
-        name = _resolve_provider_name(provider, default_provider)
-    return await _requirements(
+        name = _resolve_provider_name(None, default_provider)
+    requirements = await _requirements(
         _provider_or_404(registry, name, purpose),
         country_code,
         number_type,
         subject_type,
+    )
+    # The public form leaves out which carrier it is for.
+    return VerificationRequirements.model_validate(
+        requirements.model_dump(exclude={"provider"})
     )
 
 
@@ -582,6 +646,7 @@ class _DocumentPart(BaseModel):
 
 
 class _Submission(BaseModel):
+    # Deprecated and ignored: old clients still send it.
     provider: str | None = None
     quote_id: UUID | None = None
     number_id: UUID | None = None
@@ -683,11 +748,10 @@ async def create_verification(
 
     Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
     in the US; `sms` takes `country_code=US` and `number_type=local` and charges
-    the filing fee), `country_code`, `number_type`, `subject_type`, `provider`
-    (optional; for `sms` it defaults to the carrier of your US numbers),
-    `quote_id` (optional, for `number`: the offer to verify for; its carrier
-    is used), `number_id` (optional, for `sms`: one of your US numbers; its
-    carrier is used),
+    the filing fee), `country_code`, `number_type`, `subject_type`,
+    `quote_id` (optional, for `number`: the offer to verify for), `number_id`
+    (optional, for `sms`: one of your US numbers; needed when your US numbers
+    are with more than one carrier),
     `fields` (JSON object), `address` (JSON object, when required), `documents`
     (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
     part per slot named `file.<slot>`. Get the slot and field names from
@@ -696,6 +760,7 @@ async def create_verification(
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
     submitted to the carrier for its review; read it back to follow the state.
+    A `provider` part is deprecated and ignored: Hail picks the carrier.
     """
     form = await _parse_form(request)
 
@@ -738,20 +803,19 @@ async def create_verification(
         )
     if sub.purpose == "sms":
         provider_name = await _sms_provider_name(
-            db, principal.organization_id, sub.provider, sub.number_id, "body"
+            db, principal.organization_id, sub.number_id, "body"
         )
     elif sub.quote_id is not None:
         provider_name = await _quote_provider_name(
             db,
             principal.organization_id,
             sub.quote_id,
-            sub.provider,
             sub.country_code,
             sub.number_type,
             "body",
         )
     else:
-        provider_name = _resolve_provider_name(sub.provider, default_provider)
+        provider_name = _resolve_provider_name(None, default_provider)
     provider = _provider_or_404(registry, provider_name, sub.purpose)
 
     if sub.purpose == "sms":
@@ -845,7 +909,7 @@ async def create_verification(
             detail="carrier unavailable; try again later",
         ) from exc
     if draft.problems:
-        raise _problems_422(draft.problems)
+        raise _problems_422(draft.problems, principal.organization_id)
 
     row = CarrierVerification(
         organization_id=principal.organization_id,
@@ -990,7 +1054,16 @@ async def _retry_submit(
         await db.rollback()
         return False
     if problems:
-        await _reject_row(db, row, provider, "; ".join(p.message for p in problems))
+        _log_carrier_text(problems, row.organization_id, row.id)
+        await _reject_row(
+            db,
+            row,
+            provider,
+            "; ".join(
+                f"{p.field}: {p.message}" if p.field else p.message for p in problems
+            ),
+            carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
+        )
         return False
     return await _submit_row(
         db, row, provider, actor=(None, "system"), action="verification.submit"
@@ -1002,8 +1075,10 @@ async def _reject_row(
     row: CarrierVerification,
     provider: VerificationProvider,
     reason: str,
+    carrier_reason: str | None = None,
 ) -> None:
-    """The carrier refused the draft before submission: record why, discard
+    """The carrier refused the draft before submission: record why (Hail's
+    wording on the row, the carrier's own text in the audit row), discard
     the draft so nothing of the customer's is left at the carrier, and audit
     it as a system action (no person rejected it). If the discard fails the
     row is left as it was and tried again next tick; the sweeper never dies
@@ -1023,7 +1098,7 @@ async def _reject_row(
         "verification.reject",
         "carrier_verification",
         row.id,
-        {"rejected_by": None, "reason": reason},
+        {"rejected_by": None, "reason": reason, "carrier_reason": carrier_reason},
         actor_user_id=None,
         actor_kind="system",
     )
@@ -1135,45 +1210,62 @@ class SmsFee(BaseModel):
     )
 
 
+class SmsFees(BaseModel):
+    person: SmsFee = Field(description="Fees for a person's registration.")
+    business: SmsFee = Field(description="Fees for a business's registration.")
+
+
 @router.get(
     "/sms-fees",
-    response_model=dict[str, dict[str, SmsFee]],
+    response_model=SmsFees,
     operation_id="get_sms_registration_fees",
+    responses={
+        404: {
+            "description": "number_id is not one of your active US local "
+            "numbers that can text, or SMS registration is not available."
+        },
+        422: {
+            "description": "Your US numbers are with more than one carrier: "
+            "pass number_id."
+        },
+    },
 )
 async def get_sms_fees(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
     number_id: Annotated[
         UUID | None,
         Query(
             description="One of your active US local numbers that can text. "
-            "When given, only the fees that apply to this number are returned."
+            "Needed when your US numbers are with more than one carrier."
         ),
     ] = None,
-) -> dict[str, dict[str, SmsFee]]:
-    """Fees for US SMS registration, per carrier and subject type, in cents.
-    Passed through at cost. Pass `number_id` to get only the fees for that
-    number; 404 when it is not one of your active US local numbers that can
-    text."""
-    providers = sms_registration_fees.providers()
-    if number_id is not None:
-        carrier = await _sms_provider_name(
-            db, principal.organization_id, None, number_id, "query"
+) -> SmsFees:
+    """Fees for US SMS registration, per subject type, in cents. Passed
+    through at cost. They are the fees for the carrier of your US numbers
+    that can text, or of `number_id` when given (404 when it is not one of
+    your active US local numbers that can text). When your US numbers are
+    with more than one carrier, pass `number_id` (422 otherwise). With no US
+    number yet, the fees are those of the carrier a new US number is
+    registered with by default."""
+    carriers = await _sms_carriers(db, principal.organization_id, number_id)
+    carrier = _one_carrier(carriers, "query") if carriers else default_provider
+    if carrier not in sms_registration_fees.providers():
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="no SMS registration is available",
         )
-        providers = [p for p in providers if p == carrier]
-    out: dict[str, dict[str, SmsFee]] = {}
-    for provider in providers:
-        out[provider] = {
+    return SmsFees(
+        **{
             subject: SmsFee(
-                filing_cents=sms_registration_fees.filing_fee_cents(provider, subject),
-                monthly_cents=sms_registration_fees.monthly_fee_cents(
-                    provider, subject
-                ),
-                minimum_months=sms_registration_fees.minimum_months(provider, subject),
+                filing_cents=sms_registration_fees.filing_fee_cents(carrier, subject),
+                monthly_cents=sms_registration_fees.monthly_fee_cents(carrier, subject),
+                minimum_months=sms_registration_fees.minimum_months(carrier, subject),
             )
             for subject in ("person", "business")
         }
-    return out
+    )
 
 
 @router.get(
@@ -1213,10 +1305,10 @@ async def cancel_verification(
     An approved US SMS registration (`purpose=sms`) can be cancelled too:
     its numbers leave the campaign, the campaign is deleted at the carrier,
     and US-to-US texts from those numbers get 422 again. Its monthly fee is
-    charged through the month of the cancellation, then stops. Telnyx bills
-    at least 3 monthly fees from approval (`minimum_months` in
-    GET /verifications/sms-fees), so a Telnyx registration cancelled sooner
-    is still charged for 3 months."""
+    charged through the month of the cancellation, then stops. Some carriers
+    bill a minimum number of monthly fees from approval (`minimum_months` in
+    GET /verifications/sms-fees): a registration cancelled sooner is still
+    charged for that many months."""
     row = await _org_row_or_404(db, principal, verification_id)
     if row.state in ("submitting", "submitted"):
         raise HTTPException(
@@ -1362,7 +1454,7 @@ async def confirm_verification(
         actor_kind=actor_kind,
     )
     if problems:
-        raise _problems_422(problems)
+        raise _problems_422(problems, row.organization_id, row.id)
     # File the campaign now rather than on the next poll.
     await _refresh(db, row, registry)
     return _out(row, registry)
@@ -1378,6 +1470,8 @@ def _nothing_to_confirm() -> HTTPException:
 
 
 class AdminVerification(VerificationResponse):
+    # Superadmin only (not in the public spec): names the carrier.
+    provider: str
     organization_id: UUID
 
 
@@ -1451,8 +1545,9 @@ async def admin_approve(
     if problems:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
+            # Superadmin only: the carrier's own words help the review.
             detail="the carrier no longer accepts this draft: "
-            + "; ".join(p.message for p in problems),
+            + "; ".join(p.raw or p.message for p in problems),
         )
     if not await _submit_row(
         db, row, provider, actor=actor_of(admin), action="verification.approve"

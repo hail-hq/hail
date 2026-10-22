@@ -19,6 +19,8 @@ import re
 import httpx
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -287,7 +289,13 @@ class TelnyxVerificationProvider(VerificationProvider):
             if 400 <= exc.response.status_code < 500:
                 return DraftResult(
                     refs={},
-                    problems=[Problem(field="", message=_rejection(exc.response))],
+                    problems=[
+                        Problem(
+                            field="",
+                            message=NOT_ACCEPTED,
+                            raw=_rejection(exc.response),
+                        )
+                    ],
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
@@ -348,9 +356,7 @@ class TelnyxVerificationProvider(VerificationProvider):
                     Problem(field=req_id, message="This requirement is missing.")
                 )
             elif req.get("status") == "declined":
-                problems.append(
-                    Problem(field=req_id, message="The carrier declined this value.")
-                )
+                problems.append(Problem(field=req_id, message=VALUE_NOT_ACCEPTED))
         return problems
 
     async def check(self, refs: dict) -> list[Problem]:
@@ -413,8 +419,8 @@ class TelnyxVerificationProvider(VerificationProvider):
                 logger.warning("telnyx verification cleanup step failed", exc_info=True)
 
 
-def _rejection(response: httpx.Response) -> str:
-    """Telnyx's own words for a 4xx, without the payload."""
+def _rejection(response: httpx.Response) -> str | None:
+    """Telnyx's own words for a 4xx, without the payload. Logged only."""
     try:
         errors = response.json().get("errors") or []
     except ValueError:
@@ -423,4 +429,4 @@ def _rejection(response: httpx.Response) -> str:
         (e.get("detail") or e.get("title") for e in errors if isinstance(e, dict)),
         None,
     )
-    return detail or "The carrier did not accept the details."
+    return detail

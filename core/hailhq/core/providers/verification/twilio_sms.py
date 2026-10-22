@@ -14,6 +14,8 @@ from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -341,7 +343,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             refs["brand_sid"]
         ).fetch()
         if brand.status in ("FAILED", "SUSPENDED"):
-            return ProviderStatus(state="rejected", reason=_brand_reason(brand))
+            return ProviderStatus(
+                state="rejected",
+                reason=BRAND_REJECTED,
+                raw_reason=_brand_reason(brand),
+            )
         if brand.status != "APPROVED":
             return ProviderStatus(state="pending")
         if refs.get("subject_type") == "person":
@@ -369,13 +375,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return ProviderStatus(state="approved")
         if campaign.campaign_status == "FAILED":
             errors = campaign.errors or []
-            reason = (
-                "; ".join(
-                    e.get("description", "") for e in errors if isinstance(e, dict)
-                )
-                or "the carrier rejected the campaign"
+            raw = "; ".join(
+                e.get("description", "") for e in errors if isinstance(e, dict)
             )
-            return ProviderStatus(state="rejected", reason=reason)
+            return ProviderStatus(
+                state="rejected", reason=CAMPAIGN_REJECTED, raw_reason=raw or None
+            )
         return ProviderStatus(state="pending")
 
     def confirmation(self, refs) -> str | None:
@@ -527,9 +532,10 @@ def _evaluation_message(ev) -> str:
     return "the carrier refused a detail"
 
 
-def _brand_reason(brand) -> str:
+def _brand_reason(brand) -> str | None:
+    """The carrier's feedback on a refused brand. Logged only."""
     fb = getattr(brand, "brand_feedback", None) or []
-    return "; ".join(str(f) for f in fb) or "the carrier refused the brand"
+    return "; ".join(str(f) for f in fb) or None
 
 
 def _safe_message(msg) -> str:

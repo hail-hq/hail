@@ -17,7 +17,9 @@ curl -X POST "$HAIL_API_URL/v1/numbers" -H "Authorization: Bearer $HAIL_API_KEY"
   -d '{"country_code":"PT","quote_id":"<recommended_quote_id>"}'
 ```
 
-Or `hail numbers acquire --country PT --provider telnyx`. Schemas:
+Or `hail numbers acquire --country PT`. The API does not say which carrier
+backs an offer; the stored quote does (`offer->>'provider'` in the
+`number_offers` table). Schemas:
 [`openapi/openapi.yaml`](../../../openapi/openapi.yaml). Code:
 [`carrier_routing.py`](../../../core/hailhq/core/carrier_routing.py),
 [`number_offers.py`](../../../core/hailhq/core/number_offers.py),
@@ -100,9 +102,10 @@ from its US long codes to US numbers return 422.
 
 Telnyx will not sell some numbers (Sweden, Portugal, Italy, and others)
 until a requirement group is approved. Hail files it: `GET
-/v1/verifications/requirements?provider=telnyx&country_code=SE&number_type=mobile`
-lists the fields and documents Telnyx asks for, `POST /v1/verifications`
-(with `provider=telnyx`) creates the requirement group under
+/v1/verifications/requirements?quote_id=<quote_id>&country_code=SE&number_type=mobile`,
+with the `quote_id` of a Telnyx offer, lists the fields and documents Telnyx
+asks for. `POST /v1/verifications` (with the same `quote_id`) creates the
+requirement group under
 `customer_reference = hail-<organization UUID>`, uploads the files, and a
 superadmin approval submits it to Telnyx. Once Telnyx approves, quotes for
 that country and type turn `ready` and the order carries the group. The

@@ -61,9 +61,7 @@ async def buy(db, org, quote, monkeypatch, offer, *, kind="national"):
         "hailhq.api.number_orders.discover_offers",
         AsyncMock(return_value=([offer], [])),
     )
-    return await acquire_offer(
-        db, org, quote.id, country="PT", kind=kind, provider="auto", billed=True
-    )
+    return await acquire_offer(db, org, quote.id, country="PT", kind=kind, billed=True)
 
 
 @pytest.fixture(autouse=True)
@@ -232,8 +230,14 @@ async def _seed_approved_verification(db, org, *, number_type="national"):
     return row
 
 
+NEUTRAL_REJECTION = (
+    "the carrier rejected the end-user registration; "
+    "start a new verification with corrected details"
+)
+
+
 async def test_didww_registration_rejected_revokes_approval(
-    async_session, org_and_key, monkeypatch
+    async_session, org_and_key, monkeypatch, caplog
 ):
     org, _, _ = org_and_key
     verification = await _seed_approved_verification(async_session, org)
@@ -254,12 +258,21 @@ async def test_didww_registration_rejected_revokes_approval(
     monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
-    await reconcile_order(async_session, number, force=True)
+    with caplog.at_level("WARNING", logger="hailhq.api.number_orders"):
+        await reconcile_order(async_session, number, force=True)
     revoke.assert_awaited_once_with("addr-1", org, "PT", "national")
-    assert number.provisioning_metadata["failure_reason"] == "Document is blurry"
+    # The buyer reads Hail's wording; the carrier's text stays server-side.
+    assert number.provisioning_metadata["failure_reason"] == NEUTRAL_REJECTION
+    assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
+    logged = [
+        r.getMessage() for r in caplog.records if "Document is blurry" in r.getMessage()
+    ]
+    assert len(logged) == 1
+    assert str(org) in logged[0] and str(number.id) in logged[0]
+    assert str(verification.id) in logged[0]
     await async_session.refresh(verification)
     assert verification.state == "rejected"
-    assert verification.rejection_reason == "Document is blurry"
+    assert verification.rejection_reason == NEUTRAL_REJECTION
     await async_session.refresh(other)
     assert other.state == "approved"
     assert await get_balance_cents(async_session, org) == 100000 - 350
@@ -272,7 +285,8 @@ async def test_didww_registration_rejected_revokes_approval(
         )
     ).scalar_one()
     assert audit.actor_kind == "system"
-    assert audit.payload["reason"] == "Document is blurry"
+    assert audit.payload["reason"] == NEUTRAL_REJECTION
+    assert audit.payload["carrier_reason"] == "Document is blurry"
 
 
 async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
@@ -300,10 +314,8 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
     outcome.return_value = ("rejected_registration", DID, ORDER)
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "failed"
-    assert (
-        number.provisioning_metadata["failure_reason"]
-        == "the carrier rejected the end-user registration"
-    )
+    assert number.provisioning_metadata["failure_reason"] == NEUTRAL_REJECTION
+    assert "carrier_reason" not in number.provisioning_metadata
     await async_session.refresh(verification)
     assert verification.state == "rejected"
     assert await get_balance_cents(async_session, org) == 100000 - 350
@@ -959,9 +971,7 @@ async def test_quotes_take_a_city_alone_outside_us_and_ca(
     assert discover.await_args.kwargs["region"] is None
 
 
-async def test_quotes_for_one_carrier_search_only_its_kinds(
-    client, org_and_key, monkeypatch
-):
+async def test_quote_provider_is_ignored(client, org_and_key, monkeypatch):
     _, _, key = org_and_key
     discover = AsyncMock(return_value=([], []))
     monkeypatch.setattr("hailhq.api.routes.numbers.discover_offers", discover)
@@ -975,4 +985,6 @@ async def test_quotes_for_one_carrier_search_only_its_kinds(
     searched = {
         call.args[2]: call.kwargs["providers"] for call in discover.await_args_list
     }
-    assert searched == {"national": ["didww"]}
+    # ``provider`` is deprecated and ignored: every carrier is searched for
+    # the kinds its own catalog lists.
+    assert searched == {"local": ["twilio"], "national": ["didww"]}

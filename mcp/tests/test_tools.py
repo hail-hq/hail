@@ -1582,14 +1582,12 @@ async def test_whoami_maps_api_errors(client: HailClient) -> None:
 def _number_response(number_id: str | None = None, e164: str = "+14155550100") -> dict:
     return {
         "id": number_id or str(uuid4()),
-        "provider": "twilio",
         "e164": e164,
         "country_code": "US",
         "number_type": "local",
         "capabilities": ["voice", "sms"],
         "provisioning_state": "active",
         "is_dedicated": True,
-        "messaging_service_sid": None,
         "voice_agent_id": None,
         "sms_agent_id": None,
         "inbound_registered": False,
@@ -1598,7 +1596,6 @@ def _number_response(number_id: str | None = None, e164: str = "+14155550100") -
 
 def _offer(readiness: str = "ready") -> dict:
     return {
-        "provider": "twilio",
         "e164": "+14155550100",
         "country_code": "US",
         "number_type": "local",
@@ -1609,8 +1606,6 @@ def _offer(readiness: str = "ready") -> dict:
         "readiness": readiness,
         "regulatory_friction": "none",
         "requirements": [],
-        "verification_id": None,
-        "address_id": None,
         "quote_id": str(uuid4()),
     }
 
@@ -1620,7 +1615,7 @@ def _quotes_response() -> dict:
     return {
         "offers": [offer],
         "recommended_quote_id": offer["quote_id"],
-        "unavailable_providers": [],
+        "incomplete": False,
         "expires_at": "2026-10-09T12:10:00+00:00",
     }
 
@@ -1643,7 +1638,6 @@ async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -
         "country_code": "US",
         "number_type": "local",
         "capabilities": ["voice"],
-        "provider": "auto",
     }
     assert result["offers"][0]["monthly_cents"] == 115
     assert result["offers"][0]["readiness"] == "ready"
@@ -1688,7 +1682,6 @@ async def test_quote_numbers_omits_number_type_when_none(client: HailClient) -> 
     assert body == {
         "country_code": "US",
         "capabilities": ["voice", "sms"],
-        "provider": "auto",
     }
 
 
@@ -1783,7 +1776,6 @@ async def test_acquire_number_sends_expected_total_and_returns_number_and_key(
         "quote_id": _ACQUIRE_ARGS["quote_id"],
         "country_code": "US",
         "number_type": "local",
-        "provider": "auto",
         "expected_total_cents": 165,
     }
     assert _UUID_RE.match(captured["key"])

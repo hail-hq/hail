@@ -147,93 +147,6 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
-// Defines values for CarrierOfferNumberType.
-const (
-	CarrierOfferNumberTypeLocal    CarrierOfferNumberType = "local"
-	CarrierOfferNumberTypeMobile   CarrierOfferNumberType = "mobile"
-	CarrierOfferNumberTypeNational CarrierOfferNumberType = "national"
-	CarrierOfferNumberTypeTollFree CarrierOfferNumberType = "toll_free"
-)
-
-// Valid indicates whether the value is a known member of the CarrierOfferNumberType enum.
-func (e CarrierOfferNumberType) Valid() bool {
-	switch e {
-	case CarrierOfferNumberTypeLocal:
-		return true
-	case CarrierOfferNumberTypeMobile:
-		return true
-	case CarrierOfferNumberTypeNational:
-		return true
-	case CarrierOfferNumberTypeTollFree:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CarrierOfferProvider.
-const (
-	CarrierOfferProviderDidww  CarrierOfferProvider = "didww"
-	CarrierOfferProviderTelnyx CarrierOfferProvider = "telnyx"
-	CarrierOfferProviderTwilio CarrierOfferProvider = "twilio"
-)
-
-// Valid indicates whether the value is a known member of the CarrierOfferProvider enum.
-func (e CarrierOfferProvider) Valid() bool {
-	switch e {
-	case CarrierOfferProviderDidww:
-		return true
-	case CarrierOfferProviderTelnyx:
-		return true
-	case CarrierOfferProviderTwilio:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CarrierOfferReadiness.
-const (
-	Ready                CarrierOfferReadiness = "ready"
-	VerificationRequired CarrierOfferReadiness = "verification_required"
-)
-
-// Valid indicates whether the value is a known member of the CarrierOfferReadiness enum.
-func (e CarrierOfferReadiness) Valid() bool {
-	switch e {
-	case Ready:
-		return true
-	case VerificationRequired:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CarrierOfferRegulatoryFriction.
-const (
-	Documents   CarrierOfferRegulatoryFriction = "documents"
-	Information CarrierOfferRegulatoryFriction = "information"
-	None        CarrierOfferRegulatoryFriction = "none"
-	Unknown     CarrierOfferRegulatoryFriction = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the CarrierOfferRegulatoryFriction enum.
-func (e CarrierOfferRegulatoryFriction) Valid() bool {
-	switch e {
-	case Documents:
-		return true
-	case Information:
-		return true
-	case None:
-		return true
-	case Unknown:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ContactEntryKind.
 const (
 	Manual ContactEntryKind = "manual"
@@ -669,30 +582,6 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	}
 }
 
-// Defines values for NumberAcquireRequestProvider.
-const (
-	NumberAcquireRequestProviderAuto   NumberAcquireRequestProvider = "auto"
-	NumberAcquireRequestProviderDidww  NumberAcquireRequestProvider = "didww"
-	NumberAcquireRequestProviderTelnyx NumberAcquireRequestProvider = "telnyx"
-	NumberAcquireRequestProviderTwilio NumberAcquireRequestProvider = "twilio"
-)
-
-// Valid indicates whether the value is a known member of the NumberAcquireRequestProvider enum.
-func (e NumberAcquireRequestProvider) Valid() bool {
-	switch e {
-	case NumberAcquireRequestProviderAuto:
-		return true
-	case NumberAcquireRequestProviderDidww:
-		return true
-	case NumberAcquireRequestProviderTelnyx:
-		return true
-	case NumberAcquireRequestProviderTwilio:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for NumberQuoteRequestCapabilities.
 const (
 	Sms   NumberQuoteRequestCapabilities = "sms"
@@ -713,46 +602,22 @@ func (e NumberQuoteRequestCapabilities) Valid() bool {
 
 // Defines values for NumberQuoteRequestNumberType.
 const (
-	Local    NumberQuoteRequestNumberType = "local"
-	Mobile   NumberQuoteRequestNumberType = "mobile"
-	National NumberQuoteRequestNumberType = "national"
-	TollFree NumberQuoteRequestNumberType = "toll_free"
+	NumberQuoteRequestNumberTypeLocal    NumberQuoteRequestNumberType = "local"
+	NumberQuoteRequestNumberTypeMobile   NumberQuoteRequestNumberType = "mobile"
+	NumberQuoteRequestNumberTypeNational NumberQuoteRequestNumberType = "national"
+	NumberQuoteRequestNumberTypeTollFree NumberQuoteRequestNumberType = "toll_free"
 )
 
 // Valid indicates whether the value is a known member of the NumberQuoteRequestNumberType enum.
 func (e NumberQuoteRequestNumberType) Valid() bool {
 	switch e {
-	case Local:
+	case NumberQuoteRequestNumberTypeLocal:
 		return true
-	case Mobile:
+	case NumberQuoteRequestNumberTypeMobile:
 		return true
-	case National:
+	case NumberQuoteRequestNumberTypeNational:
 		return true
-	case TollFree:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for NumberQuoteRequestProvider.
-const (
-	Auto   NumberQuoteRequestProvider = "auto"
-	Didww  NumberQuoteRequestProvider = "didww"
-	Telnyx NumberQuoteRequestProvider = "telnyx"
-	Twilio NumberQuoteRequestProvider = "twilio"
-)
-
-// Valid indicates whether the value is a known member of the NumberQuoteRequestProvider enum.
-func (e NumberQuoteRequestProvider) Valid() bool {
-	switch e {
-	case Auto:
-		return true
-	case Didww:
-		return true
-	case Telnyx:
-		return true
-	case Twilio:
+	case NumberQuoteRequestNumberTypeTollFree:
 		return true
 	default:
 		return false
@@ -801,36 +666,66 @@ func (e ProviderConfigEntryLayer) Valid() bool {
 	}
 }
 
-// Defines values for RequirementsSubjectType.
+// Defines values for QuoteOfferNumberType.
 const (
-	RequirementsSubjectTypeBusiness RequirementsSubjectType = "business"
-	RequirementsSubjectTypePerson   RequirementsSubjectType = "person"
+	Local    QuoteOfferNumberType = "local"
+	Mobile   QuoteOfferNumberType = "mobile"
+	National QuoteOfferNumberType = "national"
+	TollFree QuoteOfferNumberType = "toll_free"
 )
 
-// Valid indicates whether the value is a known member of the RequirementsSubjectType enum.
-func (e RequirementsSubjectType) Valid() bool {
+// Valid indicates whether the value is a known member of the QuoteOfferNumberType enum.
+func (e QuoteOfferNumberType) Valid() bool {
 	switch e {
-	case RequirementsSubjectTypeBusiness:
+	case Local:
 		return true
-	case RequirementsSubjectTypePerson:
+	case Mobile:
+		return true
+	case National:
+		return true
+	case TollFree:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for RequirementsSubjectTypes.
+// Defines values for QuoteOfferReadiness.
 const (
-	RequirementsSubjectTypesBusiness RequirementsSubjectTypes = "business"
-	RequirementsSubjectTypesPerson   RequirementsSubjectTypes = "person"
+	Ready                QuoteOfferReadiness = "ready"
+	VerificationRequired QuoteOfferReadiness = "verification_required"
 )
 
-// Valid indicates whether the value is a known member of the RequirementsSubjectTypes enum.
-func (e RequirementsSubjectTypes) Valid() bool {
+// Valid indicates whether the value is a known member of the QuoteOfferReadiness enum.
+func (e QuoteOfferReadiness) Valid() bool {
 	switch e {
-	case RequirementsSubjectTypesBusiness:
+	case Ready:
 		return true
-	case RequirementsSubjectTypesPerson:
+	case VerificationRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuoteOfferRegulatoryFriction.
+const (
+	Documents   QuoteOfferRegulatoryFriction = "documents"
+	Information QuoteOfferRegulatoryFriction = "information"
+	None        QuoteOfferRegulatoryFriction = "none"
+	Unknown     QuoteOfferRegulatoryFriction = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the QuoteOfferRegulatoryFriction enum.
+func (e QuoteOfferRegulatoryFriction) Valid() bool {
+	switch e {
+	case Documents:
+		return true
+	case Information:
+		return true
+	case None:
+		return true
+	case Unknown:
 		return true
 	default:
 		return false
@@ -897,6 +792,42 @@ func (e SmsResponseStatus) Valid() bool {
 	case SmsResponseStatusSent:
 		return true
 	case SmsResponseStatusUndelivered:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerificationRequirementsSubjectType.
+const (
+	VerificationRequirementsSubjectTypeBusiness VerificationRequirementsSubjectType = "business"
+	VerificationRequirementsSubjectTypePerson   VerificationRequirementsSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the VerificationRequirementsSubjectType enum.
+func (e VerificationRequirementsSubjectType) Valid() bool {
+	switch e {
+	case VerificationRequirementsSubjectTypeBusiness:
+		return true
+	case VerificationRequirementsSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerificationRequirementsSubjectTypes.
+const (
+	VerificationRequirementsSubjectTypesBusiness VerificationRequirementsSubjectTypes = "business"
+	VerificationRequirementsSubjectTypesPerson   VerificationRequirementsSubjectTypes = "person"
+)
+
+// Valid indicates whether the value is a known member of the VerificationRequirementsSubjectTypes enum.
+func (e VerificationRequirementsSubjectTypes) Valid() bool {
+	switch e {
+	case VerificationRequirementsSubjectTypesBusiness:
+		return true
+	case VerificationRequirementsSubjectTypesPerson:
 		return true
 	default:
 		return false
@@ -1650,72 +1581,6 @@ type CallResponseDirection string
 
 // CallResponseStatus Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
 type CallResponseStatus string
-
-// CarrierOffer defines model for CarrierOffer.
-type CarrierOffer struct {
-	// AddressId Server-selected verified address identifier, when supported; null otherwise.
-	AddressId *string `json:"address_id,omitempty"`
-
-	// Capabilities Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required.
-	Capabilities []string `json:"capabilities"`
-
-	// CountryCode ISO alpha-2 country code of the number.
-	CountryCode string `json:"country_code"`
-
-	// Currency Currency of the quoted rental and setup amounts.
-	Currency *string `json:"currency,omitempty"`
-
-	// E164 Available phone number in E.164 format.
-	E164 string `json:"e164"`
-
-	// Locality City or area the carrier lists for this number, such as Phoenix or London; null when unknown.
-	Locality *string `json:"locality,omitempty"`
-
-	// MonthlyCents Monthly number rental in USD cents, charged from organization credits.
-	MonthlyCents int `json:"monthly_cents"`
-
-	// NumberType Local, mobile, national, or toll-free number type.
-	NumberType CarrierOfferNumberType `json:"number_type"`
-
-	// Provider Carrier supplying this exact number.
-	Provider CarrierOfferProvider `json:"provider"`
-
-	// QuoteId Organization-bound quote identifier to pass to POST /numbers before expiry.
-	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
-
-	// Readiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
-	Readiness CarrierOfferReadiness `json:"readiness"`
-
-	// Region State, province or region the carrier lists, such as AZ or England; null when unknown.
-	Region *string `json:"region,omitempty"`
-
-	// RegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
-	RegulatoryFriction *CarrierOfferRegulatoryFriction `json:"regulatory_friction,omitempty"`
-
-	// Requirements Carrier regulatory requirement labels associated with this offer.
-	Requirements *[]string `json:"requirements,omitempty"`
-
-	// SetupCents One-time setup charge in USD cents, payable with the first month.
-	SetupCents int `json:"setup_cents"`
-
-	// Verification Your organization's verification for this offer's country, number type and carrier that is not cancelled or rejected; null when there is none.
-	Verification *OfferVerification `json:"verification,omitempty"`
-
-	// VerificationId Server-selected organization-bound approved bundle or requirement-group identifier, if any.
-	VerificationId *string `json:"verification_id,omitempty"`
-}
-
-// CarrierOfferNumberType Local, mobile, national, or toll-free number type.
-type CarrierOfferNumberType string
-
-// CarrierOfferProvider Carrier supplying this exact number.
-type CarrierOfferProvider string
-
-// CarrierOfferReadiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
-type CarrierOfferReadiness string
-
-// CarrierOfferRegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
-type CarrierOfferRegulatoryFriction string
 
 // ConfirmRequest defines model for ConfirmRequest.
 type ConfirmRequest struct {
@@ -2643,8 +2508,9 @@ type NumberAcquireRequest struct {
 	// NumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType *NumberAcquireRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.
-	Provider *NumberAcquireRequestProvider `json:"provider,omitempty"`
+	// Provider Deprecated and ignored. Hail buys the quoted number from the carrier it picked.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Provider *string `json:"provider,omitempty"`
 
 	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
 	QuoteId openapi_types.UUID `json:"quote_id"`
@@ -2652,9 +2518,6 @@ type NumberAcquireRequest struct {
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
-
-// NumberAcquireRequestProvider Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.
-type NumberAcquireRequestProvider string
 
 // NumberQuoteRequest defines model for NumberQuoteRequest.
 type NumberQuoteRequest struct {
@@ -2673,8 +2536,9 @@ type NumberQuoteRequest struct {
 	// NumberType Restrict number type; omit to compare all supported types.
 	NumberType *NumberQuoteRequestNumberType `json:"number_type,omitempty"`
 
-	// Provider Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
-	Provider *NumberQuoteRequestProvider `json:"provider,omitempty"`
+	// Provider Deprecated and ignored. Hail compares every carrier by readiness, remaining verification effort, and rental and setup costs.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Provider *string `json:"provider,omitempty"`
 
 	// Region Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.
 	Region *string `json:"region,omitempty"`
@@ -2686,25 +2550,19 @@ type NumberQuoteRequestCapabilities string
 // NumberQuoteRequestNumberType Restrict number type; omit to compare all supported types.
 type NumberQuoteRequestNumberType string
 
-// NumberQuoteRequestProvider Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.
-type NumberQuoteRequestProvider string
-
 // NumberQuotesResponse defines model for NumberQuotesResponse.
 type NumberQuotesResponse struct {
 	// ExpiresAt UTC expiry of these persisted quotes; request fresh offers afterward.
 	ExpiresAt time.Time `json:"expires_at"`
 
 	// Incomplete True when some carriers did not answer, so the offers may not be complete. Search again later for a full comparison.
-	Incomplete *bool `json:"incomplete,omitempty"`
+	Incomplete bool `json:"incomplete"`
 
-	// Offers Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins.
-	Offers []CarrierOffer `json:"offers"`
+	// Offers Live offers ordered by readiness, remaining verification effort, monthly price and setup price.
+	Offers []QuoteOffer `json:"offers"`
 
-	// RecommendedQuoteId Recommended ready offer matching the requested carrier preference, or null if none qualifies.
+	// RecommendedQuoteId Recommended ready offer, or null if none qualifies.
 	RecommendedQuoteId *openapi_types.UUID `json:"recommended_quote_id"`
-
-	// UnavailableProviders Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete.
-	UnavailableProviders []string `json:"unavailable_providers"`
 }
 
 // NumberRegion defines model for NumberRegion.
@@ -2785,14 +2643,8 @@ type PhoneNumberResponse struct {
 	// IsDedicated True if this number is owned by the organization. False for shared-pool numbers.
 	IsDedicated bool `json:"is_dedicated"`
 
-	// MessagingServiceSid Provider messaging-service identifier once SMS has been enabled on this number. Null until then.
-	MessagingServiceSid *string `json:"messaging_service_sid,omitempty"`
-
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
-
-	// Provider Carrier that owns and routes this number, such as twilio or telnyx.
-	Provider *string `json:"provider,omitempty"`
 
 	// ProvisioningState 'pending', 'active', 'failed', or 'released'.
 	ProvisioningState string `json:"provisioning_state"`
@@ -2912,41 +2764,60 @@ type ProviderValidateResult struct {
 	Status string `json:"status"`
 }
 
-// Requirements What a carrier needs for one (country, number type, subject type).
-type Requirements struct {
-	// AddressRequired True when an address must be collected.
-	AddressRequired *bool `json:"address_required,omitempty"`
+// QuoteOffer One number offer as the public API shows it. It never names the
+// carrier or carries a carrier-issued id: Hail picks the carrier.
+type QuoteOffer struct {
+	// Capabilities Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required.
+	Capabilities []string `json:"capabilities"`
 
-	// CountryCode ISO alpha-2 country code.
+	// CountryCode ISO alpha-2 country code of the number.
 	CountryCode string `json:"country_code"`
 
-	// Documents Documents to collect. Skip slots with `needs_input` false.
-	Documents *[]DocumentSlot `json:"documents,omitempty"`
+	// Currency Currency of the quoted rental and setup amounts.
+	Currency *string `json:"currency,omitempty"`
 
-	// Fields Values to collect about the person or business.
-	Fields *[]FieldSpec `json:"fields,omitempty"`
+	// E164 Available phone number in E.164 format.
+	E164 string `json:"e164"`
 
-	// NumberType 'local', 'mobile', 'toll_free', or 'national'.
-	NumberType string `json:"number_type"`
+	// Locality City or area the carrier lists for this number, such as Phoenix or London; null when unknown.
+	Locality *string `json:"locality,omitempty"`
 
-	// Provider The carrier these requirements come from.
-	Provider string `json:"provider"`
+	// MonthlyCents Monthly number rental in USD cents, charged from organization credits.
+	MonthlyCents int `json:"monthly_cents"`
 
-	// Required False when the carrier needs no verification for this combination.
-	Required bool `json:"required"`
+	// NumberType Local, mobile, national, or toll-free number type.
+	NumberType QuoteOfferNumberType `json:"number_type"`
 
-	// SubjectType 'person' or 'business'.
-	SubjectType RequirementsSubjectType `json:"subject_type"`
+	// QuoteId Organization-bound quote identifier to pass to POST /numbers before expiry.
+	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
 
-	// SubjectTypes Subject types the carrier accepts here, so you can offer the choice.
-	SubjectTypes *[]RequirementsSubjectTypes `json:"subject_types,omitempty"`
+	// Readiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
+	Readiness QuoteOfferReadiness `json:"readiness"`
+
+	// Region State, province or region the carrier lists, such as AZ or England; null when unknown.
+	Region *string `json:"region,omitempty"`
+
+	// RegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
+	RegulatoryFriction *QuoteOfferRegulatoryFriction `json:"regulatory_friction,omitempty"`
+
+	// Requirements Carrier regulatory requirement labels associated with this offer.
+	Requirements *[]string `json:"requirements,omitempty"`
+
+	// SetupCents One-time setup charge in USD cents, payable with the first month.
+	SetupCents int `json:"setup_cents"`
+
+	// Verification Your organization's verification for this offer's country and number type that is not cancelled or rejected; null when there is none.
+	Verification *OfferVerification `json:"verification,omitempty"`
 }
 
-// RequirementsSubjectType 'person' or 'business'.
-type RequirementsSubjectType string
+// QuoteOfferNumberType Local, mobile, national, or toll-free number type.
+type QuoteOfferNumberType string
 
-// RequirementsSubjectTypes defines model for Requirements.SubjectTypes.
-type RequirementsSubjectTypes string
+// QuoteOfferReadiness Whether regulatory preflight permits purchase for this organization; rechecked at purchase.
+type QuoteOfferReadiness string
+
+// QuoteOfferRegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
+type QuoteOfferRegulatoryFriction string
 
 // SenderIdPatch defines model for SenderIdPatch.
 type SenderIdPatch struct {
@@ -2974,7 +2845,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) always uses 'HAIL' when that carrier is Twilio. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -3003,6 +2874,12 @@ type SmsFee struct {
 
 	// MonthlyCents Charged each month while approved.
 	MonthlyCents int `json:"monthly_cents"`
+}
+
+// SmsFees defines model for SmsFees.
+type SmsFees struct {
+	Business SmsFee `json:"business"`
+	Person   SmsFee `json:"person"`
 }
 
 // SmsListResponse defines model for SmsListResponse.
@@ -3121,6 +2998,40 @@ type ValidationError_Loc_Item struct {
 	union json.RawMessage
 }
 
+// VerificationRequirements What the carrier needs for one (country, number type, subject type),
+// as the public API shows it: without the carrier's name.
+type VerificationRequirements struct {
+	// AddressRequired True when an address must be collected.
+	AddressRequired *bool `json:"address_required,omitempty"`
+
+	// CountryCode ISO alpha-2 country code.
+	CountryCode string `json:"country_code"`
+
+	// Documents Documents to collect. Skip slots with `needs_input` false.
+	Documents *[]DocumentSlot `json:"documents,omitempty"`
+
+	// Fields Values to collect about the person or business.
+	Fields *[]FieldSpec `json:"fields,omitempty"`
+
+	// NumberType 'local', 'mobile', 'toll_free', or 'national'.
+	NumberType string `json:"number_type"`
+
+	// Required False when the carrier needs no verification for this combination.
+	Required bool `json:"required"`
+
+	// SubjectType 'person' or 'business'.
+	SubjectType VerificationRequirementsSubjectType `json:"subject_type"`
+
+	// SubjectTypes Subject types the carrier accepts here, so you can offer the choice.
+	SubjectTypes *[]VerificationRequirementsSubjectTypes `json:"subject_types,omitempty"`
+}
+
+// VerificationRequirementsSubjectType 'person' or 'business'.
+type VerificationRequirementsSubjectType string
+
+// VerificationRequirementsSubjectTypes defines model for VerificationRequirements.SubjectTypes.
+type VerificationRequirementsSubjectTypes string
+
 // VerificationResponse A carrier verification. Holds state only; no personal data.
 type VerificationResponse struct {
 	// ApprovedAt When the carrier approved it.
@@ -3140,9 +3051,6 @@ type VerificationResponse struct {
 
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
-
-	// Provider The carrier this verification is with.
-	Provider string `json:"provider"`
 
 	// Purpose 'number': permission to buy a number in this country. 'sms': registration to text US numbers from a US number.
 	Purpose string `json:"purpose"`
@@ -3704,8 +3612,10 @@ type GetVerificationRequirementsParams struct {
 	CountryCode string                                        `form:"country_code" json:"country_code"`
 	NumberType  string                                        `form:"number_type" json:"number_type"`
 	SubjectType *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
-	Provider    *string                                       `form:"provider,omitempty" json:"provider,omitempty"`
-	Purpose     *string                                       `form:"purpose,omitempty" json:"purpose,omitempty"`
+
+	// Provider Deprecated and ignored. Hail picks the carrier from quote_id, number_id or its default.
+	Provider *string `form:"provider,omitempty" json:"provider,omitempty"`
+	Purpose  *string `form:"purpose,omitempty" json:"purpose,omitempty"`
 
 	// QuoteId quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
 	QuoteId *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
@@ -3720,7 +3630,7 @@ type GetVerificationRequirementsParamsSubjectType string
 
 // GetSmsRegistrationFeesParams defines parameters for GetSmsRegistrationFees.
 type GetSmsRegistrationFeesParams struct {
-	// NumberId One of your active US local numbers that can text. When given, only the fees that apply to this number are returned.
+	// NumberId One of your active US local numbers that can text. Needed when your US numbers are with more than one carrier.
 	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
 	Authorization *string             `json:"authorization,omitempty"`
 }
@@ -11725,7 +11635,7 @@ func (r CreateVerificationResponse) StatusCode() int {
 type GetVerificationRequirementsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *Requirements
+	JSON200      *VerificationRequirements
 	JSON422      *HTTPValidationError
 }
 
@@ -11748,8 +11658,7 @@ func (r GetVerificationRequirementsResponse) StatusCode() int {
 type GetSmsRegistrationFeesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *map[string]map[string]SmsFee
-	JSON422      *HTTPValidationError
+	JSON200      *SmsFees
 }
 
 // Status returns HTTPResponse.Status
@@ -14769,7 +14678,7 @@ func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificat
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Requirements
+		var dest VerificationRequirements
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -14802,18 +14711,11 @@ func ParseGetSmsRegistrationFeesResponse(rsp *http.Response) (*GetSmsRegistratio
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]map[string]SmsFee
+		var dest SmsFees
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
 
 	}
 

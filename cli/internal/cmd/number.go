@@ -53,7 +53,6 @@ existing number doesn't support.`,
 type numberAcquireFlags struct {
 	country    string
 	numberType string
-	provider   string
 	areaCode   string
 	city       string
 	region     string
@@ -88,8 +87,8 @@ Examples:
   # A local number in Phoenix, Arizona (--region is optional):
   hail numbers acquire --country US --city Phoenix --region AZ
 
-  # A US toll-free number from Telnyx:
-  hail numbers acquire --country US --type toll_free --provider telnyx
+  # A US toll-free number:
+  hail numbers acquire --country US --type toll_free
 
   # Buy one exact offer from an earlier quote:
   hail numbers acquire --country US --quote-id 8b1f0c2e-...`,
@@ -101,7 +100,6 @@ Examples:
 	}
 	cmd.Flags().StringVar(&f.country, "country", "", "ISO 3166-1 alpha-2 country code (e.g. US)")
 	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, toll_free, or national")
-	cmd.Flags().StringVar(&f.provider, "provider", "auto", "Carrier: auto, twilio, telnyx, or didww")
 	cmd.Flags().StringVar(&f.areaCode, "area-code", "", "Area code or first digits of the number, as dialed in the country (e.g. 020, 480)")
 	cmd.Flags().StringVar(&f.city, "city", "", "City name (e.g. London)")
 	cmd.Flags().StringVar(&f.region, "region", "", "Optional, with --city: US state or CA province code (e.g. AZ)")
@@ -123,11 +121,6 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 	default:
 		return helpAndFail(cmd, "--type must be 'local', 'mobile', 'toll_free', or 'national'")
 	}
-	switch f.provider {
-	case "auto", "twilio", "telnyx":
-	default:
-		return helpAndFail(cmd, "--provider must be 'auto', 'twilio', or 'telnyx'")
-	}
 	if f.voice && f.sms {
 		return helpAndFail(cmd, "--voice-only and --sms-only cannot be combined")
 	}
@@ -147,10 +140,8 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		quoteID = id
 	}
 
-	provider := client.NumberAcquireRequestProvider(f.provider)
 	body := client.NumberAcquireRequest{
 		CountryCode: f.country,
-		Provider:    &provider,
 		QuoteId:     quoteID,
 	}
 	if cmd.Flags().Changed("expected-total-cents") {
@@ -199,7 +190,6 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		caps = caps[1:]
 	}
 	nt := client.NumberQuoteRequestNumberType(f.numberType)
-	provider := client.NumberQuoteRequestProvider(f.provider)
 	var areaCode, city, region *string
 	if f.areaCode != "" {
 		areaCode = &f.areaCode
@@ -220,7 +210,6 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 			CountryCode:  f.country,
 			NumberType:   &nt,
 			Capabilities: caps,
-			Provider:     &provider,
 			AreaCode:     areaCode,
 			City:         city,
 			Region:       region,
@@ -232,10 +221,10 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 		return openapi_types.UUID{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
-	var best *client.CarrierOffer
+	var best *client.QuoteOffer
 	for i := range resp.JSON200.Offers {
 		o := &resp.JSON200.Offers[i]
-		if o.QuoteId == nil || o.Readiness != client.CarrierOfferReadiness("ready") {
+		if o.QuoteId == nil || o.Readiness != client.QuoteOfferReadiness("ready") {
 			continue
 		}
 		if best == nil || o.MonthlyCents+o.SetupCents < best.MonthlyCents+best.SetupCents {
@@ -243,7 +232,7 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		}
 	}
 	if best == nil {
-		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type or --provider", f.country, f.numberType)
+		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type", f.country, f.numberType)
 	}
 	return *best.QuoteId, nil
 }
@@ -396,9 +385,6 @@ func printPhoneNumber(opts *Options, n *client.PhoneNumberResponse, banner bool)
 	fmt.Fprintf(opts.Stdout, "  Type:         %s\n", n.NumberType)
 	fmt.Fprintf(opts.Stdout, "  Capabilities: %s\n", strings.Join(n.Capabilities, ", "))
 	fmt.Fprintf(opts.Stdout, "  State:        %s\n", n.ProvisioningState)
-	if n.MessagingServiceSid != nil && *n.MessagingServiceSid != "" {
-		fmt.Fprintf(opts.Stdout, "  Messaging:    %s\n", *n.MessagingServiceSid)
-	}
 	if n.VoiceAgentId != nil {
 		fmt.Fprintf(opts.Stdout, "  Calls:        agent %s\n", n.VoiceAgentId.String())
 	}
@@ -441,7 +427,7 @@ func printPhoneNumberList(opts *Options, body *client.PhoneNumberListResponse) e
 
 type numberRegisterSmsFlags struct {
 	subject  string
-	provider string
+	numberID string
 	fields   []string
 	address  []string
 }
@@ -474,7 +460,12 @@ and GET /v1/verifications/sms-fees.`,
 			if err != nil {
 				return err
 			}
-			body, contentType, err := buildRegisterSmsBody(f.provider, f.subject, fields, address)
+			if f.numberID != "" {
+				if _, err := uuid.Parse(f.numberID); err != nil {
+					return fmt.Errorf("--number-id must be a full UUID")
+				}
+			}
+			body, contentType, err := buildRegisterSmsBody(f.numberID, f.subject, fields, address)
 			if err != nil {
 				return err
 			}
@@ -513,7 +504,7 @@ and GET /v1/verifications/sms-fees.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.subject, "subject", "business", "Who registers: person or business")
-	cmd.Flags().StringVar(&f.provider, "provider", "", "Carrier id of your number, as shown by `hail numbers list`. Omit to let the server choose.")
+	cmd.Flags().StringVar(&f.numberID, "number-id", "", "Id of the US number to register (from `hail numbers list`). Needed when your US numbers are with more than one carrier.")
 	cmd.Flags().StringArrayVar(&f.fields, "field", nil, "Registration field as key=value (repeatable)")
 	cmd.Flags().StringArrayVar(&f.address, "address", nil, "Address part as key=value (repeatable): street, city, region, postal_code, customer_name")
 	return cmd
@@ -534,7 +525,7 @@ func parseKeyValues(pairs []string, flag string) (map[string]string, error) {
 
 // buildRegisterSmsBody builds the multipart body for POST /v1/verifications
 // with purpose=sms. The address always carries country_code US.
-func buildRegisterSmsBody(provider, subject string, fields, address map[string]string) ([]byte, string, error) {
+func buildRegisterSmsBody(numberID, subject string, fields, address map[string]string) ([]byte, string, error) {
 	addr := make(map[string]string, len(address)+1)
 	for k, v := range address {
 		addr[k] = v
@@ -562,8 +553,8 @@ func buildRegisterSmsBody(provider, subject string, fields, address map[string]s
 			return nil, "", fmt.Errorf("build request: %w", err)
 		}
 	}
-	if provider != "" {
-		if err := w.WriteField("provider", provider); err != nil {
+	if numberID != "" {
+		if err := w.WriteField("number_id", numberID); err != nil {
 			return nil, "", fmt.Errorf("build request: %w", err)
 		}
 	}

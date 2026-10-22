@@ -60,7 +60,7 @@ async def seed_quote(
 
 async def buy(db, org, quote):
     return await acquire_offer(
-        db, org, quote.id, country="PT", kind="local", provider="auto", billed=True
+        db, org, quote.id, country="PT", kind="local", billed=True
     )
 
 
@@ -249,22 +249,24 @@ async def test_quote_api_returns_live_recommendation_and_persists_org_scope(
     )
     assert response.status_code == 200, response.text
     result = response.json()
-    # An explicit carrier restricts the offers themselves: a client that buys
-    # the cheapest listed offer must never get one its provider setting rejects.
-    if preference:
-        assert {o["provider"] for o in result["offers"]} == {preference}
-    else:
-        assert {o["provider"] for o in result["offers"]} == {"twilio", "telnyx"}
-    if preference == "twilio" and not ready:
-        assert result["recommended_quote_id"] is None
-        return
+    # ``provider`` is deprecated and ignored: every carrier is compared, and
+    # no offer names its carrier or carries a carrier id.
+    assert len(result["offers"]) == 2
+    for o in result["offers"]:
+        assert not {"provider", "verification_id", "address_id"} & o.keys()
+    assert "unavailable_providers" not in result
+    stored = {
+        (await async_session.get(NumberOffer, UUID(o["quote_id"]))).offer["provider"]
+        for o in result["offers"]
+    }
+    assert stored == {"twilio", "telnyx"}
     recommended = next(
         o for o in result["offers"] if o["quote_id"] == result["recommended_quote_id"]
     )
-    assert recommended["provider"] == ("twilio" if preference == "twilio" else "telnyx")
-
     row = await async_session.get(NumberOffer, UUID(recommended["quote_id"]))
     assert row.organization_id == org
+    # The stored quote keeps the carrier for the purchase.
+    assert row.offer["provider"] == "telnyx"
 
 
 async def test_status_lookup_rejection_does_not_refund_accepted_order(
@@ -667,7 +669,6 @@ async def test_quote_mismatch_is_a_validation_shaped_422(async_session, org_and_
             row.id,
             country="PT",
             kind="mobile",
-            provider="auto",
             billed=True,
         )
     assert exc.value.status_code == 422
@@ -780,7 +781,8 @@ async def test_quote_route_says_when_a_carrier_did_not_answer(
     with caplog.at_level("WARNING", logger="hailhq.api.routes.numbers"):
         result = await _quote(client, key, monkeypatch, [offer], unavailable)
     assert result["incomplete"] is bool(unavailable)
-    assert result["unavailable_providers"] == unavailable
+    # Which carrier did not answer is only in the log.
+    assert "unavailable_providers" not in result
     logged = [r.getMessage() for r in caplog.records if "incomplete" in r.getMessage()]
     if unavailable:
         assert logged == [
@@ -834,7 +836,9 @@ async def test_quote_route_shows_the_live_verification(
     await async_session.commit()
 
     result = await _quote(client, key, monkeypatch, [offer, twilio_offer])
-    by_carrier = {o["provider"]: o for o in result["offers"]}
+    # Offers do not name their carrier; tell them apart by number.
+    by_e164 = {o["e164"]: o for o in result["offers"]}
+    by_carrier = {"telnyx": by_e164[offer.e164], "twilio": by_e164[twilio_offer.e164]}
     assert by_carrier["telnyx"]["verification"] == {
         "id": str(live.id),
         "state": "submitted",
@@ -1008,7 +1012,6 @@ async def test_quote_purchase_of_a_type_missing_from_the_catalog_is_422(
             row.id,
             country="PT",
             kind=None,
-            provider="auto",
             billed=True,
         )
     assert exc.value.status_code == 422

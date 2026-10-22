@@ -16,6 +16,7 @@ from didww.encrypt import Encrypt
 from didww.exceptions import DidwwApiError
 from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -98,13 +99,13 @@ def _slots(
 
 
 def _problems(exc: DidwwApiError) -> list[Problem]:
-    return [
-        Problem(
-            field="",
-            message=e.get("detail") or e.get("title") or "Not accepted by the carrier.",
-        )
+    """One neutral problem; the carrier's own words go in ``raw``."""
+    raw = "; ".join(
+        str(e.get("detail") or e.get("title"))
         for e in exc.errors
-    ] or [Problem(field="", message="Not accepted by the carrier.")]
+        if e.get("detail") or e.get("title")
+    )
+    return [Problem(field="", message=NOT_ACCEPTED, raw=raw or None)]
 
 
 class DidwwVerificationProvider(VerificationProvider):

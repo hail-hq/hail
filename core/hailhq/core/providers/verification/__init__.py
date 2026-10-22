@@ -20,6 +20,7 @@ from hailhq.core.providers.verification.base import (
     UploadedFile,
     VerificationProvider,
     VerificationProviderError,
+    VerificationRequirements,
 )
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "UploadedFile",
     "VerificationProvider",
     "VerificationProviderError",
+    "VerificationRequirements",
     "default_verification_provider_name",
     "get_verification_provider",
     "register_verification_provider",

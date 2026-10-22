@@ -458,8 +458,8 @@ class SmsCreate(ConsentAttestationMixin):
             "ID unchanged (about 110 countries: most of Europe, Africa, the Middle "
             "East, Asia-Pacific and the Caribbean; one table per carrier in "
             "core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or "
-            "the platform default 'HAIL' when none is set; Australia (+61) always "
-            "uses 'HAIL' when that carrier is Twilio. Every other destination, "
+            "the platform default 'HAIL' when none is set; Australia (+61) may "
+            "always use 'HAIL', depending on the carrier. Every other destination, "
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
             "exists the request fails with 422. SMS never uses the shared pool."
@@ -583,9 +583,10 @@ class NumberAcquireRequest(BaseModel):
     quote_id: UUID = Field(
         description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
     )
-    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
-        default="auto",
-        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.",
+    provider: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated and ignored. Hail buys the quoted number from the carrier it picked.",
     )
 
     country_code: str = Field(
@@ -649,9 +650,10 @@ class NumberQuoteRequest(BaseModel):
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
     )
-    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
-        default="auto",
-        description="Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
+    provider: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated and ignored. Hail compares every carrier by readiness, remaining verification effort, and rental and setup costs.",
     )
     area_code: str | None = Field(
         default=None,
@@ -737,10 +739,6 @@ class NumberQuoteRequest(BaseModel):
 
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    provider: str = Field(
-        default="twilio",
-        description="Carrier that owns and routes this number, such as twilio or telnyx.",
-    )
 
     id: UUID = Field(description="Unique identifier for this number.")
     e164: str = Field(description="The phone number, E.164 format.")
@@ -758,10 +756,6 @@ class PhoneNumberResponse(BaseModel):
     )
     is_dedicated: bool = Field(
         description="True if this number is owned by the organization. False for shared-pool numbers."
-    )
-    messaging_service_sid: str | None = Field(
-        default=None,
-        description="Provider messaging-service identifier once SMS has been enabled on this number. Null until then.",
     )
     voice_agent_id: UUID | None = Field(
         default=None,
@@ -2645,7 +2639,6 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(description="Unique identifier for this verification.")
-    provider: str = Field(description="The carrier this verification is with.")
     country_code: str = Field(description="ISO alpha-2 country code.")
     number_type: str = Field(
         description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."

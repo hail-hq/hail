@@ -562,8 +562,8 @@ async def create_agent(*, client: HailClient, **fields: Any) -> dict[str, Any]:
 
 
 # Hail does not tell agents which carrier backs a number, an offer or a
-# verification. The carrier is read server-side from the quote instead.
-# Carrier-issued ids are dropped too: their format names the carrier.
+# verification. The public API no longer returns these keys; this stays as a
+# guard against an older API that still does.
 _CARRIER_KEYS = frozenset(
     {
         "provider",
@@ -631,7 +631,6 @@ async def quote_numbers(
     fields: dict[str, Any] = {
         "country_code": country_code,
         "capabilities": ["voice", "sms"] if capabilities is None else capabilities,
-        "provider": "auto",
     }
     if number_type is not None:
         fields["number_type"] = number_type
@@ -668,7 +667,6 @@ async def acquire_number(
             quote_id=quote_id_,
             country_code=country_code,
             number_type=number_type,
-            provider="auto",
             expected_total_cents=confirm_total_cents,
             idempotency_key=idempotency_key,
         )

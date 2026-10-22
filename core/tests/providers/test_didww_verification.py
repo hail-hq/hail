@@ -14,6 +14,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
+from hailhq.core.providers.verification.base import NOT_ACCEPTED
 from hailhq.core.providers.verification.didww import DidwwVerificationProvider
 from hailhq.core.providers.voice import didww as voice_mod
 from responses import matchers
@@ -422,7 +423,8 @@ async def test_create_draft_validation_failure_discards_everything(provider):
         documents=documents,
     )
     assert result.refs == {}
-    assert [p.message for p in result.problems] == ["Address in Portugal required"]
+    assert [p.message for p in result.problems] == [NOT_ACCEPTED]
+    assert [p.raw for p in result.problems] == ["Address in Portugal required"]
     deleted = [
         c.request.url.split("/v3/")[1]
         for c in responses.calls
@@ -726,7 +728,8 @@ async def test_check_reruns_validation(provider):
     problems = await provider.check(
         {"identity_id": "id-1", "address_id": "addr-1", "requirement_id": REQ_ID}
     )
-    assert [p.message for p in problems] == ["Identity id number missing"]
+    assert [p.message for p in problems] == [NOT_ACCEPTED]
+    assert [p.raw for p in problems] == ["Identity id number missing"]
 
 
 @responses.activate

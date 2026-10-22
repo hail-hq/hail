@@ -18,17 +18,16 @@ import (
 	"github.com/hail-hq/hail/cli/internal/client"
 )
 
-func samplePhoneNumber(idStr, e164 string, caps []string, msgSid *string) client.PhoneNumberResponse {
+func samplePhoneNumber(idStr, e164 string, caps []string) client.PhoneNumberResponse {
 	id := openapi_types.UUID(uuid.MustParse(idStr))
 	return client.PhoneNumberResponse{
-		Id:                  id,
-		E164:                e164,
-		CountryCode:         "US",
-		NumberType:          "local",
-		Capabilities:        caps,
-		ProvisioningState:   "active",
-		IsDedicated:         true,
-		MessagingServiceSid: msgSid,
+		Id:                id,
+		E164:              e164,
+		CountryCode:       "US",
+		NumberType:        "local",
+		Capabilities:      caps,
+		ProvisioningState: "active",
+		IsDedicated:       true,
 	}
 }
 
@@ -43,7 +42,7 @@ type acquireServer struct {
 	buys      int32
 }
 
-func newAcquireServer(t *testing.T, offers []client.CarrierOffer, bought client.PhoneNumberResponse) *acquireServer {
+func newAcquireServer(t *testing.T, offers []client.QuoteOffer, bought client.PhoneNumberResponse) *acquireServer {
 	t.Helper()
 	as := &acquireServer{}
 	as.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +54,8 @@ func newAcquireServer(t *testing.T, offers []client.CarrierOffer, bought client.
 			as.quoteBody = body
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(client.NumberQuotesResponse{
-				Offers:               offers,
-				UnavailableProviders: []string{},
-				ExpiresAt:            time.Now().Add(10 * time.Minute),
+				Offers:    offers,
+				ExpiresAt: time.Now().Add(10 * time.Minute),
 			})
 		case "/v1/numbers":
 			atomic.AddInt32(&as.buys, 1)
@@ -73,17 +71,16 @@ func newAcquireServer(t *testing.T, offers []client.CarrierOffer, bought client.
 	return as
 }
 
-func sampleOffer(quoteID string, monthly, setup int, readiness string) client.CarrierOffer {
+func sampleOffer(quoteID string, monthly, setup int, readiness string) client.QuoteOffer {
 	id := openapi_types.UUID(uuid.MustParse(quoteID))
-	return client.CarrierOffer{
+	return client.QuoteOffer{
 		Capabilities: []string{"voice", "sms"},
 		CountryCode:  "US",
 		E164:         "+14155550000",
 		MonthlyCents: monthly,
 		NumberType:   "local",
-		Provider:     "twilio",
 		QuoteId:      &id,
-		Readiness:    client.CarrierOfferReadiness(readiness),
+		Readiness:    client.QuoteOfferReadiness(readiness),
 		SetupCents:   setup,
 	}
 }
@@ -95,8 +92,8 @@ const (
 )
 
 func TestNumberAcquire_BuysTheCheapestReadyOffer(t *testing.T) {
-	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, nil)
-	srv := newAcquireServer(t, []client.CarrierOffer{
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
+	srv := newAcquireServer(t, []client.QuoteOffer{
 		sampleOffer(quoteNotReady, 10, 0, "verification_required"),
 		sampleOffer(quoteExpensive, 200, 0, "ready"),
 		sampleOffer(quoteCheap, 100, 50, "ready"),
@@ -140,13 +137,13 @@ func TestNumberAcquire_BuysTheCheapestReadyOffer(t *testing.T) {
 	}
 }
 
-func TestNumberAcquire_TypeProviderAndCapabilitiesReachTheQuote(t *testing.T) {
-	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+18005551234", []string{"voice"}, nil)
-	srv := newAcquireServer(t, []client.CarrierOffer{sampleOffer(quoteCheap, 100, 0, "ready")}, bought)
+func TestNumberAcquire_TypeAndCapabilitiesReachTheQuote(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+18005551234", []string{"voice"})
+	srv := newAcquireServer(t, []client.QuoteOffer{sampleOffer(quoteCheap, 100, 0, "ready")}, bought)
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"numbers", "acquire", "--country", "US", "--type", "toll_free", "--provider", "telnyx", "--voice-only",
+		"numbers", "acquire", "--country", "US", "--type", "toll_free", "--voice-only",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -158,8 +155,8 @@ func TestNumberAcquire_TypeProviderAndCapabilitiesReachTheQuote(t *testing.T) {
 	if quote.NumberType == nil || *quote.NumberType != "toll_free" {
 		t.Fatalf("quote NumberType = %v", quote.NumberType)
 	}
-	if quote.Provider == nil || *quote.Provider != "telnyx" {
-		t.Fatalf("quote Provider = %v", quote.Provider)
+	if quote.Provider != nil {
+		t.Fatalf("quote sent a carrier: %v", *quote.Provider)
 	}
 	if len(quote.Capabilities) != 1 || quote.Capabilities[0] != "voice" {
 		t.Fatalf("quote Capabilities = %v", quote.Capabilities)
@@ -168,18 +165,18 @@ func TestNumberAcquire_TypeProviderAndCapabilitiesReachTheQuote(t *testing.T) {
 	if err := json.Unmarshal(srv.buyBody, &body); err != nil {
 		t.Fatalf("buy body: %v", err)
 	}
-	if body.Provider == nil || *body.Provider != "telnyx" {
-		t.Fatalf("buy Provider = %v", body.Provider)
+	if body.Provider != nil {
+		t.Fatalf("buy sent a carrier: %v", *body.Provider)
 	}
 }
 
 func TestNumberAcquire_QuoteIDSkipsTheQuoteRequest(t *testing.T) {
-	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, nil)
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
 	srv := newAcquireServer(t, nil, bought)
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"numbers", "acquire", "--country", "US", "--quote-id", quoteExpensive, "--provider", "twilio",
+		"numbers", "acquire", "--country", "US", "--quote-id", quoteExpensive,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -194,13 +191,13 @@ func TestNumberAcquire_QuoteIDSkipsTheQuoteRequest(t *testing.T) {
 	if body.QuoteId.String() != quoteExpensive {
 		t.Fatalf("QuoteId = %s", body.QuoteId)
 	}
-	if body.Provider == nil || *body.Provider != "twilio" {
-		t.Fatalf("Provider = %v", body.Provider)
+	if body.Provider != nil {
+		t.Fatalf("buy sent a carrier: %v", *body.Provider)
 	}
 }
 
 func TestNumberAcquire_ExpectedTotalCentsIsSentOnlyWhenSet(t *testing.T) {
-	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, nil)
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
 	env := func(srv *acquireServer) map[string]string {
 		return map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL}
 	}
@@ -231,8 +228,8 @@ func TestNumberAcquire_ExpectedTotalCentsIsSentOnlyWhenSet(t *testing.T) {
 }
 
 func TestNumberAcquire_NoReadyOfferDoesNotBuy(t *testing.T) {
-	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil)
-	srv := newAcquireServer(t, []client.CarrierOffer{sampleOffer(quoteNotReady, 100, 0, "verification_required")}, bought)
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"})
+	srv := newAcquireServer(t, []client.QuoteOffer{sampleOffer(quoteNotReady, 100, 0, "verification_required")}, bought)
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -247,7 +244,7 @@ func TestNumberAcquire_NoReadyOfferDoesNotBuy(t *testing.T) {
 }
 
 func TestNumberAcquire_MissingCountryFailsBeforeNetwork(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil))
+	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}))
 
 	_, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -265,11 +262,11 @@ func TestNumberAcquire_MissingCountryFailsBeforeNetwork(t *testing.T) {
 }
 
 func TestNumberAcquire_RejectsBadFlagsBeforeNetwork(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil))
+	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}))
 
 	for _, extra := range [][]string{
 		{"--type", "satellite"},
-		{"--provider", "acme"},
+		{"--provider", "twilio"},
 		{"--quote-id", "not-a-uuid"},
 		{"--voice-only", "--sms-only"},
 	} {
@@ -289,8 +286,8 @@ func TestNumberAcquire_RejectsBadFlagsBeforeNetwork(t *testing.T) {
 
 func TestNumberList_RendersTable(t *testing.T) {
 	items := []client.PhoneNumberResponse{
-		samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+15551110001", []string{"voice", "sms"}, nil),
-		samplePhoneNumber("22222222-2222-2222-2222-222222222221", "+15551110002", []string{"voice"}, nil),
+		samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+15551110001", []string{"voice", "sms"}),
+		samplePhoneNumber("22222222-2222-2222-2222-222222222221", "+15551110002", []string{"voice"}),
 	}
 	srv := newFakeServer(t, http.StatusOK, client.PhoneNumberListResponse{Items: items})
 
@@ -327,8 +324,7 @@ func TestNumberList_Empty(t *testing.T) {
 }
 
 func TestNumberGet_HappyPath(t *testing.T) {
-	sid := "MG0123456789abcdef"
-	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, &sid)
+	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
 	srv := newFakeServer(t, http.StatusOK, resp)
 
 	// Full UUID short-circuits prefix resolution — no list roundtrip.
@@ -345,13 +341,13 @@ func TestNumberGet_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout, "+14155551234") {
 		t.Errorf("stdout missing number: %q", stdout)
 	}
-	if !strings.Contains(stdout, sid) {
-		t.Errorf("stdout missing messaging service sid: %q", stdout)
+	if strings.Contains(stdout, "Messaging:") {
+		t.Errorf("stdout shows a carrier messaging id: %q", stdout)
 	}
 }
 
 func TestNumberGet_RejectsBadShape(t *testing.T) {
-	srv := newFakeServer(t, http.StatusOK, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}, nil))
+	srv := newFakeServer(t, http.StatusOK, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}))
 
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -366,8 +362,7 @@ func TestNumberGet_RejectsBadShape(t *testing.T) {
 }
 
 func TestNumberEnableSms_HappyPath(t *testing.T) {
-	sid := "MG0123456789abcdef"
-	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, &sid)
+	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
 	srv := newFakeServer(t, http.StatusOK, resp)
 
 	stdout, _, err := runRoot(t,
@@ -380,13 +375,13 @@ func TestNumberEnableSms_HappyPath(t *testing.T) {
 	if srv.lastReq.Method != http.MethodPost || srv.lastReq.URL.Path != "/v1/numbers/"+resp.Id.String()+"/enable-sms" {
 		t.Fatalf("unexpected route: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
 	}
-	if !strings.Contains(stdout, sid) {
-		t.Errorf("stdout missing messaging service sid: %q", stdout)
+	if strings.Contains(stdout, "Messaging:") {
+		t.Errorf("stdout shows a carrier messaging id: %q", stdout)
 	}
 }
 
 func TestNumberGet_JSONOutput(t *testing.T) {
-	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"}, nil)
+	resp := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
 	srv := newFakeServer(t, http.StatusOK, resp)
 
 	stdout, _, err := runRoot(t,
@@ -429,7 +424,7 @@ func registerSmsParts(t *testing.T, extra ...string) (map[string]string, string)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"awaiting_review","purpose":"sms","country_code":"US","number_type":"local","provider":"twilio","subject_type":"business","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"id":"11111111-1111-1111-1111-111111111111","state":"awaiting_review","purpose":"sms","country_code":"US","number_type":"local","subject_type":"business","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -450,8 +445,10 @@ func registerSmsParts(t *testing.T, extra ...string) (map[string]string, string)
 
 func TestNumberRegisterSms_PostsPurposeSmsMultipart(t *testing.T) {
 	gotParts, stdout := registerSmsParts(t)
-	if _, ok := gotParts["provider"]; ok {
-		t.Errorf("provider part sent without --provider: %q", gotParts["provider"])
+	for _, part := range []string{"provider", "number_id"} {
+		if _, ok := gotParts[part]; ok {
+			t.Errorf("%s part sent unasked: %q", part, gotParts[part])
+		}
 	}
 	tests := []struct{ part, want string }{
 		{"purpose", "sms"},
@@ -476,10 +473,11 @@ func TestNumberRegisterSms_PostsPurposeSmsMultipart(t *testing.T) {
 	}
 }
 
-func TestNumberRegisterSms_ProviderFlagSendsPart(t *testing.T) {
-	gotParts, _ := registerSmsParts(t, "--provider", "x")
-	if gotParts["provider"] != "x" {
-		t.Errorf("provider part = %q, want x", gotParts["provider"])
+func TestNumberRegisterSms_NumberIDFlagSendsPart(t *testing.T) {
+	const nid = "22222222-2222-2222-2222-222222222222"
+	gotParts, _ := registerSmsParts(t, "--number-id", nid)
+	if gotParts["number_id"] != nid {
+		t.Errorf("number_id part = %q, want %s", gotParts["number_id"], nid)
 	}
 }
 
@@ -501,7 +499,7 @@ func TestNumberConfirmSms_PostsTheCode(t *testing.T) {
 				b, _ := io.ReadAll(r.Body)
 				gotBody = strings.TrimSpace(string(b))
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"` + vid + `","state":"submitted","purpose":"sms","country_code":"US","number_type":"local","provider":"telnyx","subject_type":"person","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
+				_, _ = w.Write([]byte(`{"id":"` + vid + `","state":"submitted","purpose":"sms","country_code":"US","number_type":"local","subject_type":"person","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
 			}))
 			t.Cleanup(srv.Close)
 			stdout, _, err := runRoot(t,
@@ -555,7 +553,7 @@ func TestNumberCancelSms_DeletesTheVerification(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotRoute = r.Method + " " + r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"` + vid + `","state":"cancelled","purpose":"sms","country_code":"US","number_type":"local","provider":"twilio","subject_type":"business","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"id":"` + vid + `","state":"cancelled","purpose":"sms","country_code":"US","number_type":"local","subject_type":"business","created_at":"2026-10-13T00:00:00Z","updated_at":"2026-10-13T00:00:00Z"}`))
 	}))
 	t.Cleanup(srv.Close)
 	stdout, _, err := runRoot(t,

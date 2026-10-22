@@ -626,7 +626,6 @@ class _NumbersResource:
         number_type: NumberType | None = None,
         capabilities: list[Literal["voice", "sms"]] | None = None,
         quote_id: str | UUID | None = None,
-        provider: Literal["auto", "twilio", "telnyx", "didww"] | None = None,
         expected_total_cents: int | None = None,
         idempotency_key: str | None = None,
         area_code: str | None = None,
@@ -641,8 +640,8 @@ class _NumbersResource:
         is a 422). Without one, this calls :meth:`quotes` for ``number_type``
         (default ``"local"``) and ``capabilities`` (default voice and SMS),
         then buys the cheapest ready offer (monthly plus setup). It raises
-        ``HailError`` if no offer is ready to buy. ``provider`` restricts the
-        carrier; ``area_code`` and ``city`` restrict the quote as in
+        ``HailError`` if no offer is ready to buy. ``area_code`` and ``city``
+        restrict the quote as in
         :meth:`quotes`. ``expected_total_cents`` is the monthly plus setup price you
         expect to pay now; the order is refused with 409 if the quote differs.
         ``idempotency_key`` defaults to a fresh UUIDv4 and covers the
@@ -653,7 +652,6 @@ class _NumbersResource:
                 country=country,
                 capabilities=capabilities or ["voice", "sms"],
                 number_type=number_type or "local",
-                provider=provider or "auto",
                 area_code=area_code,
                 city=city,
                 region=region,
@@ -662,7 +660,7 @@ class _NumbersResource:
             if not ready:
                 raise HailError(
                     f"no number ready to buy in {country.upper()}; complete "
-                    "regulatory verification or try another number_type or provider"
+                    "regulatory verification or try another number_type"
                 )
             quote_id = min(
                 ready, key=lambda o: o.monthly_cents + o.setup_cents
@@ -670,8 +668,6 @@ class _NumbersResource:
         body: dict[str, Any] = {"country_code": country, "quote_id": str(quote_id)}
         if number_type is not None:
             body["number_type"] = number_type
-        if provider is not None:
-            body["provider"] = provider
         if expected_total_cents is not None:
             body["expected_total_cents"] = expected_total_cents
         key = idempotency_key or generate_idempotency_key()
@@ -689,7 +685,6 @@ class _NumbersResource:
         country: str,
         capabilities: list[Literal["voice", "sms"]],
         number_type: NumberType | None = None,
-        provider: Literal["auto", "twilio", "telnyx", "didww"] = "auto",
         area_code: str | None = None,
         city: str | None = None,
         region: str | None = None,
@@ -702,14 +697,14 @@ class _NumbersResource:
         offer's ``locality`` and ``region`` tell same-named cities apart.
         ``region`` (US/CA state code, with ``city``) is optional.
 
-        Pass the selected quote_id to acquire (or call acquire without one to buy the cheapest ready offer). A quote is organization-scoped
+        Hail compares every carrier and does not say which one backs an
+        offer. Pass the selected quote_id to acquire (or call acquire without one to buy the cheapest ready offer). A quote is organization-scoped
         and expires; acquisition rechecks it before reserving credits.
         """
         body: dict[str, Any] = {
             "country_code": country.upper(),
             "capabilities": capabilities,
             "number_type": number_type,
-            "provider": provider,
         }
         if area_code is not None:
             body["area_code"] = area_code

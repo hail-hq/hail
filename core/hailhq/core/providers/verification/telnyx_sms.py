@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -239,7 +241,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             brand = await self._api.request("GET", f"/10dlc/brand/{refs['brand_id']}")
             if brand.get("failureReasons"):
                 return ProviderStatus(
-                    state="rejected", reason=str(brand["failureReasons"])
+                    state="rejected",
+                    reason=BRAND_REJECTED,
+                    raw_reason=str(brand["failureReasons"]),
                 )
             person = refs.get("subject_type") == "person"
             verified = brand.get("identityStatus") in _VERIFIED
@@ -294,9 +298,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if status in _REJECTED:
             return ProviderStatus(
                 state="rejected",
-                reason=str(
-                    campaign.get("failureReasons")
-                    or "the carrier rejected the campaign"
+                reason=CAMPAIGN_REJECTED,
+                raw_reason=(
+                    str(campaign["failureReasons"])
+                    if campaign.get("failureReasons")
+                    else None
                 ),
             )
         return ProviderStatus(state="pending")

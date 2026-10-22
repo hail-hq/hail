@@ -20,6 +20,7 @@ from hailhq.core.providers.verification import (
     VerificationProviderError,
     get_verification_provider,
 )
+from hailhq.core.providers.verification.base import NOT_ACCEPTED, VALUE_NOT_ACCEPTED
 from hailhq.core.providers.verification.telnyx import TelnyxVerificationProvider
 
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -331,7 +332,9 @@ async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft(
         documents=docs,
     )
     assert result.refs == {}
-    assert [pr.message for pr in result.problems] == ["File too large"]
+    # Hail's wording for the customer; the carrier's text is kept for the log.
+    assert [pr.message for pr in result.problems] == [NOT_ACCEPTED]
+    assert [pr.raw for pr in result.problems] == ["File too large"]
     # Telnyx lists the first document before the address, so the failed upload
     # happens before any address exists: only the group is deleted.
     deleted = [c.url.path for c in fake.calls if c.method == "DELETE"]
@@ -415,7 +418,7 @@ async def test_check_reports_missing_and_declined_values() -> None:
     assert {p.field for p in problems} == {
         r["requirement_id"] for r in group["regulatory_requirements"]
     }
-    assert any("declined" in p.message for p in problems)
+    assert any(p.message == VALUE_NOT_ACCEPTED for p in problems)
 
 
 async def test_submit_posts_for_approval() -> None:

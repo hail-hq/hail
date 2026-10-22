@@ -20,6 +20,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
+from hailhq.core.providers.verification.base import VALUE_NOT_ACCEPTED
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
@@ -368,8 +369,9 @@ async def test_create_draft_carrier_problems_are_returned_and_draft_is_deleted(
     )
 
     assert result.refs == {}
-    assert [(p.field, p.message) for p in result.problems] == [
-        ("proof_of_identity.first_name", "Name does not match.")
+    # The field stays; the carrier's prose is only in ``raw``.
+    assert [(p.field, p.message, p.raw) for p in result.problems] == [
+        ("proof_of_identity.first_name", VALUE_NOT_ACCEPTED, "Name does not match.")
     ]
     deletes = [c.request.url for c in responses.calls if c.request.method == "DELETE"]
     assert len(deletes) == 5  # bundle, two documents, end user, address

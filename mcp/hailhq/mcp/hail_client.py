@@ -30,7 +30,7 @@ from urllib.parse import quote
 import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
-from hailhq.core.providers.verification import Requirements
+from hailhq.core.providers.verification import VerificationRequirements
 from hailhq.core.regions import NumberRegionsResponse
 from hailhq.core.schemas import (
     AgentCreate,
@@ -572,7 +572,9 @@ class HailClient:
         if number_id is not None:
             params["number_id"] = number_id
         resp = await self._client.get("/verifications/requirements", params=params)
-        return Requirements.model_validate(_decode(resp)).model_dump(mode="json")
+        return VerificationRequirements.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
 
     async def list_verifications(self, *, purpose: str | None = None) -> dict[str, Any]:
         params = {"purpose": purpose} if purpose is not None else None

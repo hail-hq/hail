@@ -41,7 +41,6 @@ async def client() -> HailClient:
 def _verification(vid: str | None = None, state: str = "submitted", **extra) -> dict:
     return {
         "id": vid or str(uuid4()),
-        "provider": "didww",
         "country_code": "GB",
         "number_type": "mobile",
         "subject_type": "person",
@@ -58,7 +57,6 @@ def _verification(vid: str | None = None, state: str = "submitted", **extra) -> 
 
 def _requirements() -> dict:
     return {
-        "provider": "didww",
         "country_code": "GB",
         "number_type": "mobile",
         "subject_type": "person",

@@ -10,6 +10,23 @@ from hailhq.core import telephony_catalog
 from hailhq.core.providers.sms.base import SmsProvisioningError
 
 
+async def _stored_messaging_sid(session, number_id) -> str | None:
+    """The number's messaging service id, read from the DB: the public API
+    no longer returns it."""
+    from uuid import UUID as _UUID
+
+    from hailhq.core.models import PhoneNumber as _PhoneNumber
+    from sqlalchemy import select as _select
+
+    return (
+        await session.execute(
+            _select(_PhoneNumber.messaging_service_sid)
+            .where(_PhoneNumber.id == _UUID(str(number_id)))
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
 @pytest.fixture(autouse=True)
 def pinned_catalog(tmp_path, monkeypatch):
     """Pin the telephony catalog to a fixed fixture so these tests exercise
@@ -70,6 +87,7 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
         reuse_quote=False,
         setup=0,
         expected_total_cents=None,
+        extra=None,
     ):
         org = org or org_and_key[0]
         key = key or org_and_key[2]
@@ -101,6 +119,7 @@ def buy_number(client, async_session, org_and_key, monkeypatch, voice_provider_m
         payload = {"country_code": "US", "quote_id": str(quote.id)}
         if expected_total_cents is not None:
             payload["expected_total_cents"] = expected_total_cents
+        payload.update(extra or {})
         return await client.post(
             "/numbers",
             json=payload,
@@ -172,7 +191,11 @@ async def test_purchase_sets_sms_up_on_sms_capable_number(
     service as soon as it is active."""
     resp = await buy_number()
     assert resp.status_code == 201, resp.text
-    assert resp.json()["messaging_service_sid"] == "MG_test_service"
+    assert "messaging_service_sid" not in resp.json()
+    assert (
+        await _stored_messaging_sid(async_session, resp.json()["id"])
+        == "MG_test_service"
+    )
     sms_mock.attach_number.assert_awaited_once()
     assert (
         sms_mock.attach_number.await_args.kwargs["messaging_service_sid"]
@@ -275,6 +298,55 @@ async def test_release_number_404_other_org(
     voice_provider_mock.release_number.assert_not_awaited()
 
 
+_CARRIER_FIELDS = {"provider", "messaging_service_sid"}
+
+
+async def test_number_responses_do_not_name_the_carrier(
+    buy_number, client, org_and_key
+) -> None:
+    """``provider`` in the body is deprecated: accepted, ignored (the quote
+    is a Twilio one and is bought), and never echoed."""
+    _, _, plaintext = org_and_key
+    auth = {"Authorization": f"Bearer {plaintext}"}
+    resp = await buy_number(extra={"provider": "telnyx"})
+    assert resp.status_code == 201, resp.text
+    assert not _CARRIER_FIELDS & resp.json().keys()
+    got = await client.get(f"/numbers/{resp.json()['id']}", headers=auth)
+    assert got.status_code == 200
+    assert not _CARRIER_FIELDS & got.json().keys()
+    listed = await client.get("/numbers", headers=auth)
+    assert [n["id"] for n in listed.json()["items"]] == [resp.json()["id"]]
+    assert not _CARRIER_FIELDS & listed.json()["items"][0].keys()
+
+
+async def test_release_on_an_unsupported_carrier_does_not_name_it(
+    client, async_session, org_and_key, caplog
+) -> None:
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, plaintext = org_and_key
+    number = PhoneNumber(
+        organization_id=org_id,
+        e164="+14155551112",
+        country_code="US",
+        number_type="local",
+        provider="legacyco",
+        provider_resource_id="X1",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.commit()
+    with caplog.at_level("WARNING", logger="hailhq.api.routes.numbers"):
+        resp = await client.delete(
+            f"/numbers/{number.id}",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+    assert resp.status_code == 409
+    assert "legacyco" not in resp.text
+    logged = [r.getMessage() for r in caplog.records if "legacyco" in r.getMessage()]
+    assert len(logged) == 1 and str(number.id) in logged[0]
+
+
 async def test_get_number_not_found(client, org_and_key) -> None:
     _, _, plaintext = org_and_key
     resp = await client.get(
@@ -355,7 +427,11 @@ async def test_enable_sms_creates_messaging_service_and_attaches(
         f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["messaging_service_sid"] == "MG_new_service"
+    assert "messaging_service_sid" not in resp.json()
+    assert (
+        await _stored_messaging_sid(async_session, resp.json()["id"])
+        == "MG_new_service"
+    )
     sms_mock.attach_number.assert_awaited_once_with(
         messaging_service_sid="MG_new_service", provider_resource_id="PN_sms_ok"
     )
@@ -437,7 +513,10 @@ async def test_enable_sms_reuses_existing_org_messaging_service(
         headers={"Authorization": f"Bearer {plaintext}"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["messaging_service_sid"] == "MG_org_shared"
+    assert "messaging_service_sid" not in resp.json()
+    assert (
+        await _stored_messaging_sid(async_session, resp.json()["id"]) == "MG_org_shared"
+    )
     # The org's existing service SID was passed through, not None → no new service.
     sms_mock.ensure_messaging_service.assert_awaited_once_with(
         organization_id=org_id, existing_sid="MG_org_shared"
@@ -472,7 +551,8 @@ async def test_enable_sms_is_idempotent_when_already_enabled(
         f"/numbers/{pn.id}/enable-sms", headers={"Authorization": f"Bearer {plaintext}"}
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["messaging_service_sid"] == "MG_done"
+    assert "messaging_service_sid" not in resp.json()
+    assert await _stored_messaging_sid(async_session, resp.json()["id"]) == "MG_done"
     sms_mock.ensure_messaging_service.assert_awaited_once_with(
         organization_id=org_id, existing_sid="MG_done"
     )
