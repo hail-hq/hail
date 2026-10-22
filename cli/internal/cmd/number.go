@@ -224,7 +224,8 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 	var best *client.QuoteOffer
 	for i := range resp.JSON200.Offers {
 		o := &resp.JSON200.Offers[i]
-		if o.QuoteId == nil || o.Readiness != client.QuoteOfferReadiness("ready") {
+		// A by-request offer is never bought here: support orders it.
+		if o.QuoteId == nil || o.Readiness != client.QuoteOfferReadiness("ready") || (o.ByRequest != nil && *o.ByRequest) {
 			continue
 		}
 		if best == nil || o.MonthlyCents+o.SetupCents < best.MonthlyCents+best.SetupCents {

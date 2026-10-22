@@ -656,7 +656,12 @@ class _NumbersResource:
                 city=city,
                 region=region,
             )
-            ready = [o for o in offers.offers if o.readiness == "ready" and o.quote_id]
+            # A by_request offer is never bought here: support orders it.
+            ready = [
+                o
+                for o in offers.offers
+                if o.readiness == "ready" and o.quote_id and not o.by_request
+            ]
             if not ready:
                 raise HailError(
                     f"no number ready to buy in {country.upper()}; complete "

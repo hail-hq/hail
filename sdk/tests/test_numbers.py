@@ -81,6 +81,27 @@ async def test_numbers_acquire_buys_the_cheapest_ready_offer(
 
 
 @respx.mock
+async def test_numbers_acquire_never_buys_a_by_request_offer(
+    base_url: str, api_key: str
+) -> None:
+    asked, real = uuid4(), uuid4()
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response(
+            [
+                {**_offer(asked, 10), "e164": None, "by_request": True},
+                _offer(real, 100),
+            ]
+        )
+    )
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(201, json=make_phone_number_response())
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.numbers.acquire(country="US", idempotency_key="idem-fixed")
+    assert json.loads(route.calls.last.request.content)["quote_id"] == str(real)
+
+
+@respx.mock
 async def test_numbers_acquire_passes_type_and_capabilities_to_quotes(
     base_url: str, api_key: str
 ) -> None:

@@ -2039,8 +2039,9 @@ paths:
           description: The quote does not exist for this organization.
         "422":
           description:
-            quote_id is missing (request one from POST /numbers/quotes) or the
-            quote does not match the country or type.
+            quote_id is missing (request one from POST /numbers/quotes), the
+            quote does not match the country or type, or the offer is by_request
+            (ask support for it).
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -2489,7 +2490,18 @@ paths:
 
         messaging registration requirements. `provider` is ignored: Hail compares
 
-        every carrier."
+        every carrier.
+
+
+        A number support orders by hand comes back as an offer with
+
+        `by_request: true` and no `e164`, after the offers you can buy. It is never
+
+        recommended and POST /numbers refuses it: ask support. Its `quote_id`
+
+        works for GET /verifications/requirements and POST /verifications. Without
+
+        `area_code` or `city` only."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -8293,9 +8305,13 @@ components:
     QuoteOffer:
       properties:
         e164:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: E164
-          description: Available phone number in E.164 format.
+          description:
+            "Available phone number in E.164 format. Null for a by-request
+            offer: support picks the number when it orders it."
         country_code:
           type: string
           title: Country Code
@@ -8399,6 +8415,14 @@ components:
           description: Your organization's verification for this offer's country
             and number type that is not cancelled or rejected; null when there is
             none.
+        by_request:
+          type: boolean
+          title: By Request
+          description:
+            "True when support orders this number by hand: it cannot be bought
+            with POST /numbers. Ask support for it. Its quote_id still works for
+            verification."
+          default: false
       type: object
       required:
         - e164

@@ -4,19 +4,22 @@ A customer clicked **Ask support for a number** in the console: an email to
 hi@hail.so with the subject `Number request: <CC> <type>` (for example
 `Number request: PT national`). These are rows with `by_request: true` in
 [`costs/didww.json`](../../costs/didww.json): DIDWW picks the number when the
-order is placed, so Hail cannot quote and sell it
+order is placed, so Hail cannot sell it through the API
 ([didww.md](../public/self-host/didww.md#numbers-hail-cannot-sell)).
+`POST /numbers/quotes` still returns it as an offer with `by_request: true`,
+no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
 
 1. Reply with the price from the catalog row (`usd_per_month`, `setup_usd`)
    and ask for the organization id (console → Settings). `usd_per_month` is
    the cheapest area; when `notes` says the price varies, quote the area the
    customer wants.
 2. If the row has `verification_required: true`, the customer first files
-   their papers. The console's **Verify** button needs an offer, and these
-   rows have none, so they file through the API: `GET
-/v1/verifications/requirements` then `POST /v1/verifications` with
-   `provider=didww` ([OpenAPI](../../openapi/openapi.yaml)). Wait for the Hail
-   verification to be `approved`.
+   their papers. In the console: **Verify** on the by-request offer. Through
+   the API: get the offer's `quote_id` from `POST /v1/numbers/quotes` (the
+   offer with `by_request: true`), then `GET /v1/verifications/requirements`
+   and `POST /v1/verifications` with that `quote_id`
+   ([OpenAPI](../../openapi/openapi.yaml)). Hail files it with DIDWW. Wait for
+   the Hail verification to be `approved`.
 3. Order in the DIDWW panel: **my.didww.com → Buy Numbers → \<country\> →
    \<type\>**, pick the area, quantity 1, metered plan (0 channels). Link the
    customer's approved address when DIDWW asks. Note the DID id and the

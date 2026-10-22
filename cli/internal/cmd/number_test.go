@@ -76,7 +76,7 @@ func sampleOffer(quoteID string, monthly, setup int, readiness string) client.Qu
 	return client.QuoteOffer{
 		Capabilities: []string{"voice", "sms"},
 		CountryCode:  "US",
-		E164:         "+14155550000",
+		E164:         strPtr("+14155550000"),
 		MonthlyCents: monthly,
 		NumberType:   "local",
 		QuoteId:      &id,
@@ -134,6 +134,29 @@ func TestNumberAcquire_BuysTheCheapestReadyOffer(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "+14155551234") || !strings.Contains(stdout, "voice, sms") {
 		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+func TestNumberAcquire_SkipsAByRequestOffer(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice", "sms"})
+	byRequest := sampleOffer(quoteNotReady, 10, 0, "ready")
+	byRequest.E164 = nil
+	yes := true
+	byRequest.ByRequest = &yes
+	srv := newAcquireServer(t, []client.QuoteOffer{byRequest, sampleOffer(quoteCheap, 100, 0, "ready")}, bought)
+
+	if _, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "US",
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.NumberAcquireRequest
+	if err := json.Unmarshal(srv.buyBody, &body); err != nil {
+		t.Fatalf("buy body: %v; raw=%s", err, srv.buyBody)
+	}
+	if body.QuoteId.String() != quoteCheap {
+		t.Fatalf("bought quote %s, want %s (a by-request offer is never bought)", body.QuoteId, quoteCheap)
 	}
 }
 

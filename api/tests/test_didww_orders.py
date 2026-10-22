@@ -989,3 +989,149 @@ async def test_quote_provider_is_ignored(client, org_and_key, monkeypatch):
     # ``provider`` is deprecated and ignored: every carrier is searched for
     # the kinds its own catalog lists.
     assert searched == {"local": ["twilio"], "national": ["didww"]}
+
+
+@pytest.fixture()
+def by_request_catalog(tmp_path):
+    """PT national: Twilio sells it with a quote, DIDWW lists it by request."""
+    row = {
+        "country_code": "PT",
+        "number_type": "national",
+        "usd_per_month": "3.50",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+    }
+    (tmp_path / "twilio.json").write_text(
+        json.dumps({"numbers": [row], "a2p_10dlc": []})
+    )
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {"numbers": [{**row, "by_request": True, "verification_required": True}]}
+        )
+    )
+    telephony_catalog._load.cache_clear()
+
+
+@pytest.fixture()
+def didww_verification(monkeypatch):
+    """A configured DIDWW verification plug-in (a fake) for quotes and the
+    verification routes."""
+    from hailhq.api.main import app
+    from hailhq.api.routes.verifications import get_verification_registry
+
+    from .test_verifications_api import FakeCarrier
+
+    fake = FakeCarrier()
+
+    def registry(name, purpose="number"):
+        return fake if name == "didww" and purpose == "number" else None
+
+    monkeypatch.setattr("hailhq.api.routes.numbers.get_verification_provider", registry)
+    app.dependency_overrides[get_verification_registry] = lambda: registry
+    yield fake
+    app.dependency_overrides.pop(get_verification_registry, None)
+
+
+async def _quote_pt_national(client, key, monkeypatch, live: list[CarrierOffer]):
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=(live, [])),
+    )
+    resp = await client.post(
+        "/numbers/quotes",
+        json={
+            "country_code": "PT",
+            "number_type": "national",
+            "capabilities": ["voice"],
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@pytest.mark.usefixtures("by_request_catalog")
+async def test_quotes_list_a_by_request_offer_after_the_offers_to_buy(
+    client, async_session, org_and_key, monkeypatch, didww_verification
+):
+    """Twilio sells PT national with a quote and DIDWW lists it by request:
+    both come back. The by-request one has no number, is never recommended,
+    and has a stored quote with the DIDWW carrier."""
+    _, _, key = org_and_key
+    twilio = CarrierOffer(
+        provider="twilio",
+        e164="+351300000009",
+        country_code="PT",
+        number_type="national",
+        capabilities=["voice"],
+        monthly_cents=400,
+        setup_cents=0,
+        readiness="ready",
+    )
+    body = await _quote_pt_national(client, key, monkeypatch, [twilio])
+    assert [o["by_request"] for o in body["offers"]] == [False, True]
+    asked = body["offers"][1]
+    assert asked["e164"] is None
+    assert asked["readiness"] == "verification_required"
+    assert asked["monthly_cents"] == 350
+    assert asked["quote_id"]
+    assert "provider" not in asked
+    assert body["recommended_quote_id"] == body["offers"][0]["quote_id"]
+    stored = (
+        await async_session.execute(
+            select(NumberOffer.offer).where(NumberOffer.id == asked["quote_id"])
+        )
+    ).scalar_one()
+    assert stored["provider"] == "didww" and stored["by_request"] is True
+
+
+@pytest.mark.usefixtures("by_request_catalog")
+async def test_by_request_quote_files_a_verification_with_didww_and_is_not_sold(
+    client, async_session, org_and_key, monkeypatch, didww_verification
+):
+    from .test_verifications_api import _passport, _row_provider, _submission
+
+    _, _, key = org_and_key
+    auth = {"Authorization": f"Bearer {key}"}
+    body = await _quote_pt_national(client, key, monkeypatch, [])
+    (asked,) = body["offers"]
+    assert asked["by_request"] is True
+    assert body["recommended_quote_id"] is None
+    quote_id = asked["quote_id"]
+    params = {"country_code": "PT", "number_type": "national"}
+
+    resp = await client.get(
+        "/verifications/requirements",
+        params={**params, "quote_id": quote_id},
+        headers=auth,
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/verifications",
+        data=_submission(quote_id=quote_id, provider="", **params),
+        files=_passport(),
+        headers=auth,
+    )
+    assert resp.status_code == 201, resp.text
+    assert await _row_provider(async_session, resp.json()["id"]) == "didww"
+
+    # Without the quote_id there is no carrier to pick: 422.
+    resp = await client.get("/verifications/requirements", params=params, headers=auth)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["query", "quote_id"]
+
+    # Support orders it by hand: the API never buys it.
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "PT", "number_type": "national", "quote_id": quote_id},
+        headers=auth,
+    )
+    assert resp.status_code == 422, resp.text
+    assert "Ask support" in resp.json()["detail"][0]["msg"]
+    assert resp.json()["detail"][0]["loc"] == ["body", "quote_id"]
+    assert (
+        await async_session.execute(
+            select(NumberOffer.number_id).where(NumberOffer.id == quote_id)
+        )
+    ).scalar_one() is None

@@ -238,9 +238,10 @@ class OfferVerification(BaseModel):
 
 
 class NumberOffer(BaseModel):
-    """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml."""
+    """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml.
+    ``by_request`` offers have no ``e164`` and cannot be bought: ask support."""
 
-    e164: str
+    e164: str | None
     country_code: str
     number_type: NumberType
     capabilities: list[str]
@@ -256,6 +257,7 @@ class NumberOffer(BaseModel):
     region: str | None = None
     quote_id: UUID | None = None
     verification: OfferVerification | None = None
+    by_request: bool = False
 
 
 class NumberRegion(BaseModel):

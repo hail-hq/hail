@@ -25,7 +25,9 @@ class QuoteOffer(BaseModel):
     """One number offer as the public API shows it. It never names the
     carrier or carries a carrier-issued id: Hail picks the carrier."""
 
-    e164: str = Field(description="Available phone number in E.164 format.")
+    e164: str | None = Field(
+        description="Available phone number in E.164 format. Null for a by-request offer: support picks the number when it orders it."
+    )
     country_code: str = Field(description="ISO alpha-2 country code of the number.")
     number_type: NumberType = Field(
         description="Local, mobile, national, or toll-free number type."
@@ -70,6 +72,10 @@ class QuoteOffer(BaseModel):
     verification: OfferVerification | None = Field(
         default=None,
         description="Your organization's verification for this offer's country and number type that is not cancelled or rejected; null when there is none.",
+    )
+    by_request: bool = Field(
+        default=False,
+        description="True when support orders this number by hand: it cannot be bought with POST /numbers. Ask support for it. Its quote_id still works for verification.",
     )
 
 

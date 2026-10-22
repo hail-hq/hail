@@ -462,6 +462,13 @@ async def acquire_offer(
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
+    if offer.by_request:
+        # Support orders it by hand: no carrier order here, ever.
+        raise unprocessable(
+            "This number is set up by our team, not bought through the API. "
+            "Ask support for it. Its quote_id still works for verification.",
+            loc=["body", "quote_id"],
+        )
     if offer.country_code != country or (
         kind is not None and offer.number_type != kind
     ):

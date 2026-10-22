@@ -50,6 +50,7 @@ from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
+    by_request_offers,
     discover_offers,
     rank_offers,
 )
@@ -106,8 +107,9 @@ async def _get_org_number_or_404(
         404: {"description": "The quote does not exist for this organization."},
         422: {
             "description": (
-                "quote_id is missing (request one from POST /numbers/quotes) or "
-                "the quote does not match the country or type."
+                "quote_id is missing (request one from POST /numbers/quotes), "
+                "the quote does not match the country or type, or the offer is "
+                "by_request (ask support for it)."
             ),
         },
         402: {
@@ -695,18 +697,26 @@ async def quote_numbers(
     Blocked offers sort by verification effort. SMS capability does not waive
     messaging registration requirements. `provider` is ignored: Hail compares
     every carrier.
+
+    A number support orders by hand comes back as an offer with
+    `by_request: true` and no `e164`, after the offers you can buy. It is never
+    recommended and POST /numbers refuses it: ask support. Its `quote_id`
+    works for GET /verifications/requirements and POST /verifications. Without
+    `area_code` or `city` only.
     """
 
-    # Only number types some carrier's catalog lists can be bought, so only
-    # those are searched. ``body.provider`` is deprecated and ignored.
+    # Only number types some carrier's catalog lists, for sale or by request,
+    # are searched. ``body.provider`` is deprecated and ignored.
     if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type, "auto")
+        if not _listed_by_request(body.country_code, body.number_type):
+            catalog_capabilities(body.country_code, body.number_type, "auto")
         kinds = [body.number_type]
     else:
         kinds = [
             k
             for k in ("local", "mobile", "national", "toll_free")
             if telephony_catalog.capabilities(body.country_code, k, "auto") is not None
+            or _listed_by_request(body.country_code, k)
         ]
         if not kinds:
             raise unprocessable(
@@ -739,7 +749,26 @@ async def quote_numbers(
             for kind in kinds
         )
     )
-    offers = rank_offers([offer for batch, _ in batches for offer in batch])
+    # Numbers support orders by hand: catalog offers, not live stock, so a
+    # place search (area code or city) leaves them out. Only carriers Hail
+    # can file a verification with.
+    by_request = (
+        []
+        if body.area_code or body.city
+        else [
+            offer
+            for kind in kinds
+            for offer in by_request_offers(
+                body.country_code,
+                kind,
+                body.capabilities,
+                [p for p in PROVIDERS if get_verification_provider(p) is not None],
+            )
+        ]
+    )
+    offers = rank_offers(
+        [offer for batch, _ in batches for offer in batch] + by_request
+    )
     unavailable = sorted({p for _, failures in batches for p in failures})
     if unavailable:
         logger.warning(
@@ -766,8 +795,19 @@ async def quote_numbers(
         offer.verification = verifications.get(
             (offer.provider, offer.country_code, offer.number_type)
         )
+        if (
+            offer.by_request
+            and offer.verification is not None
+            and offer.verification.state == "approved"
+        ):
+            # The catalog says verification is needed; this org has it.
+            offer.readiness, offer.regulatory_friction = "ready", "none"
+            offer.requirements = []
     await db.commit()
-    recommended = next((o for o in offers if o.readiness == "ready"), None)
+    # Never a by-request offer: it cannot be bought here.
+    recommended = next(
+        (o for o in offers if o.readiness == "ready" and not o.by_request), None
+    )
     # The public offer drops the carrier and its ids; the stored quote above
     # keeps them for the purchase.
     return NumberQuotesResponse(
@@ -775,6 +815,14 @@ async def quote_numbers(
         recommended_quote_id=recommended.quote_id if recommended else None,
         incomplete=bool(unavailable),
         expires_at=expires,
+    )
+
+
+def _listed_by_request(country: str, kind: str) -> bool:
+    """True when some carrier lists this kind of number by request only."""
+    return any(
+        telephony_catalog.by_request_row(country, kind, p) is not None
+        for p in PROVIDERS
     )
 
 

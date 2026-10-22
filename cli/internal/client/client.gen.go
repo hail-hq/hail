@@ -2767,6 +2767,9 @@ type ProviderValidateResult struct {
 // QuoteOffer One number offer as the public API shows it. It never names the
 // carrier or carries a carrier-issued id: Hail picks the carrier.
 type QuoteOffer struct {
+	// ByRequest True when support orders this number by hand: it cannot be bought with POST /numbers. Ask support for it. Its quote_id still works for verification.
+	ByRequest *bool `json:"by_request,omitempty"`
+
 	// Capabilities Voice/SMS capabilities reported by live carrier inventory; SMS registration may still be required.
 	Capabilities []string `json:"capabilities"`
 
@@ -2776,8 +2779,8 @@ type QuoteOffer struct {
 	// Currency Currency of the quoted rental and setup amounts.
 	Currency *string `json:"currency,omitempty"`
 
-	// E164 Available phone number in E.164 format.
-	E164 string `json:"e164"`
+	// E164 Available phone number in E.164 format. Null for a by-request offer: support picks the number when it orders it.
+	E164 *string `json:"e164"`
 
 	// Locality City or area the carrier lists for this number, such as Phoenix or London; null when unknown.
 	Locality *string `json:"locality,omitempty"`

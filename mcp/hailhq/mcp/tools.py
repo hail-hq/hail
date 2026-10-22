@@ -2267,6 +2267,10 @@ def register_tools(
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
 
+        An offer with ``by_request: true`` has no ``e164``: support orders
+        that number by hand. acquire_number refuses it; tell the user to ask
+        support. Its ``quote_id`` still works for verification.
+
         Errors come back as ``{"error": "<message>"}``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
