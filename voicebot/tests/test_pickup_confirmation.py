@@ -321,3 +321,29 @@ def test_probe_line_covers_every_supported_language():
     assert confirmation.probe_line(None) == "Can you hear me?"
     assert confirmation.probe_line("xx") == "Can you hear me?"
     assert confirmation.probe_line("sv") == "Hör du mig?"
+
+
+async def test_echo_during_the_probe_is_not_a_reply():
+    """VAD on our own echoed probe must not stop the silence hang-up."""
+    session = Session()
+
+    async def say(*_args, **_kwargs):
+        session.speak()
+        return SimpleNamespace(interrupted=False)
+
+    session.say = AsyncMock(side_effect=say)
+    llm = Classifier('{"label":"human"}')
+    result, heard = await (await start(session, llm))
+    assert result.reason == confirmation.UNANSWERED_REASON
+    assert heard is True
+    assert llm.calls == []
+    assert_detached(session)
+
+
+async def test_speech_still_going_after_the_probe_counts():
+    session = Session()
+    session.user_state = "speaking"
+    llm = Classifier('{"label":"human"}')
+    result, _heard = await (await start(session, llm))
+    assert result.reason == confirmation.HEARD_REASON
+    assert_detached(session)

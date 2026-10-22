@@ -185,7 +185,6 @@ async def confirm_pickup(
         return category or AMDCategory.UNCERTAIN
 
     session.on("user_input_transcribed", transcribed)
-    session.on("user_state_changed", user_state)
     session.on("close", on_close)
     try:
         try:
@@ -201,6 +200,11 @@ async def confirm_pickup(
             # A TTS failure is not silence on the line. Talk.
             logger.warning("pickup probe unavailable (%s)", type(exc).__name__)
             return prediction(AMDCategory.UNCERTAIN, UNAVAILABLE_REASON)
+        # VAD during the probe may be our own voice echoed back, so it only
+        # counts once the probe ends: an interruption, or speech still going.
+        if not probe_heard or getattr(session, "user_state", None) == "speaking":
+            heard.set()
+        session.on("user_state_changed", user_state)
         if not heard.is_set():
             try:
                 async with asyncio.timeout(RESPONSE_TIMEOUT_SECONDS):
