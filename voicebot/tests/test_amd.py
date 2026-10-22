@@ -412,6 +412,64 @@ async def test_explicit_unavailable_verdict_is_preserved_after_recheck(monkeypat
     assert result.category == AMDCategory.MACHINE_UNAVAILABLE
 
 
+@pytest.mark.parametrize("verification", ["machine-ivr", "uncertain", "provider-error"])
+async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, verification: str
+) -> None:
+    """Call 435dd50f: the menu arrived one second after the unavailable verdict.
+
+    Exercise the real AMD verification and entrypoint outcome together. A
+    missing recheck, or preserving an unverified unavailable verdict, must
+    terminate this call and fail the test.
+    """
+    welcome = (
+        "Thank you for calling Atlantis Paradise Island, Bahamas. Your call may "
+        "be recorded for quality assurance and training purposes."
+    )
+    menu = (
+        "Please listen carefully as our menu options have recently changed. "
+        "For existing reservations made directly with Atlantis, please press one. "
+        "To make a new reservation, please press two."
+    )
+    original = _prediction("machine-unavailable")
+    original.transcript = welcome
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+
+    async def detect(session, call_id, **kwargs):
+        session.stt = object()
+        session.llm = _GreetingLLM(verification)
+        if verification == "provider-error":
+            session.llm.chat = Mock(side_effect=RuntimeError("classifier failed"))
+        session._start_ivr_detection = AsyncMock()
+        return await run_amd(session, call_id)
+
+    call_id, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=None, run_amd_override=detect
+    )
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    assert session.say_calls == []
+    assert welcome in session.replies[0]
+    events = await _amd_events(async_session, call_id)
+    assert events[0].payload["category"] == "machine-ivr"
+    assert events[0].payload["reason"] == "unavailable_recheck"
+
+    # The rest of the recording arrives after AMD has returned. It must stay
+    # in menu mode, without speaking a disclosure or starting a hangup.
+    agent = session.start_options["agent"]
+    agent.phone_menu.llm = _GreetingLLM("machine-ivr")
+    session.emit_vad_speaking()
+    session.emit_user_turn(menu)
+    await session.drain_turns()
+    assert agent.phone_menu.active
+    assert agent.phone_menu.can_navigate
+    assert session.say_calls == []
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    await agent.phone_menu.aclose()
+
+
 # --------------------------------------------------------------------------- #
 # entrypoint wiring
 # --------------------------------------------------------------------------- #

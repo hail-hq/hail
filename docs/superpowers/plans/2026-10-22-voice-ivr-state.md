@@ -54,7 +54,7 @@ cannot cancel it.
 
 ## Validation
 
-- Core: 1,275 passed. Voicebot: 420 passed.
+- Core: 1,275 passed. Voicebot: 423 passed (rerun 2026-10-23).
 - Ruff 0.16.10 and Black 26.10.0: whole-repository checks passed.
 - Live text replay: nine classification cases each on Haiku 5.5 and GPT-4.1;
   four menu/closing cases on GPT-4.1. All final cases passed.
@@ -63,3 +63,17 @@ cannot cancel it.
 - No live phone call or production deployment. Unclassified speech greets after
   eight seconds, except untranscribed audio after a recorded menu or hold line
   with no keypress since; this does not add multilingual audio recovery.
+
+## Atlantis regression verification (2026-10-23)
+
+- Call `435dd50f-e5a5-4e3b-8370-59114b392c21` received an unavailable verdict
+  for its Atlantis business welcome before the reservation menu arrived.
+- Added a regression through the real `run_amd` verification and entrypoint:
+  the exact recorded welcome stays silent and connected, and the later menu
+  remains navigable. Covers IVR, uncertain, and failed verification requests.
+- All three cases fail at room deletion when the unavailable verification is
+  disabled, and pass with the existing fix restored. No additional production
+  behavior change was needed for this call.
+- GPT-4.1 text replay: the pickup and verification prompts each correctly
+  classify the exact welcome, the later menu, a full mailbox, voicemail, and a
+  live reservations greeting (10/10 cases). Audio and PSTN remain untested.
