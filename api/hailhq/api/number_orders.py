@@ -98,8 +98,8 @@ async def finish_order(
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
     ``reason`` is stored for a failed order and shown to the buyer; it is
-    Hail's own wording, never the carrier's text (that is logged, and kept
-    as ``carrier_reason`` in the metadata by ``rejected_registration``).
+    Hail's own wording, never the carrier's text (``rejected_registration``
+    keeps that as ``carrier_reason`` in the metadata).
     ``keep_setup`` charges the setup fee even on failure:
     the carrier already billed it and does not refund (the number was
     bought, then its registration was rejected or never cleared)."""
@@ -191,10 +191,10 @@ async def rejected_registration(
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
     verification rejected. Returns the reason shown to the buyer: Hail's own
-    wording. The carrier's text is logged with the org, number and
-    verification ids, and kept in the DB (the audit row's ``carrier_reason``
-    and the number's ``provisioning_metadata['carrier_reason']``). It is
-    never shown to the customer.
+    wording. The carrier's text is kept in the DB only (the audit row's
+    ``carrier_reason`` and the number's
+    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
+    The log line names the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run
     under that lock on purpose: two concurrent reconciles must never both
@@ -233,13 +233,15 @@ async def rejected_registration(
             )
         )
     ).scalar_one_or_none()
+    # Not the carrier's text: a reviewer's note can quote the customer's
+    # papers, and logs leave this server. It is kept in the DB below.
     logger.warning(
-        "carrier rejected the registration of number %s (org %s, "
-        "verification %s): %s",
+        "carrier %s rejected the registration of number %s (org %s, "
+        "verification %s)",
+        number.provider,
         number.id,
         org,
         verification.id if verification is not None else None,
-        raw,
     )
     if raw:
         number.provisioning_metadata = {
@@ -249,7 +251,7 @@ async def rejected_registration(
     if verification is not None:
         verification.state = "rejected"
         # Hail's wording for the customer; the carrier's text is in the
-        # audit row below and in the log above.
+        # audit row below.
         verification.rejection_reason = reason
         verification.updated_at = datetime.now(timezone.utc)
         # Same audit trail as every other system-driven rejection

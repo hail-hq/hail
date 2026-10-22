@@ -264,9 +264,10 @@ async def test_didww_registration_rejected_revokes_approval(
     # The buyer reads Hail's wording; the carrier's text stays server-side.
     assert number.provisioning_metadata["failure_reason"] == NEUTRAL_REJECTION
     assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
-    logged = [
-        r.getMessage() for r in caplog.records if "Document is blurry" in r.getMessage()
-    ]
+    messages = [r.getMessage() for r in caplog.records]
+    # The reviewer's note can quote personal data: kept in the DB, not logged.
+    assert not any("Document is blurry" in m for m in messages)
+    logged = [m for m in messages if "rejected the registration" in m]
     assert len(logged) == 1
     assert str(org) in logged[0] and str(number.id) in logged[0]
     assert str(verification.id) in logged[0]

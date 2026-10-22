@@ -4,8 +4,8 @@ carrier did not take at creation.
 
 Files and details pass through this process in memory to the carrier. Nothing
 identifying is written to the database, disk or logs (see the design spec).
-One exception: when the carrier refuses something, its own error text is
-logged (with the org and verification ids) and kept in the audit log, never
+One exception: when the carrier rejects a verification, its own reason is
+kept in the audit row (``payload.carrier_reason``), never in logs and never
 shown to the customer. That text can quote a value the customer sent.
 The multipart body is parsed here with an in-memory parser and a hard size cap,
 so no part is ever spooled to a temporary file.
@@ -229,31 +229,35 @@ def _provider_or_404(
     return provider
 
 
-def _log_carrier_text(
-    problems: list[Problem], organization_id: UUID, verification_id: UUID | None
+def _log_carrier_refusal(
+    problems: list[Problem],
+    organization_id: UUID,
+    verification_id: UUID | None,
+    carrier: str,
 ) -> None:
-    """Log the carrier's own words for each problem. Only for the operator:
-    the customer gets ``Problem.message``."""
+    """Log which fields the carrier refused, for the operator. Never the
+    carrier's own text: it can quote the customer's personal data, and logs
+    leave this server. The customer gets ``Problem.message``."""
     for p in problems:
-        if p.raw:
-            logger.warning(
-                "carrier refused verification details (org %s, verification %s, "
-                "field %r): %s",
-                organization_id,
-                verification_id,
-                p.field,
-                p.raw,
-            )
+        logger.warning(
+            "carrier %s refused verification details (org %s, verification %s, "
+            "field %r)",
+            carrier,
+            organization_id,
+            verification_id,
+            p.field,
+        )
 
 
 def _problems_422(
     problems: list[Problem],
     organization_id: UUID,
+    carrier: str,
     verification_id: UUID | None = None,
 ) -> HTTPException:
     """422 with one entry per problem: the field as ``loc`` and Hail's own
-    wording as ``msg``. The carrier's text is logged, never returned."""
-    _log_carrier_text(problems, organization_id, verification_id)
+    wording as ``msg``. The carrier's text is neither returned nor logged."""
+    _log_carrier_refusal(problems, organization_id, verification_id, carrier)
     return HTTPException(
         status_code=422,
         detail=[
@@ -415,13 +419,13 @@ async def _audit_carrier_rejection(
     row: CarrierVerification, raw_reason: str | None
 ) -> None:
     """The carrier rejected a submitted verification. The row holds Hail's
-    wording for the customer; the carrier's own text is logged and kept in
-    the audit row."""
+    wording for the customer; the carrier's own text is kept in the audit
+    row only (it can quote personal data, so it is not logged)."""
     logger.warning(
-        "carrier rejected verification %s (org %s): %s",
+        "carrier %s rejected verification %s (org %s)",
+        row.provider,
         row.id,
         row.organization_id,
-        raw_reason,
     )
     await write_audit_log(
         row.organization_id,
@@ -909,7 +913,7 @@ async def create_verification(
             detail="carrier unavailable; try again later",
         ) from exc
     if draft.problems:
-        raise _problems_422(draft.problems, principal.organization_id)
+        raise _problems_422(draft.problems, principal.organization_id, provider_name)
 
     row = CarrierVerification(
         organization_id=principal.organization_id,
@@ -1054,7 +1058,7 @@ async def _retry_submit(
         await db.rollback()
         return False
     if problems:
-        _log_carrier_text(problems, row.organization_id, row.id)
+        _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
         await _reject_row(
             db,
             row,
@@ -1454,7 +1458,7 @@ async def confirm_verification(
         actor_kind=actor_kind,
     )
     if problems:
-        raise _problems_422(problems, row.organization_id, row.id)
+        raise _problems_422(problems, row.organization_id, row.provider, row.id)
     # File the campaign now rather than on the next poll.
     await _refresh(db, row, registry)
     return _out(row, registry)

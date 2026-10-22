@@ -444,11 +444,11 @@ async def test_create_returns_field_problems_and_stores_nothing(
     assert (await async_session.execute(select(CarrierVerification))).first() is None
 
 
-async def test_carrier_text_is_logged_not_returned(
+async def test_carrier_text_is_neither_returned_nor_logged(
     client, org_and_key, carrier, async_session, caplog
 ) -> None:
-    """The 422 keeps the field and Hail's wording; the carrier's own text
-    goes to the log with the org id."""
+    """The 422 keeps the field and Hail's wording. The log names the carrier,
+    org and field, never the carrier's text (it can quote personal data)."""
     org_id, _, key = org_and_key
     carrier.problems = [
         Problem(
@@ -468,8 +468,12 @@ async def test_carrier_text_is_logged_not_returned(
         }
     ]
     assert "CarrierCo" not in resp.text
-    logged = [r.getMessage() for r in caplog.records if "CarrierCo" in r.getMessage()]
-    assert len(logged) == 1 and str(org_id) in logged[0]
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("CarrierCo" in m for m in messages)
+    logged = [m for m in messages if "refused verification details" in m]
+    assert len(logged) == 1
+    assert str(org_id) in logged[0] and "fake" in logged[0]
+    assert "proof_of_identity.first_name" in logged[0]
 
 
 async def test_public_verification_has_no_provider_admin_does(
@@ -1427,7 +1431,9 @@ async def test_sms_registration_rejected_brand_keeps_fee(
     # The customer reads Hail's wording, never the carrier's.
     assert resp.json()["rejection_reason"] == BRAND_REJECTED
     assert "EIN" not in resp.text
-    logged = [r.getMessage() for r in caplog.records if "EIN" in r.getMessage()]
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("EIN" in m for m in messages)
+    logged = [m for m in messages if "rejected verification" in m]
     assert len(logged) == 1 and vid in logged[0] and str(org_id) in logged[0]
     audit = (
         await async_session.execute(
