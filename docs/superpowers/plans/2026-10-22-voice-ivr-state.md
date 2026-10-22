@@ -66,7 +66,7 @@ cannot cancel it.
 
 ## Atlantis regression verification (2026-10-23)
 
-- Call `435dd50f-e5a5-4e3b-8370-59114b392c21` received an unavailable verdict
+- Call `435dd50f` received an unavailable verdict
   for its Atlantis business welcome before the reservation menu arrived.
 - Added a regression through the real `run_amd` verification and entrypoint:
   the exact recorded welcome stays silent and connected, and the later menu
