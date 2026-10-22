@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 
-from livekit.agents import APIConnectOptions
-from livekit.agents.llm import LLM, ChatContext, function_tool
+from hailhq.voicebot.classify import classify_speech
+from livekit.agents.llm import LLM
 from livekit.agents.voice.amd import AMDCategory
 
 logger = logging.getLogger("hailhq.voicebot")
 CLASSIFY_TIMEOUT_SECONDS = 5.0
-UNCONFIRMED_TIMEOUT_SECONDS = 8.0
+GREET_TIMEOUT_SECONDS = 8.0
 
 REMOTE_SPEECH_PROMPT = """\
 Classify the LATEST remote speech on a phone call, in any language. Earlier
@@ -48,28 +47,15 @@ async def classify_remote_speech(
     """A bounded, tool-only classification; errors never confirm a person."""
     if llm is None or not text.strip():
         return AMDCategory.UNCERTAIN
-
-    @function_tool
-    async def save_prediction(label: AMDCategory) -> None:
-        """Save the category of the latest remote speech."""
-
-    ctx = ChatContext()
-    ctx.add_message(role="system", content=REMOTE_SPEECH_PROMPT)
+    messages = []
     if earlier:
-        ctx.add_message(role="user", content=f"Earlier speech:\n{earlier[-3000:]}")
-    ctx.add_message(role="user", content=f"Latest speech:\n{text[-3000:]}")
+        messages.append(f"Earlier speech:\n{earlier[-3000:]}")
+    messages.append(f"Latest speech:\n{text[-3000:]}")
     try:
         async with asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS):
-            async with llm.chat(
-                chat_ctx=ctx,
-                tools=[save_prediction],
-                tool_choice="required",
-                conn_options=APIConnectOptions(max_retry=0, timeout=10.0),
-            ) as stream:
-                result = await stream.collect()
-        for call in result.tool_calls:
-            if call.name == "save_prediction":
-                return AMDCategory(json.loads(call.arguments)["label"])
+            category = await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
+        if category is not None:
+            return category
     except Exception as exc:
         # Provider error bodies may contain the transcript.
         logger.warning(
@@ -79,18 +65,33 @@ async def classify_remote_speech(
 
 
 class PhoneMenu:
+    """Menu state for an outbound call that a phone tree answered.
+
+    Completed speech is classified. ``human`` greets, ``machine-vm`` and
+    ``machine-unavailable`` end the call, ``machine-ivr`` keeps navigating.
+    Speech that cannot be classified (an ``uncertain`` verdict, or VAD speech
+    with no transcript) greets after ``GREET_TIMEOUT_SECONDS``: LiveKit's AMD
+    guide treats ``uncertain`` as a human. Only an explicit machine verdict
+    hangs up.
+    https://docs.livekit.io/telephony/features/answering-machine-detection/
+
+    After a ``machine-ivr`` verdict (a menu, hold or queue announcement), VAD
+    speech with no transcript (hold music, clicks) does not start that wait,
+    because VAD alone does not end a turn. A keypress ends this state: the
+    next voice may be a person.
+    https://docs.livekit.io/agents/logic/turns/
+    """
+
     def __init__(
         self,
         llm: LLM | None,
         *,
         on_human: Callable[[str], Awaitable[None]],
         on_machine: Callable[[AMDCategory], Awaitable[None]],
-        on_unconfirmed: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.llm = llm
         self.on_human = on_human
         self.on_machine = on_machine
-        self.on_unconfirmed = on_unconfirmed
         self.active = True
         self.can_navigate = True
         self._checks = 0
@@ -100,6 +101,9 @@ class PhoneMenu:
         self._speaking = False
         self._speech_has_text = True
         self._needs_confirmation = False
+        # The last completed speech was a recorded menu, hold or queue line.
+        # True at start: the menu exists because the pickup was machine-ivr.
+        self._recorded = True
         self._ending = False
 
     @property
@@ -123,8 +127,20 @@ class PhoneMenu:
 
     def finished_speaking(self) -> None:
         self._speaking = False
+        if not self._speech_has_text:
+            # LiveKit drops a turn with an empty transcript before the
+            # completed-turn hook, so observe() never runs for it. Let the
+            # menu reply again, or it stays silent for the rest of the call.
+            if self.active and not self._ending:
+                self.can_navigate = True
+            if self._recorded:
+                return
         if not self._speech_has_text or self._needs_confirmation:
             self._arm_deadline()
+
+    def pressed_keys(self) -> None:
+        """A keypress ends the menu prompt; the next voice may be a person."""
+        self._recorded = False
 
     def transcript_progress(self, text: str) -> None:
         if text.strip():
@@ -137,36 +153,37 @@ class PhoneMenu:
                 self._arm_deadline()
 
     def _cancel_wait(self) -> None:
-        # Once the terminal callback starts, it owns shutdown. Late input
-        # must never cancel a room deletion after the final status was set.
+        # Once the greeting starts, it owns the call. Late input must never
+        # cancel it mid-sentence.
         if self._timeout_task is not None and not self._ending:
             self._timeout_task.cancel()
             self._timeout_task = None
 
     def _arm_deadline(self) -> None:
-        if (
-            not self.active
-            or self._speaking
-            or self._ending
-            or self.on_unconfirmed is None
-        ):
+        if not self.active or self._speaking or self._ending:
             return
         if self._timeout_task is not None and not self._timeout_task.done():
             return
 
-        async def wait_for_confirmation() -> None:
-            await asyncio.sleep(UNCONFIRMED_TIMEOUT_SECONDS)
-            if self.active and not self.can_navigate and not self._speaking:
+        async def greet_when_unconfirmed() -> None:
+            await asyncio.sleep(GREET_TIMEOUT_SECONDS)
+            if (
+                self.active
+                and not self._speaking
+                and not self._ending
+                and not self.checking
+            ):
+                # Latch first, so late input cannot cancel the greeting.
+                self.active = False
                 self._ending = True
-                await self.on_unconfirmed()
+                await self.on_human("")
 
-        self._timeout_task = asyncio.create_task(wait_for_confirmation())
+        self._timeout_task = asyncio.create_task(greet_when_unconfirmed())
 
     async def aclose(self) -> None:
         if self._timeout_task is not None:
-            if not self._ending:
-                self._timeout_task.cancel()
             if self._timeout_task is not asyncio.current_task():
+                self._timeout_task.cancel()
                 await asyncio.gather(self._timeout_task, return_exceptions=True)
             self._timeout_task = None
 
@@ -186,9 +203,16 @@ class PhoneMenu:
             category = await classify_remote_speech(self.llm, text, earlier=earlier)
         finally:
             self._checks -= 1
-        if self._ending or revision != self._revision:
-            self._needs_confirmation = True
-            self._arm_deadline()
+        if self._ending:
+            return AMDCategory.UNCERTAIN
+        if revision != self._revision:
+            if category == AMDCategory.MACHINE_IVR:
+                # Newer audio arrived, but this speech was still recorded:
+                # hold music that follows it must not start the wait.
+                self._recorded = True
+            else:
+                self._needs_confirmation = True
+                self._arm_deadline()
             return AMDCategory.UNCERTAIN
         if category == AMDCategory.HUMAN:
             self.active = False
@@ -198,8 +222,10 @@ class PhoneMenu:
             await self.on_machine(category)
         elif category == AMDCategory.MACHINE_IVR:
             self._needs_confirmation = False
+            self._recorded = True
             self.can_navigate = True
         else:
             self._needs_confirmation = True
+            self._recorded = False
             self._arm_deadline()
         return category

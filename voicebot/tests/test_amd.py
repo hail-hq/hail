@@ -696,6 +696,28 @@ async def test_non_hangup_categories_speak_the_disclosure(
     assert ctx.shutdown_calls == []
 
 
+async def test_failed_greeting_is_not_saved_as_no_answer(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A say()/TTS failure after a person answered is not an unanswered call."""
+
+    def broken_say(self: Any, text: str, **kwargs: Any) -> Any:
+        raise RuntimeError("tts failed")
+
+    monkeypatch.setattr(_FakeAmdSession, "say", broken_say)
+    call_id, ctx, _session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("human")
+    )
+
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status != "no_answer"
+
+
 # --------------------------------------------------------------------------- #
 # machine-ivr: the production failure this branch fixes
 # --------------------------------------------------------------------------- #
@@ -764,7 +786,7 @@ async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
 async def test_vad_without_transcript_cannot_confirm_a_person(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Audio energy also comes from the next recorded prompt, in any language."""
+    """VAD alone does not greet at once; PhoneMenu waits a bounded time (test_ivr.py)."""
 
     _call_id, _ctx, session = await _drive_entrypoint(
         async_session, monkeypatch, amd_result=_prediction("machine-ivr")

@@ -848,13 +848,15 @@ def arm_deferred_greeting(
     *,
     agent: SpeechSanitizingAgent,
     on_machine: Callable[[AMDCategory], Awaitable[None]],
-    on_unconfirmed: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
-    """Release the greeting only after completed speech confirms a person.
+    """Release the greeting once completed speech is not a recorded menu.
 
     A keypress and subsequent VAD/transcript used to be treated as a handoff.
     A multi-stage menu satisfies both, so classification now runs in the
     agent's completed-turn hook, before its normal reply can be generated.
+    Speech that stays unclassified greets after a bounded wait, and only an
+    explicit voicemail or unavailable verdict hangs up (see :class:`PhoneMenu`).
+    A greeting that fails is logged; it never sets a call status.
     """
 
     async def greet(_text: str) -> None:
@@ -880,7 +882,6 @@ def arm_deferred_greeting(
         session.llm,
         on_human=greet,
         on_machine=on_machine,
-        on_unconfirmed=on_unconfirmed,
     )
 
     @session.on("user_state_changed")
@@ -889,6 +890,11 @@ def arm_deferred_greeting(
             agent.phone_menu.heard_speech()
         elif getattr(ev, "new_state", None) in ("listening", "away"):
             agent.phone_menu.finished_speaking()
+
+    @session.on("function_tools_executed")
+    def _on_keypress(ev: Any) -> None:
+        if any(c.name == DTMF_TOOL_NAME for c in getattr(ev, "function_calls", [])):
+            agent.phone_menu.pressed_keys()
 
     @session.on("user_input_transcribed")
     def _on_transcript(ev: Any) -> None:
@@ -2344,12 +2350,6 @@ async def _run_call(
         logger.info("call_id=%s answered by %s, hanging up", call_id, category.value)
         await hangup_no_answer(amd_end_reason(category))
 
-    async def hangup_unconfirmed() -> None:
-        logger.warning(
-            "call_id=%s remote speech after menu could not be confirmed", call_id
-        )
-        await hangup_no_answer(CallEndReason.USER_UNAVAILABLE.value)
-
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         await hangup_machine(amd_result.category)
         return
@@ -2361,8 +2361,9 @@ async def _run_call(
         # reciting its disclosure into a "press one / press two" menu while
         # the tree timed out. `generate_reply` is a real LLM turn with
         # `send_dtmf` attached, which is what actually navigates the menu.
-        # The disclosure is deferred, not dropped: `_speak_deferred_greeting`
-        # fires it the moment a person is on the line.
+        # The disclosure is deferred, not dropped: `arm_deferred_greeting`
+        # speaks it once speech is classified as a person, or after a bounded
+        # wait when speech cannot be classified.
         logger.info("call_id=%s phone tree detected, navigating", call_id)
         agent.release_opening()
         arm_deferred_greeting(
@@ -2373,7 +2374,6 @@ async def _run_call(
             on_greeted=recovery.start,
             agent=agent,
             on_machine=hangup_machine,
-            on_unconfirmed=hangup_unconfirmed,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)

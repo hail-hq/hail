@@ -296,28 +296,110 @@ async def test_database_marker_cannot_delay_the_human_greeting(monkeypatch):
         await asyncio.gather(*list(tasks))
 
 
-async def test_untranscribed_menu_speech_has_a_bounded_deadline(monkeypatch):
+def greeting_menu(monkeypatch, llm=None):
     from hailhq.voicebot import ivr
 
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01, raising=False)
-    ended = asyncio.Event()
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
+    greeted = asyncio.Event()
 
-    async def end_unconfirmed():
-        ended.set()
+    async def human(text):
+        greeted.set()
 
-    menu = PhoneMenu(
-        None,
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
-    )
+    menu = PhoneMenu(llm, on_human=AsyncMock(side_effect=human), on_machine=AsyncMock())
+    return menu, greeted
+
+
+async def test_untranscribed_speech_greets_after_a_bounded_wait(monkeypatch):
+    """Uncertain is treated as a person; only a machine verdict hangs up."""
+    menu, greeted = greeting_menu(monkeypatch)
+    try:
+        menu.pressed_keys()
+        menu.heard_speech()  # A person in a language STT does not transcribe.
+        menu.finished_speaking()
+        await asyncio.wait_for(greeted.wait(), 0.2)
+        assert not menu.active
+        menu.on_human.assert_awaited_once_with("")
+        menu.on_machine.assert_not_awaited()
+    finally:
+        await menu.aclose()
+
+
+async def test_untranscribed_speech_lets_the_menu_reply_again(monkeypatch):
+    menu, _ = greeting_menu(monkeypatch)
+    try:
+        menu.heard_speech()
+        assert not menu.can_navigate
+        # An empty transcript never reaches observe().
+        menu.finished_speaking()
+        assert menu.can_navigate
+    finally:
+        await menu.aclose()
+
+
+async def test_untranscribed_audio_after_hold_announcement_does_not_greet(
+    monkeypatch,
+):
+    menu, greeted = greeting_menu(monkeypatch, Classifier('{"label":"machine-ivr"}'))
+    try:
+        await menu.observe("Please hold for the next available agent.")
+        for _ in range(2):  # Hold music and clicks: VAD speech, no transcript.
+            menu.heard_speech()
+            menu.finished_speaking()
+            await asyncio.sleep(0.03)
+        assert not greeted.is_set()
+        assert menu.active and menu.can_navigate
+    finally:
+        await menu.aclose()
+
+
+async def test_untranscribed_audio_after_pickup_menu_does_not_greet(monkeypatch):
+    """The menu exists because the pickup was a recorded menu or hold line."""
+    menu, greeted = greeting_menu(monkeypatch)
     try:
         menu.heard_speech()
         menu.finished_speaking()
-        await asyncio.wait_for(ended.wait(), 0.2)
+        await asyncio.sleep(0.03)
+        assert not greeted.is_set()
         assert menu.active
-        menu.on_human.assert_not_awaited()
-        menu.on_machine.assert_not_awaited()
+    finally:
+        await menu.aclose()
+
+
+async def test_hold_music_during_classification_does_not_greet(monkeypatch):
+    from hailhq.voicebot import ivr
+
+    menu, greeted = greeting_menu(monkeypatch)
+    menu.pressed_keys()
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def delayed(*args, **kwargs):
+        entered.set()
+        await finish.wait()
+        return AMDCategory.MACHINE_IVR
+
+    monkeypatch.setattr(ivr, "classify_remote_speech", delayed)
+    try:
+        task = asyncio.create_task(menu.observe("Please hold."))
+        await entered.wait()
+        menu.heard_speech()  # Hold music starts before the verdict returns.
+        finish.set()
+        assert await task == AMDCategory.UNCERTAIN
+        menu.finished_speaking()
+        await asyncio.sleep(0.03)
+        assert not greeted.is_set()
+        assert menu.active
+    finally:
+        await menu.aclose()
+
+
+async def test_keypress_after_menu_lets_untranscribed_speech_greet(monkeypatch):
+    menu, greeted = greeting_menu(monkeypatch, Classifier('{"label":"machine-ivr"}'))
+    try:
+        await menu.observe("For reception, press one.")
+        menu.pressed_keys()
+        menu.heard_speech()  # A person in a language STT does not transcribe.
+        menu.finished_speaking()
+        await asyncio.wait_for(greeted.wait(), 0.2)
     finally:
         await menu.aclose()
 
@@ -325,140 +407,147 @@ async def test_untranscribed_menu_speech_has_a_bounded_deadline(monkeypatch):
 async def test_long_menu_with_transcription_progress_never_hits_missing_text_deadline(
     monkeypatch,
 ):
-    from hailhq.voicebot import ivr
-
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01)
-    ended = []
-
-    async def end_unconfirmed():
-        ended.append(True)
-
-    menu = PhoneMenu(
-        Classifier('{"label":"machine-ivr"}'),
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
-    )
+    menu, greeted = greeting_menu(monkeypatch, Classifier('{"label":"machine-ivr"}'))
     try:
         menu.heard_speech()
         await asyncio.sleep(0.03)  # A menu longer than the missing-text deadline.
-        assert ended == []
+        assert not greeted.is_set()
         menu.transcript_progress("Welcome. For a new booking, press one.")
         menu.finished_speaking()
         await menu.observe("Welcome. For a new booking, press one.")
         await asyncio.sleep(0.03)
-        assert ended == []
+        assert not greeted.is_set()
+        assert menu.active
     finally:
         await menu.aclose()
 
 
-async def test_interim_without_completed_turn_still_expires_after_speech_ends(
+async def test_interim_without_completed_turn_still_greets_after_speech_ends(
+    monkeypatch,
+):
+    menu, greeted = greeting_menu(monkeypatch)
+    try:
+        menu.pressed_keys()
+        menu.heard_speech()
+        menu.transcript_progress("Welcome to")
+        menu.finished_speaking()
+        await asyncio.wait_for(greeted.wait(), 0.2)
+        menu.on_machine.assert_not_awaited()
+    finally:
+        await menu.aclose()
+
+
+async def test_late_transcript_cannot_cancel_or_repeat_an_initiated_greeting(
     monkeypatch,
 ):
     from hailhq.voicebot import ivr
 
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01)
-    ended = asyncio.Event()
-
-    async def end_unconfirmed():
-        ended.set()
-
-    menu = PhoneMenu(
-        None,
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
-    )
-    try:
-        menu.heard_speech()
-        menu.transcript_progress("Welcome to")
-        menu.finished_speaking()
-        await asyncio.wait_for(ended.wait(), 0.2)
-        menu.on_human.assert_not_awaited()
-    finally:
-        await menu.aclose()
-
-
-async def test_late_human_transcript_cannot_cancel_an_initiated_hangup(monkeypatch):
-    from hailhq.voicebot import ivr
-
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
     started, finish = asyncio.Event(), asyncio.Event()
     completed = []
 
-    async def end_unconfirmed():
+    async def greet(text):
         started.set()
         await finish.wait()
-        completed.append(True)
+        completed.append(text)
 
     menu = PhoneMenu(
-        Classifier('{"label":"human"}'),
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
+        Classifier('{"label":"human"}'), on_human=greet, on_machine=AsyncMock()
     )
     try:
-        # No transcript arrives after the recorded speech ends.
+        # No transcript arrives after the speech ends.
+        menu.pressed_keys()
         menu.heard_speech()
         menu.finished_speaking()
         await asyncio.wait_for(started.wait(), 0.2)
+        menu.heard_speech()
+        menu.transcript_progress("Hello, reception.")
         await menu.observe("Hello, reception.")
-        menu.on_human.assert_not_awaited()
         finish.set()
-        await menu.aclose()
-        assert completed == [True]
+        await asyncio.sleep(0)
+        assert completed == [""]
+        assert menu.llm.calls == []
     finally:
         finish.set()
         await menu.aclose()
 
 
 async def test_valid_transcript_cancels_the_missing_speech_deadline(monkeypatch):
-    from hailhq.voicebot import ivr
-
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01, raising=False)
-    ended = []
-
-    async def end_unconfirmed():
-        ended.append(True)
-
-    menu = PhoneMenu(
-        Classifier('{"label":"machine-ivr"}'),
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
-    )
+    menu, greeted = greeting_menu(monkeypatch, Classifier('{"label":"machine-ivr"}'))
     try:
         menu.heard_speech()
         await menu.observe("For an existing reservation, press two.")
         await asyncio.sleep(0.03)
         assert menu.can_navigate
-        assert ended == []
+        assert not greeted.is_set()
     finally:
         await menu.aclose()
 
 
-async def test_late_progress_after_uncertain_verdict_keeps_its_deadline(monkeypatch):
-    from hailhq.voicebot import ivr
-
-    monkeypatch.setattr(ivr, "UNCONFIRMED_TIMEOUT_SECONDS", 0.01)
-    ended = asyncio.Event()
-
-    async def end_unconfirmed():
-        ended.set()
-
-    menu = PhoneMenu(
-        Classifier('{"label":"uncertain"}'),
-        on_human=AsyncMock(),
-        on_machine=AsyncMock(),
-        on_unconfirmed=end_unconfirmed,
-    )
+async def test_late_progress_after_uncertain_verdict_still_greets(monkeypatch):
+    menu, greeted = greeting_menu(monkeypatch, Classifier('{"label":"uncertain"}'))
     try:
         await menu.observe("Hello")
         menu.transcript_progress("Hello there")
-        await asyncio.wait_for(ended.wait(), 0.2)
-        menu.on_human.assert_not_awaited()
+        await asyncio.wait_for(greeted.wait(), 0.2)
+        menu.on_human.assert_awaited_once_with("")
     finally:
         await menu.aclose()
+
+
+async def test_failed_greeting_after_unconfirmed_speech_never_hangs_up(
+    monkeypatch,
+):
+    from uuid import UUID
+
+    from hailhq.voicebot import ivr
+
+    from .test_amd import _FakeAmdSession
+
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
+    failed = asyncio.Event()
+
+    async def speak(session, metadata, **kwargs):
+        failed.set()
+        raise RuntimeError("tts failed")
+
+    async def write(*args):
+        pass
+
+    monkeypatch.setattr(agent_mod, "speak_greeting", speak)
+    monkeypatch.setattr(agent_mod, "write_call_event", write)
+    agent = SpeechSanitizingAgent(instructions="test")
+    on_machine = AsyncMock()
+    agent_mod.arm_deferred_greeting(
+        _FakeAmdSession(), {}, UUID(int=1), set(), agent=agent, on_machine=on_machine
+    )
+    try:
+        agent.phone_menu.pressed_keys()
+        agent.phone_menu.heard_speech()
+        agent.phone_menu.finished_speaking()
+        await asyncio.wait_for(failed.wait(), 0.2)
+        await asyncio.sleep(0)
+        on_machine.assert_not_awaited()
+        assert not agent.phone_menu.active
+    finally:
+        await agent.phone_menu.aclose()
+
+
+async def test_menu_keypress_reaches_the_phone_menu(monkeypatch):
+    from uuid import UUID
+
+    from .test_amd import _FakeAmdSession
+
+    session = _FakeAmdSession()
+    agent = SpeechSanitizingAgent(instructions="test")
+    agent_mod.arm_deferred_greeting(
+        session, {}, UUID(int=1), set(), agent=agent, on_machine=AsyncMock()
+    )
+    agent.phone_menu._recorded = True
+    session.emit_keypress("other_tool")
+    assert agent.phone_menu._recorded
+    session.emit_keypress()
+    assert not agent.phone_menu._recorded
 
 
 async def _greet_with(monkeypatch, agent, speak):

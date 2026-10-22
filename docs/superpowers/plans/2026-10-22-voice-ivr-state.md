@@ -12,11 +12,14 @@ chain PR #238 remain independent.
 
 **Constraints:** No production changes, database writes, real phone calls, merging,
 or model configuration changes. Use an isolated local test database. A VAD event
-alone is not evidence of a human. Missing transcripts remain unconfirmed. After
-speech ends, allow eight seconds for a usable completed turn. Keep long menus
-alive while speech/transcription continues. An uncertain classification has the
-same bounded post-speech wait. Once a terminal decision starts, late input cannot
-cancel shutdown or release a greeting.
+alone is not evidence of a human. After speech ends, allow eight seconds for a
+usable completed turn; speech that stays unclassified (uncertain, or no
+transcript) then greets, as LiveKit's AMD guide treats uncertain as a human.
+Only an explicit voicemail or unavailable verdict hangs up. After a recorded
+menu, hold or queue line (including the pickup), VAD speech with no transcript
+does not start the wait until a key is pressed. Keep long menus alive while
+speech/transcription continues. Once a greeting or hang-up starts, late input
+cannot cancel it.
 
 ## Task 1: Explicit menu state
 
@@ -51,11 +54,12 @@ cancel shutdown or release a greeting.
 
 ## Validation
 
-- Core: 1,275 passed. Voicebot: 410 passed.
+- Core: 1,275 passed. Voicebot: 420 passed.
 - Ruff 0.16.10 and Black 26.10.0: whole-repository checks passed.
 - Live text replay: nine classification cases each on Haiku 5.5 and GPT-4.1;
   four menu/closing cases on GPT-4.1. All final cases passed.
 - Review regressions cover database latency, terminal audio-recheck verdicts,
   continuous menus, interim-only input, late progress, and initiated shutdown.
-- No live phone call or production deployment. Missing transcripts produce a
-  bounded unconfirmed result; this does not add multilingual audio recovery.
+- No live phone call or production deployment. Unclassified speech greets after
+  eight seconds, except untranscribed audio after a recorded menu or hold line
+  with no keypress since; this does not add multilingual audio recovery.
