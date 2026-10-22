@@ -791,6 +791,10 @@ def _is_str_map(value: Any) -> bool:
 
 _VERIFICATION_PURPOSES = ("number", "sms")
 _PURPOSE_ERROR = "purpose must be 'number' or 'sms'"
+_QUOTE_REQUIRED = (
+    "quote_id is required for purpose='number': pass the quote_id of the "
+    "offer from quote_numbers"
+)
 
 
 # Typed in the JSON schema only. Validation stays ``Any`` so FastMCP never
@@ -913,6 +917,8 @@ async def get_verification_requirements(
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
+    if purpose == "number" and quote_id is None:
+        return {"error": f"{_QUOTE_REQUIRED}."}
     if quote_id is not None and _as_uuid(quote_id) is None:
         return _not_uuid("quote_id")
     if number_id is not None and _as_uuid(number_id) is None:
@@ -1022,6 +1028,8 @@ async def submit_verification(
 ) -> dict[str, Any]:
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
+    if purpose == "number" and quote_id is None:
+        return {"error": f"{_QUOTE_REQUIRED}. Nothing was sent."}
     if quote_id is not None and _as_uuid(quote_id) is None:
         return {"error": "quote_id must be a UUID. Nothing was sent."}
     if number_id is not None and _as_uuid(number_id) is None:
@@ -2475,8 +2483,8 @@ def register_tools(
         is ``local``, ``mobile``, ``national`` or ``toll_free``.
         ``subject_type`` is ``person`` (default) or ``business``; the result's
         ``subject_types`` lists what the carrier accepts. ``quote_id`` is the
-        offer's ``quote_id`` from quote_numbers: pass it for
-        ``purpose='number'`` so the form matches that offer.
+        offer's ``quote_id`` from quote_numbers. It is required for
+        ``purpose='number'``: the form is the one for that offer.
 
         ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
         ``purpose='sms'`` registers the organization to text US numbers from a

@@ -15,7 +15,6 @@ import pytest
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
-    get_default_provider_name,
     get_default_sms_provider_name,
     get_verification_registry,
 )
@@ -207,8 +206,14 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         return self.detach_leaves_service
 
 
+# quote_id of a GB mobile offer from the "fake" carrier, for the test org.
+# A number verification needs one; `carrier` sets it.
+_QUOTE_ID: str | None = None
+
+
 @pytest.fixture()
-def carrier():
+async def carrier(org_and_key, async_session):
+    global _QUOTE_ID
     fake = FakeCarrier()
     app.dependency_overrides[get_verification_registry] = lambda: (
         lambda name, purpose="number": (
@@ -216,11 +221,21 @@ def carrier():
         )
     )
     verifications_routes._last_polled.clear()
-    app.dependency_overrides[get_default_provider_name] = lambda: "fake"
+    _QUOTE_ID = await _raw_quote(async_session, org_and_key[0], "fake")
     yield fake
+    _QUOTE_ID = None
     app.dependency_overrides.pop(get_verification_registry, None)
-    app.dependency_overrides.pop(get_default_provider_name, None)
     app.dependency_overrides.pop(require_superadmin, None)
+
+
+def _gb_mobile(**params) -> dict:
+    """Query for the GB mobile number form, with the test quote."""
+    return {
+        "country_code": "GB",
+        "number_type": "mobile",
+        "quote_id": _QUOTE_ID,
+        **params,
+    }
 
 
 @pytest.fixture()
@@ -235,11 +250,9 @@ def sms_carrier():
 
     app.dependency_overrides[get_verification_registry] = lambda: registry
     verifications_routes._last_polled.clear()
-    app.dependency_overrides[get_default_provider_name] = lambda: "fake"
     app.dependency_overrides[get_default_sms_provider_name] = lambda: "fake"
     yield fake
     app.dependency_overrides.pop(get_verification_registry, None)
-    app.dependency_overrides.pop(get_default_provider_name, None)
     app.dependency_overrides.pop(get_default_sms_provider_name, None)
 
 
@@ -302,6 +315,7 @@ def _auth(plaintext: str) -> dict[str, str]:
 def _submission(**overrides) -> dict:
     data = {
         "provider": "fake",
+        "quote_id": _QUOTE_ID or "",
         "country_code": "GB",
         "number_type": "mobile",
         "subject_type": "person",
@@ -351,7 +365,7 @@ async def test_requirements_returns_the_form(client, org_and_key, carrier) -> No
     _, _, key = org_and_key
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile", "provider": "fake"},
+        params=_gb_mobile(provider="fake"),
         headers=_auth(key),
     )
     assert resp.status_code == 200, resp.text
@@ -368,7 +382,7 @@ async def test_requirements_ignore_the_provider_param(
     _, _, key = org_and_key
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile", "provider": "nope"},
+        params=_gb_mobile(provider="nope"),
         headers=_auth(key),
     )
     assert resp.status_code == 200, resp.text
@@ -846,7 +860,7 @@ async def test_requirements_unsupported_subject_lists_the_allowed_ones(
     carrier.requirements = only_business
     resp = await client.get(
         "/verifications/requirements",
-        params={"provider": "fake", "country_code": "DE", "number_type": "local"},
+        params=_gb_mobile(provider="fake"),
         headers=_auth(key),
     )
     assert resp.status_code == 422
@@ -1019,26 +1033,27 @@ async def test_purchase_without_verification_passes_none(
     assert purchase.await_args.args[2] is None
 
 
-async def test_requirements_and_create_default_to_the_configured_carrier(
-    client, org_and_key, carrier, async_session
+async def test_number_verification_without_quote_id_is_422(
+    client, org_and_key, carrier
 ) -> None:
+    """Hail picks the carrier from the offer: no quote, no form, no filing."""
     _, _, key = org_and_key
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile"},
+        params={"country_code": "GB", "number_type": "mobile", "provider": "fake"},
         headers=_auth(key),
     )
-    assert resp.status_code == 200, resp.text
-    assert "provider" not in resp.json()
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["query", "quote_id"]
     resp = await client.post(
         "/verifications",
-        data=_submission(provider=""),
+        data=_submission(quote_id=""),
         files=_passport(),
         headers=_auth(key),
     )
-    assert resp.status_code == 201, resp.text
-    assert "provider" not in resp.json()
-    assert await _row_provider(async_session, resp.json()["id"]) == "fake"
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "quote_id"]
+    assert carrier.drafts == []
 
 
 async def _raw_quote(async_session, org_id, carrier_name: str) -> str:
@@ -1066,8 +1081,6 @@ async def test_quote_id_picks_the_quoted_carrier(
 ) -> None:
     """A client that never sees the carrier name verifies for an offer."""
     org_id, _, key = org_and_key
-    # No default carrier: only the quote can name "fake".
-    app.dependency_overrides[get_default_provider_name] = lambda: None
     quote_id = await _raw_quote(async_session, org_id, "fake")
     resp = await client.get(
         "/verifications/requirements",
@@ -1161,12 +1174,14 @@ async def test_quote_id_is_rejected_for_sms(
     assert resp.status_code == 422, resp.text
 
 
-async def test_no_configured_carrier_is_404(client, org_and_key, carrier) -> None:
-    _, _, key = org_and_key
-    app.dependency_overrides[get_default_provider_name] = lambda: None
+async def test_quote_from_an_unconfigured_carrier_is_404(
+    client, org_and_key, carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    quote_id = await _raw_quote(async_session, org_id, "none")
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile"},
+        params=_gb_mobile(quote_id=quote_id),
         headers=_auth(key),
     )
     assert resp.status_code == 404

@@ -100,25 +100,19 @@ def get_verification_registry() -> Registry:
     return get_verification_provider
 
 
-def get_default_provider_name() -> str | None:
-    """Carrier used when a request names none. Dependency so tests can swap it."""
-    return default_verification_provider_name()
-
-
 def get_default_sms_provider_name() -> str | None:
     """First configured US SMS registration carrier. Dependency so tests can
     swap it."""
     return default_verification_provider_name("sms")
 
 
-def _resolve_provider_name(name: str | None, default: str | None) -> str:
-    resolved = name or default
-    if not resolved:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="no verification provider is configured",
-        )
-    return resolved
+def _quote_required(where: str) -> HTTPException:
+    """422 for a number verification sent without the offer's quote_id."""
+    return unprocessable(
+        "quote_id is required for purpose=number: get offers from "
+        "POST /numbers/quotes and pass the quote_id of the offer to verify for",
+        loc=[where, "quote_id"],
+    )
 
 
 async def _quote_provider_name(
@@ -580,22 +574,22 @@ async def get_requirements(
     registry: Annotated[Registry, Depends(get_verification_registry)],
     country_code: Annotated[str, Query(min_length=2, max_length=2)],
     number_type: str,
-    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
     subject_type: SubjectType = "person",
     provider: Annotated[
         str | None,
         Query(
             deprecated=True,
             description="Deprecated and ignored. Hail picks the carrier from "
-            "quote_id, number_id or its default.",
+            "quote_id or number_id.",
         ),
     ] = None,
     purpose: str = "number",
     quote_id: Annotated[
         UUID | None,
         Query(
-            description="quote_id of an offer from POST /numbers/quotes that needs "
-            "verification. The carrier is read from it."
+            description="Required for purpose=number: quote_id of an offer "
+            "from POST /numbers/quotes that needs verification. The carrier "
+            "is read from it."
         ),
     ] = None,
     number_id: Annotated[
@@ -609,7 +603,8 @@ async def get_requirements(
 ) -> VerificationRequirements:
     """What the carrier needs from you: the fields, the documents, and whether
     an address is needed. `purpose=number` (default) is for buying a number;
-    pass the offer's `quote_id` to get the form for that offer. `purpose=sms`
+    it requires the offer's `quote_id` (422 without it) and returns the form
+    for that offer. `purpose=sms`
     is for registering to send SMS in the US; it uses the carrier of your US
     numbers, or of the number passed as `number_id`. Build your form from it.
     `provider` is ignored."""
@@ -637,7 +632,7 @@ async def get_requirements(
             "query",
         )
     else:
-        name = _resolve_provider_name(None, default_provider)
+        raise _quote_required("query")
     requirements = await _requirements(
         _provider_or_404(registry, name, purpose),
         country_code,
@@ -752,14 +747,13 @@ async def create_verification(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
-    default_provider: Annotated[str | None, Depends(get_default_provider_name)],
 ) -> VerificationResponse:
     """Submit your details and documents (multipart/form-data).
 
     Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
     in the US; `sms` takes `country_code=US` and `number_type=local` and charges
     the filing fee), `country_code`, `number_type`, `subject_type`,
-    `quote_id` (optional, for `number`: the offer to verify for), `number_id`
+    `quote_id` (required for `number`: the offer to verify for), `number_id`
     (optional, for `sms`: one of your US numbers; needed when your US numbers
     are with more than one carrier),
     `fields` (JSON object), `address` (JSON object, when required), `documents`
@@ -825,7 +819,7 @@ async def create_verification(
             "body",
         )
     else:
-        provider_name = _resolve_provider_name(None, default_provider)
+        raise _quote_required("body")
     provider = _provider_or_404(registry, provider_name, sub.purpose)
 
     if sub.purpose == "sms":

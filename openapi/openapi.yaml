@@ -4391,7 +4391,9 @@ paths:
 
         an address is needed. `purpose=number` (default) is for buying a number;
 
-        pass the offer's `quote_id` to get the form for that offer. `purpose=sms`
+        it requires the offer's `quote_id` (422 without it) and returns the form
+
+        for that offer. `purpose=sms`
 
         is for registering to send SMS in the US; it uses the carrier of your US
 
@@ -4432,13 +4434,13 @@ paths:
               - type: string
               - type: "null"
             description:
-              Deprecated and ignored. Hail picks the carrier from quote_id,
-              number_id or its default.
+              Deprecated and ignored. Hail picks the carrier from quote_id or
+              number_id.
             deprecated: true
             title: Provider
           description:
-            Deprecated and ignored. Hail picks the carrier from quote_id,
-            number_id or its default.
+            Deprecated and ignored. Hail picks the carrier from quote_id or
+            number_id.
           deprecated: true
         - name: purpose
           in: query
@@ -4456,12 +4458,12 @@ paths:
                 format: uuid
               - type: "null"
             description:
-              quote_id of an offer from POST /numbers/quotes that needs verification.
-              The carrier is read from it.
+              "Required for purpose=number: quote_id of an offer from POST
+              /numbers/quotes that needs verification. The carrier is read from it."
             title: Quote Id
           description:
-            quote_id of an offer from POST /numbers/quotes that needs verification.
-            The carrier is read from it.
+            "Required for purpose=number: quote_id of an offer from POST
+            /numbers/quotes that needs verification. The carrier is read from it."
         - name: number_id
           in: query
           required: false
@@ -4533,7 +4535,7 @@ paths:
 
         the filing fee), `country_code`, `number_type`, `subject_type`,
 
-        `quote_id` (optional, for `number`: the offer to verify for), `number_id`
+        `quote_id` (required for `number`: the offer to verify for), `number_id`
 
         (optional, for `sms`: one of your US numbers; needed when your US numbers
 

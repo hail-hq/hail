@@ -3613,11 +3613,11 @@ type GetVerificationRequirementsParams struct {
 	NumberType  string                                        `form:"number_type" json:"number_type"`
 	SubjectType *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
 
-	// Provider Deprecated and ignored. Hail picks the carrier from quote_id, number_id or its default.
+	// Provider Deprecated and ignored. Hail picks the carrier from quote_id or number_id.
 	Provider *string `form:"provider,omitempty" json:"provider,omitempty"`
 	Purpose  *string `form:"purpose,omitempty" json:"purpose,omitempty"`
 
-	// QuoteId quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
+	// QuoteId Required for purpose=number: quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
 	QuoteId *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
 
 	// NumberId For purpose=sms: id of one of your US numbers. The carrier is read from it. Needed when your US numbers are with more than one carrier.

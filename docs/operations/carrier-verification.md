@@ -34,8 +34,8 @@ One live verification per (organization, carrier, country, number type). `cancel
 
 ## Flow
 
-1. `GET /verifications/requirements?country_code=GB&number_type=mobile&subject_type=person` returns the form: fields, address rules, document slots.
-2. `POST /verifications` (multipart) sends the details and files. The carrier evaluates them at once. Problems come back as 422 with the field named, and nothing is stored.
+1. `GET /verifications/requirements?quote_id=<quote_id>&country_code=GB&number_type=mobile&subject_type=person` returns the form: fields, address rules, document slots. `quote_id` is the offer's id from `POST /numbers/quotes`. It is required for `purpose=number` (422 without it): Hail reads the carrier from it.
+2. `POST /verifications` (multipart, same `quote_id`) sends the details and files. The carrier evaluates them at once. Problems come back as 422 with the field named, and nothing is stored.
 3. When the evaluation passes, the row is saved as `awaiting_review` and submitted to the carrier in the same request. There is no human gate. If the carrier is unreachable the row stays `awaiting_review`; the background pass retries.
 4. `GET /verifications/{id}` and `GET /verifications` ask the carrier for the current status at most once a minute per row and update `submitted` rows to `approved` or `rejected`.
 5. Every `HAIL_VERIFICATION_POLL_SECONDS` the background pass (`sweep_verifications` in [`api/hailhq/api/routes/verifications.py`](../../api/hailhq/api/routes/verifications.py)) does:
@@ -47,7 +47,7 @@ Runnable example:
 
 ```bash
 curl -s -X POST "$HAIL_API_URL/verifications" -H "Authorization: Bearer $HAIL_API_KEY" \
-  -F country_code=GB -F number_type=mobile -F subject_type=person \
+  -F quote_id=<quote_id> -F country_code=GB -F number_type=mobile -F subject_type=person \
   -F 'fields={"first_name":"Ada","last_name":"Lovelace"}' \
   -F 'documents={"proof_of_identity":{"option":"passport"}}' \
   -F file.proof_of_identity=@passport.jpg
