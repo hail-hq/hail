@@ -21,7 +21,7 @@ status: submitted
 - [x] Make the Hail workspace public.
 - [x] Record the public workspace URL here.
 - [x] Enable automatic updates after reviewing the published collection.
-- [ ] Pin **Hail API** under **Featured collections** on the workspace **Docs** tab.
+- [x] Pin **Hail API** under **Featured collections** on the workspace **Docs** tab.
 
 ## Steps to submit
 
