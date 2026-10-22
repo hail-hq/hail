@@ -25,11 +25,16 @@ status: drafted
 ## Steps to submit
 
 1. Create an account at <https://www.postman.com/> and a team named **Hail**.
-   Choose a Hail-related public handle if it is available.
-2. Create a workspace named **Hail API**. Use an internal workspace while
-   preparing it, then change its visibility to public when ready.
-3. Add the summary and overview from **Content** below. Use the Hail logo at
-   `hail-website/public/assets/monogram-512.png` for the team avatar.
+   Make the team profile public: profile in the header → **Hail** →
+   **Team profile** → **Make my team's profile public**. Then **Edit Your
+   Public Profile**: add the team description, website `https://hail.so`, and
+   the logo from `hail-website/public/assets/monogram-512.png`
+   (**Upload profile photo**).
+2. Click **Workspaces** in the header → **Create**. Name it **Hail API**,
+   choose **Internal** and **Blank workspace**, then **Create Workspace**.
+   The create form has no summary or description fields.
+3. In the workspace, open **Overview → Docs**. Set the summary and the
+   description from **Content** below. Changes save automatically.
 4. Generate the collection from the `hail` repository:
 
    ```sh
@@ -53,10 +58,11 @@ status: drafted
    Review the individual examples you want to try before enabling paid requests.
 7. Return to the original workspace. Its collection variables must contain
    vault references and placeholders, never your API key or customer data.
-8. Open **Workspace overview → Settings**, change the workspace type to
-   **Public**, and save. A team approval request may be needed depending on
-   the account plan and role. Once public, the workspace and collection are
-   listed on the Postman API Network. This is not a separate directory form.
+8. In the sidebar, click **⋯ → Workspace overview → Settings**. Under
+   **Workspace type**, click **Change**, select **Public**, then **Save
+   changes** (or **Submit request** if approval is needed). Once public, the
+   workspace and collection are listed on the Postman API Network. This is
+   not a separate directory form.
 9. Record the public workspace URL and the collection UID in **Notes**.
 10. To keep the collection current, create a Postman API key with access to
     it. This is a **Postman key**, not a Hail API key. In the
@@ -91,7 +97,7 @@ Summary:
 
 > Try calls, texts, email, phone numbers, and AI assistants with your own Hail API key.
 
-Overview: copy [postman/README.md](../../postman/README.md). The generated
+Description: copy [postman/README.md](../../postman/README.md). The generated
 collection includes the same introduction and signup link.
 
 Collection **Hail API**:
@@ -145,6 +151,8 @@ Sources checked on 2026-10-20:
 - [Import an API specification](https://learning.postman.com/docs/design-apis/specifications/import-a-specification/).
 - [Maintain public collections](https://learning.postman.com/docs/postman-api-network/showcase/maintain-public-apis).
 - [Replace a collection](https://learning.postman.com/api-docs/api-reference/collections/put-collection).
+- [Public workspaces](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/public-workspaces/).
+- [Edit workspace details](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/internal-workspaces/manage-workspaces/#edit-workspace-details).
 - [Use vault secrets](https://learning.postman.com/docs/use/postman-vault/use-vault-secrets).
 - [Publisher verification](https://learning.postman.com/docs/postman-api-network/showcase/prepare/verify-publisher-team).
 - [Create an MCP request](https://learning.postman.com/docs/use/send-requests/protocols/mcp-requests/create).
