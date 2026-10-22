@@ -140,6 +140,25 @@ async def test_get_call_status_in_progress_has_nullable_fields(
 
 
 @responses.activate
+async def test_get_failed_call_with_bounded_timeout() -> None:
+    provider = TwilioVoiceProvider(
+        account_sid=ACCOUNT_SID, auth_token=AUTH_TOKEN, timeout=3
+    )
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/Calls/CA_failed.json",
+        json={"sid": "CA_failed", "status": "failed", "duration": "0"},
+        status=200,
+    )
+
+    status = await provider.get_call_status("CA_failed")
+
+    assert status.status == "failed"
+    assert status.duration_seconds == 0
+    assert responses.calls[0].request.req_kwargs["timeout"] == 3
+
+
+@responses.activate
 async def test_hangup_call(provider: TwilioVoiceProvider) -> None:
     responses.add(
         responses.POST,

@@ -19,6 +19,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Voice: Twilio-confirmed carrier rejections, including blocked destinations, finish as `failed` with `sip_trunk_failure` instead of `busy`. Genuine busy responses keep their status.
 - MCP: every tool now sets `annotations.title`, and `submit_verification` declares types for `fields`, `documents`, `files` and `address`, so MCP directories list them correctly.
 
 ## [0.30.0] (2026-10-20)

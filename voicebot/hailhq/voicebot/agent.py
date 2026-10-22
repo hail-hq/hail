@@ -57,6 +57,7 @@ from hailhq.core.prompts import (
     build_voice_instructions,
     other_party_section,
 )
+from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.telemetry import (
@@ -1015,6 +1016,43 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
     return (status, end_reason.value)
 
 
+async def reconcile_sip_rejection(
+    call_id: UUID, captured: dict[str, str | None]
+) -> None:
+    """Resolve an ambiguous LiveKit rejection before publishing its outcome.
+
+    LiveKit uses USER_REJECTED for SIP 403 (including Twilio geo-permission
+    blocks) as well as genuine busy/decline responses. Twilio's final call
+    status distinguishes these. Only query its exact Call SID supplied by
+    the SIP participant; the stored SCL_ id belongs to LiveKit, not Twilio.
+    A failed lookup must not prevent settlement or pool-number release.
+    """
+    sid = captured.get("twilio_call_sid")
+    if captured["status"] != "busy" or not sid:
+        return
+    try:
+        async with asyncio.timeout(4):
+            result = await TwilioVoiceProvider(timeout=3).get_call_status(sid)
+    except Exception:
+        logger.warning(
+            "call_id=%s could not resolve carrier rejection", call_id, exc_info=True
+        )
+        return
+    if (
+        result.status == "failed"
+        and captured["status"] == "busy"
+        and captured["end_reason"] == CallEndReason.USER_REJECTED.value
+        and captured.get("twilio_call_sid") == sid
+    ):
+        captured["status"] = "failed"
+        captured["end_reason"] = CallEndReason.SIP_TRUNK_FAILURE.value
+    await write_call_event(
+        call_id,
+        "carrier_status",
+        {"provider": "twilio", "provider_call_sid": sid, "status": result.status},
+    )
+
+
 async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
     try:
         await ctx.delete_room()
@@ -1086,6 +1124,10 @@ def handle_sip_disconnect(
     if status is not None:
         captured["status"] = status
         captured["end_reason"] = end_reason
+        if status == "busy":
+            sid = getattr(participant, "attributes", {}).get("sip.twilio.callSid")
+            if sid:
+                captured["twilio_call_sid"] = sid
         logger.info(
             "call_id=%s sip participant disconnected, status=%s reason=%s",
             call_id,
@@ -2230,6 +2272,7 @@ async def _run_call(
                 await asyncio.gather(*list(answer_tasks), return_exceptions=True)
             if agent_api is not None:
                 await agent_api.aclose()
+            await reconcile_sip_rejection(call_id, captured)
             await on_call_end(
                 call_id,
                 room_name,

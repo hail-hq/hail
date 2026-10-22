@@ -41,6 +41,7 @@ class TwilioVoiceProvider(VoiceProvider):
         account_sid: str | None = None,
         auth_token: str | None = None,
         client: TwilioClient | None = None,
+        timeout: float | None = None,
     ) -> None:
         self.account_sid = account_sid or settings.twilio_account_sid
         token = auth_token or settings.twilio_auth_token
@@ -52,7 +53,15 @@ class TwilioVoiceProvider(VoiceProvider):
                     "twilio_auth_token (set them in settings or pass them "
                     "explicitly)."
                 )
-            client = TwilioClient(self.account_sid, token)
+            client = TwilioClient(
+                self.account_sid,
+                token,
+                http_client=(
+                    TwilioHttpClient(timeout=timeout, max_retries=0)
+                    if timeout is not None
+                    else None
+                ),
+            )
         self._client = client
 
     async def release_number(self, provider_resource_id: str) -> None:
