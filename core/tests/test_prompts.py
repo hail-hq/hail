@@ -34,17 +34,17 @@ def _sha(text: str) -> str:
 # Outputs before history left the prompt. Any change here changes what every
 # agent is told: update on purpose only.
 _BEFORE = {
-    (None, None): "d30e8eb91543cee42b1bc6a198b04b4805665c916546bf2ee7489e6e4c0fbadc",
+    (None, None): "db669d5cf2f3ecbb5685e42ff6929fd43351038ce4b6dd3d6aa59188976b3b84",
     (
         None,
         "inbound",
-    ): "1bfd27e02d284f661db9a69d7fc1a178ebc22fe6f0b4bcd739440064a5cf776c",
+    ): "682d32a49a036a78d904417ac8b9fc9bdf346538f5ee46c109da5dd1e6794940",
     (
         "Be kind.",
         None,
-    ): "521b8943ac711eec986decfd2f6c3160e74f7adbcabfd50d0ee4c039139038d9",
+    ): "9a229f222a24030ce494e17022d9378ed5fd62d77806be46c5c6dcaee611a7f4",
     ("Be kind.", "inbound"): (
-        "8bb85f9195020fd5182bae086f0d13c2b1ac7a7853f531a521cee769c47d09df"
+        "68eb4d2e4e0b75274d3e871cd6213b2dfb3480edee8b55e91be16732975565ff"
     ),
 }
 
@@ -60,10 +60,10 @@ def test_voice_instructions_are_byte_identical_to_before() -> None:
 
 def test_templates_are_byte_identical_to_before() -> None:
     assert _sha(prompts.prompt_template("calls_in")) == (
-        "f65256ef4cd1497ff1d237a92d6c5e35e412770f04c96e17dc8acc96a3fefa23"
+        "876bbdb4401c5597bdb2ddec34e3cfb83b5f8d90dd2a36111b17f4e72331d644"
     )
     assert _sha(prompts.prompt_template("calls_out")) == (
-        "873c4a3bf407e1b948645d57c94f9ce4e67cb2b745dd5f658228e16a72a2d183"
+        "bc9b8bfeb36a1910afca65180aa4dc00aedb89e0221717d194bf0b8d24f535b1"
     )
     assert _sha(prompts.prompt_template("texts")) == (
         "a1098eceb5c5be625839b1f096e88e9b3b6cead156af6ef927250c303b728e95"

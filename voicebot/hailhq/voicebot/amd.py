@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,6 +22,7 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.voicebot.ivr import classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
 from livekit import rtc
@@ -315,12 +317,18 @@ You have reached an automated phone menu, not a person. This was the menu:
 {transcript}
 
 Use the send_dtmf tool to press the option that best advances the reason for \
-your call. Press keys, do not speak your choice, the menu cannot hear you. \
-If no option fits, press the one for a human operator or reception. Key \
+your call. Wait for the complete menu before choosing. A pause or one \
+offered digit does not mean the list has finished. Only choose an offered \
+option that matches the call's goal. An extension option is only useful \
+when you know the requested extension. Never invent a zero/operator option. \
+If the full menu offers no relevant option, wait for a repeat. \
+Do not narrate your plans, choices, reasoning, keypresses, or waiting. \
+Press keys, do not speak your choice, the menu cannot hear you. Key \
 presses happen only through the send_dtmf tool, never write JSON, code, or \
 tool-call syntax in your reply. When you have nothing to say, reply with \
 exactly "..." and no other text. Do not speak sentences until a person is on \
-the line."""
+the line. A hold announcement is still a recording. If a post-call survey \
+starts, end the call without selecting a rating."""
 
 
 def ivr_navigation_instructions(transcript: str | None) -> str:
@@ -400,26 +408,39 @@ async def run_amd(
                 detector.execute(), timeout=DETECTION_TIMEOUT_SECONDS
             )
         # The detector is closed here, so its live STT stops while we recheck.
-        if pickup_audio is None:
-            return result
-        await pickup_audio.stop()
-        if not needs_recheck(result):
-            return result
-        assert models is not None and models.recheck_stt is not None
-        # Session transcripts during the recheck are often the same recorded
-        # greeting, so they must not discard the verdict.
-        result = await recheck_greeting(
-            result,
-            pickup_audio.frame(),
-            stt=models.recheck_stt,
-            llm=session_llm,
-            prompt=GREETING_CLASSIFICATION_PROMPT,
-        )
-        if result.category == AMDCategory.MACHINE_IVR:
-            # Match AMD.execute() on SDK 1.8.8: the initial uncertain
-            # result did not arm IVR navigation or its completion event.
-            # A failure here must not discard the verdict: the agent still
-            # navigates the menu with its own send_dtmf tool.
+        original_category = result.category
+        if pickup_audio is not None:
+            await pickup_audio.stop()
+            if needs_recheck(result):
+                assert models is not None and models.recheck_stt is not None
+                result = await recheck_greeting(
+                    result,
+                    pickup_audio.frame(),
+                    stt=models.recheck_stt,
+                    llm=session_llm,
+                    prompt=GREETING_CLASSIFICATION_PROMPT,
+                )
+        if result.category == AMDCategory.MACHINE_UNAVAILABLE:
+            # Check the final verdict, including one returned by the audio recheck.
+            # A business welcome was wrongly labelled unavailable on call 70fc43e4.
+            started = time.monotonic()
+            verified = await classify_remote_speech(
+                session_llm, result.transcript or ""
+            )
+            if verified == AMDCategory.UNCERTAIN:
+                # Keep listening silently; uncertainty cannot prove unavailability.
+                verified = AMDCategory.MACHINE_IVR
+            result = AMDPredictionEvent(
+                category=verified,
+                transcript=result.transcript,
+                reason="unavailable_recheck",
+                speech_duration=result.speech_duration,
+                delay=result.delay + time.monotonic() - started,
+            )
+        if (
+            result.category == AMDCategory.MACHINE_IVR
+            and original_category != AMDCategory.MACHINE_IVR
+        ):
             try:
                 await session._start_ivr_detection(transcript=result.transcript)
             except Exception:

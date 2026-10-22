@@ -405,7 +405,11 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     session._start_ivr_detection = AsyncMock()
     result = await amd.run_amd(session, call_id, models=models, room=room)
     assert result.category == AMDCategory(category)
-    assert result.reason == "greeting_recheck"
+    assert result.reason == (
+        "unavailable_recheck"
+        if category == "machine-unavailable"
+        else "greeting_recheck"
+    )
     assert primary.calls
     amd.PickupAudio.assert_called_once_with(room, f"caller-{call_id}", seconds=20)
     raw.stop.assert_awaited_once()
@@ -451,3 +455,27 @@ async def test_greeting_transcripts_during_recheck_keep_machine_verdict(
     assert result.category == AMDCategory.MACHINE_VM
     raw.aclose.assert_awaited_once()
     models.aclose.assert_awaited_once()
+
+
+async def test_unavailable_from_audio_recheck_is_verified_before_hangup(monkeypatch):
+    _RecordingAMD.result = prediction()
+    monkeypatch.setattr(amd, "AMD", _RecordingAMD)
+    raw = SimpleNamespace(
+        start=Mock(),
+        stop=AsyncMock(),
+        frame=Mock(return_value=frame()),
+        aclose=AsyncMock(),
+    )
+    monkeypatch.setattr(amd, "PickupAudio", Mock(return_value=raw))
+    wrong = prediction("machine-unavailable", "greeting_recheck")
+    wrong.transcript = "Welcome to Delta Vacations. We're so glad you called."
+    monkeypatch.setattr(amd, "recheck_greeting", AsyncMock(return_value=wrong))
+    verifier = Classifier('{"label":"machine-ivr"}')
+    models = amd.AMDModels(verifier, object(), recheck_stt=transcriber())
+    models.aclose = AsyncMock()
+    session = _session_with_layers()
+    session._start_ivr_detection = AsyncMock()
+    result = await amd.run_amd(session, UUID(int=10), models=models, room=object())
+    assert result.category == AMDCategory.MACHINE_IVR
+    assert verifier.calls
+    session._start_ivr_detection.assert_awaited_once()
