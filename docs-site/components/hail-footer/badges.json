@@ -12,5 +12,12 @@
     "alt": "hail - Featured on DevHunt",
     "name": "DevHunt",
     "icon": "https://hail.so/assets/devhunt-logo.svg"
+  },
+  {
+    "id": "postman",
+    "href": "https://www.postman.com/hail-hq/hail-api",
+    "alt": "Hail - Featured on Postman",
+    "name": "Postman",
+    "icon": "https://hail.so/assets/postman-logo.svg"
   }
 ]
