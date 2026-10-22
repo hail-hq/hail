@@ -8,7 +8,7 @@ answer calls and texts, and track delivery through one API.
 [Pricing](https://hail.so/pricing) ·
 [Source](https://github.com/hail-hq/hail)
 
-[![Run in Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2?action=collection%2Ffork&source=rip_markdown&collection-url=entityId%3D59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2%26entityType%3Dcollection%26workspaceId%3Daeb5d784-d1b6-4e09-a7ad-0d2e5b442d08)
+Try it in Postman: [![Run in Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2?action=collection%2Ffork&source=rip_markdown&collection-url=entityId%3D59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2%26entityType%3Dcollection%26workspaceId%3Daeb5d784-d1b6-4e09-a7ad-0d2e5b442d08)
 
 ## Get started
 
