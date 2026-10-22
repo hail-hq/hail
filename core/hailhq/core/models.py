@@ -707,6 +707,13 @@ class PhoneNumber(Base):
         attached at the carrier (``inbound_routing.register``)."""
         return self.inbound_registered_at is not None
 
+    @property
+    def subject_type(self) -> str | None:
+        """Read by ``PhoneNumberResponse``: subject type of the verification
+        the purchase used, from the stored offer. None when none was used."""
+        offer = (self.provisioning_metadata or {}).get("offer") or {}
+        return offer.get("subject_type")
+
 
 class Call(Base):
     __tablename__ = "calls"
@@ -1780,15 +1787,30 @@ class CarrierVerification(Base):
             "purpose IN ('number','sms')",
             name="carrier_verifications_purpose_check",
         ),
+        # One live number verification per subject type: an org may hold a
+        # person's and a business's at once. One live SMS registration.
         Index(
-            "carrier_verifications_live_uniq",
+            "carrier_verifications_number_live_uniq",
             "organization_id",
             "provider",
             "country_code",
             "number_type",
-            "purpose",
+            "subject_type",
             unique=True,
-            postgresql_where=text("state NOT IN ('cancelled','rejected')"),
+            postgresql_where=text(
+                "purpose = 'number' AND state NOT IN ('cancelled','rejected')"
+            ),
+        ),
+        Index(
+            "carrier_verifications_sms_live_uniq",
+            "organization_id",
+            "provider",
+            "country_code",
+            "number_type",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'sms' AND state NOT IN ('cancelled','rejected')"
+            ),
         ),
         Index("carrier_verifications_org_idx", "organization_id"),
     )

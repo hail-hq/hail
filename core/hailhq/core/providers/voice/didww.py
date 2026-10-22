@@ -18,7 +18,7 @@ import requests
 from didww.client import DidwwClient
 from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
-from hailhq.core.carrier_offer import CarrierOffer, cents, number_prefix
+from hailhq.core.carrier_offer import Approval, CarrierOffer, cents, number_prefix
 from hailhq.core.config import settings
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
@@ -166,6 +166,16 @@ def _friction(requirement: dict | None) -> Literal["information", "documents"]:
     return "documents" if qty > 0 else "information"
 
 
+def _subject_types(requirement: dict | None) -> list[str]:
+    """Who may register for a number group, from its address requirement."""
+    identity = (requirement or {}).get("attributes", {}).get("identity_type", "any")
+    if identity == "personal":
+        return ["person"]
+    if identity == "business":
+        return ["business"]
+    return ["business", "person"]
+
+
 def _offers_sync(
     org: UUID,
     country: str,
@@ -174,7 +184,9 @@ def _offers_sync(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, Approval] | None = None,
 ) -> list[CarrierOffer]:
+    approvals = approvals or {}
     client = didww_client()
     country_id, types = lookup_ids(country)
     type_id = types.get(kind)
@@ -207,8 +219,7 @@ def _offers_sync(
         params["filter[city.id]"] = city_id
     body = client.get("available_dids", params=params)
     index = _by_id(body.get("included", []))
-    approved: dict | None = None
-    approved_checked = False
+    approved_ids: set[str] | None = None
     results: list[CarrierOffer] = []
     for did in body["data"]:
         number = "+" + did["attributes"]["number"]
@@ -228,22 +239,32 @@ def _offers_sync(
         if monthly <= 0:
             continue
         needs_registration = bool(group.get("meta", {}).get("needs_registration"))
-        if needs_registration and not approved_checked:
-            approved_checked = True
-            found = client.get(
-                "addresses",
-                params={
-                    "filter[external_reference_id]": approved_address_ref(
-                        org, country, kind
-                    )
-                },
-            )["data"]
-            approved = found[0] if found else None
         req_ref = group["relationships"].get("address_requirement", {}).get("data")
         requirement = (
             index.get(("address_requirements", req_ref["id"])) if req_ref else None
         )
-        ready = not needs_registration or approved is not None
+        subject_types = _subject_types(requirement) if needs_registration else []
+        wanted = {k: a for k, a in approvals.items() if k in subject_types}
+        if wanted and approved_ids is None:
+            # Every address of this org whose registration passed, person's
+            # and business's alike: each approval is matched by its own id.
+            approved_ids = {
+                a["id"]
+                for a in client.get(
+                    "addresses",
+                    params={
+                        "filter[external_reference_id]": approved_address_ref(
+                            org, country, kind
+                        )
+                    },
+                )["data"]
+            }
+        valid = {
+            k: a
+            for k, a in wanted.items()
+            if a.address_id and a.address_id in (approved_ids or set())
+        }
+        ready = not needs_registration or bool(valid)
         city_ref = group["relationships"].get("city", {}).get("data")
         region_ref = group["relationships"].get("region", {}).get("data")
         city_row = index.get(("cities", city_ref["id"])) if city_ref else None
@@ -270,8 +291,8 @@ def _offers_sync(
                 requirements=(
                     [] if ready else ["End-user registration (identity and address)"]
                 ),
-                verification_id=approved["id"] if approved else None,
-                address_id=approved["id"] if approved else None,
+                subject_types=subject_types,
+                approvals=valid,
                 locality=city_row["attributes"].get("name") if city_row else None,
                 region=region_name,
             )
@@ -289,6 +310,7 @@ async def didww_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, Approval] | None = None,
 ) -> list[CarrierOffer]:
     """Live DIDWW inventory for one country and number type. Voice only:
     an ``sms`` request never gets a DIDWW offer. No offer without the
@@ -300,7 +322,7 @@ async def didww_offers(
     ):
         return []
     return await asyncio.to_thread(
-        _offers_sync, org, country, kind, e164, area_code, city, region
+        _offers_sync, org, country, kind, e164, area_code, city, region, approvals
     )
 
 
@@ -594,6 +616,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await didww_offers(
         org,
@@ -604,6 +627,7 @@ async def offers(
         area_code=area_code,
         city=city,
         region=region,
+        approvals=approvals,
     )
 
 

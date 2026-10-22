@@ -235,6 +235,8 @@ class OfferVerification(BaseModel):
 
     id: UUID
     state: str
+    # "person" or "business". Default for an API that predates the field.
+    subject_type: Literal["person", "business"] | None = None
 
 
 class NumberOffer(BaseModel):
@@ -256,6 +258,13 @@ class NumberOffer(BaseModel):
     locality: str | None = None
     region: str | None = None
     quote_id: UUID | None = None
+    # Who may verify for this number: "person", "business", or both. Empty
+    # when no verification is needed.
+    subject_types: list[Literal["person", "business"]] = Field(default_factory=list)
+    # Your newest live verification per subject type.
+    verifications: list[OfferVerification] = Field(default_factory=list)
+    # Deprecated: read ``verifications``. The one a purchase without
+    # subject_type would use.
     verification: OfferVerification | None = None
     by_request: bool = False
 
@@ -299,6 +308,8 @@ class PhoneNumberResponse(BaseModel):
     voice_agent_id: UUID | None = None
     sms_agent_id: UUID | None = None
     inbound_registered: bool = False
+    # Who the verification used to buy it is for. None when none was used.
+    subject_type: Literal["person", "business"] | None = None
 
 
 class PhoneNumberListResponse(BaseModel):

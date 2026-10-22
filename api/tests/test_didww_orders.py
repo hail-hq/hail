@@ -4,6 +4,7 @@ carrier functions are mocked; their HTTP is covered in core tests."""
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +15,7 @@ from hailhq.api.number_orders import (
 )
 from hailhq.core import telephony_catalog
 from hailhq.core.billing import get_balance_cents
+from hailhq.core.carrier_offer import Approval
 from hailhq.core.models import (
     AccountCredit,
     AuditLog,
@@ -32,8 +34,28 @@ DID = "d0000000-0000-0000-0000-000000000002"
 
 
 async def seed_quote(
-    db, org, *, address_id="addr-1", monthly=350, setup=350, kind="national"
+    db,
+    org,
+    *,
+    address_id="addr-1",
+    monthly=350,
+    setup=350,
+    kind="national",
+    verification_row_id=None,
 ):
+    """A ready DIDWW quote. With ``address_id``, the org's approved person
+    verification (``verification_row_id``, or a made-up id) is on it."""
+    approvals = (
+        {
+            "person": Approval(
+                row_id=verification_row_id or uuid4(),
+                verification_id=address_id,
+                address_id=address_id,
+            )
+        }
+        if address_id
+        else {}
+    )
     offer = CarrierOffer(
         provider="didww",
         e164="+351300000001",
@@ -43,8 +65,8 @@ async def seed_quote(
         monthly_cents=monthly,
         setup_cents=setup,
         readiness="ready",
-        verification_id=address_id,
-        address_id=address_id,
+        subject_types=["person"] if address_id else [],
+        approvals=approvals,
     )
     row = NumberOffer(
         organization_id=org,
@@ -214,15 +236,17 @@ async def test_didww_registration_rejected_refunds_monthly_only(
     assert await get_balance_cents(async_session, org) == 100000 - 350
 
 
-async def _seed_approved_verification(db, org, *, number_type="national"):
+async def _seed_approved_verification(
+    db, org, *, number_type="national", subject_type="person", address_id="addr-1"
+):
     row = CarrierVerification(
         organization_id=org,
         provider="didww",
         country_code="PT",
         number_type=number_type,
-        subject_type="person",
+        subject_type=subject_type,
         state="approved",
-        provider_refs={"address_id": "addr-1"},
+        provider_refs={"address_id": address_id},
         requirements_version="v1",
     )
     db.add(row)
@@ -242,7 +266,9 @@ async def test_didww_registration_rejected_revokes_approval(
     org, _, _ = org_and_key
     verification = await _seed_approved_verification(async_session, org)
     other = await _seed_approved_verification(async_session, org, number_type="local")
-    row, offer = await seed_quote(async_session, org)
+    row, offer = await seed_quote(
+        async_session, org, verification_row_id=verification.id
+    )
     monkeypatch.setattr(
         "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(return_value=ORDER),
@@ -295,7 +321,9 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
 ):
     org, _, _ = org_and_key
     verification = await _seed_approved_verification(async_session, org)
-    row, offer = await seed_quote(async_session, org)
+    row, offer = await seed_quote(
+        async_session, org, verification_row_id=verification.id
+    )
     monkeypatch.setattr(
         "hailhq.core.providers.voice.didww.place_didww_order",
         AsyncMock(return_value=ORDER),
@@ -320,6 +348,115 @@ async def test_didww_registration_rejected_refunds_even_if_revoke_fails(
     await async_session.refresh(verification)
     assert verification.state == "rejected"
     assert await get_balance_cents(async_session, org) == 100000 - 350
+
+
+async def _reject_bought_number(async_session, org, monkeypatch, quote, offer):
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.place_didww_order",
+        AsyncMock(return_value=ORDER),
+    )
+    outcome = AsyncMock(return_value=("pending", None, ORDER))
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome", outcome
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", AsyncMock()
+    )
+    revoke = AsyncMock(return_value=None)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
+    number = await buy(async_session, org, quote, monkeypatch, offer)
+    outcome.return_value = ("rejected_registration", DID, ORDER)
+    await reconcile_order(async_session, number, force=True)
+    return number, revoke
+
+
+async def test_rejected_registration_rejects_only_the_verification_used(
+    async_session, org_and_key, monkeypatch
+):
+    """A person and a business verification are both approved. The number
+    was bought with the business one: only that one is rejected, and the
+    carrier takes back that one's address."""
+    org, _, _ = org_and_key
+    person = await _seed_approved_verification(async_session, org)
+    business = await _seed_approved_verification(
+        async_session, org, subject_type="business", address_id="addr-2"
+    )
+    quote, offer = await seed_quote(async_session, org, address_id=None)
+    offer = offer.model_copy(
+        update={
+            "subject_types": ["business", "person"],
+            "approvals": {
+                "person": Approval(
+                    row_id=person.id, verification_id="addr-1", address_id="addr-1"
+                ),
+                "business": Approval(
+                    row_id=business.id, verification_id="addr-2", address_id="addr-2"
+                ),
+            },
+        }
+    )
+    quote.offer = offer.model_dump(mode="json")
+    await async_session.commit()
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    number = await acquire_offer(
+        async_session,
+        org,
+        quote.id,
+        country="PT",
+        kind="national",
+        billed=True,
+        subject_type="business",
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.didww_order_outcome",
+        AsyncMock(return_value=("rejected_registration", DID, ORDER)),
+    )
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.didww.release_didww_number", AsyncMock()
+    )
+    revoke = AsyncMock(return_value=None)
+    monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
+    await reconcile_order(async_session, number, force=True)
+    assert number.provisioning_state == "failed"
+    revoke.assert_awaited_once_with("addr-2", org, "PT", "national")
+    await async_session.refresh(person)
+    await async_session.refresh(business)
+    assert (person.state, business.state) == ("approved", "rejected")
+
+
+async def test_rejected_registration_of_an_older_number_with_two_rows(
+    async_session, org_and_key, monkeypatch
+):
+    """A number bought before purchases stored the verification id: it is
+    matched by carrier, country and type, and two approved rows are no
+    error."""
+    org, _, _ = org_and_key
+    first = await _seed_approved_verification(async_session, org)
+    second = await _seed_approved_verification(
+        async_session, org, subject_type="business"
+    )
+    quote, offer = await seed_quote(async_session, org)
+    number, _ = await _reject_bought_number(
+        async_session, org, monkeypatch, quote, offer
+    )
+    # Bought before verification_row_id existed.
+    meta = dict(number.provisioning_metadata)
+    assert number.provisioning_state == "failed"
+    meta["offer"] = {**meta["offer"], "verification_row_id": None}
+    number.provisioning_metadata = meta
+    number.provisioning_state = "pending"
+    await async_session.commit()
+    from hailhq.api.number_orders import rejected_registration
+
+    await rejected_registration(async_session, number, None)
+    states = set()
+    for row in (first, second):
+        await async_session.refresh(row)
+        states.add(row.state)
+    assert "rejected" in states
 
 
 async def test_didww_pending_survives_three_days(
@@ -1099,7 +1236,7 @@ async def test_by_request_quote_files_a_verification_with_didww_and_is_not_sold(
     assert asked["by_request"] is True
     assert body["recommended_quote_id"] is None
     quote_id = asked["quote_id"]
-    params = {"country_code": "PT", "number_type": "national"}
+    params = {"country_code": "PT", "number_type": "national", "subject_type": "person"}
 
     resp = await client.get(
         "/verifications/requirements",

@@ -11,6 +11,8 @@ import phonenumbers
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
 
+SubjectType = Literal["person", "business"]
+
 
 class OfferVerification(BaseModel):
     id: UUID = Field(
@@ -18,6 +20,22 @@ class OfferVerification(BaseModel):
     )
     state: str = Field(
         description="State of that verification, such as draft, submitted or approved."
+    )
+    subject_type: SubjectType = Field(
+        description="Who that verification is for: 'person' (you) or 'business' (your company)."
+    )
+
+
+class Approval(BaseModel):
+    """One approved Hail verification as the purchase uses it. Internal: it
+    holds the carrier's own ids and is never returned by the public API."""
+
+    row_id: UUID = Field(description="Hail verification id.")
+    verification_id: str | None = Field(
+        default=None, description="Carrier id passed with the purchase."
+    )
+    address_id: str | None = Field(
+        default=None, description="Carrier address id passed with the purchase."
     )
 
 
@@ -69,9 +87,17 @@ class QuoteOffer(BaseModel):
         default=None,
         description="Organization-bound quote identifier to pass to POST /numbers before expiry.",
     )
+    subject_types: list[SubjectType] = Field(
+        default_factory=list,
+        description="Who can verify for this number: 'person' (you), 'business' (your company), or both. Empty when no verification is needed.",
+    )
+    verifications: list[OfferVerification] = Field(
+        default_factory=list,
+        description="Your organization's newest verification per subject type for this offer's country and number type, leaving out cancelled and rejected ones.",
+    )
     verification: OfferVerification | None = Field(
         default=None,
-        description="Your organization's verification for this offer's country and number type that is not cancelled or rejected; null when there is none.",
+        description="Deprecated: read `verifications`. The verification a purchase without subject_type would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.",
     )
     by_request: bool = Field(
         default=False,
@@ -94,6 +120,18 @@ class CarrierOffer(QuoteOffer):
     address_id: str | None = Field(
         default=None,
         description="Server-selected verified address identifier, when supported; null otherwise.",
+    )
+    approvals: dict[SubjectType, Approval] = Field(
+        default_factory=dict,
+        description="The org's approved verifications per subject type that the carrier still accepts for this number.",
+    )
+    subject_type: SubjectType | None = Field(
+        default=None,
+        description="Subject type of the verification the purchase used; set at purchase.",
+    )
+    verification_row_id: UUID | None = Field(
+        default=None,
+        description="Hail verification the purchase used; set at purchase.",
     )
 
 

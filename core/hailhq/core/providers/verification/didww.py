@@ -521,7 +521,8 @@ class DidwwVerificationProvider(VerificationProvider):
             raise VerificationProviderError("DIDWW request failed") from exc
 
     async def purchase_handle(self, refs: dict) -> dict:
-        return {"identity_id": refs["identity_id"], "address_id": refs["address_id"]}
+        # DIDWW registers the end user by the address: it is both ids.
+        return {"verification_id": refs["address_id"], "address_id": refs["address_id"]}
 
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)

@@ -61,6 +61,7 @@ type numberAcquireFlags struct {
 	voice      bool
 	idemKey    string
 	expected   int
+	subject    string
 }
 
 func newNumberAcquireCmd(opts *Options) *cobra.Command {
@@ -91,7 +92,10 @@ Examples:
   hail numbers acquire --country US --type toll_free
 
   # Buy one exact offer from an earlier quote:
-  hail numbers acquire --country US --quote-id 8b1f0c2e-...`,
+  hail numbers acquire --country US --quote-id 8b1f0c2e-...
+
+  # Verified as a person and as a company for this number? Pick one:
+  hail numbers acquire --country GB --type mobile --subject-type business`,
 		Args:    cobra.NoArgs,
 		PreRunE: requireMarkedFlags,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -108,6 +112,7 @@ Examples:
 	cmd.Flags().BoolVar(&f.sms, "sms-only", false, "Require SMS only (default: voice and SMS)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.Flags().IntVar(&f.expected, "expected-total-cents", 0, "Refuse the order (409) if the quoted monthly plus setup price differs from this many cents")
+	cmd.Flags().StringVar(&f.subject, "subject-type", "", "Which approved verification buys the number: person or business. Needed only when you are verified as both")
 	cmd.MarkFlagRequired("country")
 	return cmd
 }
@@ -123,6 +128,9 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 	}
 	if f.voice && f.sms {
 		return helpAndFail(cmd, "--voice-only and --sms-only cannot be combined")
+	}
+	if f.subject != "" && f.subject != "person" && f.subject != "business" {
+		return helpAndFail(cmd, "--subject-type must be 'person' or 'business'")
 	}
 
 	var quoteID openapi_types.UUID
@@ -149,6 +157,10 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 			return helpAndFail(cmd, "--expected-total-cents must be 0 or more")
 		}
 		body.ExpectedTotalCents = &f.expected
+	}
+	if f.subject != "" {
+		st := client.NumberAcquireRequestSubjectType(f.subject)
+		body.SubjectType = &st
 	}
 	// An explicit --type is checked against the quote; without --quote-id the
 	// quote was already requested for this type.
@@ -393,6 +405,9 @@ func printPhoneNumber(opts *Options, n *client.PhoneNumberResponse, banner bool)
 	fmt.Fprintf(opts.Stdout, "  Type:         %s\n", n.NumberType)
 	fmt.Fprintf(opts.Stdout, "  Capabilities: %s\n", strings.Join(n.Capabilities, ", "))
 	fmt.Fprintf(opts.Stdout, "  State:        %s\n", n.ProvisioningState)
+	if n.SubjectType != nil {
+		fmt.Fprintf(opts.Stdout, "  Verified as:  %s\n", *n.SubjectType)
+	}
 	if n.VoiceAgentId != nil {
 		fmt.Fprintf(opts.Stdout, "  Calls:        agent %s\n", n.VoiceAgentId.String())
 	}
@@ -449,16 +464,17 @@ func newNumberRegisterSmsCmd(opts *Options) *cobra.Command {
 
 Posts purpose=sms to POST /v1/verifications for a US local number. The carrier
 fee is debited from prepaid credit at filing. Required fields and fees:
-GET /v1/verifications/requirements?purpose=sms&country_code=US&number_type=local
-and GET /v1/verifications/sms-fees.`,
-		Example: `  hail numbers register-sms --subject business \
+GET /v1/verifications/requirements?purpose=sms&country_code=US&number_type=local&subject_type=business
+and GET /v1/verifications/sms-fees. --subject-type is required: person (you)
+or business (your company).`,
+		Example: `  hail numbers register-sms --subject-type business \
     --field legal_name="Acme Inc" --field ein=12-3456789 \
     --address customer_name="Acme Inc" --address street="1 Main St" \
     --address city=Austin --address region=TX --address postal_code=78701`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f.subject != "person" && f.subject != "business" {
-				return fmt.Errorf("--subject must be person or business")
+				return fmt.Errorf("--subject-type is required: person or business")
 			}
 			fields, err := parseKeyValues(f.fields, "--field")
 			if err != nil {
@@ -511,7 +527,10 @@ and GET /v1/verifications/sms-fees.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&f.subject, "subject", "business", "Who registers: person or business")
+	cmd.Flags().StringVar(&f.subject, "subject-type", "", "Required. Who registers: person (you) or business (your company)")
+	// Old name of --subject-type, kept so existing scripts still work.
+	cmd.Flags().StringVar(&f.subject, "subject", "", "Deprecated: use --subject-type")
+	_ = cmd.Flags().MarkDeprecated("subject", "use --subject-type")
 	cmd.Flags().StringVar(&f.numberID, "number-id", "", "Id of the US number to register (from `hail numbers list`). Needed when your US numbers are with more than one carrier.")
 	cmd.Flags().StringArrayVar(&f.fields, "field", nil, "Registration field as key=value (repeatable)")
 	cmd.Flags().StringArrayVar(&f.address, "address", nil, "Address part as key=value (repeatable): street, city, region, postal_code, customer_name")

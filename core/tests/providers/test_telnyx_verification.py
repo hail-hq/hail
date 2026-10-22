@@ -453,7 +453,8 @@ async def test_status_mapping(telnyx_status, state) -> None:
 async def test_purchase_handle_is_the_group_id() -> None:
     fake = Telnyx(lambda request: httpx.Response(200, json={"data": {}}))
     assert await provider(fake).purchase_handle({"group_id": GROUP}) == {
-        "requirement_group_id": GROUP
+        "verification_id": GROUP,
+        "address_id": None,
     }
 
 

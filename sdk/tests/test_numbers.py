@@ -557,3 +557,46 @@ async def test_quotes_default_when_the_api_omits_verification(
         quotes = await c.numbers.quotes(country="US", capabilities=["voice"])
     assert quotes.incomplete is False
     assert quotes.offers[0].verification is None
+
+
+@respx.mock
+async def test_numbers_acquire_sends_subject_type_only_when_given(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.post(f"{base_url}/numbers").mock(
+        return_value=httpx.Response(
+            201, json={**make_phone_number_response(), "subject_type": "business"}
+        )
+    )
+    quote_id = uuid4()
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        number = await c.numbers.acquire(
+            country="GB", quote_id=quote_id, subject_type="business"
+        )
+        assert json.loads(route.calls.last.request.content)["subject_type"] == (
+            "business"
+        )
+        assert number.subject_type == "business"
+        await c.numbers.acquire(country="GB", quote_id=quote_id)
+        assert "subject_type" not in json.loads(route.calls.last.request.content)
+
+
+@respx.mock
+async def test_quotes_expose_subject_types_and_verifications(
+    base_url: str, api_key: str
+):
+    person = {"id": str(uuid4()), "state": "approved", "subject_type": "person"}
+    offer = {
+        **_offer(uuid4()),
+        "subject_types": ["business", "person"],
+        "verifications": [person],
+        "verification": person,
+    }
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response([offer])
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        quotes = await c.numbers.quotes(country="GB", capabilities=["voice"])
+    (got,) = quotes.offers
+    assert got.subject_types == ["business", "person"]
+    assert got.verifications[0].subject_type == "person"

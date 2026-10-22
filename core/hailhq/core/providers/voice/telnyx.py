@@ -6,7 +6,7 @@ from uuid import UUID
 
 import httpx
 import phonenumbers
-from hailhq.core.carrier_offer import CarrierOffer, cents
+from hailhq.core.carrier_offer import Approval, CarrierOffer, cents
 from hailhq.core.config import settings
 from hailhq.core.providers.telnyx import TelnyxClient, get_http_client, path_id
 from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
@@ -164,9 +164,15 @@ async def telnyx_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, Approval] | None = None,
 ) -> list[CarrierOffer]:
+    """Live Telnyx inventory. ``approvals`` are the org's approved Hail
+    verifications per subject type; one counts while its requirement group
+    is still approved at Telnyx for this country and type. Telnyx does not
+    tie a group to a subject type, so either kind is accepted."""
     if not settings.telnyx_api_key:
         return []
+    approvals = approvals or {}
     if "voice" in capabilities and not all(
         (
             settings.telnyx_connection_id,
@@ -193,31 +199,37 @@ async def telnyx_offers(
     )
     if not quotes:
         return []
-    groups = (
-        await api.request(
-            "GET",
-            "/requirement_groups",
-            params={
-                "filter[country_code]": country,
-                "filter[phone_number_type]": kind,
-                "filter[action]": "ordering",
-                "filter[status]": "approved",
-                "filter[customer_reference]": f"hail-{org}",
-            },
-        )
-    )["data"]
-    group = next(
-        (
-            g
+    valid: dict[str, Approval] = {}
+    if approvals:
+        groups = (
+            await api.request(
+                "GET",
+                "/requirement_groups",
+                params={
+                    "filter[country_code]": country,
+                    "filter[phone_number_type]": kind,
+                    "filter[action]": "ordering",
+                    "filter[status]": "approved",
+                    "filter[customer_reference]": f"hail-{org}",
+                },
+            )
+        )["data"]
+        approved = {
+            g.get("id")
             for g in groups
             if g.get("customer_reference") == f"hail-{org}"
             and g.get("status") == "approved"
             and g.get("country_code") == country
             and g.get("phone_number_type") == kind
             and g.get("action") == "ordering"
-        ),
-        None,
-    )
+        }
+        valid = {
+            k: a
+            for k, a in sorted(approvals.items())
+            if a.verification_id and a.verification_id in approved
+        }
+    # Any approved group answers which rules are left; they are kind-blind.
+    group = next(iter(valid.values()), None)
     results = []
     for q in quotes:
         monthly_cents = cents(q.monthly_cost)
@@ -227,7 +239,7 @@ async def telnyx_offers(
             continue
         params = {"filter[phone_number]": q.e164, "filter[action]": "ordering"}
         if group:
-            params["filter[requirement_group_id]"] = group["id"]
+            params["filter[requirement_group_id]"] = group.verification_id
         rules = (await api.request("GET", "/regulatory_requirements", params=params))[
             "data"
         ]
@@ -277,7 +289,10 @@ async def telnyx_offers(
                     )
                 ),
                 requirements=labels,
-                verification_id=group["id"] if group else None,
+                # With a group passed, Telnyx may list no rules left; the
+                # number still needs that group at purchase.
+                subject_types=(["business", "person"] if requirements or group else []),
+                approvals=valid if requirements or group else {},
                 locality=q.locality,
                 region=q.region,
             )
@@ -384,6 +399,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await telnyx_offers(
         org,
@@ -395,6 +411,7 @@ async def offers(
         area_code=area_code,
         city=city,
         region=region,
+        approvals=approvals,
     )
 
 

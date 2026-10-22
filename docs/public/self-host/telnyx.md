@@ -102,13 +102,15 @@ from its US long codes to US numbers return 422.
 
 Telnyx will not sell some numbers (Sweden, Portugal, Italy, and others)
 until a requirement group is approved. Hail files it: `GET
-/v1/verifications/requirements?quote_id=<quote_id>&country_code=SE&number_type=mobile`,
+/v1/verifications/requirements?quote_id=<quote_id>&country_code=SE&number_type=mobile&subject_type=business`,
 with the `quote_id` of a Telnyx offer, lists the fields and documents Telnyx
 asks for. `POST /v1/verifications` (with the same `quote_id`) creates the
 requirement group under
 `customer_reference = hail-<organization UUID>`, uploads the files, and a
 superadmin approval submits it to Telnyx. Once Telnyx approves, quotes for
-that country and type turn `ready` and the order carries the group. The
+that country and type turn `ready` and the order carries the group of the
+Hail verification it uses (a group approved at Telnyx with no Hail row is not
+used). The
 console does all of this from the number picker. Plug-in:
 [`core/hailhq/core/providers/verification/telnyx.py`](../../../core/hailhq/core/providers/verification/telnyx.py).
 

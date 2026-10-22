@@ -1654,8 +1654,11 @@ async def test_quote_numbers_keeps_verification_and_incomplete(
     client: HailClient,
 ) -> None:
     body = _quotes_response()
-    verification = {"id": str(uuid4()), "state": "submitted"}
+    verification = {"id": str(uuid4()), "state": "submitted", "subject_type": "person"}
     body["offers"][0]["verification"] = verification
+    body["offers"][0]["verifications"] = [verification]
+    body["offers"][0]["subject_types"] = ["business", "person"]
+    body["offers"][0]["approvals"] = {"person": {"row_id": str(uuid4())}}
     body["offers"][0]["verification_id"] = "BU123"
     body["unavailable_providers"] = ["telnyx"]
     body["incomplete"] = True
@@ -1667,7 +1670,10 @@ async def test_quote_numbers_keeps_verification_and_incomplete(
 
     # Hail's own verification is kept; the carrier's id and names are not.
     assert result["offers"][0]["verification"] == verification
+    assert result["offers"][0]["verifications"] == [verification]
+    assert result["offers"][0]["subject_types"] == ["business", "person"]
     assert "verification_id" not in result["offers"][0]
+    assert "approvals" not in result["offers"][0]
     assert result["incomplete"] is True
     assert "unavailable_providers" not in result
 
@@ -1782,6 +1788,28 @@ async def test_acquire_number_sends_expected_total_and_returns_number_and_key(
     assert result["e164"] == "+14155550100"
     assert "provider" not in result
     assert result["idempotency_key"] == captured["key"]
+
+
+@respx.mock
+async def test_acquire_number_sends_subject_type(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        return httpx.Response(
+            201, json={**_number_response(), "subject_type": "business"}
+        )
+
+    respx.post(f"{_BASE_URL}/numbers").mock(side_effect=_handler)
+    result = await tools.acquire_number(
+        client=client, subject_type="business", **_ACQUIRE_ARGS
+    )
+    assert captured["body"]["subject_type"] == "business"
+    assert result["subject_type"] == "business"
+    result = await tools.acquire_number(
+        client=client, subject_type="company", **_ACQUIRE_ARGS
+    )
+    assert "ask the user" in result["error"]
 
 
 @respx.mock

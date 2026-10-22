@@ -582,6 +582,24 @@ func (e NumberAcquireRequestNumberType) Valid() bool {
 	}
 }
 
+// Defines values for NumberAcquireRequestSubjectType.
+const (
+	NumberAcquireRequestSubjectTypeBusiness NumberAcquireRequestSubjectType = "business"
+	NumberAcquireRequestSubjectTypePerson   NumberAcquireRequestSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the NumberAcquireRequestSubjectType enum.
+func (e NumberAcquireRequestSubjectType) Valid() bool {
+	switch e {
+	case NumberAcquireRequestSubjectTypeBusiness:
+		return true
+	case NumberAcquireRequestSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NumberQuoteRequestCapabilities.
 const (
 	Sms   NumberQuoteRequestCapabilities = "sms"
@@ -639,6 +657,42 @@ func (e ObservedDnsRecordType) Valid() bool {
 	case ObservedDnsRecordTypeMX:
 		return true
 	case ObservedDnsRecordTypeTXT:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OfferVerificationSubjectType.
+const (
+	OfferVerificationSubjectTypeBusiness OfferVerificationSubjectType = "business"
+	OfferVerificationSubjectTypePerson   OfferVerificationSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the OfferVerificationSubjectType enum.
+func (e OfferVerificationSubjectType) Valid() bool {
+	switch e {
+	case OfferVerificationSubjectTypeBusiness:
+		return true
+	case OfferVerificationSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PhoneNumberResponseSubjectType.
+const (
+	PhoneNumberResponseSubjectTypeBusiness PhoneNumberResponseSubjectType = "business"
+	PhoneNumberResponseSubjectTypePerson   PhoneNumberResponseSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the PhoneNumberResponseSubjectType enum.
+func (e PhoneNumberResponseSubjectType) Valid() bool {
+	switch e {
+	case PhoneNumberResponseSubjectTypeBusiness:
+		return true
+	case PhoneNumberResponseSubjectTypePerson:
 		return true
 	default:
 		return false
@@ -726,6 +780,24 @@ func (e QuoteOfferRegulatoryFriction) Valid() bool {
 	case None:
 		return true
 	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuoteOfferSubjectTypes.
+const (
+	QuoteOfferSubjectTypesBusiness QuoteOfferSubjectTypes = "business"
+	QuoteOfferSubjectTypesPerson   QuoteOfferSubjectTypes = "person"
+)
+
+// Valid indicates whether the value is a known member of the QuoteOfferSubjectTypes enum.
+func (e QuoteOfferSubjectTypes) Valid() bool {
+	switch e {
+	case QuoteOfferSubjectTypesBusiness:
+		return true
+	case QuoteOfferSubjectTypesPerson:
 		return true
 	default:
 		return false
@@ -2514,10 +2586,16 @@ type NumberAcquireRequest struct {
 
 	// QuoteId Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.
 	QuoteId openapi_types.UUID `json:"quote_id"`
+
+	// SubjectType Which approved verification to buy with: 'person' (you) or 'business' (your company). Needed only when you are verified as both for this number (422 without it); with one approved verification it is used. Ignored when the number needs no verification.
+	SubjectType *NumberAcquireRequestSubjectType `json:"subject_type,omitempty"`
 }
 
 // NumberAcquireRequestNumberType Kind of number to acquire: 'local', 'mobile', 'toll_free', or 'national'.
 type NumberAcquireRequestNumberType string
+
+// NumberAcquireRequestSubjectType Which approved verification to buy with: 'person' (you) or 'business' (your company). Needed only when you are verified as both for this number (422 without it); with one approved verification it is used. Ignored when the number needs no verification.
+type NumberAcquireRequestSubjectType string
 
 // NumberQuoteRequest defines model for NumberQuoteRequest.
 type NumberQuoteRequest struct {
@@ -2612,7 +2690,13 @@ type OfferVerification struct {
 
 	// State State of that verification, such as draft, submitted or approved.
 	State string `json:"state"`
+
+	// SubjectType Who that verification is for: 'person' (you) or 'business' (your company).
+	SubjectType OfferVerificationSubjectType `json:"subject_type"`
 }
+
+// OfferVerificationSubjectType Who that verification is for: 'person' (you) or 'business' (your company).
+type OfferVerificationSubjectType string
 
 // PhoneNumberListResponse defines model for PhoneNumberListResponse.
 type PhoneNumberListResponse struct {
@@ -2652,9 +2736,15 @@ type PhoneNumberResponse struct {
 	// SmsAgentId Agent that answers texts to this number. Null: texts only reach your webhooks.
 	SmsAgentId *openapi_types.UUID `json:"sms_agent_id,omitempty"`
 
+	// SubjectType Who the verification used to buy this number is for: 'person' or 'business'. Null when no verification was used.
+	SubjectType *PhoneNumberResponseSubjectType `json:"subject_type,omitempty"`
+
 	// VoiceAgentId Agent that answers calls to this number. Null: calls ring out.
 	VoiceAgentId *openapi_types.UUID `json:"voice_agent_id,omitempty"`
 }
+
+// PhoneNumberResponseSubjectType Who the verification used to buy this number is for: 'person' or 'business'. Null when no verification was used.
+type PhoneNumberResponseSubjectType string
 
 // PhoneNumberRoutingUpdate PATCH /numbers/{id}: which agent answers. A field left out keeps its
 // value; “null“ detaches.
@@ -2809,8 +2899,14 @@ type QuoteOffer struct {
 	// SetupCents One-time setup charge in USD cents, payable with the first month.
 	SetupCents int `json:"setup_cents"`
 
-	// Verification Your organization's verification for this offer's country and number type that is not cancelled or rejected; null when there is none.
+	// SubjectTypes Who can verify for this number: 'person' (you), 'business' (your company), or both. Empty when no verification is needed.
+	SubjectTypes *[]QuoteOfferSubjectTypes `json:"subject_types,omitempty"`
+
+	// Verification Deprecated: read `verifications`. The verification a purchase without subject_type would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.
 	Verification *OfferVerification `json:"verification,omitempty"`
+
+	// Verifications Your organization's newest verification per subject type for this offer's country and number type, leaving out cancelled and rejected ones.
+	Verifications *[]OfferVerification `json:"verifications,omitempty"`
 }
 
 // QuoteOfferNumberType Local, mobile, national, or toll-free number type.
@@ -2821,6 +2917,9 @@ type QuoteOfferReadiness string
 
 // QuoteOfferRegulatoryFriction Remaining verification effort derived from live requirements: none, information/address entry, document uploads, or unknown. This does not establish legal eligibility.
 type QuoteOfferRegulatoryFriction string
+
+// QuoteOfferSubjectTypes defines model for QuoteOffer.SubjectTypes.
+type QuoteOfferSubjectTypes string
 
 // SenderIdPatch defines model for SenderIdPatch.
 type SenderIdPatch struct {
@@ -3612,9 +3711,11 @@ type CreateVerificationParams struct {
 
 // GetVerificationRequirementsParams defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParams struct {
-	CountryCode string                                        `form:"country_code" json:"country_code"`
-	NumberType  string                                        `form:"number_type" json:"number_type"`
-	SubjectType *GetVerificationRequirementsParamsSubjectType `form:"subject_type,omitempty" json:"subject_type,omitempty"`
+	CountryCode string `form:"country_code" json:"country_code"`
+	NumberType  string `form:"number_type" json:"number_type"`
+
+	// SubjectType Who is verifying: 'person' (you) or 'business' (your company). Required. Ask the user which one.
+	SubjectType GetVerificationRequirementsParamsSubjectType `form:"subject_type" json:"subject_type"`
 
 	// Provider Deprecated and ignored. Hail picks the carrier from quote_id or number_id.
 	Provider *string `form:"provider,omitempty" json:"provider,omitempty"`
@@ -9098,20 +9199,16 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 			}
 		}
 
-		if params.SubjectType != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "subject_type", *params.SubjectType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "subject_type", params.SubjectType, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
 				}
 			}
-
 		}
 
 		if params.Provider != nil {

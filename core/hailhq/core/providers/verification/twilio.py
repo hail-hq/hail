@@ -465,10 +465,11 @@ class TwilioVerificationProvider(VerificationProvider):
         return ProviderStatus(state="pending")
 
     async def purchase_handle(self, refs: dict) -> dict:
-        handle = {"bundle_sid": refs["bundle_sid"]}
-        if refs.get("address_sid"):
-            handle["address_sid"] = refs["address_sid"]
-        return handle
+        # The bundle is what the purchase passes; the address rides along.
+        return {
+            "verification_id": refs["bundle_sid"],
+            "address_id": refs.get("address_sid"),
+        }
 
     # -- discard -----------------------------------------------------------
 

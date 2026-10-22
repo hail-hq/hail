@@ -38,6 +38,10 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
+from hailhq.api.routes.verifications import (
+    approved_handles,
+    refresh_number_verifications,
+)
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
 from hailhq.core.carrier_offer import (
     CarrierOffer,
@@ -109,8 +113,10 @@ async def _get_org_number_or_404(
         422: {
             "description": (
                 "quote_id is missing (request one from POST /numbers/quotes), "
-                "the quote does not match the country or type, or the offer is "
-                "by_request (ask support for it)."
+                "the quote does not match the country or type, the offer is "
+                "by_request (ask support for it), or subject_type is needed "
+                "or not approved: you are verified as a person and as a "
+                "company (pass subject_type), or not as the one you passed."
             ),
         },
         402: {
@@ -151,6 +157,10 @@ async def acquire_number(
     monthly fee immediately — it is not a reservation. quote_id is required:
     request live offers from POST /numbers/quotes first, then buy one. The
     number is usable for voice, SMS, or both, as the quote lists.
+
+    A number that needs verification is bought with one of your approved
+    verifications. When you are verified both as a person and as a company
+    for it, pass `subject_type`; with one, it is used.
     """
     if idem is not None and idem.is_replay:
         _cached_id, cached = replay_cached(
@@ -704,6 +714,11 @@ async def quote_numbers(
     recommended and POST /numbers refuses it: ask support. Its `quote_id`
     works for GET /verifications/requirements and POST /verifications. Without
     `area_code` or `city` only.
+
+    Each offer lists `subject_types` (who may verify for it: a person, a
+    business, or both) and your `verifications` per subject type. It is
+    `ready` when one of your approved verifications of an accepted subject
+    type is still valid.
     """
 
     # Numbers support orders by hand: catalog offers, not live stock, so a
@@ -743,6 +758,28 @@ async def quote_numbers(
                 f"we don't offer numbers in {body.country_code} yet",
                 loc=["body", "country_code"],
             )
+    # A verification the carrier approved since it was last read counts for
+    # this quote. Then Hail's approved rows per number type: the carriers
+    # only confirm each is still valid.
+    await refresh_number_verifications(
+        db,
+        get_verification_provider,
+        principal.organization_id,
+        body.country_code,
+        kinds,
+    )
+    approvals = {
+        kind: await approved_handles(
+            db,
+            get_verification_provider,
+            principal.organization_id,
+            body.country_code,
+            kind,
+            PROVIDERS,
+        )
+        for kind in kinds
+    }
+    verifications = await _offer_verifications(db, principal.organization_id)
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()
@@ -765,6 +802,7 @@ async def quote_numbers(
                 area_code=body.area_code,
                 city=body.city,
                 region=body.region,
+                approvals=approvals[kind],
             )
             for kind in kinds
         )
@@ -780,7 +818,6 @@ async def quote_numbers(
             principal.organization_id,
             ", ".join(unavailable),
         )
-    verifications = await _offer_verifications(db, principal.organization_id)
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -796,13 +833,14 @@ async def quote_numbers(
         )
         db.add(row)
         offer.quote_id = row.id
-        offer.verification = verifications.get(
-            (offer.provider, offer.country_code, offer.number_type)
+        per_kind = verifications.get(
+            (offer.provider, offer.country_code, offer.number_type), {}
         )
-        if (
-            offer.by_request
-            and offer.verification is not None
-            and offer.verification.state == "approved"
+        offer.verifications = [per_kind[k] for k in sorted(per_kind)]
+        offer.verification = _purchase_verification(offer, per_kind)
+        if offer.by_request and any(
+            v.state == "approved" and k in offer.subject_types
+            for k, v in per_kind.items()
         ):
             # The catalog says verification is needed; this org has it.
             offer.readiness, offer.regulatory_friction = "ready", "none"
@@ -822,12 +860,31 @@ async def quote_numbers(
     )
 
 
+def _purchase_verification(
+    offer: CarrierOffer, per_kind: dict[str, OfferVerification]
+) -> OfferVerification | None:
+    """The deprecated ``verification`` field: the row a purchase without
+    subject_type would use. That is the one approved verification the
+    carrier accepts, else the newest one that is not cancelled or rejected."""
+    approved = [
+        v
+        for k, v in per_kind.items()
+        if v.state == "approved"
+        and k in offer.subject_types
+        and (offer.by_request or k in offer.approvals)
+    ]
+    if len(approved) == 1:
+        return approved[0]
+    # ``per_kind`` is in newest-first order.
+    return next(iter(per_kind.values()), None)
+
+
 async def _offer_verifications(
     db: AsyncSession, organization_id: UUID
-) -> dict[tuple[str, str, str], OfferVerification]:
-    """The org's newest number verification per carrier, country and number
-    type, leaving out cancelled and rejected ones. The console picks the same
-    row for an offer."""
+) -> dict[tuple[str, str, str], dict[str, OfferVerification]]:
+    """The org's newest number verification per carrier, country, number
+    type and subject type, leaving out cancelled and rejected ones. The
+    console picks the same rows for an offer."""
     rows = (
         await db.execute(
             select(CarrierVerification)
@@ -839,11 +896,11 @@ async def _offer_verifications(
             .order_by(CarrierVerification.created_at.desc())
         )
     ).scalars()
-    out: dict[tuple[str, str, str], OfferVerification] = {}
+    out: dict[tuple[str, str, str], dict[str, OfferVerification]] = {}
     for r in rows:
-        out.setdefault(
-            (r.provider, r.country_code, r.number_type),
-            OfferVerification(id=r.id, state=r.state),
+        out.setdefault((r.provider, r.country_code, r.number_type), {}).setdefault(
+            r.subject_type,
+            OfferVerification(id=r.id, state=r.state, subject_type=r.subject_type),
         )
     return out
 

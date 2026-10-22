@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from hailhq.core.carrier_offer import Approval
 from hailhq.core.carrier_routing import carrier, sms_route, voice_route
 from hailhq.core.config import settings
 from hailhq.core.number_offers import CarrierOffer, rank_offers
@@ -149,6 +150,8 @@ async def test_live_portugal_rules_and_org_group(
     monkeypatch.setattr(settings, "telnyx_sip_username", "sip-user")
     monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
 
+    group_id = str(uuid4())
+
     def respond(request):
         if request.url.path.endswith("available_phone_numbers"):
             data = [
@@ -165,7 +168,7 @@ async def test_live_portugal_rules_and_org_group(
         elif request.url.path.endswith("requirement_groups"):
             data = [
                 {
-                    "id": str(uuid4()),
+                    "id": group_id,
                     "country_code": "PT",
                     "phone_number_type": "local",
                     "action": "ordering",
@@ -189,13 +192,28 @@ async def test_live_portugal_rules_and_org_group(
             ]
         return httpx.Response(200, json={"data": data})
 
+    # Hail's approved rows: the business one names this group, the person
+    # one a group Telnyx does not list. Each is matched by its own id.
+    business = Approval(row_id=uuid4(), verification_id=group_id)
+    person = Approval(row_id=uuid4(), verification_id=str(uuid4()))
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
-        result = await telnyx_offers(org, "PT", "local", ["voice"], http)
+        result = await telnyx_offers(
+            org,
+            "PT",
+            "local",
+            ["voice"],
+            http,
+            approvals={"person": person, "business": business},
+        )
     assert len(result) == 1
     assert result[0].regulatory_friction == (
         "none" if expected == "ready" else friction
     )
     assert result[0].readiness == expected
+    assert result[0].subject_types == ["business", "person"]
+    assert result[0].approvals == (
+        {"business": business} if expected == "ready" else {}
+    )
     assert result[0].monthly_cents == 230
     assert result[0].setup_cents == 100
 
@@ -236,7 +254,9 @@ async def test_twilio_live_rules_classify_verification_effort(
         )
     )
     api.numbers.v2.regulatory_compliance.regulations.list.return_value = [
-        SimpleNamespace(sid="RN_us", requirements=requirements)
+        SimpleNamespace(
+            sid="RN_us", end_user_type="business", requirements=requirements
+        )
     ]
     monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
     monkeypatch.setattr(settings, "twilio_auth_token", "test")
@@ -256,6 +276,102 @@ async def test_twilio_live_rules_classify_verification_effort(
         api.available_phone_numbers.return_value.local.list.call_args.kwargs["contains"]
         == "+12125550100"
     )
+
+
+def _twilio_gb_mobile(monkeypatch, bundles):
+    api = MagicMock()
+    api.available_phone_numbers.return_value.mobile.list.return_value = [
+        SimpleNamespace(
+            phone_number="+447700900001",
+            capabilities={"voice": True, "SMS": True},
+            address_requirements="none",
+            locality=None,
+            region=None,
+        )
+    ]
+    api.pricing.v1.phone_numbers.countries.return_value.fetch.return_value = (
+        SimpleNamespace(
+            price_unit="USD",
+            phone_number_prices=[{"number_type": "mobile", "current_price": "2.50"}],
+        )
+    )
+    compliance = api.numbers.v2.regulatory_compliance
+    compliance.regulations.list.return_value = [
+        SimpleNamespace(
+            sid="RN_person",
+            end_user_type="individual",
+            requirements={"end_user": [{"name": "Individual"}]},
+        ),
+        SimpleNamespace(
+            sid="RN_business",
+            end_user_type="business",
+            requirements={"end_user": [{"name": "Business"}]},
+        ),
+    ]
+    compliance.bundles.list.return_value = bundles
+    monkeypatch.setattr(settings, "twilio_account_sid", "AC_test")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test")
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.TwilioClient", lambda *a, **kw: api
+    )
+    return api
+
+
+async def test_twilio_person_bundle_makes_the_offer_ready(monkeypatch):
+    """GB mobile: a person's approved bundle is used. Regulations are listed
+    for every end-user type, not only business."""
+    org = uuid4()
+    api = _twilio_gb_mobile(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                sid="BU_person", friendly_name=f"hail-{org}", regulation_sid="RN_person"
+            )
+        ],
+    )
+    person = Approval(row_id=uuid4(), verification_id="BU_person")
+    (offer,) = await twilio_offers(
+        org, "GB", "mobile", ["voice"], approvals={"person": person}
+    )
+    assert offer.readiness == "ready"
+    assert offer.subject_types == ["business", "person"]
+    assert offer.approvals == {"person": person}
+    kwargs = api.numbers.v2.regulatory_compliance.regulations.list.call_args.kwargs
+    assert "end_user_type" not in kwargs
+
+
+async def test_twilio_approval_must_match_its_bundle_and_kind(monkeypatch):
+    """Each Hail approval is checked by its own bundle sid, and the bundle
+    must be for that subject type. A bundle Hail has no row for is unused."""
+    org = uuid4()
+    _twilio_gb_mobile(
+        monkeypatch,
+        [
+            # Approved at Twilio, no Hail row.
+            SimpleNamespace(
+                sid="BU_orphan",
+                friendly_name=f"hail-{org}",
+                regulation_sid="RN_business",
+            ),
+            # Hail calls it a person's, but it was made for a business.
+            SimpleNamespace(
+                sid="BU_mixed",
+                friendly_name=f"hail-{org}",
+                regulation_sid="RN_business",
+            ),
+        ],
+    )
+    (offer,) = await twilio_offers(
+        org,
+        "GB",
+        "mobile",
+        ["voice"],
+        approvals={"person": Approval(row_id=uuid4(), verification_id="BU_mixed")},
+    )
+    assert offer.readiness == "verification_required"
+    assert offer.approvals == {}
+    (offer,) = await twilio_offers(org, "GB", "mobile", ["voice"])
+    assert offer.readiness == "verification_required"
 
 
 def test_equal_ready_prices_use_twilio_but_cheaper_telnyx_wins():

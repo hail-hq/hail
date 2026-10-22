@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
-from hailhq.core.carrier_offer import CarrierOffer
+from hailhq.core.carrier_offer import Approval, CarrierOffer
 from hailhq.core.config import settings
 from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
@@ -111,7 +111,10 @@ class Carrier:
     # True when a purchase is accepted first and completes later.
     async_orders: bool
     # Live inventory: (org, country, number type, capabilities, exact e164,
-    # national digits the number starts with, city, US/CA state code).
+    # national digits the number starts with, city, US/CA state code, the
+    # org's approved Hail verifications for this carrier per subject type).
+    # The carrier only confirms an approval is still valid; it never finds
+    # one Hail has no row for.
     offers: Callable[
         [
             UUID,
@@ -122,6 +125,7 @@ class Carrier:
             str | None,
             str | None,
             str | None,
+            dict[str, Approval],
         ],
         Awaitable[list[CarrierOffer]],
     ]

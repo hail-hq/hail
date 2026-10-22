@@ -656,10 +656,13 @@ async def acquire_number(
     number_type: str,
     confirm_total_cents: int,
     idempotency_key: str | None = None,
+    subject_type: str | None = None,
 ) -> dict[str, Any]:
     quote_id_ = _as_uuid(quote_id)
     if quote_id_ is None:
         return _not_uuid("quote_id")
+    if subject_type is not None and subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}."}
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
@@ -669,6 +672,7 @@ async def acquire_number(
             number_type=number_type,
             expected_total_cents=confirm_total_cents,
             idempotency_key=idempotency_key,
+            **({"subject_type": subject_type} if subject_type else {}),
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -791,6 +795,11 @@ def _is_str_map(value: Any) -> bool:
 
 _VERIFICATION_PURPOSES = ("number", "sms")
 _PURPOSE_ERROR = "purpose must be 'number' or 'sms'"
+_SUBJECT_TYPES = ("person", "business")
+_SUBJECT_TYPE_ERROR = (
+    "subject_type must be 'person' or 'business': ask the user whether this "
+    "is for them or for their company"
+)
 _QUOTE_REQUIRED = (
     "quote_id is required for purpose='number': pass the quote_id of the "
     "offer from quote_numbers"
@@ -910,11 +919,13 @@ async def get_verification_requirements(
     client: HailClient,
     country_code: str,
     number_type: str,
-    subject_type: str = "person",
+    subject_type: str,
     quote_id: str | None = None,
     number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}."}
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
     if purpose == "number" and quote_id is None:
@@ -1020,12 +1031,14 @@ async def submit_verification(
     documents: Any,
     files: Any,
     attest_authorized: bool,
-    subject_type: str = "person",
+    subject_type: str | None,
     address: Any = None,
     quote_id: str | None = None,
     number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}. Nothing was sent."}
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
     if purpose == "number" and quote_id is None:
@@ -2255,14 +2268,22 @@ def register_tools(
         Returns ``{"offers": [...], "recommended_quote_id", "expires_at"}``.
         Each offer has ``e164``, ``number_type``,
         ``capabilities``, ``monthly_cents``, ``setup_cents``, ``readiness``,
-        ``requirements`` and ``quote_id``. Money fields are cents (USD).
+        ``requirements``, ``subject_types``, ``verifications`` and
+        ``quote_id``. Money fields are cents (USD).
         Quotes expire in 10 minutes (``expires_at``); quote again after that.
 
+        ``subject_types`` says who may verify for the number: ``person``
+        (the user), ``business`` (the user's company), or both; empty when no
+        verification is needed. ``verifications`` lists the organization's
+        verification per subject type (``id``, ``state``, ``subject_type``).
+
         An offer with ``readiness == "verification_required"`` cannot be
-        bought until the organization is verified. Call
-        get_verification_requirements, ask the user for the details, then
-        submit_verification, both with the offer's ``quote_id``, and poll
-        get_verification (review takes business days). ``requirements``
+        bought until the organization is verified. Ask the user "you or your
+        company?" to pick the ``subject_type`` (one of ``subject_types``).
+        Call get_verification_requirements, ask the user for the details,
+        then submit_verification, both with the offer's ``quote_id`` and that
+        ``subject_type``, and poll get_verification (review takes business
+        days). ``requirements``
         lists what the carrier needs. Prefer an offer whose
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
@@ -2304,6 +2325,7 @@ def register_tools(
         number_type: str,
         confirm_total_cents: int,
         idempotency_key: str | None = None,
+        subject_type: str | None = None,
     ) -> dict[str, Any]:
         """Buys a real phone number. It charges the setup fee and the first
         month now and renews monthly. Call quote_numbers first. Pass the
@@ -2322,6 +2344,13 @@ def register_tools(
         is bought once. A 4xx error returns no key: the API remembers that
         failure under it, so drop it and quote again.
 
+        ``subject_type`` (``person`` or ``business``) picks which approved
+        verification buys a number that needs one. Pass it only when the
+        offer's ``verifications`` has an approved one of each: then ask the
+        user "you or your company?". With one approved, it is used. A 422
+        "Verify as a person first" (or "a company") means that kind is not
+        approved for this number.
+
         Returns the number (``id``, ``e164``, ``provisioning_state``, ...)
         plus ``idempotency_key``, or ``{"error": "<message>",
         "idempotency_key": ...}``."""
@@ -2334,6 +2363,7 @@ def register_tools(
                     number_type=number_type,
                     confirm_total_cents=confirm_total_cents,
                     idempotency_key=idempotency_key,
+                    subject_type=subject_type,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -2474,7 +2504,7 @@ def register_tools(
         ctx: Context,
         country_code: str,
         number_type: str,
-        subject_type: str = "person",
+        subject_type: str,
         quote_id: str | None = None,
         number_id: str | None = None,
         purpose: str = "number",
@@ -2485,8 +2515,10 @@ def register_tools(
 
         ``country_code`` is ISO alpha-2 (for example ``"GB"``). ``number_type``
         is ``local``, ``mobile``, ``national`` or ``toll_free``.
-        ``subject_type`` is ``person`` (default) or ``business``; the result's
-        ``subject_types`` lists what the carrier accepts. ``quote_id`` is the
+        ``subject_type`` is required: ``person`` (the user) or ``business``
+        (the user's company). Never guess it: ask the user "you or your
+        company?". The result's ``subject_types`` lists what the carrier
+        accepts. The organization may hold one verification of each. ``quote_id`` is the
         offer's ``quote_id`` from quote_numbers. It is required for
         ``purpose='number'``: the form is the one for that offer.
 
@@ -2539,7 +2571,10 @@ def register_tools(
         documents: _JsonObject,
         files: _JsonObjectList,
         attest_authorized: StrictBool,
-        subject_type: str = "person",
+        # Required, but checked inside submit_verification: a missing
+        # required argument makes FastMCP echo every argument, personal data
+        # included, in its validation error.
+        subject_type: str | None = None,
         address: _JsonObjectOrNone = None,
         quote_id: str | None = None,
         number_id: str | None = None,
@@ -2563,9 +2598,14 @@ def register_tools(
         same ``quote_id`` you passed to get_verification_requirements. For
         ``purpose='sms'``, pass the same ``number_id`` if you passed one.
 
+        ``subject_type`` is required: ``person`` (the user) or ``business``
+        (the user's company), the same one passed to
+        get_verification_requirements. Never guess it: ask the user "you or
+        your company?".
+
         Steps: 1) call get_verification_requirements. 2) Ask the user for each
         field and file. 3) Call this once. Do not submit twice: a 409 means
-        one already exists (see list_verifications).
+        one of that subject type already exists (see list_verifications).
 
         Arguments, as listed by get_verification_requirements:
         ``fields`` is ``{field name: value}``. ``address`` is

@@ -842,13 +842,52 @@ async def test_quote_route_shows_the_live_verification(
     assert by_carrier["telnyx"]["verification"] == {
         "id": str(live.id),
         "state": "submitted",
+        "subject_type": "business",
     }
+    assert by_carrier["telnyx"]["verifications"] == [
+        by_carrier["telnyx"]["verification"]
+    ]
+    assert by_carrier["twilio"]["verifications"] == []
     # A verification with one carrier says nothing about another's offer.
     assert by_carrier["twilio"]["verification"] is None
     # The stored quote still reads as an offer the purchase understands.
     row = await async_session.get(NumberOffer, UUID(by_carrier["telnyx"]["quote_id"]))
     stored = CarrierOffer.model_validate(row.offer)
     assert (stored.provider, stored.e164) == ("telnyx", offer.e164)
+
+
+async def test_quote_route_lists_one_verification_per_subject_type(
+    client, async_session, org_and_key, monkeypatch
+):
+    """A person and a business verification may both be live. The offer
+    lists both; the deprecated ``verification`` is the one approved row the
+    carrier accepts, which a purchase without subject_type would use."""
+    from hailhq.core.carrier_offer import Approval
+
+    org, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    business = _verification(org, "submitted", created_at=now)
+    person = _verification(org, "approved", created_at=now - timedelta(days=1))
+    person.subject_type = "person"
+    async_session.add_all([business, person])
+    await async_session.commit()
+    _, offer = await seed_quote(async_session, org)
+    offer = offer.model_copy(
+        update={
+            "subject_types": ["business", "person"],
+            "approvals": {"person": Approval(row_id=person.id, verification_id="g")},
+        }
+    )
+    result = await _quote(client, key, monkeypatch, [offer])
+    (got,) = result["offers"]
+    assert got["subject_types"] == ["business", "person"]
+    assert [(v["subject_type"], v["state"]) for v in got["verifications"]] == [
+        ("business", "submitted"),
+        ("person", "approved"),
+    ]
+    assert got["verification"]["id"] == str(person.id)
+    # The carrier ids never leave the server.
+    assert "approvals" not in got and "verification_id" not in got
 
 
 async def test_quote_route_verification_is_null_without_a_live_row(

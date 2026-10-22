@@ -7,7 +7,7 @@ import logging
 from uuid import UUID
 
 from hailhq.core import telephony_catalog
-from hailhq.core.carrier_offer import CarrierOffer, cents
+from hailhq.core.carrier_offer import Approval, CarrierOffer, cents
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.schemas import NumberType
 
@@ -65,14 +65,25 @@ async def discover_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: dict[str, dict[str, Approval]] | None = None,
 ) -> tuple[list[CarrierOffer], list[str]]:
     """Live offers from ``providers`` (every carrier by default) and the
-    carriers whose lookup failed."""
+    carriers whose lookup failed. ``approvals`` is the org's approved Hail
+    verifications per carrier and subject type (``approved_handles``)."""
     asked = [p for p in PROVIDERS if p in providers]
+    approvals = approvals or {}
     results = await asyncio.gather(
         *(
             carrier(p).offers(
-                org, country, kind, capabilities, e164, area_code, city, region
+                org,
+                country,
+                kind,
+                capabilities,
+                e164,
+                area_code,
+                city,
+                region,
+                approvals.get(p, {}),
             )
             for p in asked
         ),
@@ -130,6 +141,8 @@ def by_request_offers(
                 requirements=(
                     ["End-user registration (identity and address)"] if needs else []
                 ),
+                # The catalog does not say who may verify: either may.
+                subject_types=["business", "person"] if needs else [],
                 by_request=True,
             )
         )

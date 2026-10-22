@@ -401,7 +401,7 @@ class TelnyxVerificationProvider(VerificationProvider):
         return ProviderStatus(state="draft")
 
     async def purchase_handle(self, refs: dict) -> dict:
-        return {"requirement_group_id": refs["group_id"]}
+        return {"verification_id": refs["group_id"], "address_id": None}
 
     # -- discard -----------------------------------------------------------
 

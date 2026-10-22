@@ -97,7 +97,7 @@ class FakeCarrier(VerificationProvider):
         return self.remote_status
 
     async def purchase_handle(self, refs):
-        return {"bundle_sid": refs["bundle_sid"]}
+        return {"verification_id": refs["bundle_sid"], "address_id": None}
 
     async def discard(self, refs):
         self.discarded.append(refs)
@@ -234,6 +234,7 @@ def _gb_mobile(**params) -> dict:
         "country_code": "GB",
         "number_type": "mobile",
         "quote_id": _QUOTE_ID,
+        "subject_type": "person",
         **params,
     }
 
@@ -406,7 +407,12 @@ async def test_requirements_rejects_unknown_number_type(
     _, _, key = org_and_key
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "satellite", "provider": "fake"},
+        params={
+            "subject_type": "person",
+            "country_code": "GB",
+            "number_type": "satellite",
+            "provider": "fake",
+        },
         headers=_auth(key),
     )
     assert resp.status_code == 422
@@ -952,9 +958,29 @@ async def _fund(async_session, org_id) -> None:
     await async_session.commit()
 
 
-async def _quote(async_session, org_id, verification_id):
+async def _approved(async_session, org_id, subject_type, bundle) -> uuid.UUID:
+    """An approved GB mobile number verification with a Twilio-shaped ref."""
+    row = CarrierVerification(
+        organization_id=org_id,
+        provider="twilio",
+        country_code="GB",
+        number_type="mobile",
+        subject_type=subject_type,
+        state="approved",
+        provider_refs={"bundle_sid": bundle},
+        requirements_version="v1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    return row.id
+
+
+async def _quote(async_session, org_id, approvals, subject_types=None):
+    """A ready GB mobile quote. ``approvals``: subject type -> (row id,
+    bundle), the approvals the carrier accepted at quote time."""
     from datetime import datetime, timedelta, timezone
 
+    from hailhq.core.carrier_offer import Approval
     from hailhq.core.models import NumberOffer
     from hailhq.core.number_offers import CarrierOffer
 
@@ -967,7 +993,15 @@ async def _quote(async_session, org_id, verification_id):
         monthly_cents=250,
         setup_cents=0,
         readiness="ready",
-        verification_id=verification_id,
+        subject_types=(
+            subject_types
+            if subject_types is not None
+            else (["business", "person"] if approvals else [])
+        ),
+        approvals={
+            k: Approval(row_id=row_id, verification_id=bundle)
+            for k, (row_id, bundle) in approvals.items()
+        },
     )
     quote = NumberOffer(
         organization_id=org_id,
@@ -979,58 +1013,228 @@ async def _quote(async_session, org_id, verification_id):
     return quote, offer
 
 
-async def test_purchase_passes_the_quoted_verification_to_the_carrier(
-    client, org_and_key, async_session, monkeypatch
-) -> None:
-    """Readiness comes from live carrier discovery: ``twilio_offers`` looks up
-    the org's approved bundle (``hail-<org>``, the name the verification
-    plug-in gives it) and the quote carries its id into the purchase."""
+async def _buy(client, key, async_session, org_id, approvals, monkeypatch, **body):
+    """POST /numbers for a fresh quote; returns (response, purchase mock)."""
     from unittest.mock import AsyncMock
 
-    org_id, _, key = org_and_key
     await _fund(async_session, org_id)
     purchase = AsyncMock(return_value="PN_gb_1")
     monkeypatch.setattr(
         "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
     )
-    quote, offer = await _quote(async_session, org_id, "BU_approved")
+    subject_types = body.pop("subject_types", None)
+    quote, offer = await _quote(async_session, org_id, approvals, subject_types)
     monkeypatch.setattr(
         "hailhq.api.number_orders.discover_offers",
         AsyncMock(return_value=([offer], [])),
     )
     resp = await client.post(
         "/numbers",
-        json={"country_code": "GB", "quote_id": str(quote.id)},
+        json={"country_code": "GB", "quote_id": str(quote.id), **body},
         headers=_auth(key),
+    )
+    return resp, purchase
+
+
+async def test_purchase_passes_the_quoted_verification_to_the_carrier(
+    client, org_and_key, async_session, monkeypatch
+) -> None:
+    """Hail's approved row decides the purchase handle; the carrier only
+    confirmed it at quote time. One approved kind: subject_type may be left
+    out, and the number remembers which verification it used."""
+    from hailhq.core.models import PhoneNumber
+
+    org_id, _, key = org_and_key
+    row_id = await _approved(async_session, org_id, "person", "BU_person")
+    resp, purchase = await _buy(
+        client,
+        key,
+        async_session,
+        org_id,
+        {"person": (row_id, "BU_person")},
+        monkeypatch,
     )
     assert resp.status_code == 201, resp.text
     purchase.assert_awaited_once()
-    assert purchase.await_args.args[2] == "BU_approved"
+    assert purchase.await_args.args[2] == "BU_person"
+    assert resp.json()["subject_type"] == "person"
+    number = await async_session.get(PhoneNumber, uuid.UUID(resp.json()["id"]))
+    await async_session.refresh(number)
+    stored = number.provisioning_metadata["offer"]
+    assert stored["verification_row_id"] == str(row_id)
+    listed = await client.get("/numbers", headers=_auth(key))
+    assert listed.json()["items"][0]["subject_type"] == "person"
+
+
+async def test_purchase_with_two_approved_kinds_needs_subject_type(
+    client, org_and_key, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    person = await _approved(async_session, org_id, "person", "BU_person")
+    business = await _approved(async_session, org_id, "business", "BU_business")
+    approvals = {
+        "person": (person, "BU_person"),
+        "business": (business, "BU_business"),
+    }
+    resp, purchase = await _buy(
+        client, key, async_session, org_id, approvals, monkeypatch
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "subject_type"]
+    assert resp.json()["detail"][0]["msg"] == (
+        "You are verified as a person and as a company. Pass subject_type."
+    )
+    purchase.assert_not_awaited()
+
+    resp, purchase = await _buy(
+        client,
+        key,
+        async_session,
+        org_id,
+        approvals,
+        monkeypatch,
+        subject_type="business",
+    )
+    assert resp.status_code == 201, resp.text
+    assert purchase.await_args.args[2] == "BU_business"
+    assert resp.json()["subject_type"] == "business"
+
+
+@pytest.mark.parametrize(
+    ("asked", "msg"),
+    [("person", "Verify as a person first"), ("business", "Verify as a company first")],
+)
+async def test_purchase_with_a_kind_not_approved_is_422(
+    client, org_and_key, async_session, monkeypatch, asked, msg
+) -> None:
+    org_id, _, key = org_and_key
+    other = "business" if asked == "person" else "person"
+    row_id = await _approved(async_session, org_id, other, "BU_other")
+    resp, purchase = await _buy(
+        client,
+        key,
+        async_session,
+        org_id,
+        {other: (row_id, "BU_other")},
+        monkeypatch,
+        subject_type=asked,
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "subject_type"]
+    assert resp.json()["detail"][0]["msg"] == msg
+    purchase.assert_not_awaited()
+
+
+async def test_purchase_with_a_kind_the_number_does_not_take_is_422(
+    client, org_and_key, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    row_id = await _approved(async_session, org_id, "business", "BU_business")
+    resp, purchase = await _buy(
+        client,
+        key,
+        async_session,
+        org_id,
+        {"business": (row_id, "BU_business")},
+        monkeypatch,
+        subject_types=["business"],
+        subject_type="person",
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "subject_type"]
+    purchase.assert_not_awaited()
+
+
+async def test_purchase_without_verification_ignores_subject_type(
+    client, org_and_key, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    resp, purchase = await _buy(
+        client, key, async_session, org_id, {}, monkeypatch, subject_type="person"
+    )
+    assert resp.status_code == 201, resp.text
+    assert purchase.await_args.args[2] is None
+    assert resp.json()["subject_type"] is None
+
+
+async def test_purchase_refuses_an_approval_withdrawn_since_the_quote(
+    client, org_and_key, async_session, monkeypatch
+) -> None:
+    """The carrier re-check must still accept the chosen approval."""
+    from unittest.mock import AsyncMock
+
+    org_id, _, key = org_and_key
+    row_id = await _approved(async_session, org_id, "person", "BU_person")
+    await _fund(async_session, org_id)
+    purchase = AsyncMock(return_value="PN_gb_1")
+    monkeypatch.setattr(
+        "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
+    )
+    quote, offer = await _quote(
+        async_session, org_id, {"person": (row_id, "BU_person")}
+    )
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer.model_copy(update={"approvals": {}})], [])),
+    )
+    resp = await client.post(
+        "/numbers",
+        json={"country_code": "GB", "quote_id": str(quote.id)},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 409, resp.text
+    purchase.assert_not_awaited()
 
 
 async def test_purchase_without_verification_passes_none(
     client, org_and_key, async_session, monkeypatch
 ) -> None:
-    from unittest.mock import AsyncMock
-
     org_id, _, key = org_and_key
-    await _fund(async_session, org_id)
-    purchase = AsyncMock(return_value="PN_gb_1")
-    monkeypatch.setattr(
-        "hailhq.core.providers.voice.twilio.purchase_ordered_number", purchase
-    )
-    quote, offer = await _quote(async_session, org_id, None)
-    monkeypatch.setattr(
-        "hailhq.api.number_orders.discover_offers",
-        AsyncMock(return_value=([offer], [])),
-    )
-    resp = await client.post(
-        "/numbers",
-        json={"country_code": "GB", "quote_id": str(quote.id)},
-        headers=_auth(key),
-    )
+    resp, purchase = await _buy(client, key, async_session, org_id, {}, monkeypatch)
     assert resp.status_code == 201, resp.text
     assert purchase.await_args.args[2] is None
+
+
+async def test_subject_type_is_required(client, org_and_key, carrier) -> None:
+    """No default: the agent must ask the user "you or your company?"."""
+    _, _, key = org_and_key
+    resp = await client.get(
+        "/verifications/requirements",
+        params={k: v for k, v in _gb_mobile().items() if k != "subject_type"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["query", "subject_type"]
+    for value in ("", "company"):
+        resp = await client.post(
+            "/verifications",
+            data=_submission(subject_type=value),
+            files=_passport(),
+            headers=_auth(key),
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"][0]["loc"] == ["body", "subject_type"]
+    assert carrier.drafts == []
+
+
+async def test_one_live_verification_per_subject_type(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    assert (await _create(client, key)).status_code == 201
+    resp = await _create(client, key, subject_type="business")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["subject_type"] == "business"
+    resp = await _create(client, key)
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == (
+        "You already have a verification as a person for this number type."
+    )
+    resp = await _create(client, key, subject_type="business")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == (
+        "You already have a verification as a company for this number type."
+    )
 
 
 async def test_number_verification_without_quote_id_is_422(
@@ -1040,7 +1244,12 @@ async def test_number_verification_without_quote_id_is_422(
     _, _, key = org_and_key
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile", "provider": "fake"},
+        params={
+            "subject_type": "person",
+            "country_code": "GB",
+            "number_type": "mobile",
+            "provider": "fake",
+        },
         headers=_auth(key),
     )
     assert resp.status_code == 422, resp.text
@@ -1084,7 +1293,12 @@ async def test_quote_id_picks_the_quoted_carrier(
     quote_id = await _raw_quote(async_session, org_id, "fake")
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "GB", "number_type": "mobile", "quote_id": quote_id},
+        params={
+            "subject_type": "person",
+            "country_code": "GB",
+            "number_type": "mobile",
+            "quote_id": quote_id,
+        },
         headers=_auth(key),
     )
     assert resp.status_code == 200, resp.text
@@ -1107,7 +1321,12 @@ async def test_quote_id_must_belong_to_the_org(
     for q in (quote_id, str(uuid.uuid4())):
         resp = await client.get(
             "/verifications/requirements",
-            params={"country_code": "GB", "number_type": "mobile", "quote_id": q},
+            params={
+                "subject_type": "person",
+                "country_code": "GB",
+                "number_type": "mobile",
+                "quote_id": q,
+            },
             headers=_auth(key),
         )
         assert resp.status_code == 404
@@ -1122,6 +1341,7 @@ async def test_quote_id_wins_over_a_provider_param(
     resp = await client.get(
         "/verifications/requirements",
         params={
+            "subject_type": "person",
             "country_code": "GB",
             "number_type": "mobile",
             "quote_id": quote_id,
@@ -1164,6 +1384,7 @@ async def test_quote_id_is_rejected_for_sms(
     resp = await client.get(
         "/verifications/requirements",
         params={
+            "subject_type": "person",
             "country_code": "US",
             "number_type": "local",
             "purpose": "sms",
@@ -1610,15 +1831,15 @@ async def test_approved_sms_row_is_not_a_number_purchase_handle(
     ).scalar_one()
     row.state = "approved"
     await async_session.commit()
-    handle = await verifications_routes.approved_purchase_handle(
+    handles = await verifications_routes.approved_handles(
         async_session,
         lambda name, purpose="number": sms_carrier,
         org_id,
-        "fake",
         "US",
         "local",
+        ["fake"],
     )
-    assert handle is None
+    assert handles == {}
 
 
 @pytest.fixture()
@@ -2050,7 +2271,12 @@ async def test_sms_carrier_defaults_to_the_one_of_the_us_numbers(
     await _us_number(async_session, org_id)
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "US", "number_type": "local", "purpose": "sms"},
+        params={
+            "subject_type": "person",
+            "country_code": "US",
+            "number_type": "local",
+            "purpose": "sms",
+        },
         headers=_auth(key),
     )
     assert resp.status_code == 200, resp.text
@@ -2071,7 +2297,12 @@ async def test_sms_without_us_numbers_needs_one_first(
     assert detail["msg"] == "Buy a US number first, then register it for texting."
     resp = await client.get(
         "/verifications/requirements",
-        params={"country_code": "US", "number_type": "local", "purpose": "sms"},
+        params={
+            "subject_type": "person",
+            "country_code": "US",
+            "number_type": "local",
+            "purpose": "sms",
+        },
         headers=_auth(key),
     )
     assert resp.status_code == 422, resp.text
@@ -2109,6 +2340,7 @@ async def test_sms_number_id_picks_that_numbers_carrier(
     resp = await client.get(
         "/verifications/requirements",
         params={
+            "subject_type": "person",
             "country_code": "US",
             "number_type": "local",
             "purpose": "sms",
@@ -2151,6 +2383,7 @@ async def test_number_id_is_rejected_for_number_purpose(client, org_and_key) -> 
     resp = await client.get(
         "/verifications/requirements",
         params={
+            "subject_type": "person",
             "country_code": "GB",
             "number_type": "local",
             "number_id": str(uuid.uuid4()),

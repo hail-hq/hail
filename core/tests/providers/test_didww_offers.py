@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 import responses
+from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
 from hailhq.core.providers.voice import didww as mod
 from hailhq.core.providers.voice.didww import didww_offers
@@ -63,6 +64,7 @@ def _inventory(
     skus=None,
     needs_registration=True,
     numbers=("351300000001",),
+    identity_type=None,
 ):
     if skus is None:
         skus = [
@@ -101,6 +103,7 @@ def _inventory(
                 "personal_proof_qty": 1,
                 "business_proof_qty": 1,
                 "address_proof_qty": 0,
+                **({"identity_type": identity_type} if identity_type else {}),
             },
         },
     ]
@@ -148,28 +151,78 @@ async def test_offers_verification_required_with_documents():
     assert f"filter%5Bdid_group_type.id%5D={NATIONAL_ID}" in query
 
 
-@responses.activate
-async def test_offers_ready_with_approved_address():
-    _static()
-    _inventory()
+def _approved_addresses(*ids):
     responses.add(
         responses.GET,
         f"{BASE}/addresses",
         json={
             "data": [
                 {
-                    "id": "addr-1",
+                    "id": i,
                     "type": "addresses",
                     "attributes": {"external_reference_id": f"hail:{ORG}:PT:national"},
                 }
+                for i in ids
             ]
         },
     )
-    (o,) = await didww_offers(ORG, "PT", "national", ["voice"])
+
+
+@responses.activate
+async def test_offers_ready_with_approved_address():
+    """Both kinds' addresses carry the same approved reference: each Hail
+    approval is matched by its own address id, never the first found."""
+    _static()
+    _inventory()
+    _approved_addresses("addr-0", "addr-1")
+    person = Approval(row_id=uuid4(), verification_id="addr-1", address_id="addr-1")
+    business = Approval(row_id=uuid4(), verification_id="addr-9", address_id="addr-9")
+    (o,) = await didww_offers(
+        ORG,
+        "PT",
+        "national",
+        ["voice"],
+        approvals={"person": person, "business": business},
+    )
     assert o.readiness == "ready"
-    assert o.verification_id == "addr-1"
-    assert o.address_id == "addr-1"
+    assert o.subject_types == ["business", "person"]
+    assert o.approvals == {"person": person}
     assert "filter%5Bexternal_reference_id%5D=hail%3A" in responses.calls[3].request.url
+
+
+@responses.activate
+async def test_offers_ignore_an_approval_with_no_hail_row():
+    """An address approved at DIDWW that Hail has no approved row for is
+    not used: Hail's rows decide."""
+    _static()
+    _inventory()
+    _approved_addresses("addr-1")
+    (o,) = await didww_offers(ORG, "PT", "national", ["voice"])
+    assert o.readiness == "verification_required"
+    assert o.approvals == {}
+    assert len(responses.calls) == 3  # no address lookup without approvals
+
+
+@pytest.mark.parametrize(
+    ("identity", "kinds"),
+    [
+        ("personal", ["person"]),
+        ("business", ["business"]),
+        ("any", ["business", "person"]),
+    ],
+)
+@responses.activate
+async def test_offers_list_who_may_register(identity, kinds):
+    _static()
+    _inventory(identity_type=identity)
+    _approved_addresses("addr-1")
+    person = Approval(row_id=uuid4(), verification_id="addr-1", address_id="addr-1")
+    (o,) = await didww_offers(
+        ORG, "PT", "national", ["voice"], approvals={"person": person}
+    )
+    assert o.subject_types == kinds
+    # A person's approval does not count where only a business may register.
+    assert o.readiness == ("ready" if "person" in kinds else "verification_required")
 
 
 @responses.activate

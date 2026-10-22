@@ -314,7 +314,8 @@ class VerificationProvider(ABC):
 
     @abstractmethod
     async def purchase_handle(self, refs: dict) -> dict:
-        """Opaque values the carrier's purchase call needs for this record."""
+        """The carrier ids the purchase call needs for this record:
+        ``{"verification_id": str, "address_id": str | None}``."""
 
     @abstractmethod
     async def discard(self, refs: dict) -> None:

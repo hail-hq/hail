@@ -631,6 +631,7 @@ class _NumbersResource:
         area_code: str | None = None,
         city: str | None = None,
         region: str | None = None,
+        subject_type: Literal["person", "business"] | None = None,
     ) -> PhoneNumberResponse:
         """Buy a dedicated number from a live quote.
 
@@ -645,7 +646,9 @@ class _NumbersResource:
         :meth:`quotes`. ``expected_total_cents`` is the monthly plus setup price you
         expect to pay now; the order is refused with 409 if the quote differs.
         ``idempotency_key`` defaults to a fresh UUIDv4 and covers the
-        purchase only.
+        purchase only. ``subject_type`` (``"person"`` or ``"business"``)
+        picks which approved verification buys a number that needs one. It
+        is needed only when you are verified as both (422 without it).
         """
         if quote_id is None:
             offers = await self.quotes(
@@ -681,6 +684,8 @@ class _NumbersResource:
             body["number_type"] = number_type
         if expected_total_cents is not None:
             body["expected_total_cents"] = expected_total_cents
+        if subject_type is not None:
+            body["subject_type"] = subject_type
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
             "POST",

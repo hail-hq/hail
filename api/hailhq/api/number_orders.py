@@ -14,6 +14,7 @@ from hailhq.api.audit import write_audit_log
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
+from hailhq.api.routes.verifications import approved_handles
 from hailhq.core import sms_setup, telephony_catalog
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import Outcome, carrier
@@ -226,18 +227,7 @@ async def rejected_registration(
                 number.id,
             )
     reason = REGISTRATION_REJECTED
-    verification = (
-        await db.execute(
-            select(CarrierVerification).where(
-                CarrierVerification.organization_id == org,
-                CarrierVerification.provider == number.provider,
-                CarrierVerification.country_code == number.country_code,
-                CarrierVerification.number_type == number.number_type,
-                CarrierVerification.purpose == "number",
-                CarrierVerification.state == "approved",
-            )
-        )
-    ).scalar_one_or_none()
+    verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's
     # papers, and logs leave this server. It is kept in the DB below.
     logger.warning(
@@ -272,6 +262,40 @@ async def rejected_registration(
             actor_kind="system",
         )
     return reason
+
+
+async def _purchase_verification(
+    db: AsyncSession, number: PhoneNumber
+) -> CarrierVerification | None:
+    """The approved Hail verification the purchase of ``number`` used. The
+    purchase stores its id in the offer; a number bought before that is
+    matched by carrier, country and number type (oldest rule: one approved
+    row per key)."""
+    org = number.organization_id
+    row_id = number.provisioning_metadata["offer"].get("verification_row_id")
+    if row_id:
+        row = await db.get(CarrierVerification, UUID(row_id))
+        if row is None or row.organization_id != org or row.state != "approved":
+            return None
+        return row
+    return (
+        (
+            await db.execute(
+                select(CarrierVerification)
+                .where(
+                    CarrierVerification.organization_id == org,
+                    CarrierVerification.provider == number.provider,
+                    CarrierVerification.country_code == number.country_code,
+                    CarrierVerification.number_type == number.number_type,
+                    CarrierVerification.purpose == "number",
+                    CarrierVerification.state == "approved",
+                )
+                .order_by(CarrierVerification.approved_at.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
 
 
 async def carrier_outcome(number: PhoneNumber) -> Outcome:
@@ -456,9 +480,12 @@ async def acquire_offer(
     kind: str | None,
     billed: bool,
     expected_total_cents: int | None = None,
+    subject_type: str | None = None,
 ) -> PhoneNumber:
     """Buy the quoted number. ``kind`` is the number type the client sent, or
-    None to take it from the quote; a different explicit type is a 422."""
+    None to take it from the quote; a different explicit type is a 422.
+    ``subject_type`` picks the approved verification to buy with
+    (``pick_subject_type``)."""
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
@@ -500,11 +527,14 @@ async def acquire_offer(
         raise HTTPException(
             status_code=409, detail="Quote expired; refresh number offers"
         )
+    if subject_type is not None and offer.subject_types:
+        _check_subject_type(offer, subject_type)
     if offer.readiness != "ready":
         raise unprocessable(
             "Complete this organization's regulatory verification first",
             loc=["body", "quote_id"],
         )
+    chosen = pick_subject_type(offer, subject_type)
     total = offer.monthly_cents + offer.setup_cents
     no_funds = HTTPException(
         status_code=402,
@@ -514,6 +544,15 @@ async def acquire_offer(
     # Re-checked under the lock below, after the slow discovery.
     if billed and await get_balance_cents(db, org) < total:
         raise no_funds
+    # Hail's rows decide which approvals exist now; the carrier re-check
+    # below only confirms they are still valid.
+    approvals = (
+        await approved_handles(
+            db, get_verification_provider, org, country, kind, [offer.provider]
+        )
+        if offer.subject_types
+        else {}
+    )
     # Carrier discovery is slow: release the org lock and the quote row lock
     # first so other billing and number writes for this organization proceed.
     await db.commit()
@@ -527,6 +566,7 @@ async def acquire_offer(
         row.offer.get("requested_capabilities") or offer.capabilities,
         e164=offer.e164,
         providers=[offer.provider],
+        approvals=approvals,
     )
     fresh = next(
         (o for o in live if o.provider == offer.provider and o.e164 == offer.e164), None
@@ -535,16 +575,24 @@ async def acquire_offer(
         # The carrier lookup failed; that says nothing about the quote. The
         # route does not cache this response, so a retry can succeed.
         raise RetryableError("Carrier lookup unavailable; try again shortly")
+    approval = offer.approvals.get(chosen) if chosen else None
     if (
         fresh is None
         or fresh.readiness != "ready"
-        or (fresh.monthly_cents, fresh.setup_cents, fresh.verification_id)
-        != (offer.monthly_cents, offer.setup_cents, offer.verification_id)
+        or (fresh.monthly_cents, fresh.setup_cents, fresh.subject_types)
+        != (offer.monthly_cents, offer.setup_cents, offer.subject_types)
+        or (fresh.approvals.get(chosen) if chosen else None) != approval
     ):
         raise HTTPException(
             status_code=409,
             detail="Price, inventory or verification changed; refresh offers",
         )
+    # The purchase uses the chosen approval's carrier ids, and the number
+    # remembers which verification it used.
+    offer.subject_type = chosen
+    offer.verification_row_id = approval.row_id if approval else None
+    offer.verification_id = approval.verification_id if approval else None
+    offer.address_id = approval.address_id if approval else None
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     if row.number_id:
@@ -675,6 +723,42 @@ async def acquire_offer(
     return number
 
 
+_WHO = {"person": "a person", "business": "a company"}
+
+
+def _check_subject_type(offer: CarrierOffer, subject_type: str) -> None:
+    """422 when the number does not take this subject type, or the org has
+    no approved verification of it that the carrier still accepts."""
+    who = _WHO[subject_type]
+    if subject_type not in offer.subject_types:
+        raise unprocessable(
+            f"This number cannot be bought with a verification as {who}.",
+            loc=["body", "subject_type"],
+        )
+    if subject_type not in offer.approvals:
+        raise unprocessable(
+            f"Verify as {who} first",
+            loc=["body", "subject_type"],
+        )
+
+
+def pick_subject_type(offer: CarrierOffer, subject_type: str | None) -> str | None:
+    """The subject type of the approved verification this purchase uses, or
+    None when the number needs none. Without ``subject_type``, the one
+    approved kind is used; two approved kinds are a 422."""
+    if not offer.subject_types:
+        return None  # No verification needed: subject_type is ignored.
+    if subject_type is not None:
+        return subject_type  # _check_subject_type already passed.
+    kinds = [k for k in offer.subject_types if k in offer.approvals]
+    if len(kinds) > 1:
+        raise unprocessable(
+            "You are verified as a person and as a company. Pass subject_type.",
+            loc=["body", "subject_type"],
+        )
+    return kinds[0] if kinds else None
+
+
 async def purchase_number(
     db: AsyncSession, principal: Principal, body: NumberAcquireRequest
 ) -> PhoneNumber:
@@ -692,6 +776,7 @@ async def purchase_number(
         kind=body.number_type if "number_type" in body.model_fields_set else None,
         billed=principal.auth_kind != "shared",
         expected_total_cents=body.expected_total_cents,
+        subject_type=body.subject_type,
     )
     if number.provisioning_state == "failed":
         # The hold was refunded; nothing is owed. Say so instead of a 201.

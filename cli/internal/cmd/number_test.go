@@ -473,7 +473,7 @@ func registerSmsParts(t *testing.T, extra ...string) (map[string]string, string)
 	t.Cleanup(srv.Close)
 
 	args := append([]string{
-		"numbers", "register-sms", "--subject", "business",
+		"numbers", "register-sms", "--subject-type", "business",
 		"--field", "legal_name=Acme Inc", "--field", "ein=12-3456789",
 		"--address", "city=Austin",
 	}, extra...)
@@ -623,6 +623,61 @@ func TestNumberCancelSms_RejectsBadID(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("expected 0 HTTP calls, got %d", hits)
+	}
+}
+
+func TestNumberAcquire_SubjectTypeIsSentOnlyWhenSet(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+447700900001", []string{"voice"})
+	env := func(srv *acquireServer) map[string]string {
+		return map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL}
+	}
+
+	with := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t, env(with),
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap, "--subject-type", "business",
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body client.NumberAcquireRequest
+	if err := json.Unmarshal(with.buyBody, &body); err != nil {
+		t.Fatalf("buy body: %v", err)
+	}
+	if body.SubjectType == nil || *body.SubjectType != "business" {
+		t.Fatalf("SubjectType = %v, want business", body.SubjectType)
+	}
+
+	without := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t, env(without),
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(without.buyBody), "subject_type") {
+		t.Fatalf("body sent subject_type without the flag: %s", without.buyBody)
+	}
+
+	bad := newAcquireServer(t, nil, bought)
+	if _, _, err := runRoot(t, env(bad),
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap, "--subject-type", "company",
+	); err == nil {
+		t.Fatal("expected an error for --subject-type company")
+	}
+	if bad.buys != 0 {
+		t.Errorf("expected no purchase, got %d", bad.buys)
+	}
+}
+
+func TestNumberRegisterSms_RequiresSubjectType(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, nil)
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "register-sms", "--field", "ein=12-3456789",
+	)
+	if err == nil || !strings.Contains(err.Error(), "--subject-type is required") {
+		t.Fatalf("err = %v", err)
 	}
 	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
 		t.Errorf("expected 0 HTTP calls, got %d", hits)

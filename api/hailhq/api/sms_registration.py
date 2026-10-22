@@ -137,8 +137,8 @@ async def approved_registration(
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.state == "approved",
             )
-            # carrier_verifications_live_uniq allows one live row per
-            # (org, carrier, country, type, purpose); limit(1) is defensive.
+            # carrier_verifications_sms_live_uniq allows one live row per
+            # (org, carrier, country, type); limit(1) is defensive.
             .order_by(CarrierVerification.approved_at.desc())
             .limit(1)
         )

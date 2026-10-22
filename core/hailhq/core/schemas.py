@@ -607,6 +607,16 @@ class NumberAcquireRequest(BaseModel):
             "with 409 if the quoted total differs."
         ),
     )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description=(
+            "Which approved verification to buy with: 'person' (you) or "
+            "'business' (your company). Needed only when you are verified as "
+            "both for this number (422 without it); with one approved "
+            "verification it is used. Ignored when the number needs no "
+            "verification."
+        ),
+    )
 
     @field_validator("country_code")
     @classmethod
@@ -770,6 +780,13 @@ class PhoneNumberResponse(BaseModel):
         description=(
             "True while the number is attached for inbound calls at the carrier "
             "and on Hail's LiveKit inbound trunk. Set when voice_agent_id is set."
+        ),
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description=(
+            "Who the verification used to buy this number is for: 'person' "
+            "or 'business'. Null when no verification was used."
         ),
     )
 

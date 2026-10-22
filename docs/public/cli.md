@@ -83,12 +83,12 @@ hail numbers acquire --country US --quote-id <quote-id>  # buys one exact offer 
 hail numbers list
 hail numbers get <id>
 hail numbers enable-sms <id>   # repair SMS setup; Hail does this itself when a number becomes active
-hail numbers register-sms --subject business --field legal_name="Acme Inc" ...  # US SMS registration
+hail numbers register-sms --subject-type business --field legal_name="Acme Inc" ...  # US SMS registration
 ```
 
-`acquire` requests live quotes ([`POST /numbers/quotes`](../../openapi/openapi.yaml)), then buys the cheapest ready offer (monthly plus setup) with its `quote_id`. Flags: `--country` (required), `--type` (`local|mobile|toll_free|national`), `--area-code` (area code or first digits as dialed in the country, e.g. `020`, `480`), `--city` (e.g. `London`), `--region` (optional with `--city`: US/CA state code, e.g. `AZ`), `--quote-id` (skip the quote and buy that offer), `--voice-only`, `--sms-only` (default: voice and SMS), `--expected-total-cents` (refuse with 409 if the quoted monthly plus setup differs), `--idempotency-key`.
+`acquire` requests live quotes ([`POST /numbers/quotes`](../../openapi/openapi.yaml)), then buys the cheapest ready offer (monthly plus setup) with its `quote_id`. Flags: `--country` (required), `--type` (`local|mobile|toll_free|national`), `--area-code` (area code or first digits as dialed in the country, e.g. `020`, `480`), `--city` (e.g. `London`), `--region` (optional with `--city`: US/CA state code, e.g. `AZ`), `--quote-id` (skip the quote and buy that offer), `--voice-only`, `--sms-only` (default: voice and SMS), `--expected-total-cents` (refuse with 409 if the quoted monthly plus setup differs), `--subject-type` (`person` or `business`: which approved verification buys a number that needs one; needed only when you are verified as both), `--idempotency-key`.
 
-`register-sms` files a US SMS registration (`purpose=sms` on [`POST /verifications`](../../openapi/openapi.yaml)). Hail picks the carrier from your US numbers. Pass `--number-id <id>` when your US numbers are with more than one carrier.
+`register-sms` files a US SMS registration (`purpose=sms` on [`POST /verifications`](../../openapi/openapi.yaml)). `--subject-type` (`person` or `business`) is required. Hail picks the carrier from your US numbers. Pass `--number-id <id>` when your US numbers are with more than one carrier.
 
 ## Email
 

@@ -707,7 +707,7 @@ async def test_status_reads_reference(provider, ref, state):
 async def test_purchase_handle(provider):
     assert await provider.purchase_handle(
         {"identity_id": "id-1", "address_id": "addr-1", "proof_ids": []}
-    ) == {"identity_id": "id-1", "address_id": "addr-1"}
+    ) == {"verification_id": "addr-1", "address_id": "addr-1"}
 
 
 @responses.activate

@@ -1977,12 +1977,23 @@ paths:
       tags:
         - numbers
       summary: Acquire Number
-      description:
-        "Buy a dedicated phone number for the caller's organization.\n\n\
-        This purchases a real number at the carrier and starts a recurring\nmonthly\
-        \ fee immediately \u2014 it is not a reservation. quote_id is required:\n\
-        request live offers from POST /numbers/quotes first, then buy one. The\nnumber\
-        \ is usable for voice, SMS, or both, as the quote lists."
+      description: "Buy a dedicated phone number for the caller's organization.
+
+
+        This purchases a real number at the carrier and starts a recurring
+
+        monthly fee immediately — it is not a reservation. quote_id is required:
+
+        request live offers from POST /numbers/quotes first, then buy one. The
+
+        number is usable for voice, SMS, or both, as the quote lists.
+
+
+        A number that needs verification is bought with one of your approved
+
+        verifications. When you are verified both as a person and as a company
+
+        for it, pass `subject_type`; with one, it is used."
       operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
@@ -2039,9 +2050,11 @@ paths:
           description: The quote does not exist for this organization.
         "422":
           description:
-            quote_id is missing (request one from POST /numbers/quotes), the
-            quote does not match the country or type, or the offer is by_request
-            (ask support for it).
+            "quote_id is missing (request one from POST /numbers/quotes),
+            the quote does not match the country or type, the offer is by_request
+            (ask support for it), or subject_type is needed or not approved: you
+            are verified as a person and as a company (pass subject_type), or not
+            as the one you passed."
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -2050,23 +2063,25 @@ paths:
         "409":
           description:
             The quote expired, the number is taken, the price changed,
-            expected_total_cents differs from the quoted total, or the carrier rejected
-            or failed the order. In the last case the credit hold is refunded and
-            the detail gives the reason. Also returned when the quote's number was
-            released since it was bought.
+            expected_total_cents differs from the quoted total, or the carrier
+            rejected or failed the order. In the last case the credit hold is refunded
+            and the detail gives the reason. Also returned when the quote's number
+            was released since it was bought.
         "503":
-          description:
-            The carrier lookup or number price is unavailable, or no inventory
-            matched. Nothing was charged; retry shortly.
+          description: The carrier lookup or number price is unavailable, or no
+            inventory matched. Nothing was charged; retry shortly.
     get:
       tags:
         - numbers
       summary: List Numbers
-      description:
-        "List dedicated numbers owned by the caller's organization.\n\n\
-        Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
-        shared pool numbers used for outbound calls never appear here. Failed\norders\
-        \ that were dismissed (DELETE) are not listed."
+      description: "List dedicated numbers owned by the caller's organization.
+
+
+        Cursor-paginated, newest first. Only org-owned numbers are listed —
+
+        shared pool numbers used for outbound calls never appear here. Failed
+
+        orders that were dismissed (DELETE) are not listed."
       operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
@@ -2501,7 +2516,16 @@ paths:
 
         works for GET /verifications/requirements and POST /verifications. Without
 
-        `area_code` or `city` only."
+        `area_code` or `city` only.
+
+
+        Each offer lists `subject_types` (who may verify for it: a person, a
+
+        business, or both) and your `verifications` per subject type. It is
+
+        `ready` when one of your approved verifications of an accepted subject
+
+        type is still valid."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -4397,9 +4421,8 @@ paths:
       tags:
         - verifications
       summary: Get Requirements
-      description:
-        "What the carrier needs from you: the fields, the documents, and
-        whether
+      description: "What the carrier needs from you: the fields, the documents,
+        and whether
 
         an address is needed. `purpose=number` (default) is for buying a number;
 
@@ -4430,14 +4453,17 @@ paths:
             title: Number Type
         - name: subject_type
           in: query
-          required: false
+          required: true
           schema:
             enum:
               - person
               - business
             type: string
-            default: person
+            description: "Who is verifying: 'person' (you) or 'business' (your
+              company). Required. Ask the user which one."
             title: Subject Type
+          description: "Who is verifying: 'person' (you) or 'business' (your
+            company). Required. Ask the user which one."
         - name: provider
           in: query
           required: false
@@ -4446,13 +4472,13 @@ paths:
               - type: string
               - type: "null"
             description:
-              Deprecated and ignored. Hail picks the carrier from quote_id or
-              number_id.
+              Deprecated and ignored. Hail picks the carrier from quote_id
+              or number_id.
             deprecated: true
             title: Provider
           description:
-            Deprecated and ignored. Hail picks the carrier from quote_id or
-            number_id.
+            Deprecated and ignored. Hail picks the carrier from quote_id
+            or number_id.
           deprecated: true
         - name: purpose
           in: query
@@ -4469,9 +4495,9 @@ paths:
               - type: string
                 format: uuid
               - type: "null"
-            description:
-              "Required for purpose=number: quote_id of an offer from POST
-              /numbers/quotes that needs verification. The carrier is read from it."
+            description: "Required for purpose=number: quote_id of an offer from
+              POST /numbers/quotes that needs verification. The carrier is read from
+              it."
             title: Quote Id
           description:
             "Required for purpose=number: quote_id of an offer from POST
@@ -4486,11 +4512,12 @@ paths:
               - type: "null"
             description:
               "For purpose=sms: id of one of your US numbers. The carrier
-              is read from it. Needed when your US numbers are with more than one carrier."
+              is read from it. Needed when your US numbers are with more than one
+              carrier."
             title: Number Id
           description:
-            "For purpose=sms: id of one of your US numbers. The carrier is
-            read from it. Needed when your US numbers are with more than one carrier."
+            "For purpose=sms: id of one of your US numbers. The carrier
+            is read from it. Needed when your US numbers are with more than one carrier."
         - name: authorization
           in: header
           required: false
@@ -4508,8 +4535,8 @@ paths:
                 $ref: "#/components/schemas/VerificationRequirements"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate ceiling.
-            Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -4545,7 +4572,9 @@ paths:
 
         in the US; `sms` takes `country_code=US` and `number_type=local` and charges
 
-        the filing fee), `country_code`, `number_type`, `subject_type`,
+        the filing fee), `country_code`, `number_type`, `subject_type` (required:
+
+        `person` for you, `business` for your company; ask the user which),
 
         `quote_id` (required for `number`: the offer to verify for), `number_id`
 
@@ -4555,16 +4584,23 @@ paths:
 
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 
-        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
+        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one
+        file
 
         part per slot named `file.<slot>`. Get the slot and field names from
 
         `GET /verifications/requirements`.
 
 
+        For a number you may hold one verification as a person and one as a
+
+        business at once; a second live one of the same subject type is a 409.
+
+
         The carrier checks the details right away. Problems come back as 422 with
 
-        the field named, and nothing is kept. When it passes, the verification is
+        the field named, and nothing is kept. When it passes, the verification
+        is
 
         submitted to the carrier for its review; read it back to follow the state.
 
@@ -4588,8 +4624,8 @@ paths:
                 $ref: "#/components/schemas/VerificationResponse"
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate ceiling.
-            Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -4651,8 +4687,8 @@ paths:
                 title: Response List Verifications
         "429":
           description:
-            Rate limited. This caller exceeded the general request-rate ceiling.
-            Retry after the Retry-After header (seconds).
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -7747,8 +7783,8 @@ components:
             - type: "null"
           title: Provider
           description:
-            Deprecated and ignored. Hail buys the quoted number from the carrier
-            it picked.
+            Deprecated and ignored. Hail buys the quoted number from the
+            carrier it picked.
           deprecated: true
         country_code:
           type: string
@@ -7778,8 +7814,20 @@ components:
           title: Expected Total Cents
           description:
             "The total the caller expects to pay now: the quoted monthly
-            price plus the setup price, in cents. When set, the order is refused with
-            409 if the quoted total differs."
+            price plus the setup price, in cents. When set, the order is refused
+            with 409 if the quoted total differs."
+        subject_type:
+          anyOf:
+            - type: string
+              enum:
+                - person
+                - business
+            - type: "null"
+          title: Subject Type
+          description: "Which approved verification to buy with: 'person' (you)
+            or 'business' (your company). Needed only when you are verified as
+            both for this number (422 without it); with one approved verification
+            it is used. Ignored when the number needs no verification."
       additionalProperties: false
       type: object
       required:
@@ -7988,10 +8036,20 @@ components:
           type: string
           title: State
           description: State of that verification, such as draft, submitted or approved.
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description:
+            "Who that verification is for: 'person' (you) or 'business'
+            (your company)."
       type: object
       required:
         - id
         - state
+        - subject_type
       title: OfferVerification
     PhoneNumberListResponse:
       properties:
@@ -8031,7 +8089,8 @@ components:
         number_type:
           type: string
           title: Number Type
-          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or
+            'national'."
         capabilities:
           items:
             type: string
@@ -8073,9 +8132,20 @@ components:
           title: Inbound Registered
           description:
             True while the number is attached for inbound calls at the
-            carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id is
-            set.
+            carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id
+            is set.
           default: false
+        subject_type:
+          anyOf:
+            - type: string
+              enum:
+                - person
+                - business
+            - type: "null"
+          title: Subject Type
+          description:
+            "Who the verification used to buy this number is for: 'person'
+            or 'business'. Null when no verification was used."
       type: object
       required:
         - id
@@ -8408,20 +8478,42 @@ components:
           description:
             Organization-bound quote identifier to pass to POST /numbers
             before expiry.
+        subject_types:
+          items:
+            type: string
+            enum:
+              - person
+              - business
+          type: array
+          title: Subject Types
+          description:
+            "Who can verify for this number: 'person' (you), 'business'
+            (your company), or both. Empty when no verification is needed."
+        verifications:
+          items:
+            $ref: "#/components/schemas/OfferVerification"
+          type: array
+          title: Verifications
+          description:
+            Your organization's newest verification per subject type for
+            this offer's country and number type, leaving out cancelled and rejected
+            ones.
         verification:
           anyOf:
             - $ref: "#/components/schemas/OfferVerification"
             - type: "null"
-          description: Your organization's verification for this offer's country
-            and number type that is not cancelled or rejected; null when there is
-            none.
+          description:
+            "Deprecated: read `verifications`. The verification a purchase
+            without subject_type would use: your one approved verification, else
+            the newest one that is not cancelled or rejected; null when there is
+            none."
         by_request:
           type: boolean
           title: By Request
           description:
-            "True when support orders this number by hand: it cannot be bought
-            with POST /numbers. Ask support for it. Its quote_id still works for
-            verification."
+            "True when support orders this number by hand: it cannot be
+            bought with POST /numbers. Ask support for it. Its quote_id still works
+            for verification."
           default: false
       type: object
       required:

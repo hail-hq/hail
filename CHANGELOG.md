@@ -13,6 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id` (for `purpose=number`) or one of your `number_id`s (for `purpose=sms`).
 - MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.
 - Numbers: quotes return `incomplete` and, per offer, your matching `verification` (`id`, `state`). `GET /verifications/sms-fees` takes an optional `number_id`.
+- Numbers: an organization may hold a verification as a person and one as a business for the same number type. Each quote offer lists `subject_types` and your `verifications` per subject type; `POST /numbers` takes `subject_type`, and numbers return the `subject_type` they were bought with.
 
 ### Changed
 
@@ -20,9 +21,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **Breaking.** API responses no longer name the carrier or carry carrier ids or carrier error text. `provider` in requests is ignored; see the OpenAPI spec.
 - **Breaking.** Number verifications need the offer's `quote_id` (422 without it). Quotes also list numbers support orders by hand (`by_request: true`).
 - `hail-sdk` 0.21.0 and the CLI drop `provider`. `hail numbers register-sms` takes `--number-id`.
+- **Breaking.** `subject_type` (`person` or `business`) is required on `GET /verifications/requirements` and `POST /verifications`, and on the MCP verification tools. Quote offers' `verification` is deprecated: read `verifications`.
+- `hail-sdk` 0.21.0: `numbers.acquire(subject_type=...)`. CLI: `hail numbers acquire --subject-type`; `hail numbers register-sms` requires `--subject-type` (`--subject` still works).
 
 ### Fixed
 
+- Numbers: an approved verification as a person now buys numbers that accept one. Before, only a business verification was used.
 - MCP: every tool now sets `annotations.title`, and `submit_verification` declares types for `fields`, `documents`, `files` and `address`, so MCP directories list them correctly.
 
 ## [0.30.0] (2026-10-20)

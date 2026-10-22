@@ -31,3 +31,18 @@ async def test_discover_reports_didww_outage(monkeypatch):
         uuid4(), "PT", "national", ["voice"]
     )
     assert unavailable == ["didww"]
+
+
+async def test_discover_passes_each_carrier_its_own_approvals(monkeypatch):
+    from hailhq.core.carrier_offer import Approval
+
+    calls = {name: AsyncMock(return_value=[]) for name in ("twilio", "telnyx", "didww")}
+    monkeypatch.setattr(f"{VOICE}.twilio.twilio_offers", calls["twilio"])
+    monkeypatch.setattr(f"{VOICE}.telnyx.telnyx_offers", calls["telnyx"])
+    monkeypatch.setattr(f"{VOICE}.didww.didww_offers", calls["didww"])
+    person = Approval(row_id=uuid4(), verification_id="BU1")
+    await number_offers.discover_offers(
+        uuid4(), "GB", "mobile", ["voice"], approvals={"twilio": {"person": person}}
+    )
+    assert calls["twilio"].await_args.kwargs["approvals"] == {"person": person}
+    assert calls["telnyx"].await_args.kwargs["approvals"] == {}

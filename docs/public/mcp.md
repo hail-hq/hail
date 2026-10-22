@@ -92,15 +92,18 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 
 Some numbers, for example a UK mobile, need a carrier check of the organization first. `quote_numbers` marks those offers `readiness: "verification_required"`. The whole flow works over MCP:
 
-1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`.
-2. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
-3. Ask the user for every field and file. The agent must not invent or guess any value.
-4. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
+1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`, its `quote_id`, and `subject_types`: who may verify for it (`person`, `business`, or both).
+2. Ask the user: "you or your company?". That is `subject_type` (`person` or `business`). It is required; never guess it.
+3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
+4. Ask the user for every field and file. The agent must not invent or guess any value.
+5. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
 
    ```json
    {
      "country_code": "GB",
      "number_type": "mobile",
+     "quote_id": "<quote_id>",
+     "subject_type": "person",
      "fields": { "first_name": "Ada", "last_name": "Lovelace" },
      "address": {
        "customer_name": "Ada Lovelace",
@@ -124,9 +127,9 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
    The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again.
 
-5. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-6. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above.
-7. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+6. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+7. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold one approved verification as a person and one as a business. When the offer's `verifications` has both approved, pass `subject_type` to `acquire_number` (ask the user which).
+8. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 
@@ -145,7 +148,7 @@ To register the organization to text US numbers from a US number, pass `purpose:
 }
 ```
 
-Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country and number type returns 409 while one exists.
+Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country, number type and `subject_type` returns 409 while one exists.
 
 > **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
 

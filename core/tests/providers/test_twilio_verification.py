@@ -450,11 +450,12 @@ async def test_status_mapping(provider, twilio_status, state) -> None:
 
 async def test_purchase_handle(provider) -> None:
     assert await provider.purchase_handle(REFS) == {
-        "bundle_sid": REFS["bundle_sid"],
-        "address_sid": REFS["address_sid"],
+        "verification_id": REFS["bundle_sid"],
+        "address_id": REFS["address_sid"],
     }
     assert await provider.purchase_handle({"bundle_sid": "BUx"}) == {
-        "bundle_sid": "BUx"
+        "verification_id": "BUx",
+        "address_id": None,
     }
 
 
