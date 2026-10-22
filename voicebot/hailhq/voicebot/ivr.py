@@ -105,6 +105,9 @@ class PhoneMenu:
         # True at start: the menu exists because the pickup was machine-ivr.
         self._recorded = True
         self._ending = False
+        # Speech that may be a person but was not confirmed. The timed
+        # greeting answers it, since the turn loop never did.
+        self.unconfirmed: str | None = None
 
     @property
     def checking(self) -> bool:
@@ -210,8 +213,10 @@ class PhoneMenu:
                 # Newer audio arrived, but this speech was still recorded:
                 # hold music that follows it must not start the wait.
                 self._recorded = True
+                self.unconfirmed = None
             else:
                 self._needs_confirmation = True
+                self.unconfirmed = text
                 self._arm_deadline()
             return AMDCategory.UNCERTAIN
         if category == AMDCategory.HUMAN:
@@ -223,9 +228,11 @@ class PhoneMenu:
         elif category == AMDCategory.MACHINE_IVR:
             self._needs_confirmation = False
             self._recorded = True
+            self.unconfirmed = None
             self.can_navigate = True
         else:
             self._needs_confirmation = True
             self._recorded = False
+            self.unconfirmed = text
             self._arm_deadline()
         return category

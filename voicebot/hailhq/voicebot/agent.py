@@ -788,7 +788,8 @@ async def speak_greeting(
     greeting fires *because* a person just spoke: there the session's
     normal turn loop already answers that utterance, so an injected
     opening would race it and its "they have not said anything yet"
-    premise would be false.
+    premise would be false. A greeting after the bounded wait has no such
+    turn, so it keeps the generated opening.
     """
     disclosure = (
         disclosure_line(
@@ -831,7 +832,8 @@ async def speak_greeting(
     if generate_opening and metadata.get("direction") != "inbound":
         session.generate_reply(
             instructions=opening_instructions(
-                pickup_transcript or heard, already_introduced=bool(disclosure)
+                " ".join(filter(None, (pickup_transcript, heard))),
+                already_introduced=bool(disclosure),
             )
         )
 
@@ -859,16 +861,20 @@ def arm_deferred_greeting(
     A greeting that fails is logged; it never sets a call status.
     """
 
-    async def greet(_text: str) -> None:
+    async def greet(text: str) -> None:
         agent._opening_pending = True
         marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
         try:
+            # Empty text means the wait ran out. The turn loop answered no
+            # speech then, so the opening answers it and anything said over
+            # the greeting.
             await speak_greeting(
                 session,
                 metadata,
-                generate_opening=False,
+                pickup_transcript=None if text else agent.phone_menu.unconfirmed,
+                generate_opening=not text,
                 on_opened=agent.release_opening,
             )
         except Exception:

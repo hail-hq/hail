@@ -599,3 +599,70 @@ async def test_failed_deferred_greeting_does_not_escape_the_turn_hook(monkeypatc
     _, greeted = await _greet_with(monkeypatch, agent, speak)
     assert greeted == []
     assert not agent._opening_pending
+
+
+async def _timer_greeting(monkeypatch, metadata, *, said_over_greeting=None):
+    from uuid import UUID
+
+    from hailhq.voicebot import ivr
+
+    from .test_amd import _FakeAmdSession
+
+    async def write(*args):
+        pass
+
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(agent_mod, "write_call_event", write)
+    session = _FakeAmdSession()
+    session.llm = Classifier('{"label":"uncertain"}')
+    agent = SpeechSanitizingAgent(instructions="test")
+    agent.update_chat_ctx = AsyncMock()
+    greeted = asyncio.Event()
+    if said_over_greeting:
+
+        def say(text, *, allow_interruptions=True):
+            session.say_calls.append(text)
+            agent._held_words.append(said_over_greeting)
+
+            async def done():
+                return None
+
+            return done()
+
+        session.say = say
+    agent_mod.arm_deferred_greeting(
+        session,
+        metadata,
+        UUID(int=1),
+        set(),
+        on_greeted=greeted.set,
+        agent=agent,
+        on_machine=AsyncMock(),
+    )
+    try:
+        agent.phone_menu.pressed_keys()
+        await agent.on_user_turn_completed(
+            ChatContext(), ChatMessage(role="user", content=["Hello?"])
+        )
+        await asyncio.wait_for(greeted.wait(), 0.2)
+    finally:
+        await agent.phone_menu.aclose()
+    return session
+
+
+async def test_timer_greeting_answers_the_speech_that_started_the_wait(monkeypatch):
+    # No disclosure and no first_message: the timer must not greet in silence.
+    session = await _timer_greeting(monkeypatch, {"ai_disclosure": False})
+    assert session.say_calls == []
+    assert len(session.replies) == 1
+    assert '"Hello?"' in session.replies[0]
+
+
+async def test_timer_greeting_answers_words_said_over_the_greeting(monkeypatch):
+    session = await _timer_greeting(
+        monkeypatch, {"org_name": "Acme"}, said_over_greeting="Who is this?"
+    )
+    assert session.say_calls
+    assert len(session.replies) == 1
+    assert "Hello?" in session.replies[0]
+    assert "Who is this?" in session.replies[0]
