@@ -56,13 +56,3 @@ rather than running them in full.
 
 Connect your MCP client to `https://mcp.hail.so` and authorize Hail in the browser.
 See the [MCP setup guide](https://hail.so/mcp).
-
-## Keep this workspace current
-
-The OpenAPI specification in Hail's source repository drives the route folders.
-The repository's Postman workflow generates the collection, checks it,
-and can update the published collection after changes reach `main`.
-
-This overview is also used as the collection's introduction. Changes to it
-reach its documentation on the next sync. Postman's separate workspace
-overview must be updated manually from this file.
