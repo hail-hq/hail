@@ -165,6 +165,14 @@ async def finish_order(
             )
 
 
+# Shown to the buyer when the carrier refuses the end-user registration of a
+# bought number. Hail's own wording, never the carrier's.
+REGISTRATION_REJECTED = (
+    "the carrier rejected the end-user registration; "
+    "start a new verification with corrected details"
+)
+
+
 async def give_back(number: PhoneNumber, resource_id: str) -> None:
     """Release a bought number the order will not keep. Never raises. When
     the carrier call fails, the resource id is kept on the row as
@@ -217,10 +225,7 @@ async def rejected_registration(
                 "approval back by hand: number=%s",
                 number.id,
             )
-    reason = (
-        "the carrier rejected the end-user registration; "
-        "start a new verification with corrected details"
-    )
+    reason = REGISTRATION_REJECTED
     verification = (
         await db.execute(
             select(CarrierVerification).where(

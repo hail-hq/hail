@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 __all__ = [
     "BRAND_REJECTED",
     "CAMPAIGN_REJECTED",
+    "DETAILS_REJECTED",
     "NOT_ACCEPTED",
     "VALUE_NOT_ACCEPTED",
     "Address",
@@ -225,6 +226,7 @@ NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
+DETAILS_REJECTED = "The carrier rejected the details. Start again."
 BRAND_REJECTED = (
     "The carrier rejected the brand registration. Check the business or "
     "person details and start again."

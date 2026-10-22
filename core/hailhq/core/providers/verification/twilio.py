@@ -15,6 +15,7 @@ import re
 import requests
 from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
+    DETAILS_REJECTED,
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
     Address,
@@ -458,7 +459,7 @@ class TwilioVerificationProvider(VerificationProvider):
         if bundle.status == "twilio-rejected":
             return ProviderStatus(
                 state="rejected",
-                reason="The carrier rejected the details. Start again.",
+                reason=DETAILS_REJECTED,
                 raw_reason=getattr(bundle, "failure_reason", None),
             )
         return ProviderStatus(state="pending")
