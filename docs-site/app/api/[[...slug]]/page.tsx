@@ -32,6 +32,20 @@ function ApiIndex() {
           <a href="/docs/api/openapi.json">openapi.json</a>
         </p>
         <p>
+          Try every endpoint in Postman. Fork the public collection, paste your
+          key into <code>api_key</code>, then open <strong>Start here</strong>.
+        </p>
+        <p>
+          <a href="https://app.getpostman.com/run-collection/59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2?action=collection%2Ffork&source=rip_html&collection-url=entityId%3D59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2%26entityType%3Dcollection%26workspaceId%3Daeb5d784-d1b6-4e09-a7ad-0d2e5b442d08">
+            <img
+              src="https://run.pstmn.io/button.svg"
+              alt="Run in Postman"
+              width={128}
+              height={32}
+            />
+          </a>
+        </p>
+        <p>
           Every page below (and every guide) is also available as plain markdown
           — append <code>.md</code> to its URL, or fetch{" "}
           <a href="/docs/llms.txt">llms.txt</a> (index) or{" "}
