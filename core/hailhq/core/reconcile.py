@@ -130,7 +130,9 @@ async def sweep_stale_calls(
                 "to": to_e164,
                 "agent_id": str(agent_id) if agent_id else None,
                 "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
-                "failure_message": call_failure_message("failed", {}),
+                "failure_message": call_failure_message(
+                    "failed", {}, CallEndReason.SWEEPER_TIMEOUT.value
+                ),
             },
         )
         if agent_id is not None:

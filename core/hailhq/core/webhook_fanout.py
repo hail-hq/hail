@@ -146,7 +146,7 @@ def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     data.update(extra)
     if data["status"] == "failed":
         data["failure_message"] = call_failure_message(
-            data["status"], call.metadata_ or {}
+            data["status"], call.metadata_ or {}, data.get("end_reason")
         )
     return data
 

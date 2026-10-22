@@ -1071,7 +1071,9 @@ async def reconcile_sip_rejection(
         result.status,
         error_code,
     )
-    message = call_failure_message(captured["status"] or "", captured)
+    message = call_failure_message(
+        captured["status"] or "", captured, captured["end_reason"]
+    )
     await write_call_event(
         call_id,
         "connection_result",
@@ -1673,7 +1675,9 @@ async def on_call_end(
                 cast({"failure_code": failure_code}, JSONB)
             )
             call_metadata = {**(call_metadata or {}), "failure_code": failure_code}
-        failure_message = call_failure_message(final_status, call_metadata or {})
+        failure_message = call_failure_message(
+            final_status, call_metadata or {}, final_end_reason
+        )
         result = await session.execute(
             update(Call)
             .where(Call.id == call_id, Call.status.not_in(TERMINAL_CALL_STATUSES))

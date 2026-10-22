@@ -39,3 +39,30 @@ def test_callers_cannot_supply_a_failure_code():
             recipient_consent=True,
             metadata={"failure_code": "destination_not_allowed"},
         )
+
+
+@pytest.mark.parametrize(
+    ("end_reason", "expected"),
+    [
+        ("insufficient_funds", "Your balance is empty."),
+        ("no_agent", "This number has no active voice agent."),
+        ("provider_key_error", "Your provider API key was rejected."),
+        ("llm_endpoint_failed", "Your LLM endpoint kept returning errors"),
+        ("carrier_route_failed", "This number cannot carry calls right now."),
+        ("sip_trunk_failure", "Please try again in a few minutes."),
+        ("sweeper_timeout", "Please try again in a few minutes."),
+        (None, "Please try again in a few minutes."),
+    ],
+)
+def test_failure_message_matches_end_reason(end_reason, expected):
+    call = Call(status="failed", end_reason=end_reason, metadata_={})
+    assert expected in call.failure_message
+
+
+def test_blocked_destination_wins_over_end_reason():
+    call = Call(
+        status="failed",
+        end_reason="insufficient_funds",
+        metadata_={"failure_code": "destination_not_allowed"},
+    )
+    assert call.failure_message.startswith("We cannot call this destination")

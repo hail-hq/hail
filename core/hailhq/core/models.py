@@ -797,7 +797,7 @@ class Call(Base):
 
     @property
     def failure_message(self) -> str | None:
-        return call_failure_message(self.status, self.metadata_ or {})
+        return call_failure_message(self.status, self.metadata_ or {}, self.end_reason)
 
     @property
     def recording_enabled(self) -> bool:
