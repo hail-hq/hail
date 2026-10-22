@@ -193,6 +193,29 @@ async def test_numbers_acquire_without_a_ready_offer_raises_and_does_not_buy(
 
 
 @respx.mock
+async def test_numbers_acquire_says_to_ask_support_when_every_offer_is_by_request(
+    base_url: str, api_key: str
+) -> None:
+    respx.post(f"{base_url}/numbers/quotes").mock(
+        return_value=_quotes_response(
+            [
+                {
+                    **_offer(uuid4(), readiness="verification_required"),
+                    "e164": None,
+                    "by_request": True,
+                },
+                {**_offer(uuid4(), 10), "e164": None, "by_request": True},
+            ]
+        )
+    )
+    route = respx.post(f"{base_url}/numbers")
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        with pytest.raises(HailError, match="set up by our team.*ask support"):
+            await c.numbers.acquire(country="DE", number_type="local")
+    assert not route.called
+
+
+@respx.mock
 async def test_numbers_acquire_auto_generates_idempotency_key(
     base_url: str, api_key: str
 ) -> None:

@@ -662,6 +662,12 @@ class _NumbersResource:
                 for o in offers.offers
                 if o.readiness == "ready" and o.quote_id and not o.by_request
             ]
+            if not ready and offers.offers and all(o.by_request for o in offers.offers):
+                raise HailError(
+                    f"numbers in {country.upper()} ({number_type or 'local'}) are "
+                    "set up by our team, not bought through the API; ask support "
+                    "for one"
+                )
             if not ready:
                 raise HailError(
                     f"no number ready to buy in {country.upper()}; complete "

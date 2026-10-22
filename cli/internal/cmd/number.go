@@ -222,8 +222,12 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		return openapi_types.UUID{}, apiError(resp.HTTPResponse.StatusCode, resp.Body)
 	}
 	var best *client.QuoteOffer
+	allByRequest := len(resp.JSON200.Offers) > 0
 	for i := range resp.JSON200.Offers {
 		o := &resp.JSON200.Offers[i]
+		if o.ByRequest == nil || !*o.ByRequest {
+			allByRequest = false
+		}
 		// A by-request offer is never bought here: support orders it.
 		if o.QuoteId == nil || o.Readiness != client.QuoteOfferReadiness("ready") || (o.ByRequest != nil && *o.ByRequest) {
 			continue
@@ -231,6 +235,9 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		if best == nil || o.MonthlyCents+o.SetupCents < best.MonthlyCents+best.SetupCents {
 			best = o
 		}
+	}
+	if best == nil && allByRequest {
+		return openapi_types.UUID{}, fmt.Errorf("numbers in %s (%s) are set up by our team, not bought through the API; ask support for one", f.country, f.numberType)
 	}
 	if best == nil {
 		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type", f.country, f.numberType)

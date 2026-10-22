@@ -266,6 +266,27 @@ func TestNumberAcquire_NoReadyOfferDoesNotBuy(t *testing.T) {
 	}
 }
 
+func TestNumberAcquire_AllByRequestSaysAskSupport(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"})
+	yes := true
+	ready := sampleOffer(quoteCheap, 100, 0, "ready")
+	ready.E164, ready.ByRequest = nil, &yes
+	blocked := sampleOffer(quoteNotReady, 100, 0, "verification_required")
+	blocked.E164, blocked.ByRequest = nil, &yes
+	srv := newAcquireServer(t, []client.QuoteOffer{ready, blocked}, bought)
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "DE",
+	)
+	if err == nil || !strings.Contains(err.Error(), "set up by our team") || !strings.Contains(err.Error(), "ask support") {
+		t.Fatalf("err = %v", err)
+	}
+	if srv.buys != 0 {
+		t.Errorf("expected no purchase, got %d", srv.buys)
+	}
+}
+
 func TestNumberAcquire_MissingCountryFailsBeforeNetwork(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+14155551234", []string{"voice"}))
 
