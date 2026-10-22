@@ -49,7 +49,8 @@ function finish(collection, overview, variables) {
   };
   collection.variable = [
     { key: "baseUrl", value: "https://api.hail.so", type: "string" },
-    { key: "api_key", value: "{{vault:hail-api-key}}", type: "string" },
+    // Empty: each user pastes their own key. Postman keeps it local by default.
+    { key: "api_key", value: "", type: "string" },
     ...variables,
   ];
   normalize(collection.item);

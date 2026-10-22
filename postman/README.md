@@ -12,9 +12,8 @@ answer calls and texts, and track delivery through one API.
 
 1. Create a Hail account and get an API key from the console or `hail auth token`.
 2. Fork the **Hail API** collection into your own workspace.
-3. Add your Hail key to your local Postman Vault as `hail-api-key`.
-   The collection's `api_key` variable contains the reference `{{vault:hail-api-key}}`.
-   Keep that reference when sharing the collection. Your key stays in your vault.
+3. Click the collection → **Variables** tab. Paste your Hail key as the value of `api_key`.
+   Do not click **Share** next to it: unshared values stay on your machine.
 4. Open the **Start here** folder. Send **Check API health**, then **List my agents**. Neither spends credit.
 5. Continue through the steps in order. Each step saves the IDs that the next steps use.
 

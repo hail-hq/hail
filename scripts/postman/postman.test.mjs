@@ -66,7 +66,7 @@ test("export has unique stable IDs and no internal requests or fake auth headers
   assert.equal(collection.auth.bearer[0].value, "{{api_key}}");
   assert.equal(
     collection.variable.find((v) => v.key === "api_key").value,
-    "{{vault:hail-api-key}}",
+    "",
   );
   for (const { request } of items) {
     const url = request.url.raw ?? request.url;

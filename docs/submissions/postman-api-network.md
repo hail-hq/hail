@@ -46,18 +46,13 @@ status: drafted
 5. In Postman, choose **Import**, then import
    `postman/hail-api.postman_collection.json`. Keep its name **Hail API**:
    automatic updates refuse a collection with another name.
-6. Fork **Hail API** to a separate test workspace. Store your Hail
-   API key in your local Postman Vault as `hail-api-key`. In **Start here**, send
-   **Check API health**, then **List my agents**. No credit is spent by those requests.
-   **List my agents** must return 200: this checks that the collection
-   variable `api_key = {{vault:hail-api-key}}` resolves through the
-   collection bearer auth. Postman's vault docs do not confirm this setup.
-   If it returns 401, do not publish. Instead, tell users to paste their key
-   as the current value of `api_key` in their fork, and update
-   `postman/README.md` to match.
+6. Fork **Hail API** to a separate test workspace. In the fork, open the
+   **Variables** tab and paste your Hail API key as the value of `api_key`.
+   Do not click **Share**. In **Start here**, send **Check API health**, then
+   **List my agents**. Both must return 200. No credit is spent.
    Review the individual examples you want to try before enabling paid requests.
-7. Return to the original workspace. Its collection variables must contain
-   vault references and placeholders, never your API key or customer data.
+7. Return to the original workspace. Its `api_key` variable must be empty,
+   never your API key.
 8. In the sidebar, click **⋯ → Workspace overview → Settings**. Under
    **Workspace type**, click **Change**, select **Public**, then **Save
    changes** (or **Submit request** if approval is needed). Once public, the
@@ -153,7 +148,7 @@ Sources checked on 2026-10-20:
 - [Replace a collection](https://learning.postman.com/api-docs/api-reference/collections/put-collection).
 - [Public workspaces](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/public-workspaces/).
 - [Edit workspace details](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/internal-workspaces/manage-workspaces/#edit-workspace-details).
-- [Use vault secrets](https://learning.postman.com/docs/use/postman-vault/use-vault-secrets).
+- [Share variables](https://learning.postman.com/docs/use/send-requests/variables/share-variables/).
 - [Publisher verification](https://learning.postman.com/docs/postman-api-network/showcase/prepare/verify-publisher-team).
 - [Create an MCP request](https://learning.postman.com/docs/use/send-requests/protocols/mcp-requests/create).
 - [MCP Catalog review](https://learning.postman.com/docs/postman-api-network/showcase/publish/mcp-servers/promote/).
