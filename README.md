@@ -71,19 +71,16 @@ Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks]
 
 ## Cursor plugin
 
-Build phone features without opening several carrier accounts or writing
-a separate integration for each provider.
+Give your AI assistant a phone number and an email inbox.
 
-Use Hail from Cursor to find numbers in 120 countries, compare prices,
-and read local registration requirements. Cursor can submit the details and
-documents you supply, check approval, and order a number after you confirm
-the cost. Carriers make the approval decision. Availability and local
-requirements vary.
+Let your assistant handle calls, texts, and email. Building an app? Add AI
+calls, email and SMS with one API.
 
-Use the same account for inbound and outbound calls, texts, and email.
-Query delivery records through MCP. Use signed API webhooks when your app
-needs communication events. Build with the API, CLI, or Python SDK when
-you are ready to connect your app.
+Make and take calls, send and receive messages, and check conversation
+history from Cursor. Get phone numbers in 120+ countries, with help for
+local rules and required documents, including US A2P 10DLC registration.
+Choose a built-in voice or bring your own. Build with the API, CLI, or
+Python SDK. Open-source or cloud priced on usage.
 
 From a checkout that includes the plugin, copy its files into Cursor's
 local plugin directory:
@@ -102,25 +99,8 @@ runtime is needed. Start with a read-only request:
 
 ```text
 Find call-capable Hail numbers in the UK, France, and Canada. Compare
-monthly fees, setup fees, and registration requirements. Do not buy
-numbers or submit documents.
+monthly fees, setup fees, and registration requirements.
 ```
-
-Number purchases and paid registrations require account credit.
-Review the required documents and fees before approving a registration.
-Calls and messages require account credit and recipient permission.
-Marketing sends also require a record of that permission. Use your own
-approved email and SMS copy. Review the recipient and cost before sending.
-US outbound SMS is supported. Hail helps prepare and submit A2P 10DLC
-registration for US local-number texting. Test with an approved registration
-and a ready SMS sender. US inbound and outbound calls are also supported.
-
-The plugin manifest is [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json).
-Its [MCP configuration](mcp.json) uses the hosted service. The source license
-does not make Hail Cloud usage free. Refer to the
-[Cursor setup guide](https://hail.so/mcp/cursor),
-[pricing](https://hail.so/pricing), and
-[privacy policy](https://hail.so/legal/privacy). Contact `hi@hail.so` for help.
 
 ## Install the CLI
 

@@ -2,7 +2,7 @@
   "name": "hail",
   "displayName": "Hail",
   "version": "1.0.0",
-  "description": "Build with phone numbers in 120 countries. Handle number registration, US A2P 10DLC, calls, texts, and email through one Hail MCP connection.",
+  "description": "Give your AI assistant a phone number and an email inbox. Handle calls, texts, and email through Hail in Cursor.",
   "author": {
     "name": "Hail",
     "email": "hi@hail.so"
@@ -10,7 +10,7 @@
   "homepage": "https://hail.so/mcp/cursor",
   "repository": "https://github.com/hail-hq/hail",
   "license": "AGPL-3.0-or-later",
-  "keywords": ["phone-numbers", "registration", "email", "sms", "voice", "mcp"],
+  "keywords": ["ai-agents", "voice", "sms", "email", "mcp", "phone-numbers"],
   "logo": "docs/assets/hail-messenger.svg",
   "mcpServers": "mcp.json"
 }
