@@ -12,6 +12,8 @@ returns a speakable apology to the LLM.
 from __future__ import annotations
 
 import logging
+import math
+import time
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +28,44 @@ from livekit.agents.voice import RunContext
 logger = logging.getLogger("hailhq.voicebot")
 
 SPOKEN_TOOL_FAILURE = SPOKEN_FALLBACK
+# end_call's answer when the other party talked over the goodbye.
+STILL_TALKING = (
+    "They started talking during your goodbye, so the call is still open. "
+    "Do not hang up: listen and answer them."
+)
+
+
+# Speech this long keeps the call open after a goodbye. A quick "bye" or "ok"
+# over the goodbye is shorter; "What is that?" is longer.
+KEEP_CALL_SPEECH_SECONDS = 1.0
+
+
+class SpeechTracker:
+    """When the other party talks (time.monotonic()), fed by the session's
+    ``user_state_changed`` events."""
+
+    def __init__(self) -> None:
+        self._started: float | None = None
+        self._long_ended = -math.inf
+
+    def on_state(self, state: str | None, now: float) -> None:
+        if state == "speaking":
+            if self._started is None:
+                self._started = now
+        elif self._started is not None:
+            if now - self._started >= KEEP_CALL_SPEECH_SECONDS:
+                self._long_ended = now
+            self._started = None
+
+    def talked_since(self, since: float, now: float) -> bool:
+        """True when they talk now for long enough, or did so after
+        ``since``. Short words count for neither."""
+        if (
+            self._started is not None
+            and now - self._started >= KEEP_CALL_SPEECH_SECONDS
+        ):
+            return True
+        return self._long_ended >= since
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
@@ -37,8 +77,21 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                 context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
+            # Someone who starts talking during the goodbye is not done: keep
+            # the call. Only end_call: DTMF and transfers run over IVR menus
+            # and "okay"s, so speech must not cancel them.
             if spec.risk_tier == "session_control":
+                started = time.monotonic()
                 await context.wait_for_playout()
+                if (
+                    spec.name == "end_call"
+                    and tctx.spoke_since is not None
+                    and tctx.spoke_since(started)
+                ):
+                    logger.info(
+                        "call_id=%s end_call skipped: still talking", tctx.call_id
+                    )
+                    return STILL_TALKING
             return await spec.execute(tctx, raw_arguments)
         except Exception:
             logger.exception(
@@ -68,12 +121,13 @@ async def build_agent_tools(
     hangup,
     send_dtmf,
     bridge=None,
+    spoke_since=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
     The caller must ``aclose()`` the client at shutdown. Returns no tools
     when the dispatch predates the ``organization_id`` field (rolling
-    deploy) — no tools beats wrong-org tools.
+    deploy): no tools beats wrong-org tools.
     """
     raw_org = metadata.get("organization_id")
     if raw_org is None:
@@ -90,7 +144,7 @@ async def build_agent_tools(
     allowed = metadata.get("tools")  # None ⇒ all available
     if allowed is not None and not isinstance(allowed, list):
         # Malformed dispatch metadata (e.g. a bare string instead of a
-        # list) — `s.name in allowed` would silently do substring
+        # list): `s.name in allowed` would silently do substring
         # matching on a string instead of list membership. Fail closed,
         # matching the malformed-organization_id posture above.
         logger.warning(
@@ -124,6 +178,7 @@ async def build_agent_tools(
         hangup=hangup,
         send_dtmf=send_dtmf,
         bridge=bridge,
+        spoke_since=spoke_since,
     )
 
     available: list[ToolSpec] = []

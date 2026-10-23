@@ -1,4 +1,4 @@
-"""end_call — hang up gracefully once the call's goal is met.
+"""end_call: hang up gracefully once the call's goal is met.
 
 session_control tier: purely local (the voicebot's ``hangup`` handle),
 no API call, affects only its own call. The voicebot wrapper waits for
@@ -28,9 +28,12 @@ async def _execute(ctx: ToolContext, _args: dict[str, Any]) -> str:
 SPEC = ToolSpec(
     name="end_call",
     description=(
-        "End this phone call. Use only after the call's goal is met, or when "
-        "the other party asks to end the call. Say your goodbye out loud "
-        "BEFORE calling this tool — it hangs up immediately after."
+        "End this phone call. Use only when the other party says they need "
+        "nothing more, says goodbye, or asks to end the call. A thank-you "
+        "alone is not a goodbye: ask if there is anything else. Say your "
+        "goodbye out loud BEFORE calling this tool; it hangs up right after. "
+        "If they start talking during your goodbye, the call stays open: "
+        "listen and answer them."
     ),
     parameters={"type": "object", "properties": {}, "required": []},
     risk_tier="session_control",

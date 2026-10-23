@@ -11,6 +11,7 @@
 [![CLI release](https://img.shields.io/github/v/release/hail-hq/hail?label=hail%20CLI)](https://github.com/hail-hq/hail/releases)
 [![Docs](https://img.shields.io/badge/docs-hail.so%2Fdocs-blue)](https://hail.so/docs)
 [![Brand assets](https://img.shields.io/badge/brand-hail.so%2Fbrand-5284ff)](https://hail.so/brand)
+[![Run in Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2?action=collection%2Ffork&source=rip_markdown&collection-url=entityId%3D59134891-d34d3c4a-00eb-43f8-853d-8fc7859696b2%26entityType%3Dcollection%26workspaceId%3Daeb5d784-d1b6-4e09-a7ad-0d2e5b442d08)
 
 Your agent needs to call a person to move an appointment. Hail connects to the telephone carrier and runs the voice pipeline — STT, TTS, turn detection. Your agent is the brain: point Hail at any OpenAI-compatible endpoint ([bring your own LLM](docs/public/byo-llm.md)), or let Hail's fallback chain (Anthropic → OpenAI → Gemini) do the talking. SMS and email work the same way — one MCP endpoint, one API key, one invoice.
 
@@ -68,6 +69,39 @@ Authentication differs by deployment:
 - **Self-host**: do not run `hail login`; set `HAIL_API_URL` and `HAIL_API_KEY` as shown above, or pass `--api-url` and `--api-key`.
 
 Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks](docs/public/webhooks.md) · [MCP](docs/public/mcp.md) · [operations](docs/public/self-host/operations.md)
+
+## Cursor plugin
+
+Give your AI assistant a phone number and an email inbox.
+
+Let your assistant handle calls, texts, and email. Building an app? Add AI
+calls, email and SMS with one API.
+
+Make and take calls, send and receive messages, and check conversation
+history from Cursor. Get phone numbers in 120+ countries, with help for
+local rules and required documents, including US A2P 10DLC registration.
+Choose a built-in voice or bring your own. Build with the API, CLI, or
+Python SDK. Open-source or cloud priced on usage.
+
+From a checkout that includes the plugin, copy its files into Cursor's
+local plugin directory:
+
+```bash
+mkdir -p ~/.cursor/plugins/local/hail
+git archive HEAD .cursor-plugin mcp.json README.md LICENSE \
+  docs/assets/hail-messenger.svg | tar -x -C ~/.cursor/plugins/local/hail
+```
+
+Reload Cursor and open Customize to find the Hail MCP server.
+Enterprise administrators must allow local plugin imports first.
+The plugin connects to `https://mcp.hail.so`
+using OAuth. Sign in to Hail when Cursor asks. No API key or local MCP
+runtime is needed. Start with a read-only request:
+
+```text
+Find call-capable Hail numbers in the UK, France, and Canada. Compare
+monthly fees, setup fees, and registration requirements.
+```
 
 ## Install the CLI
 
@@ -260,7 +294,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] `hail` binary via GitHub Releases
 - MCP server
   - [x] Remote Streamable HTTP endpoint included with each Hail deployment
-  - ~~PyPI stdio package~~ — deliberately not shipped; see [MCP setup](docs/public/mcp.md)
+  - [x] Stdio entry point included in the MCP container; see [MCP setup](docs/public/mcp.md#stdio)
 - Python SDK
   - [x] `hail-sdk` on PyPI, imports as `hail`
 

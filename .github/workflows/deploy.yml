@@ -4,13 +4,13 @@ name: Deploy
 # SSHes the production VM to pull + roll them.
 #
 # Required repo secrets:
-#   DEPLOY_SSH_HOST          — VM hostname or IP
-#   DEPLOY_SSH_USER          — SSH user (must be in the docker group)
-#   DEPLOY_SSH_PRIVATE_KEY   — private key authorised on the VM
-#   DEPLOY_SSH_PORT          — (optional) SSH port; defaults to 22
+#   DEPLOY_SSH_HOST          VM hostname or IP
+#   DEPLOY_SSH_USER          SSH user (must be in the docker group)
+#   DEPLOY_SSH_PRIVATE_KEY   private key authorised on the VM
+#   DEPLOY_SSH_PORT          (optional) SSH port; defaults to 22
 #
 # Optional repo variables (Settings → Actions → Variables):
-#   DEPLOY_PATH              — repo checkout on the VM; defaults to /opt/hail
+#   DEPLOY_PATH              repo checkout on the VM; defaults to /opt/hail
 #
 # Image tagging: every build pushes `latest` + `sha-<commit>`. The VM pulls
 # `:latest` (hard-coded in docker-compose.yml); the SHA tag is for forensics
@@ -136,7 +136,7 @@ jobs:
             # Best-effort preview: --sql runs in Alembic's offline mode, which
             # has no live DB connection. Any migration with a runtime
             # data-dependent guard (a real SELECT via op.get_bind()) throws
-            # there and aborts the preview early — expected, not a deploy
+            # there and aborts the preview early. That is expected, not a deploy
             # failure. Stderr is folded into the same pipe as stdout so that
             # a traceback gets bounded by head -200 like normal output does,
             # instead of dumping unbounded into the log.
@@ -145,7 +145,14 @@ jobs:
             echo "=== applying ==="
             $COMPOSE run --rm api alembic upgrade head
 
-            $COMPOSE up -d --remove-orphans
+            # Everything but the voicebot swaps in place. The voicebot rolls:
+            # the new one starts first, then the old one finishes its live calls
+            # in the background (scripts/deploy/roll-voicebot.sh).
+            # Assigned first: set -e does not see a failure inside an argument,
+            # and an empty list would make `up -d` scale the voicebot back to 1.
+            services="$($COMPOSE config --services | grep -vx voicebot)"
+            $COMPOSE up -d --remove-orphans $services
+            new_voicebot="$(scripts/deploy/roll-voicebot.sh $COMPOSE)"
 
             # Stale-image gate. `pull` + `up -d` can silently keep an old
             # build running (cached layer, registry hiccup, a service that
@@ -158,18 +165,22 @@ jobs:
             assert_fresh() {
               svc="$1"
               docker pull -q "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA"
-              cid="$($COMPOSE ps -q "$svc")"
+              # The voicebot passes its new container: old ones may still be
+              # draining on the previous image.
+              cid="${2:-$($COMPOSE ps -q "$svc")}"
               [ -n "$cid" ] || { echo "::error::$svc has no running container"; exit 1; }
               running="$(docker inspect --format '{{.Image}}' "$cid")"
               expected="$(docker image inspect --format '{{.Id}}' \
                 "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA")"
               if [ "$running" != "$expected" ]; then
-                echo "::error::$svc is stale — running $running, expected $expected (sha-$DEPLOY_GITHUB_SHA)"
+                echo "::error::$svc is stale: running $running, expected $expected (sha-$DEPLOY_GITHUB_SHA)"
                 exit 1
               fi
               echo "$svc: fresh ($expected)"
             }
-            for svc in api voicebot mcp; do assert_fresh "$svc"; done
+            assert_fresh api
+            assert_fresh mcp
+            assert_fresh voicebot "$new_voicebot"
 
             $COMPOSE ps
 

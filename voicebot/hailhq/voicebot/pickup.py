@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 
+from hailhq.voicebot.classify import classify_speech
 from livekit import rtc
 from livekit.agents import APIConnectOptions
-from livekit.agents.llm import LLM, ChatContext, function_tool
+from livekit.agents.llm import LLM
 from livekit.agents.stt import STT
 from livekit.agents.utils.participant import wait_for_track_publication
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
@@ -121,10 +121,6 @@ async def recheck_greeting(
     ):
         return result
 
-    @function_tool
-    async def save_prediction(label: AMDCategory) -> None:
-        """Save the greeting category."""
-
     started = time.monotonic()
     try:
         async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
@@ -136,31 +132,18 @@ async def recheck_greeting(
             )
             if not transcript:
                 return result
-            ctx = ChatContext()
-            ctx.add_message(role="system", content=prompt + RECHECK_NOTE)
-            ctx.add_message(role="user", content=transcript)
-            async with llm.chat(
-                chat_ctx=ctx,
-                tools=[save_prediction],
-                tool_choice="required",
-                # Google BYO also requires a >=10s provider deadline. The
-                # outer five-second local budget still bounds the recheck.
-                conn_options=APIConnectOptions(max_retry=0, timeout=10.0),
-            ) as stream:
-                response = await stream.collect()
-            for call in response.tool_calls:
-                if call.name != "save_prediction":
-                    continue
-                category = AMDCategory(json.loads(call.arguments)["label"])
-                if category == AMDCategory.UNCERTAIN:
-                    return result
-                return AMDPredictionEvent(
-                    category=category,
-                    reason="greeting_recheck",
-                    transcript=transcript,
-                    speech_duration=result.speech_duration,
-                    delay=result.delay + time.monotonic() - started,
-                )
+            # classify_speech keeps the >=10s provider deadline Google BYO
+            # needs. The outer five-second budget still bounds the recheck.
+            category = await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
+        if category is None or category == AMDCategory.UNCERTAIN:
+            return result
+        return AMDPredictionEvent(
+            category=category,
+            reason="greeting_recheck",
+            transcript=transcript,
+            speech_duration=result.speech_duration,
+            delay=result.delay + time.monotonic() - started,
+        )
     except Exception as exc:
         # Provider error bodies can contain audio or transcripts.
         logger.warning("pickup recheck unavailable (%s)", type(exc).__name__)

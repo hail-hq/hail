@@ -84,9 +84,9 @@ cp .env.example .env
 Edit `/opt/hail/.env` and fill in:
 
 - All provider secrets (Twilio, LiveKit, Deepgram, Cartesia, optional ElevenLabs fallback, and at least one LLM key); see [Twilio](./twilio.md) and [LiveKit Cloud](./livekit-cloud.md).
-- `HAIL_API_KEY` — generate with `openssl rand -base64 32 | tr -d '/+=' | head -c 40 | sed 's/^/hk_/'`.
-- `DATABASE_URL` — the managed Postgres connection string. Most providers require `?sslmode=require`.
-- `HAIL_DOMAIN` — your apex (for example, `hail.example.com`). Both `api.` and `mcp.` subdomains derive from it.
+- `HAIL_API_KEY`: generate with `openssl rand -base64 32 | tr -d '/+=' | head -c 40 | sed 's/^/hk_/'`.
+- `DATABASE_URL`: the managed Postgres connection string. Most providers require `?sslmode=require`.
+- `HAIL_DOMAIN`: your apex (for example, `hail.example.com`). Both `api.` and `mcp.` subdomains derive from it.
 
 The `.env` file is already gitignored. Never commit it.
 
@@ -114,7 +114,7 @@ To skip the manual GHCR login, trigger the GitHub Actions workflow (step 6) firs
 
 Bind your first phone number using [Self-host: first-run setup](./operations.md#self-host-first-run-setup). Because this deployment uses managed Postgres, replace `docker compose exec postgres …` with `psql "$DATABASE_URL" -c …`.
 
-Send a request to `https://api.<domain>/healthz` from your laptop. You must see `{"status":"ok"}`. Caddy gets a Let's Encrypt cert on the first request. The first call after boot can take 10–20 seconds.
+Send a request to `https://api.<domain>/healthz` from your laptop. You must see `{"status":"ok"}`. Caddy gets a Let's Encrypt cert on the first request. The first call after boot can take 10 to 20 seconds.
 
 ## 5. Configure GitHub Actions
 
@@ -145,7 +145,8 @@ The GHCR push uses the workflow's `GITHUB_TOKEN` (already scoped `packages: writ
 Push any commit to `main`, or run **Actions → Deploy → Run workflow** in the GitHub UI. The workflow:
 
 1. Builds `api`, `voicebot`, `mcp` images in parallel and pushes both `sha-<commit>` and `latest` to ghcr.io/hail-hq/hail-\*.
-2. Connects to the VM with SSH, fetches the new commit, and runs `alembic upgrade head`. Then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` rolls the containers onto the newly pulled `:latest`.
+2. Connects to the VM with SSH, fetches the new commit, and runs `alembic upgrade head`. Then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` rolls every service except the voicebot onto the newly pulled `:latest`.
+3. Rolls the voicebot with [`scripts/deploy/roll-voicebot.sh`](../../../scripts/deploy/roll-voicebot.sh): the new voicebot starts next to the old one, and once it has registered with LiveKit, the old one finishes its live calls (up to about 1 hour) and stops. A deploy no longer drops calls.
 
 `concurrency: deploy-prod` makes simultaneous merges queue. They do not race.
 
@@ -169,10 +170,11 @@ Push any commit to `main`, or run **Actions → Deploy → Run workflow** in the
 
 ## Footguns
 
-| symptom                                                      | fix                                                                                                                                                                                                |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Caddy logs `tls: no certificates configured` on first start  | DNS has not propagated yet, or :80/:443 is not open. Confirm that `dig api.<domain>` returns the VM IP and `sudo ufw status` shows both ports open.                                                |
-| `docker pull` 401 / "denied" from GHCR                       | The package is private by default. Set its visibility to public under GitHub → Packages → hail-\_ → Package settings, or rely on the workflow's `docker login` step.                               |
-| `permission denied while trying to connect to docker daemon` | The deploy user must be in the `docker` group. Run `sudo usermod -aG docker $USER` on the VM and re-establish the SSH session.                                                                     |
-| Caddy 502s for api.<domain>                                  | Caddy resolves `api` and `mcp` via Compose's internal DNS — all services share the `hail` project network. Do not split the project name across files.                                             |
-| api/mcp port reachable from the public internet              | A published port without the `127.0.0.1:` prefix bypasses UFW. Check `docker compose -f docker-compose.yml -f docker-compose.prod.yml port api 8080` returns `127.0.0.1:8080`, not `0.0.0.0:8080`. |
+| symptom                                                      | fix                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live calls drop when you run `up -d` by hand during a deploy | A deploy can leave 2 voicebots running while the old one drains. A plain `up -d` scales the voicebot back to 1 and stops one with a 10 s limit. Wait until `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps voicebot` shows one container, or pass the other services by name. |
+| Caddy logs `tls: no certificates configured` on first start  | DNS has not propagated yet, or :80/:443 is not open. Confirm that `dig api.<domain>` returns the VM IP and `sudo ufw status` shows both ports open.                                                                                                                                               |
+| `docker pull` 401 / "denied" from GHCR                       | The package is private by default. Set its visibility to public under GitHub → Packages → hail-\_ → Package settings, or rely on the workflow's `docker login` step.                                                                                                                              |
+| `permission denied while trying to connect to docker daemon` | The deploy user must be in the `docker` group. Run `sudo usermod -aG docker $USER` on the VM and re-establish the SSH session.                                                                                                                                                                    |
+| Caddy 502s for api.<domain>                                  | Caddy resolves `api` and `mcp` via Compose's internal DNS: all services share the `hail` project network. Do not split the project name across files.                                                                                                                                             |
+| api/mcp port reachable from the public internet              | A published port without the `127.0.0.1:` prefix bypasses UFW. Check `docker compose -f docker-compose.yml -f docker-compose.prod.yml port api 8080` returns `127.0.0.1:8080`, not `0.0.0.0:8080`.                                                                                                |

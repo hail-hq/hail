@@ -195,3 +195,52 @@ def test_sells_in_ignores_receive_only_and_by_request(tmp_path, monkeypatch):
         assert telephony_catalog.sells_in("PT", "didww") is False
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_by_request_offers_come_from_the_catalog_and_rank_last(tmp_path, monkeypatch):
+    from hailhq.core.number_offers import (
+        CarrierOffer,
+        by_request_offers,
+        rank_offers,
+    )
+
+    row = {
+        "country_code": "PT",
+        "number_type": "national",
+        "usd_per_month": "3.50",
+        "setup_usd": "1.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+    }
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": [row]}))
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {"numbers": [{**row, "by_request": True, "verification_required": True}]}
+        )
+    )
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        (asked,) = by_request_offers("PT", "national", ["voice"])
+        assert asked.provider == "didww" and asked.by_request and asked.e164 is None
+        assert (asked.monthly_cents, asked.setup_cents) == (350, 100)
+        assert asked.readiness == "verification_required"
+        # A voice-only row never answers a request for SMS.
+        assert by_request_offers("PT", "national", ["voice", "sms"]) == []
+        # A carrier Hail cannot file with gives no offer.
+        assert by_request_offers("PT", "national", ["voice"], ["twilio"]) == []
+        live = CarrierOffer(
+            provider="twilio",
+            e164="+351300000009",
+            country_code="PT",
+            number_type="national",
+            capabilities=["voice"],
+            monthly_cents=900,
+            setup_cents=0,
+            readiness="verification_required",
+        )
+        assert rank_offers([asked, live]) == [live, asked]
+    finally:
+        telephony_catalog._load.cache_clear()

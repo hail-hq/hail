@@ -15,6 +15,9 @@ import re
 import requests
 from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
+    DETAILS_REJECTED,
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -30,7 +33,11 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
 )
-from hailhq.core.providers.verification.forms import pick_option, validate_input
+from hailhq.core.providers.verification.forms import (
+    display_name,
+    pick_option,
+    validate_input,
+)
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -131,6 +138,14 @@ def _field_spec(f: dict) -> FieldSpec:
         options=options,
         required=bool(constraint),
     )
+
+
+def _name_from(values: dict, subject_type: SubjectType) -> str | None:
+    """The name in one set of Twilio attributes: ``business_name`` for a
+    business, ``first_name`` and ``last_name`` for a person."""
+    if subject_type == "business":
+        return display_name(values.get("business_name"))
+    return display_name(values.get("first_name"), values.get("last_name"))
 
 
 def _map_requirements(
@@ -366,7 +381,8 @@ class TwilioVerificationProvider(VerificationProvider):
             self._discard_sync(refs)
             if exc.status == 400:
                 return DraftResult(
-                    refs={}, problems=[Problem(field="", message=exc.msg)]
+                    refs={},
+                    problems=[Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)],
                 )
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
@@ -424,20 +440,19 @@ class TwilioVerificationProvider(VerificationProvider):
                 problems.append(
                     Problem(
                         field=field,
-                        message=bad.get("failure_reason")
-                        or f"{bad.get('friendly_name', 'A value')} is not valid.",
+                        message=VALUE_NOT_ACCEPTED if field else NOT_ACCEPTED,
+                        raw=bad.get("failure_reason") or bad.get("friendly_name"),
                     )
                 )
             if not result.get("invalid"):
                 problems.append(
                     Problem(
                         field=slot,
-                        message=f"{result.get('requirement_friendly_name', 'A requirement')} is missing.",
+                        message="This is missing." if slot else NOT_ACCEPTED,
+                        raw=result.get("requirement_friendly_name"),
                     )
                 )
-        return problems or [
-            Problem(field="", message="The carrier did not accept the details.")
-        ]
+        return problems or [Problem(field="", message=NOT_ACCEPTED)]
 
     async def check(self, refs: dict) -> list[Problem]:
         return await asyncio.to_thread(self._evaluate, refs)
@@ -454,18 +469,57 @@ class TwilioVerificationProvider(VerificationProvider):
         if bundle.status == "twilio-approved":
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
-            reason = getattr(bundle, "failure_reason", None)
             return ProviderStatus(
                 state="rejected",
-                reason=reason or "The carrier rejected the details. Start again.",
+                reason=DETAILS_REJECTED,
+                raw_reason=getattr(bundle, "failure_reason", None),
             )
         return ProviderStatus(state="pending")
 
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """End-user fields first (``business_name``, or ``first_name`` and
+        ``last_name``), then the same fields on a document, then the
+        address's ``customer_name``."""
+        kind = requirements.subject_type
+        return (
+            _name_from(fields, kind)
+            or next(
+                (n for d in documents.values() if (n := _name_from(d.fields, kind))),
+                None,
+            )
+            or display_name(address.customer_name if address else None)
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The end user's attributes, else the address's customer name."""
+
+        def run() -> str | None:
+            if refs.get("end_user_sid"):
+                end_user = self._rc.end_users(refs["end_user_sid"]).fetch()
+                name = _name_from(end_user.attributes or {}, subject_type)
+                if name:
+                    return name
+            if refs.get("address_sid"):
+                addr = self._client.addresses(refs["address_sid"]).fetch()
+                return display_name(addr.customer_name)
+            return None
+
+        return await asyncio.to_thread(run)
+
     async def purchase_handle(self, refs: dict) -> dict:
-        handle = {"bundle_sid": refs["bundle_sid"]}
-        if refs.get("address_sid"):
-            handle["address_sid"] = refs["address_sid"]
-        return handle
+        # The bundle is what the purchase passes; the address rides along.
+        return {
+            "verification_id": refs["bundle_sid"],
+            "address_id": refs.get("address_sid"),
+        }
 
     # -- discard -----------------------------------------------------------
 

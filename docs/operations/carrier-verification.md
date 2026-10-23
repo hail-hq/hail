@@ -7,7 +7,7 @@
 Some countries require the buyer of a phone number to be verified first (ID, address, or a regulatory bundle). Hail collects the details in the console, files them with the carrier, and follows the carrier's decision. Once approved, `POST /numbers` can buy numbers of that country and type for the organization.
 
 - Twilio is the only carrier plug-in in v1. It is registered in [`core/hailhq/core/providers/verification/__init__.py`](../../core/hailhq/core/providers/verification/__init__.py) and is active whenever `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set.
-- Hail stores state and opaque carrier IDs only. No names, addresses, or documents are kept (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)).
+- Hail stores state, opaque carrier IDs, and the name of the person or company (`subject_name`). No addresses or documents are kept (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)). The name is never logged.
 - **Customer-facing text never names a carrier.** Error details, docstrings (they become OpenAPI descriptions), and console copy say "the carrier", never "Twilio" or "bundle".
 
 ## Configuration
@@ -30,24 +30,60 @@ Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` 
 | `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why. | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
 | `cancelled`       | Customer withdrew or dismissed it.                            | `DELETE /verifications/{id}`.                                                               |
 
-One live verification per (organization, carrier, country, number type). `cancelled` and `rejected` rows do not count, so the customer can start over.
+For a number (`purpose=number`): an organization may hold several live verifications per (carrier, country, number type, `subject_type`): several people, several companies. Only an exact duplicate is refused: the same `subject_type` and the same `subject_name`, ignoring case (unique index `carrier_verifications_number_live_uniq` on `(organization_id, provider, country_code, number_type, subject_type, lower(subject_name))`, rows with a name only). That is a 409 `You already have a verification for <name> as a person/company for this number type.` For US SMS (`purpose=sms`): one live registration per (organization, carrier, country, number type) (`carrier_verifications_sms_live_uniq`). `cancelled` and `rejected` rows do not count, so the customer can start over.
+
+## Subject name
+
+`POST /verifications` takes the name from the form the customer filled in. Each plug-in reads it with `subject_name` (no carrier call) before the draft is made; null when the form holds no name. `VerificationResponse.subject_name`, quote offers' `verifications[].subject_name` and `PhoneNumberResponse.subject_name` return it.
+
+| Plug-in                                                    | Business                                                                                                              | Person                                     | Fallback                                                |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Twilio number (`twilio.py`)                                | end-user field `business_name`                                                                                        | end-user fields `first_name` + `last_name` | same fields on a document, then `address.customer_name` |
+| Telnyx number (`telnyx.py`)                                | `address.customer_name`; without an address, the text field whose label starts with "Company name" or "Business name" | `address.customer_name`                    | none (free-text contact fields are never read)          |
+| DIDWW number (`didww.py`)                                  | identity field `company_name`                                                                                         | identity fields `first_name` + `last_name` | `address.customer_name`                                 |
+| Twilio SMS (`twilio_sms.py`), Telnyx SMS (`telnyx_sms.py`) | `legal_name`                                                                                                          | `first_name` + `last_name`                 | `address.customer_name`                                 |
+
+Names are trimmed and cut at 200 characters.
+
+### Backfill for rows made before the name was kept
+
+Rows created before `subject_name` existed have none. `python -m hailhq.core.verification_names` ([`core/hailhq/core/verification_names.py`](../../core/hailhq/core/verification_names.py)) reads the name back from the carrier for every row with `subject_name IS NULL`, through each plug-in's `fetch_subject_name`:
+
+| Plug-in       | Carrier record read                                                                                                                      |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Twilio number | end user `refs.end_user_sid` (`business_name`, or `first_name` + `last_name`), else address `refs.address_sid` (`customer_name`)         |
+| Telnyx number | address `refs.address_id` (`business_name`, or `first_name` + `last_name`); a group with no address keeps null                           |
+| DIDWW number  | identity `refs.identity_id` (`company_name`, or `first_name` + `last_name`)                                                              |
+| Twilio SMS    | customer profile `refs.profile_sid`: its business information (`business_name`) or starter profile (`first_name` + `last_name`) end user |
+| Telnyx SMS    | brand `refs.brand_id` (`firstName` + `lastName`, else `companyName`)                                                                     |
+
+It commits row by row and logs counts and row ids only, never a name. A carrier that is not configured, a record that is gone, or a lookup that fails leaves the row null; run it again later to retry. A live row whose name would duplicate another live row of the same kind stays null (counted as `duplicate`). Run it once after the deploy that adds the column, on the production VM:
+
+```bash
+cd /opt/hail
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  run --rm api python -m hailhq.core.verification_names
+```
+
+The last log line reads `verification names: N named, N without a name at the carrier, N carrier not configured, N lookup failed, N duplicate`.
 
 ## Flow
 
-1. `GET /verifications/requirements?country_code=GB&number_type=mobile&subject_type=person` returns the form: fields, address rules, document slots.
-2. `POST /verifications` (multipart) sends the details and files. The carrier evaluates them at once. Problems come back as 422 with the field named, and nothing is stored.
+1. `GET /verifications/requirements?quote_id=<quote_id>&country_code=GB&number_type=mobile&subject_type=person` returns the form: fields, address rules, document slots. `subject_type` (`person` or `business`) is required on this route and on `POST /verifications` (422 without it). `quote_id` is the offer's id from `POST /numbers/quotes`. It is required for `purpose=number` (422 without it): Hail reads the carrier from it. A number support orders by hand also has an offer (`by_request: true`) with a `quote_id` for this.
+2. `POST /verifications` (multipart, same `quote_id`) sends the details and files. The carrier evaluates them at once. Problems come back as 422 with the field named, and nothing is stored.
 3. When the evaluation passes, the row is saved as `awaiting_review` and submitted to the carrier in the same request. There is no human gate. If the carrier is unreachable the row stays `awaiting_review`; the background pass retries.
 4. `GET /verifications/{id}` and `GET /verifications` ask the carrier for the current status at most once a minute per row and update `submitted` rows to `approved` or `rejected`.
 5. Every `HAIL_VERIFICATION_POLL_SECONDS` the background pass (`sweep_verifications` in [`api/hailhq/api/routes/verifications.py`](../../api/hailhq/api/routes/verifications.py)) does:
    - `awaiting_review` rows untouched for 2 minutes: lock the row (`FOR UPDATE SKIP LOCKED`), ask the carrier to check the draft. Pass → submit. Refused → `rejected` with the carrier's message, draft discarded, audit `verification.reject` by `system`. Carrier down → leave it; try next pass.
    - `submitting` and `submitted` rows: refresh from the carrier. A `submitting` row older than 5 minutes is settled from the carrier's status.
-6. When a number is bought, `approved_purchase_handle` hands the carrier's purchase values (for Twilio, the bundle SID) to the purchase call. No carrier call happens inside the purchase lock.
+6. Quotes and purchases read the org's approved rows with `approved_handles` (a list per carrier, newest first, each with its `subject_type` and `subject_name`, carrier ids from each plug-in's `purchase_handle`). Hail's rows decide which approval is used. The carrier only confirms it is still valid, in its `offers` adapter: Twilio by bundle SID and the bundle's regulation (individual = person), Telnyx by requirement group id (kind-blind), DIDWW by address id. A carrier-side approval with no Hail row is not used. `POST /numbers/quotes` first refreshes the org's submitted rows for that country (at most once a minute per row).
+7. Each offer lists `subject_types` (who the carrier accepts) and `verifications`: every live row for its carrier, country and type (`id`, `state`, `subject_type`, `subject_name`), approved first, then newest. `POST /numbers` takes `verification_id` (Hail's id): it must be one of the org's approved number rows that the carrier still accepts for this offer, else 422 on `verification_id`. Without it, the one approved valid row is used (after the optional `subject_type` filter); more than one is a 422 on `verification_id` (`You have more than one verification for this number. Pass verification_id.`). `subject_type` alone still gives `Verify as a person first` / `Verify as a company first` when that kind has no valid approval. The number stores `subject_type`, `subject_name` and `verification_row_id` in `provisioning_metadata.offer`; `PhoneNumberResponse` returns `subject_type`, `subject_name` and `verification_id` from it. A carrier rejection after the purchase (DIDWW) rejects that row only.
 
 Runnable example:
 
 ```bash
 curl -s -X POST "$HAIL_API_URL/verifications" -H "Authorization: Bearer $HAIL_API_KEY" \
-  -F country_code=GB -F number_type=mobile -F subject_type=person \
+  -F quote_id=<quote_id> -F country_code=GB -F number_type=mobile -F subject_type=person \
   -F 'fields={"first_name":"Ada","last_name":"Lovelace"}' \
   -F 'documents={"proof_of_identity":{"option":"passport"}}' \
   -F file.proof_of_identity=@passport.jpg
@@ -108,7 +144,7 @@ Same flow as above with `purpose=sms`: each organization registers its own US A2
 
 - Routes and the background pass: [`api/hailhq/api/routes/verifications.py`](../../api/hailhq/api/routes/verifications.py).
 - Worker loop: [`api/hailhq/api/verification_worker.py`](../../api/hailhq/api/verification_worker.py).
-- Carrier plug-in contract (`requirements`, `create_draft`, `check`, `submit`, `status`, `purchase_handle`, `discard`): [`core/hailhq/core/providers/verification/base.py`](../../core/hailhq/core/providers/verification/base.py). Twilio: [`twilio.py`](../../core/hailhq/core/providers/verification/twilio.py) next to it.
+- Carrier plug-in contract (`requirements`, `create_draft`, `check`, `submit`, `status`, `purchase_handle`, `discard`, `subject_name`, `fetch_subject_name`): [`core/hailhq/core/providers/verification/base.py`](../../core/hailhq/core/providers/verification/base.py). Twilio: [`twilio.py`](../../core/hailhq/core/providers/verification/twilio.py) next to it.
 - Tests: [`api/tests/test_verifications_api.py`](../../api/tests/test_verifications_api.py) (`FakeCarrier` stands in for the carrier). Run: `cd api && uv run pytest tests/test_verifications_api.py -q`.
 - Is the pass running? `docker compose logs api | grep "verification worker"`. The line appears only on a pass that changed something.
 - Audit trail: `SELECT action, actor_kind, payload FROM audit_log WHERE target_type = 'carrier_verification' ORDER BY created_at DESC LIMIT 20;`

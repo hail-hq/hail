@@ -78,8 +78,15 @@ def test_path_id_rejects_non_strings() -> None:
 # Every HailClient method that puts an id in a path
 # --------------------------------------------------------------------------- #
 
-# Methods whose *_id parameter goes in a JSON body, not a path.
-_BODY_ID_METHODS = {"place_call", "send_sms", "send_email", "acquire_number"}
+# Methods whose *_id parameter goes in a body or query string, not a path.
+_BODY_ID_METHODS = {
+    "place_call",
+    "send_sms",
+    "send_email",
+    "acquire_number",
+    "get_verification_requirements",
+    "submit_verification",
+}
 
 
 def _id_methods() -> list[tuple[str, list[str]]]:

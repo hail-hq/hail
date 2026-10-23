@@ -208,3 +208,52 @@ async def test_uninterruptible_tool_disallows_interruptions():
     rc = FakeRunContext()
     await _make_handler(spec, _tctx())({}, rc)
     assert rc.interruptions_allowed is False
+
+
+async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():
+    import dataclasses
+
+    from hailhq.voicebot.tools import STILL_TALKING
+
+    hung_up = []
+
+    async def record(_ctx, _args):
+        hung_up.append(True)
+        return "Call ended."
+
+    end_call = _spec(name="end_call", tier="session_control", execute=record)
+    talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
+    assert await _make_handler(end_call, talked)({}, FakeRunContext()) == STILL_TALKING
+    assert hung_up == []
+
+    quiet = dataclasses.replace(_tctx(), spoke_since=lambda _t: False)
+    assert await _make_handler(end_call, quiet)({}, FakeRunContext()) == "Call ended."
+    assert hung_up == [True]
+
+
+async def test_other_session_tools_run_while_they_talk():
+    import dataclasses
+
+    dtmf = _spec(name="send_dtmf", tier="session_control")
+    talked = dataclasses.replace(_tctx(), spoke_since=lambda _t: True)
+    assert await _make_handler(dtmf, talked)({}, FakeRunContext()) == "ok"
+
+
+def test_speech_tracker_ignores_short_words():
+    from hailhq.voicebot.tools import SpeechTracker
+
+    speech = SpeechTracker()
+    speech.on_state("speaking", 10.0)
+    speech.on_state("listening", 10.4)  # "bye"
+    assert not speech.talked_since(9.0, 11.0)
+
+    speech.on_state("speaking", 12.0)
+    assert not speech.talked_since(9.0, 12.5)  # still talking, not yet long
+    assert speech.talked_since(9.0, 13.2)  # still talking, long enough
+    speech.on_state("listening", 13.8)  # "What is that?"
+    assert speech.talked_since(9.0, 14.0)
+    assert not speech.talked_since(14.0, 14.5)  # it ended before `since`
+
+    speech.on_state("speaking", 15.0)
+    speech.on_state("listening", 15.3)  # a short "ok" after the long one
+    assert speech.talked_since(9.0, 16.0)

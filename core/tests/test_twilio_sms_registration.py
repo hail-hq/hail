@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from hailhq.core.providers.verification.base import Address
+from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED, Address
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 
 
@@ -357,7 +357,8 @@ async def test_status_rejected_carries_carrier_reason() -> None:
         }
     )
     assert st.state == "rejected"
-    assert "sufficient business information" in st.reason
+    assert st.reason == CAMPAIGN_REJECTED
+    assert "sufficient business information" in st.raw_reason
 
 
 def _raise(exc):

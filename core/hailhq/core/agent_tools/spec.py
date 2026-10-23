@@ -1,4 +1,4 @@
-"""ToolSpec / ToolContext — the contract between core tools and the voicebot.
+"""ToolSpec / ToolContext: the contract between core tools and the voicebot.
 
 ``execute`` returns a short plain sentence the agent speaks. Expected
 failures (unavailable channel, denied send) come back as speakable
@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 RiskTier = Literal["read_only", "session_control", "outbound_send"]
 
 # Shared spoken fallback when the internal route's response carries no
-# ``spoken`` text (defensive — the route always sets one today). Both send
+# ``spoken`` text (defensive: the route always sets one today). Both send
 # tools and the voicebot's own tool-failure path use this exact string so
 # the callee hears one consistent apology regardless of where it originates.
 SPOKEN_FALLBACK = "Sorry, that didn't work."
@@ -72,6 +72,9 @@ class ToolContext:
     send_dtmf: Callable[[str], Awaitable[None]] | None
     thread: ThreadScope | None = None
     bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None
+    # True when the other party started speaking at or after the given
+    # time.monotonic(). None outside a live session.
+    spoke_since: Callable[[float], bool] | None = None
 
 
 @dataclass(frozen=True)

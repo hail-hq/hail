@@ -102,7 +102,6 @@ def make_phone_number_response(
     number_id: UUID | None = None,
     e164: str = "+15550001111",
     capabilities: list[str] | None = None,
-    messaging_service_sid: str | None = None,
 ) -> dict:
     """Server-shaped JSON for a PhoneNumberResponse."""
     return {
@@ -113,7 +112,6 @@ def make_phone_number_response(
         "capabilities": capabilities or ["voice", "sms"],
         "provisioning_state": "active",
         "is_dedicated": True,
-        "messaging_service_sid": messaging_service_sid,
     }
 
 

@@ -80,18 +80,46 @@
   padding: 0 0 32px;
 }
 .hail-footer-badges a {
-  display: block;
-  line-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 200px;
+  height: 64px;
+  padding: 12px;
+  border: 1px solid var(--hf-line);
+  border-radius: 10px;
+  background: var(--hf-bg);
+  line-height: 1;
+}
+.hail-footer-badges li {
+  max-width: 100%;
 }
 .hail-footer-badges a:hover {
   text-decoration: none;
 }
 .hail-footer-badges img {
-  width: auto;
-  max-width: 100%;
+  display: block;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
 }
-.hail-footer-badge-dark {
-  display: none;
+.hail-footer-badge-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.hail-footer-badge-label {
+  color: var(--hf-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.hail-footer-badge-name {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 20px;
 }
 .hail-footer-end {
   border-top: 1px solid var(--hf-ink);
@@ -129,6 +157,36 @@
     grid-column: 1/-1;
   }
 }
+@media (max-width: 767px) {
+  .hail-footer-badges {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .hail-footer-badges a {
+    width: 168px;
+    height: 48px;
+    padding: 8px;
+    gap: 8px;
+    border-radius: 8px;
+  }
+  .hail-footer-badges img {
+    flex-basis: 28px;
+    width: 28px;
+    height: 28px;
+  }
+  .hail-footer-badge-copy {
+    gap: 2px;
+  }
+  .hail-footer-badge-label {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+  .hail-footer-badge-name {
+    font-size: 15px;
+    line-height: 18px;
+  }
+}
 @media (max-width: 480px) {
   .hail-footer-inner {
     width: calc(100% - 32px);
@@ -149,12 +207,6 @@
     --hf-line: #2c2c2c;
     --hf-ac: #4b82ff;
   }
-  html:not([data-theme="light"]):not(.light) .hail-footer-badge-light {
-    display: none;
-  }
-  html:not([data-theme="light"]):not(.light) .hail-footer-badge-dark {
-    display: inline;
-  }
 }
 html[data-theme="dark"] .hail-footer,
 html.dark .hail-footer {
@@ -163,14 +215,6 @@ html.dark .hail-footer {
   --hf-muted: #aaa69d;
   --hf-line: #2c2c2c;
   --hf-ac: #4b82ff;
-}
-html[data-theme="dark"] .hail-footer-badge-light,
-html.dark .hail-footer-badge-light {
-  display: none;
-}
-html[data-theme="dark"] .hail-footer-badge-dark,
-html.dark .hail-footer-badge-dark {
-  display: inline;
 }
 
 .hail-footer.hail-footer,

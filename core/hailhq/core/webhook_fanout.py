@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.call_failures import call_failure_message
 from hailhq.core.models import Call, WebhookDelivery, WebhookSubscription
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -143,6 +144,10 @@ def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     if call.end_reason is not None:
         data["end_reason"] = call.end_reason
     data.update(extra)
+    if data["status"] == "failed":
+        data["failure_message"] = call_failure_message(
+            data["status"], call.metadata_ or {}, data.get("end_reason")
+        )
     return data
 
 

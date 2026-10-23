@@ -16,6 +16,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .conftest import insert_org_and_key
 
 
+async def _stored_messaging_sid(session, number_id) -> str | None:
+    """The number's messaging service id, read from the DB: the public API
+    no longer returns it."""
+    from uuid import UUID as _UUID
+
+    from hailhq.core.models import PhoneNumber as _PhoneNumber
+    from sqlalchemy import select as _select
+
+    return (
+        await session.execute(
+            _select(_PhoneNumber.messaging_service_sid)
+            .where(_PhoneNumber.id == _UUID(str(number_id)))
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
 @pytest.fixture()
 async def org(async_session: AsyncSession):
     org_id, _key, plain = await insert_org_and_key(async_session)
@@ -446,7 +463,10 @@ async def test_assigning_texts_agent_sets_sms_up(
         f"/numbers/{number.id}", json={"sms_agent_id": agent["id"]}, headers=headers
     )
     assert r.status_code == 200, r.text
-    assert r.json()["messaging_service_sid"] == "MG_test_service"
+    assert "messaging_service_sid" not in r.json()
+    assert (
+        await _stored_messaging_sid(async_session, r.json()["id"]) == "MG_test_service"
+    )
     sms_mock.attach_number.assert_awaited_once_with(
         messaging_service_sid="MG_test_service", provider_resource_id="PN_test"
     )

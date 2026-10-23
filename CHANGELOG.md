@@ -4,6 +4,44 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
+
+## [0.31.0] (2026-10-23)
+
+The API stops naming the carrier behind numbers, quotes and verifications.
+Verifications are kept per person or company, and a call's own recording
+choice wins over the workspace setting.
+
+Component versions cut alongside this release:
+**`cli-v0.30.0`** (Homebrew + GitHub Releases) and **`sdk-v0.21.0`** (PyPI).
+`hail-sdk` 0.20.0 cannot read quotes from this API; upgrade to 0.21.0.
+Database migrations run on deploy.
+
+### Added
+
+- Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id` (for `purpose=number`) or one of your `number_id`s (for `purpose=sms`).
+- MCP: a stdio entry point in the MCP container (`python -m hailhq.mcp.stdio`) for hosts that require stdio. It uses `HAIL_API_KEY`.
+- Numbers: quotes return `incomplete` and, per offer, your matching `verification` (`id`, `state`). `GET /verifications/sms-fees` takes an optional `number_id`.
+- Numbers: an organization may hold a verification as a person and one as a business for the same number type. Each quote offer lists `subject_types` and your `verifications` per subject type; `POST /numbers` takes `subject_type`, and numbers return the `subject_type` they were bought with.
+
+### Changed
+
+- Calls: `recording_enabled` on a call or agent now wins in both directions. `true` records even when the workspace has recording off, and `false` turns it off.
+- MCP: number, quote and verification tools no longer show which carrier backs a number. Verification tools take `quote_id` or `number_id` instead of `provider`.
+- **Breaking.** API responses no longer name the carrier or carry carrier ids or carrier error text. `provider` in requests is ignored; see the OpenAPI spec.
+- **Breaking.** Number verifications need the offer's `quote_id` (422 without it). Quotes also list numbers support orders by hand (`by_request: true`).
+- `hail-sdk` 0.21.0 and the CLI drop `provider`. `hail numbers register-sms` takes `--number-id`.
+- **Breaking.** `subject_type` (`person` or `business`) is required on `GET /verifications/requirements` and `POST /verifications`, and on the MCP verification tools. Quote offers' `verification` is deprecated: read `verifications`.
+- `hail-sdk` 0.21.0: `numbers.acquire(subject_type=...)`. CLI: `hail numbers acquire --subject-type`; `hail numbers register-sms` requires `--subject-type` (`--subject` still works).
+
+### Fixed
+
+- Numbers: an approved verification as a person now buys numbers that accept one. Before, only a business verification was used.
+- MCP: every tool now sets `annotations.title`, and `submit_verification` declares types for `fields`, `documents`, `files` and `address`, so MCP directories list them correctly.
+- Voice: carrier-confirmed rejections finish as `failed` instead of `busy`. Call responses and failure webhooks include a readable `failure_message`; blocked destinations explain that calling the destination is disabled. Genuine busy responses keep their status.
+
 ## [0.30.0] (2026-10-20)
 
 Sender ID SMS to about 110 countries, voice suggestions by language, and call

@@ -56,6 +56,9 @@ jobs:
       - name: sdk tests
         working-directory: sdk
         run: uv run pytest tests -v
+      - name: mcp tests
+        working-directory: mcp
+        run: uv run pytest tests -v
 
   go:
     runs-on: ubuntu-latest

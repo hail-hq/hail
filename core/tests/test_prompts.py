@@ -34,17 +34,17 @@ def _sha(text: str) -> str:
 # Outputs before history left the prompt. Any change here changes what every
 # agent is told: update on purpose only.
 _BEFORE = {
-    (None, None): "bbe15277ce24dac4d6ce9fe12c986a014dfa820c0ea9316c7fe763737067f384",
+    (None, None): "db669d5cf2f3ecbb5685e42ff6929fd43351038ce4b6dd3d6aa59188976b3b84",
     (
         None,
         "inbound",
-    ): "7ee3b773d72af1d3464667629516c678b7fc5fe0f7e634daac06dad041da4b8a",
+    ): "682d32a49a036a78d904417ac8b9fc9bdf346538f5ee46c109da5dd1e6794940",
     (
         "Be kind.",
         None,
-    ): "7e88b50477bbd9faf943b50b1ca8467b94ab05b298800394392819ff69a7f880",
+    ): "9a229f222a24030ce494e17022d9378ed5fd62d77806be46c5c6dcaee611a7f4",
     ("Be kind.", "inbound"): (
-        "fd9b6edeb6462489c5d584d694e47ac7c9a21fad57422045d8c36876596025c8"
+        "68eb4d2e4e0b75274d3e871cd6213b2dfb3480edee8b55e91be16732975565ff"
     ),
 }
 
@@ -60,10 +60,10 @@ def test_voice_instructions_are_byte_identical_to_before() -> None:
 
 def test_templates_are_byte_identical_to_before() -> None:
     assert _sha(prompts.prompt_template("calls_in")) == (
-        "4055affcf84308836edfd27a288187fd48bbf2cc2c4e903c786597cba9e53ba4"
+        "876bbdb4401c5597bdb2ddec34e3cfb83b5f8d90dd2a36111b17f4e72331d644"
     )
     assert _sha(prompts.prompt_template("calls_out")) == (
-        "1c65e09d6d8845e05fcd275f16357d5a0eee24097c8d5a9465d74cdd5546dfa9"
+        "bc9b8bfeb36a1910afca65180aa4dc00aedb89e0221717d194bf0b8d24f535b1"
     )
     assert _sha(prompts.prompt_template("texts")) == (
         "a1098eceb5c5be625839b1f096e88e9b3b6cead156af6ef927250c303b728e95"
@@ -124,5 +124,11 @@ def test_other_party_goes_last() -> None:
     )
     assert out.endswith(f"{prompts.THREAD_TOOL_HINT_VOICE}\n\n{section}")
     assert section.startswith("# The person on this call")
-    assert '"me" or "my email", they mean "Sam"' in section
+    assert 'Any email for them goes to "Sam"' in section
     assert "my email" not in prompts.other_party_section("Sam", can_email=False)
+
+
+def test_thanks_alone_does_not_end_the_call() -> None:
+    for preamble in (prompts.VOICE_PREAMBLE, prompts.VOICE_PREAMBLE_INBOUND):
+        assert "A thank-you alone does not end the call." in preamble
+        assert "the channel (text or email)" in preamble

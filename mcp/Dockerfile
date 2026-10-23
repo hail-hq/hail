@@ -38,4 +38,5 @@ COPY --from=builder --chown=hail:hail /app/.venv /app/.venv
 USER hail
 
 EXPOSE 8081
+# For stdio, override CMD with: python -u -m hailhq.mcp.stdio
 CMD ["uvicorn", "hailhq.mcp.server:app", "--host", "0.0.0.0", "--port", "8081"]

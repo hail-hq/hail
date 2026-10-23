@@ -98,6 +98,17 @@ async def test_every_tool_has_explicit_hints_and_title(tools_by_name) -> None:
         ):
             assert getattr(a, hint) is not None, f"{name}.{hint} not set"
         assert tool.title, f"{name} has no title"
+        # Directory listings read annotations.title, hosts read Tool.title.
+        assert a.title == tool.title, f"{name} annotations.title differs"
+
+
+async def test_submit_verification_params_have_schema_types(tools_by_name) -> None:
+    props = tools_by_name["submit_verification"].inputSchema["properties"]
+    assert props["fields"]["type"] == "object"
+    assert props["documents"]["type"] == "object"
+    assert props["files"]["type"] == "array"
+    assert props["files"]["items"] == {"type": "object"}
+    assert props["address"]["anyOf"] == [{"type": "object"}, {"type": "null"}]
 
 
 async def test_read_only_set_is_exact(tools_by_name) -> None:

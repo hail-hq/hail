@@ -53,6 +53,7 @@ from hail.models import (
     NumberRegionsResponse,
     NumberType,
     ObservedDnsRecord,
+    OfferVerification,
     PhoneNumberListResponse,
     PhoneNumberResponse,
     ProviderConfigEntry,
@@ -68,7 +69,7 @@ from hail.models import (
     WhoamiResponse,
 )
 
-__version__ = "0.20.0"
+__version__ = "0.22.0"
 
 __all__ = [
     # helpers
@@ -119,6 +120,7 @@ __all__ = [
     "NumberRegionsResponse",
     "NumberType",
     "ObservedDnsRecord",
+    "OfferVerification",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
     "ProviderConfigEntry",

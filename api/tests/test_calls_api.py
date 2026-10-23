@@ -312,6 +312,8 @@ async def test_post_calls_happy_path_201(
     assert audit.payload["consent_source"] is None
     assert audit.payload["consent_obtained_at"] is None
     assert audit.payload["message_type"] == "informational"
+    assert audit.payload["recording_override"] is None
+    assert "recording_enabled" in audit.payload
 
     # Exactly one call_events row (queued -> dialing).
     events = (await async_session.execute(select(CallEvent))).scalars().all()

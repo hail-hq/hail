@@ -9,14 +9,53 @@ from uuid import UUID
 
 import phonenumbers
 from hailhq.core.schemas import NumberType
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+SubjectType = Literal["person", "business"]
 
 
-class CarrierOffer(BaseModel):
-    provider: Literal["twilio", "telnyx", "didww"] = Field(
-        description="Carrier supplying this exact number."
+class OfferVerification(BaseModel):
+    id: UUID = Field(
+        description="Hail verification id. Read it with GET /v1/verifications/{verification_id}."
     )
-    e164: str = Field(description="Available phone number in E.164 format.")
+    state: str = Field(
+        description="State of that verification, such as draft, submitted or approved."
+    )
+    subject_type: SubjectType = Field(
+        description="Who that verification is for: 'person' (you) or 'business' (your company)."
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description="Name of the person or company that verification is for, as typed in the verification form. Null when unknown.",
+    )
+
+
+class Approval(BaseModel):
+    """One approved Hail verification as the purchase uses it. Internal: it
+    holds the carrier's own ids and is never returned by the public API."""
+
+    row_id: UUID = Field(description="Hail verification id.")
+    subject_type: SubjectType | None = Field(
+        default=None, description="Who that verification is for."
+    )
+    subject_name: str | None = Field(
+        default=None, description="Name of that person or company, when known."
+    )
+    verification_id: str | None = Field(
+        default=None, description="Carrier id passed with the purchase."
+    )
+    address_id: str | None = Field(
+        default=None, description="Carrier address id passed with the purchase."
+    )
+
+
+class QuoteOffer(BaseModel):
+    """One number offer as the public API shows it. It never names the
+    carrier or carries a carrier-issued id: Hail picks the carrier."""
+
+    e164: str | None = Field(
+        description="Available phone number in E.164 format. Null for a by-request offer: support picks the number when it orders it."
+    )
     country_code: str = Field(description="ISO alpha-2 country code of the number.")
     number_type: NumberType = Field(
         description="Local, mobile, national, or toll-free number type."
@@ -46,14 +85,6 @@ class CarrierOffer(BaseModel):
         default_factory=list,
         description="Carrier regulatory requirement labels associated with this offer.",
     )
-    verification_id: str | None = Field(
-        default=None,
-        description="Server-selected organization-bound approved bundle or requirement-group identifier, if any.",
-    )
-    address_id: str | None = Field(
-        default=None,
-        description="Server-selected verified address identifier, when supported; null otherwise.",
-    )
     locality: str | None = Field(
         default=None,
         description="City or area the carrier lists for this number, such as Phoenix or London; null when unknown.",
@@ -66,6 +97,65 @@ class CarrierOffer(BaseModel):
         default=None,
         description="Organization-bound quote identifier to pass to POST /numbers before expiry.",
     )
+    subject_types: list[SubjectType] = Field(
+        default_factory=list,
+        description="Who can verify for this number: 'person' (you), 'business' (your company), or both. Empty when no verification is needed.",
+    )
+    verifications: list[OfferVerification] = Field(
+        default_factory=list,
+        description="Every verification of your organization for this offer's country and number type, leaving out cancelled and rejected ones: approved first, then newest first. Pass one's `id` as `verification_id` to POST /numbers to buy with it.",
+    )
+    verification: OfferVerification | None = Field(
+        default=None,
+        description="Deprecated: read `verifications`. The verification a purchase without verification_id would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.",
+    )
+    by_request: bool = Field(
+        default=False,
+        description="True when support orders this number by hand: it cannot be bought with POST /numbers. Ask support for it. Its quote_id still works for verification.",
+    )
+
+
+class CarrierOffer(QuoteOffer):
+    """Internal offer: the public fields plus the carrier and its ids. Stored
+    in ``number_offers.offer`` and read back by the purchase flow. Never
+    returned by the public API (see ``QuoteOffer``)."""
+
+    provider: Literal["twilio", "telnyx", "didww"] = Field(
+        description="Carrier supplying this exact number."
+    )
+    verification_id: str | None = Field(
+        default=None,
+        description="Server-selected organization-bound approved bundle or requirement-group identifier, if any.",
+    )
+    address_id: str | None = Field(
+        default=None,
+        description="Server-selected verified address identifier, when supported; null otherwise.",
+    )
+    approvals: list[Approval] = Field(
+        default_factory=list,
+        description="The org's approved verifications that the carrier still accepts for this number, newest first.",
+    )
+    subject_type: SubjectType | None = Field(
+        default=None,
+        description="Subject type of the verification the purchase used; set at purchase.",
+    )
+    verification_row_id: UUID | None = Field(
+        default=None,
+        description="Hail verification the purchase used; set at purchase.",
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description="Name on the verification the purchase used; set at purchase.",
+    )
+
+    @field_validator("approvals", mode="before")
+    @classmethod
+    def _approvals_list(cls, value):
+        """Offers stored before approvals became a list held one approval
+        per subject type: {"person": {...}}. Read them as a list."""
+        if isinstance(value, dict):
+            return [{**a, "subject_type": k} for k, a in value.items()]
+        return value
 
 
 def number_prefix(country: str, area_code: str) -> str:
@@ -81,14 +171,14 @@ def cents(value) -> int:
 
 
 class NumberQuotesResponse(BaseModel):
-    offers: list[CarrierOffer] = Field(
-        description="Live carrier offers ordered by readiness, remaining verification effort, monthly price and setup price. On a tie the first carrier listed wins."
+    offers: list[QuoteOffer] = Field(
+        description="Live offers ordered by readiness, remaining verification effort, monthly price and setup price."
     )
     recommended_quote_id: UUID | None = Field(
-        description="Recommended ready offer matching the requested carrier preference, or null if none qualifies."
+        description="Recommended ready offer, or null if none qualifies."
     )
-    unavailable_providers: list[str] = Field(
-        description="Carriers whose inventory, price, or regulatory lookup failed; comparison may be incomplete."
+    incomplete: bool = Field(
+        description="True when some carriers did not answer, so the offers may not be complete. Search again later for a full comparison.",
     )
     expires_at: datetime = Field(
         description="UTC expiry of these persisted quotes; request fresh offers afterward."

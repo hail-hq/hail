@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Mascot } from "./Mascot";
+import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
 import "./footer.css";
 
 export type FooterGroup = {
@@ -11,11 +12,9 @@ export type FooterBadge = {
   id: string;
   href: string;
   alt: string;
-  /** Rendered size in px. Both are set so the row does not shift on load. */
-  width: number;
-  height: number;
-  /** One image per footer theme. */
-  src: { light: string; dark: string };
+  name: string;
+  /** Square provider logo. Shared CSS owns all card and logo dimensions. */
+  icon: string;
 };
 
 /** Framework-independent, server-rendered footer. Native anchors cross Next zones safely. */
@@ -41,8 +40,7 @@ export function Footer({
               <span>hail.so</span>
             </a>
             <p>
-              Give your assistant calls, texts, and email. Add email and SMS to
-              your app. One account, three ways to connect.
+              {PRODUCT_SHORT_DESCRIPTION} {PRODUCT_COPY.availability}
             </p>
             <div className="hail-footer-social">
               <a href="https://github.com/hail-hq/hail">GitHub ↗</a>
@@ -65,22 +63,16 @@ export function Footer({
           ))}
         </div>
         {badges.length > 0 && (
-          <ul className="hail-footer-badges" aria-label="Featured on">
+          <ul id="footer-badges" className="hail-footer-badges" aria-label="Featured on">
             {badges.map((badge) => (
               <li key={badge.id}>
-                <a href={badge.href} target="_blank" rel="noopener">
-                  {(["light", "dark"] as const).map((theme) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={theme}
-                      className={`hail-footer-badge-${theme}`}
-                      src={badge.src[theme]}
-                      alt={badge.alt}
-                      width={badge.width}
-                      height={badge.height}
-                      loading="lazy"
-                    />
-                  ))}
+                <a href={badge.href} target="_blank" rel="noopener" aria-label={badge.alt}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
+                  <span className="hail-footer-badge-copy">
+                    <span className="hail-footer-badge-label">FEATURED ON</span>
+                    <span className="hail-footer-badge-name">{badge.name}</span>
+                  </span>
                 </a>
               </li>
             ))}

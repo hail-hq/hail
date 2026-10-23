@@ -38,14 +38,24 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.api.routes.calls import get_livekit_optional
+from hailhq.api.routes.verifications import (
+    approved_handles,
+    refresh_number_verifications,
+)
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
-from hailhq.core.carrier_offer import NumberQuotesResponse
+from hailhq.core.carrier_offer import (
+    CarrierOffer,
+    NumberQuotesResponse,
+    OfferVerification,
+    QuoteOffer,
+)
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
+    by_request_offers,
     discover_offers,
     rank_offers,
 )
@@ -102,8 +112,14 @@ async def _get_org_number_or_404(
         404: {"description": "The quote does not exist for this organization."},
         422: {
             "description": (
-                "quote_id is missing (request one from POST /numbers/quotes) or "
-                "the quote does not match the country, type or provider."
+                "quote_id is missing (request one from POST /numbers/quotes), "
+                "the quote does not match the country or type, the offer is "
+                "by_request (ask support for it), or the verification to buy "
+                "with is unclear or not usable: you have more than one "
+                "approved verification for this number (pass verification_id), "
+                "verification_id is not one of your approved verifications "
+                "for it, or you are not verified as the subject_type you "
+                "passed."
             ),
         },
         402: {
@@ -144,6 +160,11 @@ async def acquire_number(
     monthly fee immediately — it is not a reservation. quote_id is required:
     request live offers from POST /numbers/quotes first, then buy one. The
     number is usable for voice, SMS, or both, as the quote lists.
+
+    A number that needs verification is bought with one of your approved
+    verifications. With one, it is used. With more than one (several people
+    or companies), pass `verification_id`: the `id` of one of the quote's
+    `verifications`, which carry the person's or company's name.
     """
     if idem is not None and idem.is_replay:
         _cached_id, cached = replay_cached(
@@ -240,9 +261,15 @@ async def release_org_number(
             detail="Number order is still pending; refresh its status before releasing",
         )
     if number.provider not in CARRIERS:
+        logger.warning(
+            "number %s (org %s): release refused, carrier %s is not supported",
+            number.id,
+            number.organization_id,
+            number.provider,
+        )
         raise HTTPException(
             status_code=409,
-            detail=f"{number.provider} numbers cannot be released through the API yet",
+            detail="this number cannot be released through the API yet; contact support",
         )
     if number.inbound_registered_at is not None:
         if lk is not None:
@@ -603,7 +630,7 @@ async def enable_sms(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> PhoneNumberResponse:
-    """Attach a dedicated number to the org's shared SMS Messaging Service.
+    """Set up a dedicated number for SMS at its carrier.
 
     Hail does this itself when an sms-capable number becomes active and when
     a texts agent is assigned, so this call is only needed to repair a number
@@ -681,31 +708,86 @@ async def quote_numbers(
 ):
     """Compare live, org-specific offers. Prices include setup + monthly rent.
 
-    Auto recommends a ready offer with the lowest monthly rent, then setup
-    cost. On a tie the first carrier listed wins. Blocked offers sort by verification effort. SMS capability does not waive messaging registration requirements.
+    Recommends a ready offer with the lowest monthly rent, then setup cost.
+    Blocked offers sort by verification effort. SMS capability does not waive
+    messaging registration requirements. `provider` is ignored: Hail compares
+    every carrier.
+
+    A number support orders by hand comes back as an offer with
+    `by_request: true` and no `e164`, after the offers you can buy. It is never
+    recommended and POST /numbers refuses it: ask support. Its `quote_id`
+    works for GET /verifications/requirements and POST /verifications. Without
+    `area_code` or `city` only.
+
+    Each offer lists `subject_types` (who may verify for it: a person, a
+    business, or both) and all your `verifications` for it that are not
+    cancelled or rejected, each with the name of its person or company
+    (`subject_name`), approved first. It is `ready` when one of your
+    approved verifications of an accepted subject type is still valid.
     """
 
-    # Only number types the requested carrier's catalog lists (any carrier
-    # for 'auto') can be bought, so only those are searched.
+    # Numbers support orders by hand: catalog offers, not live stock, so a
+    # place search (area code or city) leaves them out. Only carriers Hail
+    # can file a verification with.
+    def asked_by_request(kind: str) -> list[CarrierOffer]:
+        if body.area_code or body.city:
+            return []
+        return by_request_offers(
+            body.country_code,
+            kind,
+            body.capabilities,
+            [p for p in PROVIDERS if get_verification_provider(p) is not None],
+        )
+
+    # Only number types some carrier sells, or lists by request with an
+    # offer for this search, are searched. A kind with neither is not
+    # offered: 422, never an empty list. ``body.provider`` is deprecated and
+    # ignored.
+    by_request_by_kind: dict[str, list[CarrierOffer]] = {}
     if body.number_type:
-        catalog_capabilities(body.country_code, body.number_type, body.provider)
+        by_request_by_kind[body.number_type] = asked_by_request(body.number_type)
+        if not by_request_by_kind[body.number_type]:
+            catalog_capabilities(body.country_code, body.number_type, "auto")
         kinds = [body.number_type]
     else:
-        kinds = [
-            k
-            for k in ("local", "mobile", "national", "toll_free")
-            if telephony_catalog.capabilities(body.country_code, k, body.provider)
-            is not None
-        ]
+        kinds = []
+        for k in ("local", "mobile", "national", "toll_free"):
+            by_request_by_kind[k] = asked_by_request(k)
+            if (
+                telephony_catalog.capabilities(body.country_code, k, "auto") is not None
+                or by_request_by_kind[k]
+            ):
+                kinds.append(k)
         if not kinds:
             raise unprocessable(
                 f"we don't offer numbers in {body.country_code} yet",
                 loc=["body", "country_code"],
             )
+    # A verification the carrier approved since it was last read counts for
+    # this quote. Then Hail's approved rows per number type: the carriers
+    # only confirm each is still valid.
+    await refresh_number_verifications(
+        db,
+        get_verification_provider,
+        principal.organization_id,
+        body.country_code,
+        kinds,
+    )
+    approvals = {
+        kind: await approved_handles(
+            db,
+            get_verification_provider,
+            principal.organization_id,
+            body.country_code,
+            kind,
+            PROVIDERS,
+        )
+        for kind in kinds
+    }
+    verifications = await _offer_verifications(db, principal.organization_id)
     # Carrier discovery takes seconds. End the transaction the auth lookup
     # opened so this request does not hold a pooled connection while it waits.
     await db.commit()
-    providers = PROVIDERS if body.provider == "auto" else [body.provider]
     batches = await asyncio.gather(
         *(
             discover_offers(
@@ -718,24 +800,29 @@ async def quote_numbers(
                 # quote must never show an offer the purchase would refuse.
                 providers=[
                     p
-                    for p in providers
+                    for p in PROVIDERS
                     if telephony_catalog.capabilities(body.country_code, kind, p)
                     is not None
                 ],
                 area_code=body.area_code,
                 city=body.city,
                 region=body.region,
+                approvals=approvals[kind],
             )
             for kind in kinds
         )
     )
-    # An explicit carrier restricts the offers themselves, not only the
-    # recommendation: a client that buys "the cheapest offer" must never be
-    # handed a quote its own provider setting then rejects with a 422.
+    by_request = [offer for kind in kinds for offer in by_request_by_kind[kind]]
     offers = rank_offers(
-        [offer for batch, _ in batches for offer in batch], body.provider
+        [offer for batch, _ in batches for offer in batch] + by_request
     )
     unavailable = sorted({p for _, failures in batches for p in failures})
+    if unavailable:
+        logger.warning(
+            "number quotes incomplete for org %s: no answer from %s",
+            principal.organization_id,
+            ", ".join(unavailable),
+        )
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -751,14 +838,81 @@ async def quote_numbers(
         )
         db.add(row)
         offer.quote_id = row.id
+        rows = verifications.get(
+            (offer.provider, offer.country_code, offer.number_type), []
+        )
+        # Approved first, then newest first (a stable sort keeps the order).
+        offer.verifications = sorted(rows, key=lambda v: v.state != "approved")
+        offer.verification = _purchase_verification(offer, rows)
+        if offer.by_request and any(
+            v.state == "approved" and v.subject_type in offer.subject_types
+            for v in rows
+        ):
+            # The catalog says verification is needed; this org has it.
+            offer.readiness, offer.regulatory_friction = "ready", "none"
+            offer.requirements = []
     await db.commit()
-    recommended = next((o for o in offers if o.readiness == "ready"), None)
-    return {
-        "offers": offers,
-        "recommended_quote_id": recommended.quote_id if recommended else None,
-        "unavailable_providers": unavailable,
-        "expires_at": expires,
-    }
+    # Never a by-request offer: it cannot be bought here.
+    recommended = next(
+        (o for o in offers if o.readiness == "ready" and not o.by_request), None
+    )
+    # The public offer drops the carrier and its ids; the stored quote above
+    # keeps them for the purchase.
+    return NumberQuotesResponse(
+        offers=[QuoteOffer.model_validate(o.model_dump()) for o in offers],
+        recommended_quote_id=recommended.quote_id if recommended else None,
+        incomplete=bool(unavailable),
+        expires_at=expires,
+    )
+
+
+def _purchase_verification(
+    offer: CarrierOffer, rows: list[OfferVerification]
+) -> OfferVerification | None:
+    """The deprecated ``verification`` field: the row a purchase without
+    verification_id would use. That is the one approved verification the
+    carrier accepts, else the newest one that is not cancelled or rejected."""
+    valid = {a.row_id for a in offer.approvals}
+    approved = [
+        v
+        for v in rows
+        if v.state == "approved"
+        and v.subject_type in offer.subject_types
+        and (offer.by_request or v.id in valid)
+    ]
+    if len(approved) == 1:
+        return approved[0]
+    # ``rows`` is in newest-first order.
+    return next(iter(rows), None)
+
+
+async def _offer_verifications(
+    db: AsyncSession, organization_id: UUID
+) -> dict[tuple[str, str, str], list[OfferVerification]]:
+    """The org's number verifications per carrier, country and number type,
+    leaving out cancelled and rejected ones, newest first."""
+    rows = (
+        await db.execute(
+            select(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.purpose == "number",
+                CarrierVerification.state.not_in(("cancelled", "rejected")),
+            )
+            .order_by(CarrierVerification.created_at.desc(), CarrierVerification.id)
+        )
+    ).scalars()
+    out: dict[tuple[str, str, str], list[OfferVerification]] = {}
+    for r in rows:
+        out.setdefault((r.provider, r.country_code, r.number_type), []).append(
+            OfferVerification(
+                id=r.id,
+                state=r.state,
+                subject_type=r.subject_type,
+                subject_name=r.subject_name,
+            )
+        )
+    return out
 
 
 __all__ = ["release_org_number", "router"]

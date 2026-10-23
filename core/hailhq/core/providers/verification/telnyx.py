@@ -19,6 +19,8 @@ import re
 import httpx
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -35,6 +37,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import (
     address_complete,
+    display_name,
     pick_option,
     validate_input,
 )
@@ -287,7 +290,13 @@ class TelnyxVerificationProvider(VerificationProvider):
             if 400 <= exc.response.status_code < 500:
                 return DraftResult(
                     refs={},
-                    problems=[Problem(field="", message=_rejection(exc.response))],
+                    problems=[
+                        Problem(
+                            field="",
+                            message=NOT_ACCEPTED,
+                            raw=_rejection(exc.response),
+                        )
+                    ],
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
@@ -348,9 +357,7 @@ class TelnyxVerificationProvider(VerificationProvider):
                     Problem(field=req_id, message="This requirement is missing.")
                 )
             elif req.get("status") == "declined":
-                problems.append(
-                    Problem(field=req_id, message="The carrier declined this value.")
-                )
+                problems.append(Problem(field=req_id, message=VALUE_NOT_ACCEPTED))
         return problems
 
     async def check(self, refs: dict) -> list[Problem]:
@@ -394,8 +401,55 @@ class TelnyxVerificationProvider(VerificationProvider):
             return ProviderStatus(state="pending")
         return ProviderStatus(state="draft")
 
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The address's ``customer_name`` (Telnyx files it as the business
+        name, or the first and last name). Telnyx's text fields are keyed by
+        requirement id and some are free text ("Name, Business Name, Phone
+        Number"), so without an address only a business's field whose label
+        starts with "Company name" or "Business name" is used."""
+        name = display_name(address.customer_name if address else None)
+        if name or requirements.subject_type != "business":
+            return name
+        return next(
+            (
+                n
+                for f in requirements.fields
+                if f.label.lower().startswith(("company name", "business name"))
+                and (n := display_name(fields.get(f.name)))
+            ),
+            None,
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The name on the address the group holds."""
+        if not refs.get("address_id"):
+            return None
+        try:
+            addr = (
+                await self._api.request(
+                    "GET", f"/addresses/{path_id(refs['address_id'])}"
+                )
+            )["data"]
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Telnyx request failed") from exc
+        if subject_type == "business":
+            return display_name(addr.get("business_name")) or display_name(
+                addr.get("first_name"), addr.get("last_name")
+            )
+        return display_name(addr.get("first_name"), addr.get("last_name")) or (
+            display_name(addr.get("business_name"))
+        )
+
     async def purchase_handle(self, refs: dict) -> dict:
-        return {"requirement_group_id": refs["group_id"]}
+        return {"verification_id": refs["group_id"], "address_id": None}
 
     # -- discard -----------------------------------------------------------
 
@@ -413,8 +467,9 @@ class TelnyxVerificationProvider(VerificationProvider):
                 logger.warning("telnyx verification cleanup step failed", exc_info=True)
 
 
-def _rejection(response: httpx.Response) -> str:
-    """Telnyx's own words for a 4xx, without the payload."""
+def _rejection(response: httpx.Response) -> str | None:
+    """Telnyx's own words for a 4xx, without the payload. Never logged or
+    shown to the customer (see ``Problem.raw``)."""
     try:
         errors = response.json().get("errors") or []
     except ValueError:
@@ -423,4 +478,4 @@ def _rejection(response: httpx.Response) -> str:
         (e.get("detail") or e.get("title") for e in errors if isinstance(e, dict)),
         None,
     )
-    return detail or "The carrier did not accept the details."
+    return detail

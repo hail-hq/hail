@@ -41,7 +41,6 @@ async def client() -> HailClient:
 def _verification(vid: str | None = None, state: str = "submitted", **extra) -> dict:
     return {
         "id": vid or str(uuid4()),
-        "provider": "didww",
         "country_code": "GB",
         "number_type": "mobile",
         "subject_type": "person",
@@ -58,7 +57,6 @@ def _verification(vid: str | None = None, state: str = "submitted", **extra) -> 
 
 def _requirements() -> dict:
     return {
-        "provider": "didww",
         "country_code": "GB",
         "number_type": "mobile",
         "subject_type": "person",
@@ -119,15 +117,20 @@ def _sized(n: int, ct: str = "application/pdf") -> bytes:
     return head + b"a" * (n - len(head))
 
 
+_QUOTE = "8b1f0c2e-0000-4000-8000-000000000001"
+
+
 def _kwargs(client: HailClient, **over) -> dict:
     base = {
         "client": client,
         "country_code": "GB",
         "number_type": "mobile",
+        "quote_id": _QUOTE,
         "fields": {"first_name": _FIELD_VALUE},
         "documents": {"identity": {"option": "passport", "fields": {}}},
         "files": [_file()],
         "attest_authorized": True,
+        "subject_type": "person",
         "address": {
             "customer_name": _NAME,
             "street": _STREET,
@@ -158,7 +161,11 @@ async def test_requirements_sends_query(client: HailClient) -> None:
         return_value=httpx.Response(200, json=_requirements())
     )
     result = await tools.get_verification_requirements(
-        client=client, country_code="GB", number_type="mobile"
+        subject_type="person",
+        client=client,
+        country_code="GB",
+        number_type="mobile",
+        quote_id=_QUOTE,
     )
     params = dict(route.calls[0].request.url.params)
     assert params == {
@@ -166,6 +173,7 @@ async def test_requirements_sends_query(client: HailClient) -> None:
         "number_type": "mobile",
         "subject_type": "person",
         "purpose": "number",
+        "quote_id": _QUOTE,
     }
     assert result["required"] is True
     assert result["documents"][0]["needs_input"] is True
@@ -173,7 +181,7 @@ async def test_requirements_sends_query(client: HailClient) -> None:
 
 
 @respx.mock
-async def test_requirements_sends_provider_and_subject_type(
+async def test_requirements_sends_quote_id_and_subject_type(
     client: HailClient,
 ) -> None:
     route = respx.get(f"{_BASE_URL}/verifications/requirements").mock(
@@ -184,11 +192,67 @@ async def test_requirements_sends_provider_and_subject_type(
         country_code="GB",
         number_type="mobile",
         subject_type="business",
-        provider="didww",
+        quote_id="8b1f0c2e-0000-4000-8000-000000000002",
     )
     params = dict(route.calls[0].request.url.params)
     assert params["subject_type"] == "business"
-    assert params["provider"] == "didww"
+    assert params["quote_id"] == "8b1f0c2e-0000-4000-8000-000000000002"
+    assert "provider" not in params
+
+
+async def test_requirements_rejects_a_bad_quote_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        subject_type="person",
+        client=client,
+        country_code="GB",
+        number_type="mobile",
+        quote_id="nope",
+    )
+    assert "quote_id" in result["error"]
+
+
+@respx.mock
+async def test_requirements_sends_number_id(client: HailClient) -> None:
+    route = respx.get(f"{_BASE_URL}/verifications/requirements").mock(
+        return_value=httpx.Response(200, json=_requirements())
+    )
+    await tools.get_verification_requirements(
+        subject_type="person",
+        client=client,
+        country_code="US",
+        number_type="local",
+        purpose="sms",
+        number_id="8b1f0c2e-0000-4000-8000-000000000003",
+    )
+    params = dict(route.calls[0].request.url.params)
+    assert params["number_id"] == "8b1f0c2e-0000-4000-8000-000000000003"
+
+
+async def test_requirements_rejects_a_bad_number_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        subject_type="person",
+        client=client,
+        country_code="US",
+        number_type="local",
+        purpose="sms",
+        number_id="nope",
+    )
+    assert "number_id" in result["error"]
+
+
+@respx.mock
+async def test_requirements_hide_the_carrier(client: HailClient) -> None:
+    respx.get(f"{_BASE_URL}/verifications/requirements").mock(
+        return_value=httpx.Response(200, json=_requirements())
+    )
+    result = await tools.get_verification_requirements(
+        subject_type="person",
+        client=client,
+        country_code="GB",
+        number_type="mobile",
+        quote_id=_QUOTE,
+    )
+    assert "provider" not in result
 
 
 @respx.mock
@@ -202,9 +266,23 @@ async def test_requirements_maps_422(client: HailClient) -> None:
         )
     )
     result = await tools.get_verification_requirements(
-        client=client, country_code="GB", number_type="bogus"
+        subject_type="person",
+        client=client,
+        country_code="GB",
+        number_type="bogus",
+        quote_id=_QUOTE,
     )
     assert "error" in result
+
+
+async def test_number_verification_needs_a_quote_id(client: HailClient) -> None:
+    result = await tools.get_verification_requirements(
+        subject_type="person", client=client, country_code="GB", number_type="mobile"
+    )
+    assert "quote_id is required" in result["error"]
+    result = await tools.submit_verification(**_kwargs(client, quote_id=None))
+    assert "quote_id is required" in result["error"]
+    assert "Nothing was sent" in result["error"]
 
 
 # --------------------------------------------------------------------------- #
@@ -367,7 +445,7 @@ async def test_submit_builds_multipart(client: HailClient) -> None:
         **_kwargs(
             client,
             files=[_file(data=payload, ct="image/jpeg")],
-            provider="didww",
+            quote_id="8b1f0c2e-0000-4000-8000-000000000002",
         )
     )
     assert result["id"] == vid
@@ -377,7 +455,8 @@ async def test_submit_builds_multipart(client: HailClient) -> None:
     assert parts["country_code"]["body"] == b"GB"
     assert parts["number_type"]["body"] == b"mobile"
     assert parts["subject_type"]["body"] == b"person"
-    assert parts["provider"]["body"] == b"didww"
+    assert parts["quote_id"]["body"] == b"8b1f0c2e-0000-4000-8000-000000000002"
+    assert "provider" not in parts
     assert json.loads(parts["fields"]["body"]) == {"first_name": _FIELD_VALUE}
     assert json.loads(parts["address"]["body"])["customer_name"] == _NAME
     assert json.loads(parts["documents"]["body"]) == {
@@ -402,6 +481,30 @@ async def test_submit_omits_optional_parts(client: HailClient) -> None:
     await tools.submit_verification(**_kwargs(client, address=None))
     assert "address" not in captured["parts"]
     assert "provider" not in captured["parts"]
+    assert "number_id" not in captured["parts"]
+
+
+@respx.mock
+async def test_submit_sends_number_id(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(201, json=_verification())
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=_handler)
+    await tools.submit_verification(
+        **_kwargs(client, number_id="8b1f0c2e-0000-4000-8000-000000000003")
+    )
+    assert (
+        captured["parts"]["number_id"]["body"]
+        == b"8b1f0c2e-0000-4000-8000-000000000003"
+    )
+
+
+async def test_submit_rejects_a_bad_number_id(client: HailClient) -> None:
+    result = await tools.submit_verification(**_kwargs(client, number_id="nope"))
+    assert result == {"error": "number_id must be a UUID. Nothing was sent."}
 
 
 @respx.mock
@@ -412,10 +515,10 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
     result = await tools.submit_verification(**_kwargs(client))
     assert set(result) == {
         "id",
-        "provider",
         "country_code",
         "number_type",
         "subject_type",
+        "subject_name",
         "purpose",
         "state",
         "rejection_reason",
@@ -688,6 +791,24 @@ async def test_submit_409_duplicate_surfaces_detail(client: HailClient) -> None:
 
 
 @respx.mock
+async def test_submit_409_named_duplicate_does_not_echo_the_name(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "detail": "You already have a verification for Zelda Quixote "
+                "as a person for this number type."
+            },
+        )
+    )
+    result = await tools.submit_verification(**_kwargs(client))
+    assert "Zelda" not in result["error"] and "Quixote" not in result["error"]
+    assert "same name already exists" in result["error"]
+
+
+@respx.mock
 async def test_submit_503(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/verifications").mock(
         return_value=httpx.Response(
@@ -753,13 +874,15 @@ def _tool_args(**over) -> dict:
     args = {
         "country_code": "GB",
         "number_type": "mobile",
+        "quote_id": _QUOTE,
         "fields": {"first_name": _FIELD_VALUE},
         "documents": {"identity": {"option": "passport", "fields": {}}},
         "files": [_file()],
         "attest_authorized": True,
+        "subject_type": "person",
     }
     args.update(over)
-    return args
+    return {k: v for k, v in args.items() if v is not _OMIT}
 
 
 @respx.mock
@@ -823,6 +946,35 @@ async def test_wrong_shapes_through_the_real_entry_point_echo_nothing(
         assert value not in text, value
 
 
+_OMIT = object()
+
+
+@respx.mock
+async def test_missing_subject_type_through_the_real_entry_point_echoes_nothing(
+    monkeypatch,
+) -> None:
+    srv = await _real_server(monkeypatch)
+    route = respx.route().mock(return_value=httpx.Response(500))
+    result = await srv.mcp_app.call_tool(
+        "submit_verification", _tool_args(subject_type=_OMIT)
+    )
+    assert route.call_count == 0
+    text = str(result)
+    assert "ask the user" in text and "Nothing was sent" in text
+    for value in (*_SENTINELS, "input_value"):
+        assert value not in text, value
+
+
+async def test_requirements_tool_requires_subject_type(monkeypatch) -> None:
+    srv = await _real_server(monkeypatch)
+    tool = next(
+        t
+        for t in await srv.mcp_app.list_tools()
+        if t.name == "get_verification_requirements"
+    )
+    assert "subject_type" in tool.inputSchema["required"]
+
+
 @respx.mock
 async def test_attestation_true_passes_through_the_real_entry_point(
     monkeypatch,
@@ -855,7 +1007,11 @@ async def test_requirements_sends_purpose(client: HailClient) -> None:
         return_value=httpx.Response(200, json=_requirements())
     )
     await tools.get_verification_requirements(
-        client=client, country_code="US", number_type="local", purpose="sms"
+        subject_type="person",
+        client=client,
+        country_code="US",
+        number_type="local",
+        purpose="sms",
     )
     assert route.calls[0].request.url.params["purpose"] == "sms"
 
@@ -904,7 +1060,11 @@ async def test_bad_purpose_makes_no_call_and_is_not_echoed(
     ]
     results = [
         await tools.get_verification_requirements(
-            client=client, country_code="US", number_type="local", purpose=bad
+            subject_type="person",
+            client=client,
+            country_code="US",
+            number_type="local",
+            purpose=bad,
         ),
         await tools.list_verifications(client=client, purpose=bad),
         await tools.submit_verification(**_kwargs(client, purpose=bad)),
@@ -981,3 +1141,21 @@ async def test_list_and_get_carry_confirmation(client: HailClient) -> None:
         )
         result = await tools.get_verification(client=client, verification_id=vid)
     assert result["confirmation"] == "code"
+
+
+@respx.mock
+async def test_subject_type_must_be_asked_for(client: HailClient) -> None:
+    """No default: the agent must ask the user "you or your company?"."""
+    route = respx.route()
+    for bad in ("", "company"):
+        result = await tools.get_verification_requirements(
+            client=client,
+            country_code="GB",
+            number_type="mobile",
+            quote_id=_QUOTE,
+            subject_type=bad,
+        )
+        assert "ask the user" in result["error"]
+        result = await tools.submit_verification(**_kwargs(client, subject_type=bad))
+        assert "Nothing was sent" in result["error"]
+    assert not route.called

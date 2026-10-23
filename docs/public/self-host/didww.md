@@ -117,10 +117,16 @@ DIDWW_API_KEY=<sandbox key> DIDWW_ENVIRONMENT=sandbox \
 curl -X POST "$HAIL_API_URL/numbers/quotes" -H "Authorization: Bearer $HAIL_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"country_code":"PT","number_type":"national","capabilities":["voice"]}'
-# → offers[].provider == "didww", readiness "ready" or "verification_required"
+# → offers[] with readiness "ready" or "verification_required"
 curl -X POST "$HAIL_API_URL/numbers" -H "Authorization: Bearer $HAIL_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"country_code":"PT","number_type":"national","quote_id":"<quote_id>"}'
+```
+
+The API does not say which carrier backs an offer. The stored quote does:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT id, offer->>'provider' AS carrier, offer->>'e164' AS e164 FROM number_offers ORDER BY expires_at DESC LIMIT 10;"
 ```
 
 Order of events for a country that needs end-user registration:
@@ -157,21 +163,23 @@ The same applies to Twilio numbers when `LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID` i
 
 ## 6. No DIDWW offer shows up
 
-Ask for a quote and read `unavailable_providers`:
+Ask for a quote, then read the `api` log and the stored quotes:
 
 ```bash
 curl -s -X POST "$HAIL_API_URL/numbers/quotes" -H "Authorization: Bearer $HAIL_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"country_code":"PT","number_type":"national","capabilities":["voice"]}' \
-  | python3 -c 'import json,sys; q=json.load(sys.stdin); print(q["unavailable_providers"], [o["provider"] for o in q["offers"]])'
+  | python3 -c 'import json,sys; q=json.load(sys.stdin); print(q["incomplete"], len(q["offers"]))'
+docker compose logs api | grep "number quotes incomplete"
+psql "$DATABASE_URL" -c "SELECT offer->>'provider' AS carrier, count(*) FROM number_offers WHERE expires_at > now() GROUP BY 1;"
 ```
 
-| You see                                 | Cause                                                                                 | Fix                                                                                     |
-| --------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `["didww"]` in `unavailable_providers`  | The DIDWW lookup failed. Almost always `available_dids` is not enabled (§1, step 3).  | Run the `curl` in §1 step 3. 403 → ask DIDWW support. Other error → see the `api` log.  |
-| `[]` and no `didww` offer               | `DIDWW_API_KEY` or `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty, or `"sms"` requested. | Set both in `.env`, restart `api`. Quote with `"capabilities":["voice"]`.               |
-| 422 `we don't offer a national number…` | The pair (country, type) is not in `costs/didww.json`.                                | Wait for the weekly catalog sync, or run it (`docs/operations/number-catalog-sync.md`). |
-| 422 for a pair `costs/didww.json` lists | The row has `by_request` or `receive_only` ([below](#numbers-hail-cannot-sell)).      | Nothing to fix: Hail does not sell it. For `by_request`, support orders it by hand.     |
+| You see                                                  | Cause                                                                                 | Fix                                                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `incomplete` true, log line `... no answer from didww`   | The DIDWW lookup failed. Almost always `available_dids` is not enabled (§1, step 3).  | Run the `curl` in §1 step 3. 403 → ask DIDWW support. Other error → see the `api` log.  |
+| `incomplete` false and no `didww` row in `number_offers` | `DIDWW_API_KEY` or `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` empty, or `"sms"` requested. | Set both in `.env`, restart `api`. Quote with `"capabilities":["voice"]`.               |
+| 422 `we don't offer a national number…`                  | The pair (country, type) is not in `costs/didww.json`.                                | Wait for the weekly catalog sync, or run it (`docs/operations/number-catalog-sync.md`). |
+| 422 for a pair `costs/didww.json` lists                  | The row has `by_request` or `receive_only` ([below](#numbers-hail-cannot-sell)).      | Nothing to fix: Hail does not sell it. For `by_request`, support orders it by hand.     |
 
 The console's "both jobs" card (calls + SMS) never lists DIDWW; only
 "calls-only numbers" does.

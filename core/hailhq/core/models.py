@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
+from hailhq.core.call_failures import call_failure_message
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
     ARRAY,
@@ -707,6 +708,28 @@ class PhoneNumber(Base):
         attached at the carrier (``inbound_routing.register``)."""
         return self.inbound_registered_at is not None
 
+    @property
+    def subject_type(self) -> str | None:
+        """Read by ``PhoneNumberResponse``: subject type of the verification
+        the purchase used, from the stored offer. None when none was used."""
+        offer = (self.provisioning_metadata or {}).get("offer") or {}
+        return offer.get("subject_type")
+
+    @property
+    def verification_id(self) -> str | None:
+        """Read by ``PhoneNumberResponse``: Hail's id of the verification the
+        purchase used (``verification_row_id`` in the stored offer; the
+        offer's ``verification_id`` is the carrier's own id)."""
+        offer = (self.provisioning_metadata or {}).get("offer") or {}
+        return offer.get("verification_row_id")
+
+    @property
+    def subject_name(self) -> str | None:
+        """Read by ``PhoneNumberResponse``: name on the verification the
+        purchase used, from the stored offer."""
+        offer = (self.provisioning_metadata or {}).get("offer") or {}
+        return offer.get("subject_name")
+
 
 class Call(Base):
     __tablename__ = "calls"
@@ -793,6 +816,10 @@ class Call(Base):
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )
+
+    @property
+    def failure_message(self) -> str | None:
+        return call_failure_message(self.status, self.metadata_ or {}, self.end_reason)
 
     @property
     def recording_enabled(self) -> bool:
@@ -1729,8 +1756,9 @@ class NumberOffer(Base):
 
 class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
-    in some countries. Holds state and opaque carrier IDs only: no names,
-    addresses or document data are stored here (see the design spec)."""
+    in some countries. Holds state, opaque carrier IDs and the name of the
+    person or company it is for (``subject_name``). No addresses or
+    document data are stored here (see the design spec)."""
 
     __tablename__ = "carrier_verifications"
 
@@ -1744,6 +1772,9 @@ class CarrierVerification(Base):
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
     number_type: Mapped[str] = mapped_column(Text, nullable=False)
     subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    # Name of the person or company, from the verification form. Shown to the
+    # customer to tell verifications apart. Never logged.
+    subject_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     purpose: Mapped[str] = mapped_column(Text, server_default="number", nullable=False)
     state: Mapped[str] = mapped_column(Text, nullable=False)
     provider_refs: Mapped[dict] = mapped_column(
@@ -1780,15 +1811,33 @@ class CarrierVerification(Base):
             "purpose IN ('number','sms')",
             name="carrier_verifications_purpose_check",
         ),
+        # Several live number verifications per subject type (several people,
+        # several companies), but never the same name twice for one kind.
+        # One live SMS registration.
         Index(
-            "carrier_verifications_live_uniq",
+            "carrier_verifications_number_live_uniq",
             "organization_id",
             "provider",
             "country_code",
             "number_type",
-            "purpose",
+            "subject_type",
+            text("lower(subject_name)"),
             unique=True,
-            postgresql_where=text("state NOT IN ('cancelled','rejected')"),
+            postgresql_where=text(
+                "purpose = 'number' AND state NOT IN ('cancelled','rejected') "
+                "AND subject_name IS NOT NULL"
+            ),
+        ),
+        Index(
+            "carrier_verifications_sms_live_uniq",
+            "organization_id",
+            "provider",
+            "country_code",
+            "number_type",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'sms' AND state NOT IN ('cancelled','rejected')"
+            ),
         ),
         Index("carrier_verifications_org_idx", "organization_id"),
     )
