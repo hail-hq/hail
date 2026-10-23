@@ -7,6 +7,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
+- CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
+
+### Fixed
+
+- Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 
 ## [0.31.0] (2026-10-23)
 

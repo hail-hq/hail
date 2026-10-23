@@ -720,10 +720,12 @@ async def quote_numbers(
     `area_code` or `city` only.
 
     Each offer lists `subject_types` (who may verify for it: a person, a
-    business, or both) and all your `verifications` for it that are not
-    cancelled or rejected, each with the name of its person or company
-    (`subject_name`), approved first. It is `ready` when one of your
-    approved verifications of an accepted subject type is still valid.
+    business, or both) and the `verifications` you can buy it with, each
+    with the name of its person or company (`subject_name`), approved first:
+    yours of an accepted subject type that are under review, and the
+    approved ones the carrier still accepts for this offer. Pass an approved
+    one's `id` as `verification_id` to POST /numbers. An offer that needs
+    verification is `ready` when one of them is approved.
     """
 
     # Numbers support orders by hand: catalog offers, not live stock, so a
@@ -838,16 +840,16 @@ async def quote_numbers(
         )
         db.add(row)
         offer.quote_id = row.id
-        rows = verifications.get(
-            (offer.provider, offer.country_code, offer.number_type), []
+        rows = _usable_verifications(
+            offer,
+            verifications.get(
+                (offer.provider, offer.country_code, offer.number_type), []
+            ),
         )
         # Approved first, then newest first (a stable sort keeps the order).
         offer.verifications = sorted(rows, key=lambda v: v.state != "approved")
         offer.verification = _purchase_verification(offer, rows)
-        if offer.by_request and any(
-            v.state == "approved" and v.subject_type in offer.subject_types
-            for v in rows
-        ):
+        if offer.by_request and any(v.state == "approved" for v in rows):
             # The catalog says verification is needed; this org has it.
             offer.readiness, offer.regulatory_friction = "ready", "none"
             offer.requirements = []
@@ -866,20 +868,31 @@ async def quote_numbers(
     )
 
 
+def _usable_verifications(
+    offer: CarrierOffer, rows: list[OfferVerification]
+) -> list[OfferVerification]:
+    """The verifications this offer can be bought with: of a subject type
+    it accepts, and, once approved, one the carrier still accepts for it
+    (``offer.approvals``). A by-request offer has no carrier check, so any
+    approved one counts. Rows still under review stay: they say what is
+    on the way."""
+    valid = {a.row_id for a in offer.approvals}
+    return [
+        v
+        for v in rows
+        if v.subject_type in offer.subject_types
+        and (v.state != "approved" or offer.by_request or v.id in valid)
+    ]
+
+
 def _purchase_verification(
     offer: CarrierOffer, rows: list[OfferVerification]
 ) -> OfferVerification | None:
     """The deprecated ``verification`` field: the row a purchase without
     verification_id would use. That is the one approved verification the
-    carrier accepts, else the newest one that is not cancelled or rejected."""
-    valid = {a.row_id for a in offer.approvals}
-    approved = [
-        v
-        for v in rows
-        if v.state == "approved"
-        and v.subject_type in offer.subject_types
-        and (offer.by_request or v.id in valid)
-    ]
+    carrier accepts, else the newest usable one. ``rows`` is
+    ``_usable_verifications``."""
+    approved = [v for v in rows if v.state == "approved"]
     if len(approved) == 1:
         return approved[0]
     # ``rows`` is in newest-first order.

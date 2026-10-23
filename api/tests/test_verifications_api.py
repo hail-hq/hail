@@ -640,6 +640,61 @@ async def test_several_people_of_one_kind_may_be_live(
     ).status_code == 201
 
 
+async def test_a_second_nameless_verification_of_one_kind_is_409(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    first = await _create(client, key, **_named("", ""))
+    assert first.status_code == 201, first.text
+    assert first.json()["subject_name"] is None
+    again = await _create(client, key, **_named("", ""))
+    assert again.status_code == 409, again.text
+    assert again.json()["detail"] == (
+        "You already have a verification as a person for this number type "
+        "with no name on it."
+    )
+    assert len(carrier.drafts) == 1
+    # A named one of the same kind, and a nameless company, are still fine.
+    assert (await _create(client, key)).status_code == 201
+    assert (
+        await _create(client, key, subject_type="business", **_named("", ""))
+    ).status_code == 201
+    # Once the nameless one is rejected, a new nameless one may be filed.
+    await _set_state(async_session, first.json()["id"], "rejected", age_s=0)
+    assert (await _create(client, key, **_named("", ""))).status_code == 201
+
+
+async def test_a_duplicate_is_refused_before_files_are_read_or_filed(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """The 409 comes before the uploads are read and before any filing."""
+    _, _, key = org_and_key
+    assert (await _create(client, key)).status_code == 201
+    assert len(carrier.drafts) == 1
+
+    reads = 0
+
+    async def counting_read(upload):
+        nonlocal reads
+        reads += 1
+        raise AssertionError("uploads must not be read before the 409")
+
+    monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
+    resp = await _create(client, key)
+    assert resp.status_code == 409, resp.text
+    assert reads == 0
+    assert len(carrier.drafts) == 1  # no second filing
+    assert carrier.discarded == []
+    # Nameless duplicate: the same.
+    monkeypatch.undo()
+    assert (await _create(client, key, **_named("", ""))).status_code == 201
+    monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
+    resp = await _create(client, key, **_named("", ""))
+    assert resp.status_code == 409, resp.text
+    assert reads == 0
+    assert len(carrier.drafts) == 2
+
+
 async def test_same_name_may_return_after_a_cancel(
     client, org_and_key, carrier, async_session
 ) -> None:
@@ -649,7 +704,7 @@ async def test_same_name_may_return_after_a_cancel(
     assert (await _create(client, key)).status_code == 201
 
 
-async def test_the_index_refuses_a_duplicate_name_in_any_case(
+async def test_the_indexes_refuse_a_duplicate_name_or_a_second_nameless_one(
     org_and_key, async_session
 ) -> None:
     """The database refuses what the route's check refuses, even in a race."""
@@ -677,11 +732,17 @@ async def test_the_index_refuses_a_duplicate_name_in_any_case(
             row("Ada Lovelace", subject_type="business"),
             row("Ada Lovelace", state="cancelled"),
             row(None),
-            row(None),
+            row(None, subject_type="business"),
+            row(None, state="rejected"),
         ]
     )
     await async_session.commit()
     async_session.add(row("ADA LOVELACE"))
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
+    await async_session.rollback()
+    # A second live nameless row of one kind: refused too.
+    async_session.add(row(None, state="submitted"))
     with pytest.raises(IntegrityError):
         await async_session.commit()
     await async_session.rollback()

@@ -25,7 +25,7 @@ def _row(org, key, provider="twilio", name=None, **over) -> CarrierVerification:
     return CarrierVerification(
         organization_id=org,
         provider=provider,
-        country_code="GB",
+        country_code=over.pop("country_code", "GB"),
         number_type="mobile",
         subject_type=over.pop("subject_type", "person"),
         purpose=over.pop("purpose", "number"),
@@ -39,11 +39,13 @@ def _row(org, key, provider="twilio", name=None, **over) -> CarrierVerification:
 async def test_backfill_names_rows_from_their_carrier(async_session, caplog) -> None:
     org = uuid.uuid4()
     rows = {
-        "named": _row(org, "named"),
+        # Nameless live rows of one kind are one per key (a unique index),
+        # so each gets its own country.
+        "named": _row(org, "named", country_code="FR"),
         "sms": _row(org, "sms", purpose="sms", subject_type="business"),
         "cancelled": _row(org, "cancelled", state="cancelled"),
-        "none": _row(org, "none"),
-        "boom": _row(org, "boom"),
+        "none": _row(org, "none", country_code="DE"),
+        "boom": _row(org, "boom", country_code="ES"),
         "nocarrier": _row(org, "nocarrier", provider="gone"),
         "kept": _row(org, "kept", name="Already Named"),
         # A live row of the same kind whose name another live row holds.
