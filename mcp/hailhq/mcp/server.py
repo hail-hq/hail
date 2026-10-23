@@ -33,6 +33,7 @@ from hailhq.core.config import settings
 from hailhq.core.telemetry import (
     configure_telemetry,
     flush_telemetry,
+    instrument,
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
@@ -51,7 +52,7 @@ from mcp.server.fastmcp import FastMCP
 
 _telemetry = configure_telemetry("hail-mcp")
 if _telemetry:
-    logfire.instrument_mcp()
+    instrument("MCP", logfire.instrument_mcp)
 
 
 def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
@@ -127,7 +128,12 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     )
     if _telemetry:
         app.add_middleware(IdentityMiddleware)
-        logfire.instrument_starlette(app, server_request_hook=request_span_attributes)
+        instrument(
+            "Starlette",
+            logfire.instrument_starlette,
+            app,
+            server_request_hook=request_span_attributes,
+        )
     return mcp_app, singleton, app
 
 

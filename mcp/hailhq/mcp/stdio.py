@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import logfire
-from hailhq.core.telemetry import configure_telemetry, flush_telemetry
+from hailhq.core.telemetry import configure_telemetry, flush_telemetry, instrument
 from hailhq.mcp.auth import AuthMode, select_auth_mode
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import register_tools
@@ -18,7 +18,7 @@ async def serve() -> None:
     if mode is not AuthMode.STATIC_KEY:
         raise RuntimeError("stdio requires HAIL_API_KEY; unset HAIL_AUTH_URL")
     if configure_telemetry("hail-mcp"):
-        logfire.instrument_mcp()
+        instrument("MCP", logfire.instrument_mcp)
 
     try:
         async with HailClient() as client:

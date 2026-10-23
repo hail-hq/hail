@@ -199,6 +199,16 @@ def _scrub_identity(match: logfire.ScrubMatch):
     return None
 
 
+def instrument(name: str, setup: Any, /, *args: Any, **kwargs: Any) -> None:
+    """Run one optional tracing setup. Telemetry is a nice-to-have: a library
+    version the instrumentation does not support (it raises) must never stop
+    a service, so a failure turns that tracing off and logs a warning."""
+    try:
+        setup(*args, **kwargs)
+    except Exception as exc:
+        logger.warning("Telemetry: %s tracing is off (%s)", name, exc)
+
+
 def configure_telemetry(service_name: str) -> bool:
     global _configured_pid, _span_processor
     if not settings.hail_logfire_enabled:
@@ -236,30 +246,34 @@ def configure_telemetry(service_name: str) -> bool:
         )
     )
     # One explicit exporter ensures every span passes through the privacy filter.
-    logfire.configure(
-        send_to_logfire=False,
-        console=False,
-        metrics=logfire.MetricsOptions(
-            additional_readers=[
-                PeriodicExportingMetricReader(
-                    OTLPMetricExporter(
-                        endpoint=join_url(settings.logfire_base_url, "v1/metrics"),
-                        headers={"Authorization": token},
-                        timeout=5,
-                    ),
-                    export_interval_millis=60000,
-                )
-            ]
-        ),
-        service_name=service_name,
-        service_version=settings.logfire_service_version or None,
-        environment=settings.logfire_environment,
-        additional_span_processors=[IdentitySpanProcessor(), processor],
-        sampling=logfire.SamplingOptions(head=settings.hail_logfire_sample_rate),
-        scrubbing=logfire.ScrubbingOptions(callback=_scrub_identity),
-        inspect_arguments=False,
-        distributed_tracing=True,
-    )
+    try:
+        logfire.configure(
+            send_to_logfire=False,
+            console=False,
+            metrics=logfire.MetricsOptions(
+                additional_readers=[
+                    PeriodicExportingMetricReader(
+                        OTLPMetricExporter(
+                            endpoint=join_url(settings.logfire_base_url, "v1/metrics"),
+                            headers={"Authorization": token},
+                            timeout=5,
+                        ),
+                        export_interval_millis=60000,
+                    )
+                ]
+            ),
+            service_name=service_name,
+            service_version=settings.logfire_service_version or None,
+            environment=settings.logfire_environment,
+            additional_span_processors=[IdentitySpanProcessor(), processor],
+            sampling=logfire.SamplingOptions(head=settings.hail_logfire_sample_rate),
+            scrubbing=logfire.ScrubbingOptions(callback=_scrub_identity),
+            inspect_arguments=False,
+            distributed_tracing=True,
+        )
+    except Exception as exc:
+        logger.warning("Telemetry disabled: Logfire setup failed (%s)", exc)
+        return False
     handler = BackendLoggingHandler()
     handler.addFilter(BackendLogFilter())
     root = logging.getLogger()
@@ -268,9 +282,9 @@ def configure_telemetry(service_name: str) -> bool:
             root.removeHandler(existing)
     root.addHandler(handler)
     logging.getLogger("hailhq").setLevel(logging.INFO)
-    logfire.instrument_httpx()
-    logfire.instrument_requests()
-    logfire.instrument_aiohttp_client()
+    instrument("httpx", logfire.instrument_httpx)
+    instrument("requests", logfire.instrument_requests)
+    instrument("aiohttp", logfire.instrument_aiohttp_client)
     _span_processor = processor
     _extra_providers.clear()
     _configured_pid = os.getpid()

@@ -210,3 +210,13 @@ def test_export_drops_mcp_tool_call_arguments_by_design():
     assert sentinel not in str(exported.attributes)
     assert sentinel not in str(exported.events[0].attributes)
     assert exported.attributes["mcp.tool.name"] == "submit_verification"
+
+
+def test_instrument_turns_off_tracing_instead_of_failing(caplog):
+    from hailhq.core.telemetry import instrument
+
+    def refuse():
+        raise RuntimeError("unsupported library version")
+
+    instrument("Example", refuse)
+    assert "Example tracing is off" in caplog.text
