@@ -192,6 +192,7 @@ def test_org_llm_with_fallback_checks_first_then_house_checkers(layers, monkeypa
     monkeypatch.setattr(amd, "org_llm", lambda org: org_client)
     org = ResolvedLayer("anthropic", "org-llm", {"model": "org-model"}, True)
     llm, owned = amd.build_classifier(session, org_cfgs={"llm": org})
+    assert llm is not session.llm
     assert built == ["claude-haiku-5-5"]
     assert llm.primary is org_client
     assert llm.backups == (haiku, amd.openai.LLM.return_value, google.return_value)
