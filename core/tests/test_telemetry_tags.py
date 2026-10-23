@@ -78,27 +78,7 @@ def test_mask_party_keeps_country_code_last_four_or_domain(value, masked):
     assert mask_party(value) == masked
 
 
-def test_llm_content_is_dropped_when_the_switch_is_off(monkeypatch):
-    monkeypatch.setattr(telemetry.settings, "hail_logfire_capture_content", False)
-    exported = _export(
-        [
-            _span(
-                "llm_request",
-                **{
-                    "gen_ai.system_instructions": PROMPT,
-                    "gen_ai.input.messages": '[{"role": "user"}]',
-                    "gen_ai.output.messages": '[{"role": "assistant"}]',
-                    "lk.pii.user_transcript": "call me on +46701234567",
-                    "gen_ai.request.model": "example-model",
-                },
-            )
-        ]
-    )[0]
-    assert set(exported.attributes) == {"gen_ai.request.model"}
-
-
-def test_llm_content_passes_unmasked_when_the_switch_is_on(monkeypatch):
-    monkeypatch.setattr(telemetry.settings, "hail_logfire_capture_content", True)
+def test_llm_content_passes_unmasked():
     content = {
         "gen_ai.system_instructions": PROMPT,
         "gen_ai.input.messages": '[{"role": "user", "parts": "mail a@example.org"}]',
@@ -115,14 +95,13 @@ def test_llm_content_passes_unmasked_when_the_switch_is_on(monkeypatch):
     assert "lk.pii.chat_ctx" not in exported.attributes
 
 
-def test_logfire_scrubber_keeps_opted_in_content_and_tags(monkeypatch):
+def test_logfire_scrubber_keeps_content_and_tags():
     import logfire
 
     def match(*path):
         found = re.search("password", "password")
         return logfire.ScrubMatch(path, "x password", found)
 
-    monkeypatch.setattr(telemetry.settings, "hail_logfire_capture_content", True)
     assert telemetry._scrub_identity(match("attributes", "hail.to")) == "x password"
     assert (
         telemetry._scrub_identity(
@@ -131,11 +110,6 @@ def test_logfire_scrubber_keeps_opted_in_content_and_tags(monkeypatch):
         == "x password"
     )
     assert telemetry._scrub_identity(match("attributes", "lk.pii.chat_ctx")) is None
-    monkeypatch.setattr(telemetry.settings, "hail_logfire_capture_content", False)
-    assert (
-        telemetry._scrub_identity(match("attributes", "gen_ai.tool.call.arguments"))
-        is None
-    )
 
 
 def test_tags_reach_child_spans_livekit_spans_root_and_logs(traced):
@@ -398,7 +372,6 @@ assert span.attributes["hail.channel"] == "voice"
         env={
             **os.environ,
             "HAIL_LOGFIRE_ENABLED": "true",
-            "HAIL_LOGFIRE_CAPTURE_CONTENT": "true",
             "LOGFIRE_TOKEN": "test-only-placeholder",
             "LOGFIRE_BASE_URL": "https://logfire.example.test",
         },

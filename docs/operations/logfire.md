@@ -10,7 +10,6 @@ LOGFIRE_ENVIRONMENT=production
 LOGFIRE_BASE_URL=https://logfire-eu.pydantic.dev
 LOGFIRE_SERVICE_VERSION=<release SHA>
 HAIL_LOGFIRE_SAMPLE_RATE=1.0
-HAIL_LOGFIRE_CAPTURE_CONTENT=true
 ```
 
 For local development, select the same project with the CLI and point
@@ -63,7 +62,7 @@ ORDER BY start_timestamp DESC LIMIT 20
 
 ## LLM content
 
-`HAIL_LOGFIRE_CAPTURE_CONTENT=true` exports these keys in full, not masked:
+The export always sends these keys in full, not masked:
 `gen_ai.system_instructions`, `gen_ai.input.messages`,
 `gen_ai.output.messages`, `gen_ai.tool.call.arguments`,
 `gen_ai.tool.call.result` and `lk.pii.user_transcript`. Logfire shows the

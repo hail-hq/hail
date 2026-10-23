@@ -60,7 +60,7 @@ _CONTENT = re.compile(
     r"phone|email|otp|authorization|cookie|token|secret|api_key)(?:$|[._])",
     re.IGNORECASE,
 )
-# LLM content exported unmasked when HAIL_LOGFIRE_CAPTURE_CONTENT is true:
+# LLM content, always exported unmasked:
 # the GenAI keys Logfire's LLM view renders, and the caller's transcript.
 CONTENT_FIELDS = frozenset(
     {
@@ -98,9 +98,8 @@ def _safe_text(value: str) -> str:
 
 def _safe_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
     result = {}
-    capture_content = settings.hail_logfire_capture_content
     for key, value in (attributes or {}).items():
-        if key in _KEPT_FIELDS or (capture_content and key in CONTENT_FIELDS):
+        if key in _KEPT_FIELDS or key in CONTENT_FIELDS:
             result[key] = value
             continue
         if key in {
@@ -255,8 +254,8 @@ def _scrub_identity(match: logfire.ScrubMatch):
     key = match.path[1]
     if len(match.path) == 2 and key in _KEPT_FIELDS:
         return match.value
-    # Content is opted in whole: a prompt that says "password" stays readable.
-    if settings.hail_logfire_capture_content and key in CONTENT_FIELDS:
+    # Content is exported whole: a prompt that says "password" stays readable.
+    if key in CONTENT_FIELDS:
         return match.value
     return None
 
