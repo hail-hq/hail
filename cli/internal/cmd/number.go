@@ -106,33 +106,18 @@ Examples:
 			return runNumberAcquire(cmd.Context(), cmd, opts, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.country, "country", "", "ISO 3166-1 alpha-2 country code (e.g. US)")
-	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, toll_free, or national")
-	cmd.Flags().StringVar(&f.areaCode, "area-code", "", "Area code or first digits of the number, as dialed in the country (e.g. 020, 480)")
-	cmd.Flags().StringVar(&f.city, "city", "", "City name (e.g. London)")
-	cmd.Flags().StringVar(&f.region, "region", "", "Optional, with --city: US state or CA province code (e.g. AZ)")
+	addQuoteFlags(cmd, f)
 	cmd.Flags().StringVar(&f.quoteID, "quote-id", "", "Buy this quote (from POST /numbers/quotes) instead of the cheapest offer")
-	cmd.Flags().BoolVar(&f.voice, "voice-only", false, "Require voice only (default: voice and SMS)")
-	cmd.Flags().BoolVar(&f.sms, "sms-only", false, "Require SMS only (default: voice and SMS)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.Flags().IntVar(&f.expected, "expected-total-cents", 0, "Refuse the order (409) if the quoted monthly plus setup price differs from this many cents")
 	cmd.Flags().StringVar(&f.subject, "subject-type", "", "Buy only with an approved verification of this kind: person or business")
 	cmd.Flags().StringVar(&f.verifyID, "verification-id", "", "Which approved verification buys the number (an id from hail numbers quotes). Needed only when more than one is approved")
-	cmd.MarkFlagRequired("country")
 	return cmd
 }
 
 func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f *numberAcquireFlags) error {
-	if f.country == "" {
-		return requireInputs(cmd, "--country")
-	}
-	switch f.numberType {
-	case "local", "mobile", "toll_free", "national":
-	default:
-		return helpAndFail(cmd, "--type must be 'local', 'mobile', 'toll_free', or 'national'")
-	}
-	if f.voice && f.sms {
-		return helpAndFail(cmd, "--voice-only and --sms-only cannot be combined")
+	if err := checkQuoteFlags(cmd, f); err != nil {
+		return err
 	}
 	if f.subject != "" && f.subject != "person" && f.subject != "business" {
 		return helpAndFail(cmd, "--subject-type must be 'person' or 'business'")
@@ -199,7 +184,8 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		err := apiError(resp.HTTPResponse.StatusCode, resp.Body)
 		if resp.HTTPResponse.StatusCode == http.StatusUnprocessableEntity &&
 			bytes.Contains(resp.Body, []byte("verification_id")) {
-			return fmt.Errorf("%w\nSee the verifications you can pass as --verification-id:\n  %s", err, quotesHint(f))
+			// Without --type the API took the type from the quote: unknown here.
+			return fmt.Errorf("%w\nSee the verifications you can pass as --verification-id:\n  %s", err, quotesHint(f, f.quoteID == "" || cmd.Flags().Changed("type")))
 		}
 		return err
 	}
@@ -208,9 +194,36 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 }
 
 // quotesHint is the command that lists the offers and their verifications
-// for the number the user asked for.
-func quotesHint(f *numberAcquireFlags) string {
-	return fmt.Sprintf("hail numbers quotes --country %s --type %s", f.country, f.numberType)
+// for the number the user asked for. typeKnown is false when --type was left
+// to the quote: the hint then names the flag's values instead of a guess.
+func quotesHint(f *numberAcquireFlags, typeKnown bool) string {
+	numberType := "<local|mobile|toll_free|national>"
+	if typeKnown {
+		numberType = f.numberType
+	}
+	hint := "hail numbers quotes --country " + f.country + " --type " + numberType
+	for _, flag := range []struct{ name, value string }{
+		{"--area-code", f.areaCode}, {"--city", f.city}, {"--region", f.region},
+	} {
+		if flag.value != "" {
+			hint += " " + flag.name + " " + shellQuote(flag.value)
+		}
+	}
+	if f.voice {
+		hint += " --voice-only"
+	}
+	if f.sms {
+		hint += " --sms-only"
+	}
+	return hint
+}
+
+// shellQuote quotes a flag value that holds a space or a quote.
+func shellQuote(v string) string {
+	if strings.ContainsAny(v, " '\"") {
+		return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+	}
+	return v
 }
 
 // requestQuotes asks POST /numbers/quotes for live offers matching the
@@ -292,7 +305,7 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags, 
 		return openapi_types.UUID{}, fmt.Errorf("numbers in %s (%s) are set up by our team, not bought through the API; ask support for one", f.country, f.numberType)
 	}
 	if best == nil {
-		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type\nSee the offers and your verifications:\n  %s", f.country, f.numberType, quotesHint(f))
+		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type\nSee the offers and your verifications:\n  %s", f.country, f.numberType, quotesHint(f, true))
 	}
 	return *best.QuoteId, nil
 }
@@ -319,7 +332,7 @@ func newNumberQuotesCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "quotes",
 		Short: "List live offers and the verifications that can buy each one",
-		Long: `hail numbers quotes — list live offers for a number, without buying.
+		Long: `hail numbers quotes: list live offers for a number, without buying.
 
 It calls POST /numbers/quotes with the same flags as acquire. Each offer
 shows its number, type, monthly and setup price, readiness and quote id.
@@ -337,6 +350,13 @@ Examples:
 			return runNumberQuotes(cmd.Context(), cmd, opts, f)
 		},
 	}
+	addQuoteFlags(cmd, f)
+	return cmd
+}
+
+// addQuoteFlags registers the flags POST /numbers/quotes takes, shared by
+// acquire and quotes. --country is required.
+func addQuoteFlags(cmd *cobra.Command, f *numberAcquireFlags) {
 	cmd.Flags().StringVar(&f.country, "country", "", "ISO 3166-1 alpha-2 country code (e.g. US)")
 	cmd.Flags().StringVar(&f.numberType, "type", "local", "Number type: local, mobile, toll_free, or national")
 	cmd.Flags().StringVar(&f.areaCode, "area-code", "", "Area code or first digits of the number, as dialed in the country (e.g. 020, 480)")
@@ -345,10 +365,10 @@ Examples:
 	cmd.Flags().BoolVar(&f.voice, "voice-only", false, "Require voice only (default: voice and SMS)")
 	cmd.Flags().BoolVar(&f.sms, "sms-only", false, "Require SMS only (default: voice and SMS)")
 	cmd.MarkFlagRequired("country")
-	return cmd
 }
 
-func runNumberQuotes(ctx context.Context, cmd *cobra.Command, opts *Options, f *numberAcquireFlags) error {
+// checkQuoteFlags validates the flags addQuoteFlags registers.
+func checkQuoteFlags(cmd *cobra.Command, f *numberAcquireFlags) error {
 	if f.country == "" {
 		return requireInputs(cmd, "--country")
 	}
@@ -359,6 +379,13 @@ func runNumberQuotes(ctx context.Context, cmd *cobra.Command, opts *Options, f *
 	}
 	if f.voice && f.sms {
 		return helpAndFail(cmd, "--voice-only and --sms-only cannot be combined")
+	}
+	return nil
+}
+
+func runNumberQuotes(ctx context.Context, cmd *cobra.Command, opts *Options, f *numberAcquireFlags) error {
+	if err := checkQuoteFlags(cmd, f); err != nil {
+		return err
 	}
 	quotes, err := requestQuotes(ctx, opts, f)
 	if err != nil {

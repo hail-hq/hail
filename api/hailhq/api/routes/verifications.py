@@ -928,9 +928,18 @@ async def create_verification(
             "this number does not need verification", loc=["body", "number_type"]
         )
 
-    # The name the customer typed, as the plug-in reads it from this form
-    # (no plug-in reads the files for it). Stored on the row; never logged.
-    subject_name = provider.subject_name(requirements, sub.fields, sub.address, {})
+    # The name the customer typed, as the plug-in reads it from this form.
+    # Some plug-ins read it from a document's fields; none reads the files,
+    # so they are not read yet. Stored on the row; never logged.
+    subject_name = provider.subject_name(
+        requirements,
+        sub.fields,
+        sub.address,
+        {
+            slot: DocumentInput(option=value.option, fields=value.fields)
+            for slot, value in sub.documents.items()
+        },
+    )
 
     # Every 409 comes before the uploads are checked and copied, and before
     # any filing with the carrier. Number: several live verifications per

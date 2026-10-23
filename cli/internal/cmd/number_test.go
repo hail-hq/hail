@@ -818,3 +818,20 @@ func TestNumberAcquire_VerificationIDErrorPointsAtQuotes(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestNumberAcquire_HintWithoutTypeDoesNotGuessIt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"loc":["body","verification_id"],"msg":"Pass verification_id.","type":"value_error"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap, "--city", "New York",
+	)
+	want := "hail numbers quotes --country GB --type <local|mobile|toll_free|national> --city 'New York'"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v", err)
+	}
+}

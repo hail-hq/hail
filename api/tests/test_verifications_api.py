@@ -679,20 +679,59 @@ async def test_a_duplicate_is_refused_before_files_are_read_or_filed(
         reads += 1
         raise AssertionError("uploads must not be read before the 409")
 
+    read_file = verifications_routes._read_file
     monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
     resp = await _create(client, key)
     assert resp.status_code == 409, resp.text
     assert reads == 0
     assert len(carrier.drafts) == 1  # no second filing
     assert carrier.discarded == []
-    # Nameless duplicate: the same.
-    monkeypatch.undo()
+    # Nameless duplicate: the same. (Not monkeypatch.undo(): that would also
+    # undo the fixtures' patches, such as the fake carrier.)
+    monkeypatch.setattr(verifications_routes, "_read_file", read_file)
     assert (await _create(client, key, **_named("", ""))).status_code == 201
     monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
     resp = await _create(client, key, **_named("", ""))
     assert resp.status_code == 409, resp.text
     assert reads == 0
     assert len(carrier.drafts) == 2
+
+
+async def test_the_name_on_a_document_counts(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """A plug-in may read the name from a document's fields (not its file):
+    two people named only on their documents are two named rows, not a
+    nameless 409."""
+    _, _, key = org_and_key
+
+    def from_documents(requirements, fields, address, documents):
+        return next(
+            (d.fields["full_name"] for d in documents.values() if d.fields),
+            None,
+        )
+
+    monkeypatch.setattr(carrier, "subject_name", from_documents)
+
+    def named_on_document(name: str) -> dict:
+        return {
+            **_named("", ""),
+            "documents": json.dumps(
+                {
+                    "proof_of_identity": {
+                        "option": "passport",
+                        "fields": {"full_name": name},
+                    }
+                }
+            ),
+        }
+
+    first = await _create(client, key, **named_on_document("Ada Lovelace"))
+    assert first.status_code == 201, first.text
+    assert first.json()["subject_name"] == "Ada Lovelace"
+    second = await _create(client, key, **named_on_document("Grace Hopper"))
+    assert second.status_code == 201, second.text
+    assert second.json()["subject_name"] == "Grace Hopper"
 
 
 async def test_same_name_may_return_after_a_cancel(
