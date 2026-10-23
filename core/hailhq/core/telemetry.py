@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -199,7 +199,9 @@ def _scrub_identity(match: logfire.ScrubMatch):
     return None
 
 
-def instrument(name: str, setup: Any, /, *args: Any, **kwargs: Any) -> None:
+def instrument(
+    name: str, setup: Callable[..., object], /, *args: Any, **kwargs: Any
+) -> None:
     """Run one optional tracing setup. Telemetry is a nice-to-have: a library
     version the instrumentation does not support (it raises) must never stop
     a service, so a failure turns that tracing off and logs a warning."""
@@ -272,6 +274,8 @@ def configure_telemetry(service_name: str) -> bool:
             distributed_tracing=True,
         )
     except Exception as exc:
+        # Stop the exporter thread; it would never be flushed or reused.
+        processor.shutdown()
         logger.warning("Telemetry disabled: Logfire setup failed (%s)", exc)
         return False
     handler = BackendLoggingHandler()

@@ -63,7 +63,10 @@ def test_to_sync_url_keeps_sslmode():
 def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     from hailhq.core import db
 
-    def refuse(**_kwargs):
+    calls = []
+
+    def refuse(**kwargs):
+        calls.append(kwargs)
         raise RuntimeError("could not instrument SQLAlchemy")
 
     monkeypatch.setattr(db, "_engine", None)
@@ -71,3 +74,4 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     monkeypatch.setattr(db, "telemetry_enabled", lambda: True)
     monkeypatch.setattr(db.logfire, "instrument_sqlalchemy", refuse)
     assert db._ensure_initialized() is not None
+    assert calls == [{"engine": db._engine}]
