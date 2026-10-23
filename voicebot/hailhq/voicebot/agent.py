@@ -78,6 +78,7 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
+    NO_PROBE_REASONS,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
@@ -2449,6 +2450,8 @@ async def _run_call(
                 and captured["end_reason"] is None
                 and amd_result is not None
                 and amd_result.category == AMDCategory.UNCERTAIN
+                # No audio reached the detector: talk, as before the probe.
+                and amd_result.reason not in NO_PROBE_REASONS
             ):
                 classifier = models.llm if models is not None else session.llm
             # Without a classifier or transcripts the reply cannot be judged,

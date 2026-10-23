@@ -301,6 +301,15 @@ POST_ANSWER_TIMEOUT_SECONDS = 20.0
 # ringing left 5s and the greeting was spoken into the mailbox.
 DETECTION_TIMEOUT_SECONDS = 90.0
 
+# Uncertain verdicts that skip the pickup probe; the call talks right away.
+# LiveKit Agents 1.8.8 sets these reasons in ``voice/amd/detector.py``
+# (``participant_missing``: the leg never published audio) and
+# ``voice/amd/classifier.py`` (``detection_timeout``: the post-answer budget
+# ran out with no verdict). A probe cannot judge a reply on such a line.
+NO_PROBE_REASONS: frozenset[str] = frozenset(
+    {"participant_missing", "detection_timeout"}
+)
+
 # The verdict that means "we are talking to a phone tree, not a person".
 MACHINE_IVR_CATEGORY = "machine-ivr"
 
@@ -500,6 +509,7 @@ __all__ = [
     "IVR_NAVIGATION_INSTRUCTIONS",
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
+    "NO_PROBE_REASONS",
     "NO_SPEECH_THRESHOLD_SECONDS",
     "amd_end_reason",
     "ivr_navigation_instructions",

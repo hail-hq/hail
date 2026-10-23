@@ -1147,6 +1147,24 @@ async def test_failed_detection_skips_the_probe_and_opens_the_call(
     assert ctx.shutdown_calls == []
 
 
+@pytest.mark.parametrize("reason", ["participant_missing", "detection_timeout"])
+async def test_no_audio_verdict_skips_the_probe_and_opens_the_call(
+    async_session, monkeypatch, reason
+):
+    """LiveKit heard no usable audio: a probe cannot judge a reply. Talk."""
+    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+
+    _, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain").model_copy(update={"reason": reason}),
+    )
+    session.confirm.assert_not_awaited()
+    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+
+
 async def test_probe_speaks_the_call_language(async_session, monkeypatch):
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
