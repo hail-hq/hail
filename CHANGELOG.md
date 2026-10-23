@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Verifications carry `subject_name`, the person's or company's name from the form. An organization may hold several verifications of each kind; quote offers list all of them, `POST /numbers` takes `verification_id`, and numbers return `verification_id` and `subject_name`. `hail-sdk` 0.22.0: `numbers.acquire(verification_id=...)`. CLI: `hail numbers acquire --verification-id`.
+- Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 
 ## [0.31.0] (2026-10-23)
 

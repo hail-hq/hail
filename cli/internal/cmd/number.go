@@ -154,7 +154,7 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 		}
 		quoteID = openapi_types.UUID(parsed)
 	} else {
-		id, err := cheapestQuoteID(ctx, opts, f)
+		id, err := cheapestQuoteID(ctx, opts, f, verificationID)
 		if err != nil {
 			return err
 		}
@@ -203,8 +203,9 @@ func runNumberAcquire(ctx context.Context, cmd *cobra.Command, opts *Options, f 
 
 // cheapestQuoteID requests live offers and returns the ready offer with the
 // lowest monthly plus setup price. The first such offer wins a tie, which is
-// the API's own ranking.
-func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) (openapi_types.UUID, error) {
+// the API's own ranking. With verificationID, only offers that list it as
+// approved count: a verification belongs to one carrier's offers.
+func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags, verificationID *openapi_types.UUID) (openapi_types.UUID, error) {
 	caps := []client.NumberQuoteRequestCapabilities{
 		client.NumberQuoteRequestCapabilities("voice"),
 		client.NumberQuoteRequestCapabilities("sms"),
@@ -258,6 +259,9 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		if o.QuoteId == nil || o.Readiness != client.QuoteOfferReadiness("ready") || (o.ByRequest != nil && *o.ByRequest) {
 			continue
 		}
+		if verificationID != nil && !listsApproved(o, *verificationID) {
+			continue
+		}
 		if best == nil || o.MonthlyCents+o.SetupCents < best.MonthlyCents+best.SetupCents {
 			best = o
 		}
@@ -269,6 +273,19 @@ func cheapestQuoteID(ctx context.Context, opts *Options, f *numberAcquireFlags) 
 		return openapi_types.UUID{}, fmt.Errorf("no number ready to buy in %s (%s); complete regulatory verification or try another --type", f.country, f.numberType)
 	}
 	return *best.QuoteId, nil
+}
+
+// listsApproved reports whether the offer lists id as an approved verification.
+func listsApproved(o *client.QuoteOffer, id openapi_types.UUID) bool {
+	if o.Verifications == nil {
+		return false
+	}
+	for _, v := range *o.Verifications {
+		if v.Id == id && v.State == "approved" {
+			return true
+		}
+	}
+	return false
 }
 
 // --------------------------------------------------------------------------- //

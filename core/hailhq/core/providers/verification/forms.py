@@ -28,9 +28,11 @@ _NAME_MAX = 200
 
 
 def display_name(*parts: str | None) -> str | None:
-    """The non-empty parts joined by a space, or None when all are empty."""
-    name = " ".join(p.strip() for p in parts if p and p.strip())
-    return name[:_NAME_MAX] or None
+    """The words of the parts joined by single spaces, or None when all are
+    empty. "Ada  Lovelace" and "Ada Lovelace" give the same name, so the
+    duplicate check and the unique index see them as one."""
+    name = " ".join(" ".join(p for p in parts if p).split())
+    return name[:_NAME_MAX].rstrip() or None
 
 
 def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:

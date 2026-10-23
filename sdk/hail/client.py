@@ -667,6 +667,14 @@ class _NumbersResource:
                 o
                 for o in offers.offers
                 if o.readiness == "ready" and o.quote_id and not o.by_request
+                # A verification belongs to one carrier's offers.
+                and (
+                    verification_id is None
+                    or any(
+                        str(v.id) == str(verification_id) and v.state == "approved"
+                        for v in o.verifications
+                    )
+                )
             ]
             if not ready and offers.offers and all(o.by_request for o in offers.offers):
                 raise HailError(
