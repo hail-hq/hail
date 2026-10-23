@@ -32,6 +32,8 @@ from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.system_email import noreply_address
+from hailhq.core.telemetry import bind_organization
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data
 from sqlalchemy import cast, func, select, update
@@ -455,6 +457,14 @@ async def ingest_inbound(
         if email_id is None:
             continue
         result.email_ids.append(email_id)
+        await bind_organization(db, domain.organization_id)
+        tag_context(
+            channel="email",
+            direction="inbound",
+            email_id=email_id,
+            from_=parsed.from_address,
+            to=recipient,
+        )
         if created:
             result.created_email_ids.append((email_id, domain.organization_id))
 

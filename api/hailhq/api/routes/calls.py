@@ -72,6 +72,7 @@ from hailhq.core.schemas import (
     VoiceConfig,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy import select, update
@@ -498,6 +499,14 @@ async def create_call(
 
     await db.commit()
     await db.refresh(call)
+    tag_context(
+        channel="voice",
+        direction="outbound",
+        agent_id=call.agent_id,
+        call_id=call.id,
+        from_=call.from_e164,
+        to=call.to_e164,
+    )
 
     # 3. Audit log in a separate transaction; failures must not unwind the call.
     actor_user_id, actor_kind = actor_of(principal)
@@ -573,6 +582,8 @@ async def create_call(
             metadata={
                 "call_id": str(call.id),
                 "direction": "outbound",
+                "from_e164": call.from_e164,
+                "to_e164": call.to_e164,
                 "await_agent_ready": True,
                 "agent_id": str(agent.id) if agent else None,
                 "max_duration_seconds": call.max_duration_seconds,

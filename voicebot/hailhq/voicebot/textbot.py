@@ -29,7 +29,11 @@ from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.telemetry import operation, telemetry_enabled
-from hailhq.core.telemetry_identity import identity_scope, resolve_identity
+from hailhq.core.telemetry_identity import (
+    identity_scope,
+    resolve_identity,
+    tag_context,
+)
 from hailhq.core.text_agent import (
     MAX_REPLY_CHARS,
     ClaimedReply,
@@ -222,6 +226,14 @@ async def reply_once(api: AgentApiClient) -> bool:
             "attempt": claimed.attempt,
         },
     ) as span:
+        tag_context(
+            channel="sms",
+            direction="inbound",
+            agent_id=claimed.agent.id,
+            sms_id=claimed.sms.id,
+            from_=claimed.sms.from_e164,
+            to=claimed.sms.to_e164,
+        )
         return await _reply_claimed(api, claimed, span)
 
 

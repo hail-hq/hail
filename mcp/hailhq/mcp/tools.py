@@ -91,7 +91,7 @@ import httpx
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
-from hailhq.core.telemetry_identity import identity_scope
+from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
 from pydantic import StrictBool, ValidationError, WithJsonSchema
@@ -1290,6 +1290,19 @@ async def _client_for(
         raise RuntimeError("static-key mode requires a singleton HailClient")
     async with _actor_for(singleton):
         yield singleton
+
+
+class TaggedFastMCP(FastMCP):
+    """FastMCP that tags each tool call's trace with the tool name.
+
+    The tool call runs in the session's task, in its own trace, under the
+    "MCP server handle request: tools/call" span, so that span is the root.
+    """
+
+    async def call_tool(self, name, arguments):
+        bind_root()
+        tag_context(channel="mcp", tool=name)
+        return await super().call_tool(name, arguments)
 
 
 _ACTOR_TTL_SECONDS = 300

@@ -69,6 +69,7 @@ from hailhq.core.sms_registration_gate import (
     us_registration_block,
 )
 from hailhq.core.sms_setup import org_messaging_service_sid
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import fanout_sms_event
 from sqlalchemy import delete, func, select
@@ -359,6 +360,13 @@ async def create_sms(
     # (eager_defaults) leave id/timestamps populated on the instance.
     db.add(sms)
     await db.commit()
+    tag_context(
+        channel="sms",
+        direction="outbound",
+        sms_id=sms.id,
+        from_=sms.from_e164,
+        to=sms.to_e164,
+    )
 
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(

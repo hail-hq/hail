@@ -40,7 +40,7 @@ from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import register_tools
+from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -68,7 +68,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             resource_server_url=settings.mcp_resource_url,
             required_scopes=None,  # scope enforcement deferred to Phase 2
         )
-        mcp_app: FastMCP = FastMCP(
+        mcp_app: FastMCP = TaggedFastMCP(
             name="hail",
             streamable_http_path="/",
             host="0.0.0.0",
@@ -80,7 +80,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         singleton: HailClient | None = None
     else:
         # static-key: pre-1c shape.
-        mcp_app = FastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
+        mcp_app = TaggedFastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
