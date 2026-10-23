@@ -35,11 +35,14 @@ this as required rather than optional.
   serves a distinct, non-redundant role; the LLM providers are chained as
   failover for reliability, not parallel processing, so a given
   conversation is only ever sent to one provider at a time.
-- **Monitoring and tracing** — Hail sends application traces to
+- **Monitoring and tracing**: Hail sends application traces to
   Pydantic Logfire, in its EU region, to run and debug the service.
-  Traces can include voice and SMS agent prompts, transcripts and
-  replies. A Recipient's phone number is masked to its last 4 digits and
-  an email address to its domain. Retention follows the Logfire project
+  Traces include voice and SMS agent prompts, transcripts, replies, and
+  tool call arguments and results, sent as is. This content can hold a
+  Recipient's full phone number, email address or name. In trace tags,
+  a Recipient's phone number is masked to its country code and last 4
+  digits, and an email address to its domain. The Developer's own number
+  and address are sent in full. Retention follows the Logfire project
   retention setting.
 - **Consent and lawful basis** — Developers (Hail's customers) warrant
   that they hold the lawful basis and consent required to contact each

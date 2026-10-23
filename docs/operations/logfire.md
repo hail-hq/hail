@@ -64,7 +64,10 @@ deploy or restart production services.
 Data protection: Pydantic Logfire (EU region) is a listed sub-processor of the
 hosted service. The legal records ([RoPA](../legal/ropa.md),
 [DPIA summary](../legal/dpia-summary.md)) also cover voice and SMS agent
-prompts, transcripts and replies, and call, SMS and email tags with the
-counterparty's number masked to its last 4 digits and email to its domain.
+prompts, transcripts, replies and tool call arguments and results, sent as
+is (they can hold a counterparty's full number, address or name). They also
+cover call, SMS and email tags: the counterparty's number is masked to its
+country code and last 4 digits and an email to its domain; the
+organization's own number and address are sent in full.
 Update them if what is exported changes. Retention follows the Logfire project
 retention setting.
