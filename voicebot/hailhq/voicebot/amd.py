@@ -274,6 +274,10 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
     "machine-unavailable": CallEndReason.MACHINE_UNAVAILABLE,
 }
 
+# ``AMDPredictionEvent.reason`` when an unavailable verdict was rechecked and
+# kept as a menu because the recheck failed, timed out, or was unsure.
+UNAVAILABLE_RECHECK_REASON = "unavailable_recheck"
+
 # Ceiling on how long a live-but-silent callee waits before hearing the
 # disclosure. A recipient waiting for us to speak should not have to say hello
 # before hearing anything. Classification uncertainty must not mean dead air.
@@ -433,7 +437,7 @@ async def run_amd(
             result = AMDPredictionEvent(
                 category=verified,
                 transcript=result.transcript,
-                reason="unavailable_recheck",
+                reason=UNAVAILABLE_RECHECK_REASON,
                 speech_duration=result.speech_duration,
                 delay=result.delay + time.monotonic() - started,
             )
@@ -474,6 +478,7 @@ __all__ = [
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
+    "UNAVAILABLE_RECHECK_REASON",
     "amd_end_reason",
     "ivr_navigation_instructions",
     "run_amd",

@@ -666,3 +666,45 @@ async def test_timer_greeting_answers_words_said_over_the_greeting(monkeypatch):
     assert len(session.replies) == 1
     assert "Hello?" in session.replies[0]
     assert "Who is this?" in session.replies[0]
+
+
+def silent_menu(monkeypatch):
+    from hailhq.voicebot import ivr
+
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
+    return PhoneMenu(None, on_human=AsyncMock(), on_machine=AsyncMock())
+
+
+async def test_silent_line_hangs_up_as_unavailable(monkeypatch):
+    menu = silent_menu(monkeypatch)
+    menu.expect_speech()
+    await asyncio.wait_for(menu._silence_task, 1)
+    menu.on_machine.assert_awaited_once_with(AMDCategory.MACHINE_UNAVAILABLE)
+    menu.on_human.assert_not_awaited()
+    await menu.aclose()
+
+
+@pytest.mark.parametrize(
+    "hear",
+    [
+        lambda m: m.heard_speech(),
+        lambda m: m.transcript_progress("Para español, oprima dos."),
+        lambda m: m.finished_speaking(),
+    ],
+    ids=["vad", "transcript", "speech-ended"],
+)
+async def test_speech_cancels_the_silent_line_hangup(monkeypatch, hear):
+    menu = silent_menu(monkeypatch)
+    menu.expect_speech()
+    hear(menu)
+    await asyncio.sleep(0.05)
+    menu.on_machine.assert_not_awaited()
+    await menu.aclose()
+
+
+async def test_menu_without_expect_speech_never_hangs_up_on_silence(monkeypatch):
+    menu = silent_menu(monkeypatch)
+    await asyncio.sleep(0.05)
+    menu.on_machine.assert_not_awaited()
+    assert menu.active
+    await menu.aclose()
