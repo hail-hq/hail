@@ -80,6 +80,9 @@ class PhoneMenu:
     because VAD alone does not end a turn. A keypress ends this state: the
     next voice may be a person.
     https://docs.livekit.io/agents/logic/turns/
+
+    :meth:`expect_speech` adds a silent-line hangup for one case only (see
+    its docstring).
     """
 
     def __init__(
@@ -99,6 +102,7 @@ class PhoneMenu:
         self._history: deque[str] = deque(maxlen=4)
         self._timeout_task: asyncio.Task[None] | None = None
         self._silence_task: asyncio.Task[None] | None = None
+        self._hang_up_if_silent = False
         self._speaking = False
         self._speech_has_text = True
         self._needs_confirmation = False
@@ -134,6 +138,8 @@ class PhoneMenu:
         self._cancel_silence()
         self._speaking = False
         if not self._speech_has_text:
+            # Noise, a click or tones: the line may still be dead.
+            self._arm_silence()
             # LiveKit drops a turn with an empty transcript before the
             # completed-turn hook, so observe() never runs for it. Let the
             # menu reply again, or it stays silent for the rest of the call.
@@ -147,10 +153,18 @@ class PhoneMenu:
     def pressed_keys(self) -> None:
         """A keypress ends the menu prompt; the next voice may be a person."""
         self._recorded = False
+        self.agent_acted()
+
+    def agent_acted(self) -> None:
+        """Our own reply or keypress restarts the silent-line wait.
+
+        The time we spend thinking or pressing keys is not the line's silence.
+        """
+        self._arm_silence()
 
     def transcript_progress(self, text: str) -> None:
         if text.strip():
-            self._cancel_silence()
+            self._stop_silence()
             self._cancel_wait()
             # Interim/final STT progress is not a completed turn. If speech
             # has ended, keep a bounded wait for observe() to receive it.
@@ -165,10 +179,27 @@ class PhoneMenu:
         For a pickup that was first classified unavailable and then kept as a
         menu only because the recheck failed or was unsure. If that line goes
         silent, no speech event ever starts the greeting wait, so without this
-        the call would run until its maximum duration. Any speech cancels it.
+        the call would run until its maximum duration.
+
+        Voice activity stops the wait. If it ends with no transcript (noise, a
+        click, tones), the wait starts again. A transcript stops it for good:
+        the classifier decides from then on. Our own keypress or reply starts
+        the wait again, so our own time does not count as silence.
         """
-        if not self.active or self._ending or self._silence_task is not None:
+        self._hang_up_if_silent = True
+        self._arm_silence()
+
+    def _arm_silence(self) -> None:
+        # Never next to the greeting wait: the two would race to end the menu.
+        if (
+            not self._hang_up_if_silent
+            or not self.active
+            or self._ending
+            or self._speaking
+            or (self._timeout_task is not None and not self._timeout_task.done())
+        ):
             return
+        self._cancel_silence()
 
         async def hang_up_when_silent() -> None:
             await asyncio.sleep(GREET_TIMEOUT_SECONDS)
@@ -178,6 +209,11 @@ class PhoneMenu:
                 await self.on_machine(AMDCategory.MACHINE_UNAVAILABLE)
 
         self._silence_task = asyncio.create_task(hang_up_when_silent())
+
+    def _stop_silence(self) -> None:
+        """A transcript: real speech, so the classifier decides."""
+        self._hang_up_if_silent = False
+        self._cancel_silence()
 
     def _cancel_silence(self) -> None:
         if self._silence_task is not None and not self._ending:
@@ -211,6 +247,8 @@ class PhoneMenu:
                 await self.on_human("")
 
         self._timeout_task = asyncio.create_task(greet_when_unconfirmed())
+        # The greeting wait owns the menu now; see _arm_silence.
+        self._cancel_silence()
 
     async def aclose(self) -> None:
         for task in (self._timeout_task, self._silence_task):
@@ -223,7 +261,7 @@ class PhoneMenu:
     async def observe(self, text: str) -> AMDCategory:
         if not self.active or self._ending or not text.strip():
             return AMDCategory.UNCERTAIN
-        self._cancel_silence()
+        self._stop_silence()
         self._speech_has_text = True
         self._needs_confirmation = False
         self.transcript_progress(text)
