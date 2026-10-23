@@ -689,9 +689,13 @@ async def test_silent_line_hangs_up_as_unavailable(monkeypatch):
     [
         lambda m: m.heard_speech(),
         lambda m: m.transcript_progress("Para español, oprima dos."),
-        lambda m: m.finished_speaking(),
+        lambda m: (
+            m.heard_speech(),
+            m.transcript_progress("Para español, oprima dos."),
+            m.finished_speaking(),
+        ),
     ],
-    ids=["vad", "transcript", "speech-ended"],
+    ids=["vad", "transcript", "words-then-end"],
 )
 async def test_speech_cancels_the_silent_line_hangup(monkeypatch, hear):
     menu = silent_menu(monkeypatch)
@@ -707,4 +711,43 @@ async def test_menu_without_expect_speech_never_hangs_up_on_silence(monkeypatch)
     await asyncio.sleep(0.05)
     menu.on_machine.assert_not_awaited()
     assert menu.active
+    await menu.aclose()
+
+
+async def test_noise_then_silence_hangs_up_as_unavailable(monkeypatch):
+    menu = silent_menu(monkeypatch)
+    menu.expect_speech()
+    menu.heard_speech()
+    menu.finished_speaking()  # VAD ended with no transcript: a click or tones
+    await asyncio.wait_for(menu._silence_task, 1)
+    menu.on_machine.assert_awaited_once_with(AMDCategory.MACHINE_UNAVAILABLE)
+    menu.on_human.assert_not_awaited()
+    await menu.aclose()
+
+
+@pytest.mark.parametrize(
+    "act",
+    [lambda m: m.pressed_keys(), lambda m: m.agent_acted()],
+    ids=["keypress", "agent-turn"],
+)
+async def test_our_action_restarts_the_silent_line_wait(monkeypatch, act):
+    from hailhq.voicebot import ivr
+
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.2)
+    menu = PhoneMenu(None, on_human=AsyncMock(), on_machine=AsyncMock())
+    menu.expect_speech()
+    await asyncio.sleep(0.15)
+    act(menu)
+    await asyncio.sleep(0.15)  # 0.3 s since start, 0.15 s since our action
+    menu.on_machine.assert_not_awaited()
+    await asyncio.wait_for(menu._silence_task, 1)
+    menu.on_machine.assert_awaited_once_with(AMDCategory.MACHINE_UNAVAILABLE)
+    await menu.aclose()
+
+
+async def test_our_action_never_arms_the_wait_without_expect_speech(monkeypatch):
+    menu = silent_menu(monkeypatch)
+    menu.pressed_keys()
+    menu.agent_acted()
+    assert menu._silence_task is None
     await menu.aclose()

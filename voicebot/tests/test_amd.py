@@ -455,7 +455,9 @@ async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
     assert welcome in session.replies[0]
     events = await _amd_events(async_session, call_id)
     assert events[0].payload["category"] == "machine-ivr"
-    assert events[0].payload["reason"] == "unavailable_recheck"
+    assert events[0].payload["reason"] == (
+        "unavailable_recheck" if verification == "machine-ivr" else "unavailable_unsure"
+    )
 
     # The rest of the recording arrives after AMD has returned. It must stay
     # in menu mode, without speaking a disclosure or starting a hangup.
@@ -472,8 +474,10 @@ async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
     await agent.phone_menu.aclose()
 
 
-async def _drive_dead_line(async_session, monkeypatch, verification, *, speech):
-    """A dead-line recording whose unavailable recheck was not confirmed.
+async def _drive_dead_line(async_session, monkeypatch, verification, *, hear=None):
+    """A dead-line recording first heard as unavailable, then rechecked.
+
+    ``hear`` plays the line's audio on the fake session after the pickup.
 
     The driver closes the call after ``entrypoint`` returns, which cancels
     the menu's timers, so the line's audio and the wait run before that.
@@ -505,9 +509,9 @@ async def _drive_dead_line(async_session, monkeypatch, verification, *, speech):
         await entrypoint(ctx)
         session = sessions[0]
         menu = session.start_options["agent"].phone_menu
-        assert menu._silence_task is not None
-        if speech:
-            session.emit_vad_speaking()
+        seen["armed"] = menu._silence_task is not None
+        if hear is not None:
+            hear(session)
         await asyncio.sleep(0.05)
         seen.update(
             active=menu.active,
@@ -522,7 +526,9 @@ async def _drive_dead_line(async_session, monkeypatch, verification, *, speech):
     )
     events = await _amd_events(async_session, call_id)
     assert events[0].payload["category"] == "machine-ivr"
-    assert events[0].payload["reason"] == "unavailable_recheck"
+    assert events[0].payload["reason"] == (
+        "unavailable_recheck" if verification == "machine-ivr" else "unavailable_unsure"
+    )
     return seen
 
 
@@ -531,9 +537,8 @@ async def test_silent_line_after_unconfirmed_unavailable_hangs_up(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, verification: str
 ) -> None:
     """Nothing follows the recording: hang up as unavailable, never greet."""
-    seen = await _drive_dead_line(
-        async_session, monkeypatch, verification, speech=False
-    )
+    seen = await _drive_dead_line(async_session, monkeypatch, verification)
+    assert seen["armed"]
     assert seen["delete_room_calls"] == 1
     assert seen["shutdown_calls"] == [CallEndReason.MACHINE_UNAVAILABLE.value]
     assert seen["say_calls"] == []
@@ -543,10 +548,42 @@ async def test_speech_after_unconfirmed_unavailable_cancels_the_hangup(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Speech before the wait ends keeps the normal menu handling."""
-    seen = await _drive_dead_line(async_session, monkeypatch, "uncertain", speech=True)
+    seen = await _drive_dead_line(
+        async_session,
+        monkeypatch,
+        "uncertain",
+        hear=lambda session: session.emit_vad_speaking(),
+    )
     assert seen["active"]
     assert seen["delete_room_calls"] == 0
     assert seen["shutdown_calls"] == []
+    assert seen["say_calls"] == []
+
+
+async def test_confident_menu_recheck_never_hangs_up_on_silence(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recheck heard a menu for sure: silence keeps normal menu handling."""
+    seen = await _drive_dead_line(async_session, monkeypatch, "machine-ivr")
+    assert not seen["armed"]
+    assert seen["active"]
+    assert seen["delete_room_calls"] == 0
+    assert seen["shutdown_calls"] == []
+    assert seen["say_calls"] == []
+
+
+async def test_noise_then_silence_after_unconfirmed_unavailable_hangs_up(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A click with no words, then nothing: still a dead line."""
+
+    def click(session):
+        session.emit_vad_speaking()
+        session.emit_vad_stopped()
+
+    seen = await _drive_dead_line(async_session, monkeypatch, "uncertain", hear=click)
+    assert seen["delete_room_calls"] == 1
+    assert seen["shutdown_calls"] == [CallEndReason.MACHINE_UNAVAILABLE.value]
     assert seen["say_calls"] == []
 
 
@@ -598,6 +635,11 @@ class _FakeAmdSession:
     def emit_vad_speaking(self) -> None:
         """VAD heard a voice — no transcript, as with unsupported languages."""
         ev = SimpleNamespace(new_state="speaking", old_state="listening")
+        for fn in self.handlers.get("user_state_changed", []):
+            fn(ev)
+
+    def emit_vad_stopped(self) -> None:
+        ev = SimpleNamespace(new_state="listening", old_state="speaking")
         for fn in self.handlers.get("user_state_changed", []):
             fn(ev)
 
