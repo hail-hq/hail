@@ -104,6 +104,24 @@ def test_house_chain_gives_each_model_one_try(monkeypatch) -> None:
     assert adapter._attempt_timeout == 10.0
 
 
+def test_org_chain_with_fallback_gives_each_model_one_try(monkeypatch) -> None:
+    """The org LLM with fallback uses the house chain's one-try settings."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    org = ResolvedLayer(
+        provider="openai-compatible",
+        api_key="org-key",
+        params={"base_url": "https://llm.example.com/v1", "model": "m"},
+        fallback_enabled=True,
+    )
+    adapter = build_llm(None, org)
+    assert isinstance(adapter, FallbackAdapter)
+    assert adapter._llm_instances[0].model == "m"
+    assert adapter._max_retry_per_llm == 0
+    assert adapter._attempt_timeout == 10.0
+
+
 @pytest.mark.parametrize(
     ("google_model", "google_api_key"),
     [("", "test-google-placeholder"), ("gemini-3.5-flash-lite", "")],

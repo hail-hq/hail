@@ -383,8 +383,7 @@ def build_llm(
             return agents_llm.FallbackAdapter(
                 llm=[byo, *_house_llms()],
                 attempt_timeout=10.0,
-                max_retry_per_llm=1,
-                retry_interval=5.0,
+                max_retry_per_llm=0,
             )
         return byo
     return _house_llm()
