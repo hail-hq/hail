@@ -22,7 +22,10 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
-from hailhq.voicebot.classify import CLASSIFIER_REQUEST_TIMEOUT_SECONDS
+from hailhq.voicebot.classify import (
+    CLASSIFIER_REQUEST_TIMEOUT_SECONDS,
+    CLASSIFY_TIMEOUT_SECONDS,
+)
 from hailhq.voicebot.ivr import try_classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt, house_llm, org_llm
@@ -61,12 +64,14 @@ a country from the greeting's language alone.
 # One try per classifier, no retries. Limit elapsed time locally: the Google
 # plugin forwards conn_options.timeout to its provider, which rejects <10s.
 # https://docs.livekit.io/reference/python/livekit/plugins/google/index.html
-# POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
+# All tries together stop at CLASSIFY_TIMEOUT_SECONDS.
 CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
 
 
 class ClassifierFailover(LLM):
-    """Each classifier in order, one try each.
+    """Each classifier in order, one try each, all within
+    ``CLASSIFY_TIMEOUT_SECONDS``. The cap is here so it also covers LiveKit's
+    AMD classifier call, which has no timeout of its own.
 
     Replaces ``FallbackAdapter``, which after a failure sends an extra
     background request to the failed provider. That request is wasted here:
@@ -114,38 +119,39 @@ class _ClassifierFailoverStream(LLMStream):
 
     async def _run(self) -> None:
         models = (self._failover.primary, *self._failover.backups)
-        for model in models:
-            sent = False
-            try:
-                async with asyncio.timeout(CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS):
-                    async with model.chat(
-                        chat_ctx=self._chat_ctx,
-                        tools=self._tools,
-                        tool_choice=self._tool_choice,
-                        conn_options=APIConnectOptions(
-                            max_retry=0, timeout=CLASSIFIER_REQUEST_TIMEOUT_SECONDS
-                        ),
-                    ) as stream:
-                        async for chunk in stream:
-                            sent = True
-                            self._event_ch.send_nowait(chunk)
-                return
-            except (APIError, TimeoutError) as e:
-                if model is models[-1]:
+        async with asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS):
+            for model in models:
+                sent = False
+                try:
+                    async with asyncio.timeout(CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS):
+                        async with model.chat(
+                            chat_ctx=self._chat_ctx,
+                            tools=self._tools,
+                            tool_choice=self._tool_choice,
+                            conn_options=APIConnectOptions(
+                                max_retry=0, timeout=CLASSIFIER_REQUEST_TIMEOUT_SECONDS
+                            ),
+                        ) as stream:
+                            async for chunk in stream:
+                                sent = True
+                                self._event_ch.send_nowait(chunk)
+                    return
+                except (APIError, TimeoutError) as e:
+                    if model is models[-1]:
+                        logger.warning(
+                            "AMD last classifier %s failed (limit %ss per try); "
+                            "it may be too slow for AMD: %s",
+                            model.model,
+                            CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
+                            e,
+                        )
+                        raise
+                    # A partial answer cannot be resent from another model.
+                    if sent:
+                        raise
                     logger.warning(
-                        "AMD last classifier %s failed (limit %ss per try); "
-                        "it may be too slow for AMD: %s",
-                        model.model,
-                        CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
-                        e,
+                        "AMD classifier %s failed, using backup: %s", model.label, e
                     )
-                    raise
-                # A partial answer cannot be resent from another model.
-                if sent:
-                    raise
-                logger.warning(
-                    "AMD classifier %s failed, using backup: %s", model.label, e
-                )
 
 
 @dataclass

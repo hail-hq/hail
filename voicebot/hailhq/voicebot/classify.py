@@ -13,6 +13,8 @@ from livekit.agents.voice.amd import AMDCategory
 CLASSIFIER_REQUEST_TIMEOUT_SECONDS = 10.0
 # Total for one check: the first classifier gets its 3s try
 # (``amd.CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS``), the next one gets the rest.
+# ``amd.ClassifierFailover`` applies it to the house checkers, AMD included;
+# ``classify_speech`` applies it to a customer's own LLM too.
 CLASSIFY_TIMEOUT_SECONDS = 5.0
 
 

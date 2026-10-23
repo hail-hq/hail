@@ -1,5 +1,7 @@
 """Multilingual AMD must not override a customer's provider selection."""
 
+import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
@@ -426,3 +428,78 @@ async def test_slow_amd_backup_logs_a_clear_warning(layers, caplog):
         assert "may be too slow for AMD" in caplog.text
     finally:
         await models.aclose()
+
+
+class _Checker(FakeLLM):
+    """``slow`` hangs, ``down`` fails at once, otherwise saves a verdict."""
+
+    def __init__(self, mode, calls):
+        super().__init__()
+        self.mode = mode
+        self.calls = calls
+
+    def chat(self, **kwargs):
+        self.calls.append(self)
+        return _CheckerStream(
+            self,
+            chat_ctx=kwargs["chat_ctx"],
+            tools=kwargs["tools"],
+            conn_options=kwargs["conn_options"],
+        )
+
+
+class _CheckerStream(LLMStream):
+    async def _run(self):
+        if self._llm.mode == "slow":
+            await asyncio.Event().wait()
+        if self._llm.mode == "down":
+            raise APIStatusError("forbidden", status_code=403)
+        self._event_ch.send_nowait(
+            ChatChunk(
+                id="verdict",
+                delta=ChoiceDelta(
+                    role="assistant",
+                    tool_calls=[
+                        FunctionToolCall(
+                            call_id="verdict",
+                            name="save_prediction",
+                            arguments='{"category":"human"}',
+                        )
+                    ],
+                ),
+            )
+        )
+
+
+async def test_slow_checkers_stop_at_one_total_in_the_amd_path(monkeypatch):
+    """LiveKit's AMD calls chat().collect() with no timeout: the checker's own
+    total stops three slow checkers."""
+    monkeypatch.setattr(amd, "CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS", 0.06)
+    monkeypatch.setattr(amd, "CLASSIFY_TIMEOUT_SECONDS", 0.1)
+    calls: list = []
+    checkers = [_Checker("slow", calls) for _ in range(3)]
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        async with amd.ClassifierFailover(*checkers).chat(
+            chat_ctx=ChatContext()
+        ) as stream:
+            await stream.collect()
+    elapsed = time.monotonic() - started
+    # Not 3 x 0.06: the third checker is never reached.
+    assert 0.09 <= elapsed < 0.15
+    assert calls == checkers[:2]
+
+
+async def test_fast_failures_reach_the_third_checker():
+    calls: list = []
+    checkers = [
+        _Checker("down", calls),
+        _Checker("down", calls),
+        _Checker("ok", calls),
+    ]
+    async with amd.ClassifierFailover(*checkers).chat(
+        chat_ctx=ChatContext()
+    ) as stream:
+        response = await stream.collect()
+    assert calls == checkers
+    assert [call.name for call in response.tool_calls] == ["save_prediction"]
