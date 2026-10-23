@@ -414,3 +414,52 @@ async def test_speech_still_going_after_the_probe_counts():
     result, _heard = await (await start(session, llm))
     assert result.reason == confirmation.HEARD_REASON
     assert_detached(session)
+
+
+async def test_short_reply_over_the_probe_counts():
+    """A "Hello?" said over the probe is a reply, not our echo."""
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    session.say = Mock(return_value=Handle(lambda _h: session.transcribe("Hello?")))
+    result, heard = await (await start(session, llm))
+    assert result.category == AMDCategory.HUMAN
+    assert result.transcript == "Hello?"
+    assert heard is True
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.parametrize("echo", ["Can you hear me?", "can you hear me", "Hear me."])
+async def test_echo_of_the_probe_during_playout_is_dropped(echo):
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    session.say = Mock(return_value=Handle(lambda _h: session.transcribe(echo)))
+    result, _heard = await (await start(session, llm))
+    assert result.reason == confirmation.UNANSWERED_REASON
+    assert result.transcript == ""
+    assert llm.calls == []
+
+
+async def test_probe_that_runs_past_its_time_limit_is_stopped(monkeypatch):
+    """A cut probe must not keep playing under the opening."""
+    monkeypatch.setattr(confirmation, "PROBE_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(confirmation, "PROBE_CHARS_PER_SECOND", 1000.0)
+
+    class StuckHandle:
+        interrupted = False
+
+        def __init__(self):
+            self.interrupt = Mock()
+
+        def __await__(self):
+            return asyncio.sleep(10).__await__()
+
+    session = Session()
+    handle = StuckHandle()
+    session.say = Mock(return_value=handle)
+    result, heard = await confirmation.confirm_pickup(
+        session, llm=Classifier('{"label":"human"}'), prompt="Can you hear me?"
+    )
+    handle.interrupt.assert_called_once_with(force=True)
+    assert result.reason == confirmation.UNAVAILABLE_REASON
+    assert heard is False
+    assert_detached(session)
