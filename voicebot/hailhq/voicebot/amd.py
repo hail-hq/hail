@@ -22,9 +22,19 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.voicebot.classify import (
+    CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
+    CLASSIFIER_REQUEST_TIMEOUT_SECONDS,
+    STREAM_SETUP_MARGIN_SECONDS,
+)
 from hailhq.voicebot.ivr import try_classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
-from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+from hailhq.voicebot.pipeline import (
+    ResolvedLayer,
+    build_stt,
+    house_anthropic,
+    house_anthropic_ready,
+)
 from livekit import rtc
 from livekit.agents import APIConnectOptions, APIError
 from livekit.agents.llm import LLM, ChatContext, LLMStream, Tool, ToolChoice
@@ -57,26 +67,34 @@ a country from the greeting's language alone.
 """
 
 
-# One try per classifier, no retries. Limit elapsed time locally: the Google
-# plugin forwards conn_options.timeout to its provider, which rejects <10s.
+# One try per classifier, no retries (CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS in
+# classify.py). Limit elapsed time locally: the Google plugin forwards
+# conn_options.timeout to its provider, which rejects <10s.
 # https://docs.livekit.io/reference/python/livekit/plugins/google/index.html
 # POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
-CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
-CLASSIFIER_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 class ClassifierFailover(LLM):
-    """Primary classifier, then the backup, one try each.
+    """Each classifier in order, one try each.
 
     Replaces ``FallbackAdapter``, which after a failure sends an extra
     background request to the failed provider. That request is wasted here:
     the adapter only lives for one call, and AMD closes the clients first.
     """
 
-    def __init__(self, primary: LLM, backup: LLM) -> None:
+    def __init__(self, primary: LLM, *backups: LLM) -> None:
         super().__init__()
         self.primary = primary
-        self.backup = backup
+        self.backups = backups
+
+    @property
+    def deadline(self) -> float:
+        """One deadline for the whole chain, so the last classifier still
+        gets its full try. Callers add no cap of their own."""
+        count = 1 + len(self.backups)
+        return count * (
+            CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS + STREAM_SETUP_MARGIN_SECONDS
+        )
 
     @property
     def model(self) -> str:
@@ -113,7 +131,12 @@ class _ClassifierFailoverStream(LLMStream):
         self._tool_choice = tool_choice
 
     async def _run(self) -> None:
-        for model in (self._failover.primary, self._failover.backup):
+        async with asyncio.timeout(self._failover.deadline):
+            await self._try_each()
+
+    async def _try_each(self) -> None:
+        models = (self._failover.primary, *self._failover.backups)
+        for model in models:
             sent = False
             try:
                 async with asyncio.timeout(CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS):
@@ -130,10 +153,10 @@ class _ClassifierFailoverStream(LLMStream):
                             self._event_ch.send_nowait(chunk)
                 return
             except (APIError, TimeoutError) as e:
-                if model is self._failover.backup:
+                if model is models[-1]:
                     logger.warning(
-                        "AMD backup classifier %s failed (limit %ss per try); "
-                        "OPENAI_MODEL may be too slow for AMD: %s",
+                        "AMD last classifier %s failed (limit %ss per try); "
+                        "it may be too slow for AMD: %s",
                         model.model,
                         CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
                         e,
@@ -149,19 +172,81 @@ class _ClassifierFailoverStream(LLMStream):
 
 @dataclass
 class AMDModels:
+    """AMD's own clients. ``owned`` are the transcription clients, closed
+    when ``run_amd`` ends. ``classifiers`` back ``llm``; the caller closes
+    them after AMD, or at call end when the phone menu check uses them."""
+
     llm: LLM | None
     stt: STT | None
     owned: list = field(default_factory=list)
     recheck_stt: STT | None = None
+    classifiers: list = field(default_factory=list)
 
-    async def aclose(self) -> None:
+    async def aclose_transcription(self) -> None:
         # Never close the session's conversation layers.
         owned, self.owned = self.owned, []
-        for model in owned:
-            try:
-                await model.aclose()
-            except Exception:
-                logger.exception("could not close AMD model")
+        await _close_all(owned)
+
+    async def aclose(self) -> None:
+        await self.aclose_transcription()
+        classifiers, self.classifiers = self.classifiers, []
+        await _close_all(classifiers)
+
+
+async def _close_all(models: list) -> None:
+    for model in models:
+        try:
+            await model.aclose()
+        except Exception:
+            logger.exception("could not close AMD model")
+
+
+def build_classifier(
+    session: AgentSession,
+    *,
+    org_cfgs: dict[str, ResolvedLayer] | None = None,
+    llm_override: bool = False,
+) -> tuple[LLM | None, list[LLM]]:
+    """The yes/no classifier for AMD, the pickup recheck and the menu check,
+    and the clients the caller must close.
+
+    These checks force their tool. Haiku 5.5 (``ANTHROPIC_BACKUP_MODEL``),
+    OpenAI and Gemini accept that; Sonnet 5.5 does not, so the call's chain
+    is never used. A customer's own LLM is their choice and is used as is.
+    With no house classifier, this returns None and the checks are skipped
+    (docs/operations/voice-llm.md). Independent clients: closing them must
+    not close the conversation's providers.
+    """
+    if llm_override or "llm" in (org_cfgs or {}):
+        # run_amd skips AMD when this is not a plain LLM.
+        return session.llm, []  # type: ignore[return-value]
+    builders: list[Callable[[], LLM]] = []
+    if settings.anthropic_backup_model and house_anthropic_ready():
+        builders.append(lambda: house_anthropic(settings.anthropic_backup_model))
+    if settings.openai_api_key and settings.openai_model:
+        builders.append(
+            lambda: openai.LLM(
+                model=settings.openai_model, api_key=settings.openai_api_key
+            )
+        )
+    if settings.google_api_key and settings.google_amd_model:
+        builders.append(
+            lambda: google.LLM(
+                model=settings.google_amd_model, api_key=settings.google_api_key
+            )
+        )
+    classifiers: list[LLM] = []
+    for build in builders:
+        try:
+            classifiers.append(build())
+        except Exception:
+            logger.exception("AMD classifier setup failed; skipping it")
+    if not classifiers:
+        logger.warning("no house classifier has a model and a key; skipping checks")
+        return None, []
+    # One try each, without spending the detection budget retrying an
+    # overloaded provider. Wrapped even when alone, for the chain deadline.
+    return ClassifierFailover(*classifiers), classifiers
 
 
 def build_amd_models(
@@ -228,37 +313,9 @@ def build_amd_models(
             models.owned.append(models.stt)
     except Exception:
         logger.exception("AMD transcription setup failed; reusing session STT")
-    try:
-        if (
-            not llm_override
-            and "llm" not in org_cfgs
-            and settings.google_api_key
-            and settings.google_amd_model
-        ):
-            models.llm = google.LLM(
-                model=settings.google_amd_model, api_key=settings.google_api_key
-            )
-            models.owned.append(models.llm)
-    except Exception:
-        logger.exception("AMD classifier setup failed; reusing session LLM")
-    if (
-        models.llm is not session.llm
-        and settings.openai_api_key
-        and settings.openai_model
-    ):
-        try:
-            backup = openai.LLM(
-                model=settings.openai_model, api_key=settings.openai_api_key
-            )
-            models.owned.append(backup)
-            # AMD's classifier collects the whole response before executing
-            # prediction tools. Fail over on provider errors without spending
-            # its detection budget retrying the same overloaded LLM.
-            # Use independent clients so AMD cleanup cannot close conversation
-            # providers or change a customer's explicitly selected LLM.
-            models.llm = ClassifierFailover(models.llm, backup)
-        except Exception:
-            logger.exception("AMD fallback setup failed; keeping primary classifier")
+    models.llm, models.classifiers = build_classifier(
+        session, org_cfgs=org_cfgs, llm_override=llm_override
+    )
     return models
 
 
@@ -354,6 +411,8 @@ async def run_amd(
 
     ``models`` supplies independently configured AMD layers. Without it, reuse
     the session layers for backwards compatibility and direct dispatches.
+    Its transcription clients close here. Its classifiers stay open: the
+    caller closes them (``AMDModels.aclose``) once no check needs them.
     ``on_ready`` releases the API's dialing gate only after AMD is armed.
     Detection failure stays distinct from a positive human classification.
 
@@ -378,7 +437,7 @@ async def run_amd(
         # RealtimeModel, so narrow rather than widen AMD's parameter type.
         session_llm = models.llm if models else session.llm
         if not isinstance(session_llm, LLM):
-            logger.warning("call_id=%s session has no plain LLM; skipping AMD", call_id)
+            logger.warning("call_id=%s no classifier; skipping AMD", call_id)
             return None
         session_stt = models.stt if models else session.stt
         if session_stt is None:
@@ -467,7 +526,7 @@ async def run_amd(
         if pickup_audio is not None:
             await pickup_audio.aclose()
         if models is not None:
-            await models.aclose()
+            await models.aclose_transcription()
         try:
             await _release()
         except Exception:
@@ -481,6 +540,7 @@ __all__ = [
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
     "amd_end_reason",
+    "build_classifier",
     "ivr_navigation_instructions",
     "run_amd",
 ]

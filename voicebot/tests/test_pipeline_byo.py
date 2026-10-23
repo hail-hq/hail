@@ -29,9 +29,9 @@ def house_keys(monkeypatch):
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "deepgram_model", "nova-3")
     monkeypatch.setattr(settings, "speechmatics_model", "linden-1")
-    monkeypatch.setattr(settings, "openai_model", "gpt-5.4-mini")
-    monkeypatch.setattr(settings, "google_model", "gemini-3-flash")
-    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-4-6")
+    monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
 
 
 @dataclass

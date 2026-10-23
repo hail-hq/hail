@@ -56,10 +56,12 @@ class Settings(BaseSettings):
     # LLM models for the FallbackAdapter chain (mode A, system_prompt only).
     # Set via .env / .env.local, see .env.example for current values.
     openai_model: str = ""
+    # Last backup in the chain. Empty: skipped.
     google_model: str = ""
-    # Must accept thinking off at low effort (Haiku 5.5 does; Sonnet 5.5 and
-    # Opus 5.5 return 400). See docs/operations/voice-llm.md.
+    # The first model and its backup, both with thinking off at low effort.
+    # See docs/operations/voice-llm.md.
     anthropic_model: str = ""
+    anthropic_backup_model: str = ""
     # Set: the house Anthropic model runs on Amazon Bedrock in this region,
     # signed with the AWS credentials below. Empty: Anthropic's API.
     anthropic_bedrock_region: str = ""

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hailhq.voicebot import agent as agent_mod
+from hailhq.voicebot import classify
 from hailhq.voicebot.agent import SpeechSanitizingAgent
 from hailhq.voicebot.ivr import (
     PhoneMenu,
@@ -72,7 +73,13 @@ async def test_next_recorded_prompt_does_not_mean_person_detected(monkeypatch):
     monkeypatch.setattr(agent_mod, "write_call_event", write)
     tasks = set()
     agent_mod.arm_deferred_greeting(
-        session, {}, UUID(int=1), tasks, agent=agent, on_machine=AsyncMock()
+        session,
+        {},
+        UUID(int=1),
+        tasks,
+        agent=agent,
+        on_machine=AsyncMock(),
+        classifier=session.llm,
     )
     session.emit_keypress()
     await agent.on_user_turn_completed(
@@ -152,7 +159,6 @@ async def test_classifier_error_does_not_unlock_or_hang_up():
 
 
 async def test_classifier_timeout_is_bounded(monkeypatch):
-    from hailhq.voicebot import ivr
 
     menu, outcomes = menu_for("human")
     entered = asyncio.Event()
@@ -169,12 +175,35 @@ async def test_classifier_timeout_is_bounded(monkeypatch):
             pass
 
     menu.llm.chat = lambda **kwargs: SlowStream()
-    monkeypatch.setattr(ivr, "CLASSIFY_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(classify, "CLASSIFIER_REQUEST_TIMEOUT_SECONDS", 0.01)
     result = await asyncio.wait_for(menu.observe("Hello"), 0.2)
     assert entered.is_set()
     assert result == AMDCategory.UNCERTAIN
     assert menu.active and not menu.checking
     assert outcomes == []
+
+
+async def test_aclose_waits_for_a_running_check(monkeypatch):
+    """The caller closes the classifier after aclose: never under a check."""
+    from hailhq.voicebot import ivr
+
+    menu, _outcomes = menu_for("human")
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args, **kwargs):
+        entered.set()
+        await finish.wait()
+        return AMDCategory.MACHINE_IVR
+
+    monkeypatch.setattr(ivr, "classify_remote_speech", slow)
+    check = asyncio.create_task(menu.observe("For sales, press one."))
+    await entered.wait()
+    closing = asyncio.create_task(menu.aclose())
+    await asyncio.sleep(0.01)
+    assert not closing.done()
+    finish.set()
+    await asyncio.wait_for(closing, 1)
+    assert check.done()
 
 
 async def test_cancellation_cannot_release_greeting(monkeypatch):
@@ -303,7 +332,13 @@ async def test_database_marker_cannot_delay_the_human_greeting(monkeypatch):
     monkeypatch.setattr(agent_mod, "write_call_event", slow_write)
     tasks = set()
     agent_mod.arm_deferred_greeting(
-        session, {}, UUID(int=1), tasks, agent=agent, on_machine=AsyncMock()
+        session,
+        {},
+        UUID(int=1),
+        tasks,
+        agent=agent,
+        on_machine=AsyncMock(),
+        classifier=session.llm,
     )
     turn = asyncio.create_task(
         agent.on_user_turn_completed(
@@ -543,7 +578,13 @@ async def test_failed_greeting_after_unconfirmed_speech_never_hangs_up(
     agent = SpeechSanitizingAgent(instructions="test")
     on_machine = AsyncMock()
     agent_mod.arm_deferred_greeting(
-        _FakeAmdSession(), {}, UUID(int=1), set(), agent=agent, on_machine=on_machine
+        _FakeAmdSession(),
+        {},
+        UUID(int=1),
+        set(),
+        agent=agent,
+        on_machine=on_machine,
+        classifier=_FakeAmdSession().llm,
     )
     try:
         agent.phone_menu.pressed_keys()
@@ -565,7 +606,13 @@ async def test_menu_keypress_reaches_the_phone_menu(monkeypatch):
     session = _FakeAmdSession()
     agent = SpeechSanitizingAgent(instructions="test")
     agent_mod.arm_deferred_greeting(
-        session, {}, UUID(int=1), set(), agent=agent, on_machine=AsyncMock()
+        session,
+        {},
+        UUID(int=1),
+        set(),
+        agent=agent,
+        on_machine=AsyncMock(),
+        classifier=session.llm,
     )
     agent.phone_menu._recorded = True
     session.emit_keypress("other_tool")
@@ -593,6 +640,7 @@ async def _greet_with(monkeypatch, agent, speak):
         on_greeted=lambda: greeted.append(True),
         agent=agent,
         on_machine=AsyncMock(),
+        classifier=_FakeAmdSession().llm,
     )
     turn_ctx = ChatContext()
     await agent.on_user_turn_completed(
@@ -662,6 +710,7 @@ async def _timer_greeting(monkeypatch, metadata, *, said_over_greeting=None):
         on_greeted=greeted.set,
         agent=agent,
         on_machine=AsyncMock(),
+        classifier=session.llm,
     )
     try:
         agent.phone_menu.pressed_keys()
@@ -690,3 +739,28 @@ async def test_timer_greeting_answers_words_said_over_the_greeting(monkeypatch):
     assert len(session.replies) == 1
     assert "Hello?" in session.replies[0]
     assert "Who is this?" in session.replies[0]
+
+
+async def test_menu_check_never_uses_the_call_chain():
+    """The call's chain starts with Sonnet 5.5, which rejects a forced tool.
+    With no classifier, the menu check is skipped (speech stays uncertain)."""
+    from uuid import UUID
+
+    from .test_amd import _FakeAmdSession
+
+    session = _FakeAmdSession()
+    agent = SpeechSanitizingAgent(instructions="test")
+    agent_mod.arm_deferred_greeting(
+        session,
+        {},
+        UUID(int=1),
+        set(),
+        agent=agent,
+        on_machine=AsyncMock(),
+        classifier=None,
+    )
+    try:
+        assert agent.phone_menu.llm is None
+        assert await agent.phone_menu.observe("Hello?") == AMDCategory.UNCERTAIN
+    finally:
+        await agent.phone_menu.aclose()

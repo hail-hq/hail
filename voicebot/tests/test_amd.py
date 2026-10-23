@@ -26,7 +26,6 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.classify import classify_speech
-from hailhq.voicebot.ivr import CLASSIFY_TIMEOUT_SECONDS
 from livekit import rtc
 from livekit.agents.llm import (
     ChatChunk,
@@ -421,11 +420,10 @@ def _break_checker(monkeypatch, session, failure: str) -> None:
         session.llm.chat = Mock(side_effect=RuntimeError("classifier failed"))
     elif failure == "timeout":
 
-        async def hang(*args, **kwargs):
-            await asyncio.Event().wait()
-
-        monkeypatch.setattr(ivr_mod, "classify_speech", hang)
-        monkeypatch.setattr(ivr_mod, "CLASSIFY_TIMEOUT_SECONDS", 0.01)
+        # The classifier chain hit its deadline.
+        monkeypatch.setattr(
+            ivr_mod, "classify_speech", AsyncMock(side_effect=TimeoutError)
+        )
 
 
 async def test_answered_uncertain_unavailable_recheck_hangs_up(monkeypatch):
@@ -523,7 +521,6 @@ async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
     )
     # The later menu turns use a working checker.
     monkeypatch.setattr(ivr_mod, "classify_speech", classify_speech)
-    monkeypatch.setattr(ivr_mod, "CLASSIFY_TIMEOUT_SECONDS", CLASSIFY_TIMEOUT_SECONDS)
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
     assert session.say_calls == []
@@ -681,6 +678,8 @@ async def _drive_entrypoint(
     run_amd_override: Any = None,
     disconnect_before_amd: bool = False,
     answered: bool = False,
+    classifier: Any = "fake",
+    real_amd_models: bool = False,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
     from hailhq.voicebot import agent as agent_mod
@@ -688,6 +687,12 @@ async def _drive_entrypoint(
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
     session = _FakeAmdSession()
+    # AMD's classifier also backs the menu check; it hears a person.
+    models = amd_mod.AMDModels(
+        _GreetingLLM("human") if classifier == "fake" else classifier, object()
+    )
+    models.aclose = AsyncMock()
+    session.amd_models = models
 
     async def _no_org_cfgs(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
         return {}
@@ -697,7 +702,8 @@ async def _drive_entrypoint(
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _no_org_cfgs)
     monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: session)
-    monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: None)
+    if not real_amd_models:
+        monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: models)
     monkeypatch.setattr(agent_mod, "run_amd", run_amd_override or _fake_run_amd)
     monkeypatch.setattr(
         agent_mod.settings, "hail_voice_max_duration_seconds", 0, raising=False
@@ -1000,6 +1006,123 @@ async def test_detection_failure_proceeds_like_a_human_answer(
 
     assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
     assert ctx.delete_room_calls == 0
+
+
+def _count_amd_models(monkeypatch, models) -> list:
+    """Hand ``models`` to the entrypoint and count the builds."""
+    from hailhq.voicebot import agent as agent_mod
+
+    built: list = []
+    monkeypatch.setattr(
+        agent_mod, "build_amd_models", lambda *a, **k: built.append(1) or models
+    )
+    return built
+
+
+def _record_after_entrypoint(monkeypatch, seen: dict, models) -> None:
+    """Note whether the classifier was closed before shutdown callbacks run."""
+    import sys
+
+    from hailhq.voicebot.agent import entrypoint
+
+    async def run_then_check(ctx):
+        await entrypoint(ctx)
+        seen["closed_before_shutdown"] = models.aclose.await_count
+
+    monkeypatch.setattr(sys.modules[__name__], "entrypoint_under_test", run_then_check)
+
+
+async def test_menu_check_reuses_amd_classifier_until_call_end(
+    async_session, monkeypatch
+):
+    """One classifier per call: AMD's chain backs the menu check and closes
+    at call end, after the menu."""
+    models = amd_mod.AMDModels(_GreetingLLM("machine-ivr"), object())
+    models.aclose = AsyncMock()
+    built = _count_amd_models(monkeypatch, models)
+    seen: dict = {}
+    _record_after_entrypoint(monkeypatch, seen, models)
+    _, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        real_amd_models=True,
+    )
+    assert built == [1]
+    assert session.start_options["agent"].phone_menu.llm is models.llm
+    assert seen == {"closed_before_shutdown": 0}
+    models.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize("category", ["human", "uncertain", "machine-vm", None])
+async def test_classifier_closes_after_amd_when_no_menu_uses_it(
+    async_session, monkeypatch, category
+):
+    models = amd_mod.AMDModels(_GreetingLLM("human"), object())
+    models.aclose = AsyncMock()
+    _count_amd_models(monkeypatch, models)
+    seen: dict = {}
+    _record_after_entrypoint(monkeypatch, seen, models)
+    await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction(category) if category else None,
+        real_amd_models=True,
+    )
+    assert seen["closed_before_shutdown"] >= 1
+
+
+async def test_shutdown_stops_amd_before_closing_the_classifier(
+    async_session, monkeypatch
+):
+    """A shutdown during AMD never closes the classifier under a running
+    check: AMD is cancelled first."""
+    import sys
+
+    from hailhq.voicebot.agent import entrypoint
+
+    order: list[str] = []
+    models = amd_mod.AMDModels(_GreetingLLM("human"), object())
+
+    async def close() -> None:
+        order.append("closed")
+
+    models.aclose = AsyncMock(side_effect=close)
+    _count_amd_models(monkeypatch, models)
+    running = asyncio.Event()
+    holder: dict = {}
+
+    async def checking(session, call_id, **kwargs):
+        running.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            order.append("amd stopped")
+
+    async def run_with_shutdown(ctx):
+        entry = asyncio.create_task(entrypoint(ctx))
+        await running.wait()
+        holder["shutdown"] = asyncio.create_task(ctx.shutdown_callbacks[0]())
+        await entry
+        await holder["shutdown"]
+        ctx.shutdown_callbacks.clear()
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "entrypoint_under_test", run_with_shutdown
+    )
+    call_id, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        run_amd_override=checking,
+        real_amd_models=True,
+    )
+    assert order[:2] == ["amd stopped", "closed"]
+    assert session.say_calls == []
+    events = await _amd_events(async_session, call_id)
+    assert len(events) == 1
+    assert events[0].payload["reason"] == "detection_failed"
+    assert events[0].payload["category"] is None
 
 
 @pytest.mark.parametrize(

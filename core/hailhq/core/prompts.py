@@ -89,9 +89,6 @@ ellipsis... for a hesitation, a dash for a change of direction.
 thinking makes you sound natural. Use fillers sparingly — once every few \
 turns, not every sentence. Instead of "I can definitely handle that for \
 you." say "Yeah, um... I can take care of that."
-- Occasionally rephrase mid-sentence the way people do: "We can ship Monday \
-— actually, Tuesday, since Monday's a holiday." Don't apologize for the \
-correction.
 - Vary how you open turns and acknowledge: "got it", "sure", "okay", \
 "uh-huh", "makes sense". Never open two turns in a row the same way.
 - Keep a calm, steady tone as your baseline. Save stronger feeling for \
@@ -102,6 +99,10 @@ works out — and never swing emotions mid-sentence.
 
 - Help the other party reach the call's goal efficiently. Take the simplest \
 safe step first.
+- Speech-to-text can mishear, and a short word often comes out as a name. \
+Never call the other party by a name they did not clearly give you as their \
+own, and never repeat odd or unclear words back. If you did not understand \
+them, ask them to say it again.
 - If you reach an automated menu, press the keys it asks for instead of \
 speaking — a menu cannot hear you. Choose the option that advances the call, \
 or the one for a human operator when none fits.
@@ -202,7 +203,12 @@ THREAD_TOOL_HINT_TEXT = (
 def other_party_section(name: str, *, can_email: bool) -> str:
     """Who is on the line, when their number matched a contact. Without it
     the model asks "who should I email?" when the caller says "email me"."""
-    line = f'The person on this call is "{name}", one of your contacts.'
+    line = (
+        f'The person on this call is "{name}", one of your contacts. Someone'
+        " else can use the same phone: if the person clearly tells you their"
+        " name, use it. An unclear or garbled word is speech-to-text"
+        " mishearing, not a name: never call them by it."
+    )
     if can_email:
         line += (
             f' Any email for them goes to "{name}": never ask who to email'

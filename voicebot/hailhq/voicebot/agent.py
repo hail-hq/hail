@@ -43,7 +43,7 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.directory import find_by_phone
+from hailhq.core.directory import DirectoryEntry, find_by_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
@@ -78,6 +78,7 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
+    AMDModels,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
@@ -90,6 +91,7 @@ from hailhq.voicebot.pipeline import (
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
+    stt_takes_keyterms,
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
@@ -97,9 +99,9 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLMError
+from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
-from livekit.agents.voice.amd import AMDCategory
+from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
@@ -305,10 +307,10 @@ def build_instructions(
 _OTHER_PARTY_TIMEOUT_SECONDS = 1.0
 
 
-async def other_party_prompt(call_id: UUID) -> str | None:
-    """The prompt section naming the person on the line (the caller on an
+async def other_party(call_id: UUID) -> DirectoryEntry | None:
+    """The directory entry of the person on the line (the caller on an
     inbound call, the callee on an outbound one) when their number is in the
-    org's directory. A lookup failure or timeout only drops the section."""
+    org's directory. A lookup failure or timeout returns None."""
     try:
         async with (
             asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
@@ -334,10 +336,7 @@ async def other_party_prompt(call_id: UUID) -> str | None:
     except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None
-    if entry is None:
-        return None
-    # send_email reaches members only, so a contact's email is no use here.
-    return other_party_section(entry.name, can_email=entry.source == "member")
+    return entry
 
 
 def has_thread_tool(tools: list[Any]) -> bool:
@@ -853,8 +852,13 @@ def arm_deferred_greeting(
     *,
     agent: SpeechSanitizingAgent,
     on_machine: Callable[[AMDCategory], Awaitable[None]],
+    classifier: LLM | None,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
+
+    ``classifier`` is AMD's classifier (``AMDModels.llm``, built once per
+    call by ``build_classifier``), never the call's chain. None skips the menu check: speech stays uncertain and greets after
+    the bounded wait.
 
     A keypress and subsequent VAD/transcript used to be treated as a handoff.
     A multi-stage menu satisfies both, so classification now runs in the
@@ -888,7 +892,7 @@ def arm_deferred_greeting(
             on_greeted()
 
     agent.phone_menu = PhoneMenu(
-        session.llm,
+        classifier,
         on_human=greet,
         on_machine=on_machine,
     )
@@ -2191,7 +2195,7 @@ async def _run_call(
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
-    other_party_task = asyncio.create_task(other_party_prompt(call_id))
+    other_party_task = asyncio.create_task(other_party(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2215,6 +2219,12 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
+    known = await other_party_task
+    if known is not None and stt_takes_keyterms(session.stt):
+        # The STT then spells the known name right. Keyterm detection stays
+        # off: a wrong detected term degrades recognition for the whole call.
+        session.update_options(keyterms=[known.name])
+
     thread_tool = has_thread_tool(agent_tools)
     logger.info("call_id=%s thread_history tool=%s", call_id, thread_tool)
     agent = SpeechSanitizingAgent(
@@ -2224,7 +2234,12 @@ async def _run_call(
             metadata.get("direction"),
             thread_tool=thread_tool,
             language=language,
-            other_party=await other_party_task,
+            # send_email reaches members only, so a contact's email is no use.
+            other_party=(
+                other_party_section(known.name, can_email=known.source == "member")
+                if known is not None
+                else None
+            ),
         ),
         tools=agent_tools,
     )
@@ -2328,13 +2343,27 @@ async def _run_call(
         call_id=call_id,
     )
 
+    # AMD's clients. Its classifier also backs the phone menu check, so on
+    # that path it is closed at shutdown, after AMD and the last check end.
+    amd_models: AMDModels | None = None
+    amd_task: asyncio.Task[AMDPredictionEvent | None] | None = None
+    # Shutdown cancelled AMD: write its row, then stop.
+    amd_cancelled = False
+
     async def _shutdown_body() -> None:
         nonlocal shutting_down
         shutting_down = True
         try:
             await recovery.aclose()
+            # Never close the classifier under a running check: stop AMD
+            # first, and let the menu finish its check.
+            if amd_task is not None and not amd_task.done():
+                amd_task.cancel()
+                await asyncio.gather(amd_task, return_exceptions=True)
             if agent.phone_menu is not None:
                 await agent.phone_menu.aclose()
+            if amd_models is not None:
+                await amd_models.aclose()
             # The bridge swaps in the handover cap once a contact answers.
             cap_task = bridge_state.get("soft_cap_task") or soft_cap_task
             if cap_task is not None and not cap_task.done():
@@ -2417,15 +2446,31 @@ async def _run_call(
                     {VOICE_READY_ATTRIBUTE: "true"}
                 )
 
-        models = build_amd_models(
+        amd_models = models = build_amd_models(
             session,
             org_cfgs=org_cfgs,
             llm_override=llm_cfg is not None,
             language=language,
         )
-        amd_result = await run_amd(
-            session, call_id, models=models, on_ready=signal_ready, room=ctx.room
+        amd_task = asyncio.create_task(
+            run_amd(
+                session, call_id, models=models, on_ready=signal_ready, room=ctx.room
+            )
         )
+        try:
+            amd_result = await amd_task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            # Shutdown stopped AMD: the call has already ended.
+            amd_result = None
+            amd_cancelled = True
+        if models is not None and (
+            amd_result is None or amd_result.category != MACHINE_IVR_CATEGORY
+        ):
+            # Only the phone menu check uses the classifier after AMD.
+            await models.aclose()
     if not inbound:
         await write_call_event(
             call_id,
@@ -2442,6 +2487,8 @@ async def _run_call(
                 "delay": amd_result.delay if amd_result else None,
             },
         )
+    if amd_cancelled:
+        return
 
     async def hangup_no_answer(end_reason: str) -> None:
         # Voicemail or a dead mailbox, hang up without speaking. We never
@@ -2484,6 +2531,8 @@ async def _run_call(
             on_greeted=recovery.start,
             agent=agent,
             on_machine=hangup_machine,
+            # AMD's classifier, built once per call (see build_amd_models).
+            classifier=amd_models.llm if amd_models is not None else None,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)

@@ -2088,7 +2088,7 @@ def test_greeting_with_ai_line(message, spoken):
     assert greeting_with_ai_line(message, "AI line.") == spoken
 
 
-async def test_other_party_prompt_names_a_member_caller(monkeypatch):
+async def test_other_party_finds_the_caller(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.core.directory import DirectoryEntry
@@ -2116,12 +2116,12 @@ async def test_other_party_prompt_names_a_member_caller(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", scope)
     monkeypatch.setattr(agent_mod, "find_by_phone", find)
-    prompt = await agent_mod.other_party_prompt(UUID(int=1))
+    entry = await agent_mod.other_party(UUID(int=1))
     assert seen["number"] == "+46700000000"
-    assert '"Sam"' in prompt and "my email" in prompt
+    assert entry.name == "Sam" and entry.source == "member"
 
 
-async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
+async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.voicebot import agent as agent_mod
@@ -2132,7 +2132,7 @@ async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
         yield
 
     monkeypatch.setattr(agent_mod, "session_scope", refused)
-    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+    assert await agent_mod.other_party(UUID(int=1)) is None
 
     class Session:
         async def execute(self, _stmt):
@@ -2144,4 +2144,19 @@ async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", stuck)
     monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
-    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+    assert await agent_mod.other_party(UUID(int=1)) is None
+
+
+async def test_known_name_reaches_the_stt_as_a_keyterm():
+    """update_options before session.start stores the term; the session
+    hands it to the Deepgram STT when the activity starts (livekit-agents
+    1.8.8 keyterm_detection.py, KeytermDetector.start)."""
+    from livekit.agents import AgentSession
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    stt = deepgram_plugin.STT(model="nova-3", api_key="dg-test")
+    session = AgentSession(stt=stt)
+    session.update_options(keyterms=["Sam"])
+    assert session.keyterms == ["Sam"]
+    session._keyterm_detector.start(session, stt=stt)
+    assert stt._opts.keyterm == ["Sam"]

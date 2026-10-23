@@ -2,10 +2,11 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from uuid import UUID
 
 import pytest
 from hailhq.core.config import settings
-from hailhq.voicebot import amd
+from hailhq.voicebot import amd, classify
 from hailhq.voicebot.pipeline import ResolvedLayer
 from livekit.agents import APIStatusError
 from livekit.agents.llm import (
@@ -29,6 +30,8 @@ def layers(monkeypatch):
     monkeypatch.setattr(settings, "openai_model", "house-chat-model")
     monkeypatch.setattr(settings, "google_api_key", "house-google")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
+    # No Anthropic classifier unless a test sets one.
+    monkeypatch.setattr(settings, "anthropic_backup_model", "")
     session = SimpleNamespace(llm=object(), stt=object(), vad=object())
     transcribe = Mock(return_value=object())
     google = Mock(return_value=FakeLLM())
@@ -95,7 +98,7 @@ def test_missing_house_credentials_keep_the_existing_pipeline(layers, monkeypatc
     monkeypatch.setattr(settings, "openai_api_key", "")
     monkeypatch.setattr(settings, "google_api_key", "")
     result = amd.build_amd_models(session)
-    assert result.stt is session.stt and result.llm is session.llm
+    assert result.stt is session.stt and result.llm is None
     transcribe.assert_not_called()
     google.assert_not_called()
 
@@ -118,30 +121,95 @@ def test_optional_recheck_setup_failure_keeps_the_working_live_stt(layers):
     assert primary in result.owned
 
 
-def test_optional_classifier_setup_failure_keeps_the_working_session_llm(layers):
+def test_optional_classifier_setup_failure_skips_that_classifier(layers):
     session, _, google = layers
     google.side_effect = ValueError("classifier account not configured")
     result = amd.build_amd_models(session)
-    assert result.llm is session.llm
+    assert result.llm.primary is amd.openai.LLM.return_value
 
 
-def test_optional_backup_setup_failure_keeps_primary_classifier(layers):
+def test_no_classifier_never_falls_back_to_the_call_chain(layers, monkeypatch):
+    """The call's chain starts with Sonnet 5.5, which rejects a forced tool:
+    with no house classifier, AMD and the checks are skipped instead."""
+    session, _, _ = layers
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    assert amd.build_amd_models(session).llm is None
+    assert amd.build_classifier(session) == (None, [])
+
+
+async def test_no_classifier_skips_amd_and_releases_the_dial(layers):
+    session, _, _ = layers
+    released = []
+
+    async def ready():
+        released.append(True)
+
+    models = amd.AMDModels(None, session.stt)
+    assert (
+        await amd.run_amd(session, UUID(int=1), models=models, on_ready=ready) is None
+    )
+    assert released == [True]
+
+
+def test_customer_llm_stays_the_classifier(layers):
+    session, _, _ = layers
+    assert amd.build_classifier(session, llm_override=True) == (session.llm, [])
+
+
+def test_haiku_classifies_first_then_openai_then_gemini(layers, monkeypatch):
+    """LiveKit's AMD forces its tool: Haiku 5.5 accepts that, Sonnet 5.5
+    does not, so ANTHROPIC_BACKUP_MODEL goes first."""
+    session, _, google = layers
+    haiku = FakeLLM()
+    built = []
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
+    monkeypatch.setattr(
+        amd, "house_anthropic", lambda model: built.append(model) or haiku
+    )
+    result = amd.build_amd_models(session)
+    assert built == ["claude-haiku-5-5"]
+    assert isinstance(result.llm, amd.ClassifierFailover)
+    assert result.llm.primary is haiku
+    assert result.llm.backups == (amd.openai.LLM.return_value, google.return_value)
+    # One deadline for the chain: a full try and stream setup per classifier.
+    assert result.llm.deadline == 3 * (
+        classify.CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS
+        + classify.STREAM_SETUP_MARGIN_SECONDS
+    )
+
+
+def test_haiku_skipped_without_anthropic_keys(layers, monkeypatch):
+    session, _, google = layers
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    result = amd.build_amd_models(session)
+    assert result.llm.primary is amd.openai.LLM.return_value
+    assert result.llm.backups == (google.return_value,)
+
+
+def test_openai_setup_failure_keeps_gemini_classifier(layers):
     session, _, google = layers
     amd.openai.LLM.side_effect = ValueError("backup not configured")
     result = amd.build_amd_models(session)
-    assert result.llm is google.return_value
+    assert result.llm.primary is google.return_value
 
 
-def test_missing_backup_credentials_keep_primary_classifier(layers, monkeypatch):
+def test_missing_openai_key_keeps_gemini_classifier(layers, monkeypatch):
     session, _, google = layers
     monkeypatch.setattr(settings, "openai_api_key", "")
     result = amd.build_amd_models(session)
-    assert result.llm is google.return_value
+    assert result.llm.primary is google.return_value
     amd.openai.LLM.assert_not_called()
 
 
 async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers):
-    """Classification must finish on the backup when Gemini returns HTTP 503."""
+    """Classification must finish on the backup when the first classifier
+    returns HTTP 503."""
     session, _, google = layers
     attempts = []
 
@@ -180,8 +248,8 @@ async def test_overloaded_amd_classifier_fails_over_with_prediction_tools(layers
             )
 
     primary, backup = Classifier(True), Classifier(False)
-    google.return_value = primary
-    amd.openai.LLM.return_value = backup
+    amd.openai.LLM.return_value = primary
+    google.return_value = backup
     models = amd.build_amd_models(session)
     assert isinstance(models.llm, amd.ClassifierFailover)
 
@@ -291,6 +359,6 @@ async def test_slow_amd_backup_logs_a_clear_warning(layers, caplog):
         with pytest.raises(APIStatusError):
             async with models.llm.chat(chat_ctx=ChatContext()) as stream:
                 await stream.collect()
-        assert "OPENAI_MODEL may be too slow for AMD" in caplog.text
+        assert "may be too slow for AMD" in caplog.text
     finally:
         await models.aclose()

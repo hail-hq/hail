@@ -12,7 +12,6 @@ from livekit.agents.llm import LLM
 from livekit.agents.voice.amd import AMDCategory
 
 logger = logging.getLogger("hailhq.voicebot")
-CLASSIFY_TIMEOUT_SECONDS = 5.0
 GREET_TIMEOUT_SECONDS = 8.0
 
 REMOTE_SPEECH_PROMPT = """\
@@ -44,7 +43,7 @@ Examples:
 async def classify_remote_speech(
     llm: LLM | None, text: str, *, earlier: str = ""
 ) -> AMDCategory:
-    """A bounded, tool-only classification; errors never confirm a person."""
+    """A tool-only classification; errors never confirm a person."""
     category = await try_classify_remote_speech(llm, text, earlier=earlier)
     return AMDCategory.UNCERTAIN if category is None else category
 
@@ -64,8 +63,8 @@ async def try_classify_remote_speech(
         messages.append(f"Earlier speech:\n{earlier[-3000:]}")
     messages.append(f"Latest speech:\n{text[-3000:]}")
     try:
-        async with asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS):
-            return await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
+        # The classifier's chain deadline bounds the wait.
+        return await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
     except Exception as exc:
         # Provider error bodies may contain the transcript.
         logger.warning(
@@ -105,6 +104,10 @@ class PhoneMenu:
         self.active = True
         self.can_navigate = True
         self._checks = 0
+        # Set while no check runs, so aclose can wait before the classifier
+        # is closed.
+        self._idle = asyncio.Event()
+        self._idle.set()
         self._revision = 0
         self._history: deque[str] = deque(maxlen=4)
         self._timeout_task: asyncio.Task[None] | None = None
@@ -199,6 +202,9 @@ class PhoneMenu:
                 self._timeout_task.cancel()
                 await asyncio.gather(self._timeout_task, return_exceptions=True)
             self._timeout_task = None
+        # The caller closes the classifier next. A running check ends within
+        # the classifier's chain deadline.
+        await self._idle.wait()
 
     async def observe(self, text: str) -> AMDCategory:
         if not self.active or self._ending or not text.strip():
@@ -211,11 +217,14 @@ class PhoneMenu:
         earlier = "\n".join(self._history)
         self._history.append(text[-1000:])
         self._checks += 1
+        self._idle.clear()
         self.can_navigate = False
         try:
             category = await classify_remote_speech(self.llm, text, earlier=earlier)
         finally:
             self._checks -= 1
+            if self._checks == 0:
+                self._idle.set()
         if self._ending:
             return AMDCategory.UNCERTAIN
         if revision != self._revision:

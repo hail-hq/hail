@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 from google.genai import types
-from hailhq.voicebot import amd, pickup
+from hailhq.voicebot import amd, classify, pickup
 from livekit import rtc
 from livekit.agents.llm import ChatChunk, ChoiceDelta, FunctionToolCall, LLMStream
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
@@ -230,7 +230,7 @@ async def test_empty_or_failed_transcription_does_not_reach_llm(caplog):
 
 
 async def test_recheck_deadline_cancels_provider_and_preserves_original(monkeypatch):
-    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(pickup, "RECOGNIZE_TIMEOUT_SECONDS", 0.02)
     cancelled = asyncio.Event()
 
     async def hang(*args, **kwargs):
@@ -277,8 +277,10 @@ async def test_caller_cancellation_propagates_and_closes_recheck():
     assert cancelled.is_set()
 
 
-async def test_shared_recheck_deadline_also_cancels_slow_llm(monkeypatch):
-    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.04)
+async def test_classifier_deadline_cancels_slow_llm(monkeypatch):
+    """The transcription cap does not cover the classifier: its own deadline
+    does (here a customer's LLM, capped at its request timeout)."""
+    monkeypatch.setattr(classify, "CLASSIFIER_REQUEST_TIMEOUT_SECONDS", 0.04)
     cancelled = asyncio.Event()
 
     class HangingStream(LLMStream):
@@ -396,7 +398,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     models = amd.AMDModels(
         amd.ClassifierFailover(primary, backup), object(), recheck_stt=batch
     )
-    models.aclose = AsyncMock()
+    models.aclose_transcription = AsyncMock()
     call_id = UUID(int=10)
     room = object()
     session = _session_with_layers()
@@ -414,7 +416,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     amd.PickupAudio.assert_called_once_with(room, f"caller-{call_id}", seconds=20)
     raw.stop.assert_awaited_once()
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose_transcription.assert_awaited_once()
     if category == "machine-ivr":
         session._start_ivr_detection.assert_awaited_once_with(
             transcript="A recorded greeting"
@@ -449,12 +451,12 @@ async def test_greeting_transcripts_during_recheck_keep_machine_verdict(
 
     monkeypatch.setattr(amd, "recheck_greeting", recheck)
     models = amd.AMDModels(FakeLLM(), object(), recheck_stt=transcriber())
-    models.aclose = AsyncMock()
+    models.aclose_transcription = AsyncMock()
     result = await amd.run_amd(session, UUID(int=10), models=models, room=object())
     assert result is not original
     assert result.category == AMDCategory.MACHINE_VM
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose_transcription.assert_awaited_once()
 
 
 async def test_unavailable_from_audio_recheck_is_verified_before_hangup(monkeypatch):
@@ -472,7 +474,7 @@ async def test_unavailable_from_audio_recheck_is_verified_before_hangup(monkeypa
     monkeypatch.setattr(amd, "recheck_greeting", AsyncMock(return_value=wrong))
     verifier = Classifier('{"label":"machine-ivr"}')
     models = amd.AMDModels(verifier, object(), recheck_stt=transcriber())
-    models.aclose = AsyncMock()
+    models.aclose_transcription = AsyncMock()
     session = _session_with_layers()
     session._start_ivr_detection = AsyncMock()
     result = await amd.run_amd(session, UUID(int=10), models=models, room=object())

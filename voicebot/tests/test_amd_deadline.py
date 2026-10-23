@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from google.genai import errors, types
-from hailhq.voicebot import amd
+from hailhq.voicebot import amd, ivr
 from livekit.agents.llm import (
     ChatChunk,
     ChatContext,
@@ -13,9 +13,11 @@ from livekit.agents.llm import (
     LLMStream,
     function_tool,
 )
+from livekit.agents.voice.amd import AMDCategory
 from livekit.plugins import google
 
 from ._fakes import FakeLLM
+from .test_pickup import Classifier as Answers
 
 
 class Classifier(FakeLLM):
@@ -155,3 +157,38 @@ async def test_amd_cancellation_closes_primary_without_starting_backup():
         await task
     assert primary.cancelled
     assert not backup.attempts
+
+
+async def test_chain_deadline_lets_the_third_classifier_answer(monkeypatch):
+    """Two classifiers time out; the third still gets its full try."""
+    monkeypatch.setattr(amd, "CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(amd, "STREAM_SETUP_MARGIN_SECONDS", 0.05)
+    first, second = Classifier("hang"), Classifier("hang")
+    third = Answers('{"label":"machine-ivr"}')
+    chain = amd.ClassifierFailover(first, second, third)
+    result = await ivr.classify_remote_speech(chain, "For sales, press one.")
+    assert first.cancelled and second.cancelled
+    assert len(third.calls) == 1
+    assert result == AMDCategory.MACHINE_IVR
+
+
+async def test_two_model_chain_gets_a_two_model_deadline(monkeypatch):
+    monkeypatch.setattr(amd, "CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(amd, "STREAM_SETUP_MARGIN_SECONDS", 0.01)
+    two = amd.ClassifierFailover(Classifier(), Classifier())
+    three = amd.ClassifierFailover(Classifier(), Classifier(), Classifier())
+    assert two.deadline == pytest.approx(2 * 0.06)
+    assert three.deadline == pytest.approx(3 * 0.06)
+
+
+async def test_chain_deadline_stops_a_check_that_outruns_every_try(monkeypatch):
+    """The chain deadline, not a caller cap, ends the whole check."""
+    monkeypatch.setattr(amd, "CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(amd, "STREAM_SETUP_MARGIN_SECONDS", 0.0)
+    chain = amd.ClassifierFailover(Classifier("hang"), Classifier())
+    monkeypatch.setattr(amd.ClassifierFailover, "deadline", 0.05)
+    async with asyncio.timeout(2):
+        result = await ivr.try_classify_remote_speech(chain, "For sales, press one.")
+    assert result is None
+    assert chain.primary.cancelled
+    assert not chain.backups[0].attempts
