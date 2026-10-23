@@ -81,8 +81,9 @@ class PhoneMenu:
     ``machine-unavailable`` end the call, ``machine-ivr`` keeps navigating.
     Speech that cannot be classified (an ``uncertain`` verdict, or VAD speech
     with no transcript) greets after ``GREET_TIMEOUT_SECONDS``: LiveKit's AMD
-    guide treats ``uncertain`` as a human. Only an explicit machine verdict
-    hangs up.
+    guide treats ``uncertain`` as a human. One exception, in ``run_amd``:
+    after a ``machine-unavailable`` verdict, an unsure recheck hangs up, and a
+    failed recheck keeps listening as a menu.
     https://docs.livekit.io/telephony/features/answering-machine-detection/
 
     After a ``machine-ivr`` verdict (a menu, hold or queue announcement), VAD
