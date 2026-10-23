@@ -2343,12 +2343,10 @@ async def _run_call(
         call_id=call_id,
     )
 
-    # AMD's clients. Its classifier also backs the phone menu check, so on
-    # that path it is closed at shutdown, after AMD and the last check end.
+    # AMD's clients. Its classifier also backs the phone menu check, so it
+    # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None
     amd_task: asyncio.Task[AMDPredictionEvent | None] | None = None
-    # Shutdown cancelled AMD: write its row, then stop.
-    amd_cancelled = False
 
     async def _shutdown_body() -> None:
         nonlocal shutting_down
@@ -2465,12 +2463,6 @@ async def _run_call(
                 raise
             # Shutdown stopped AMD: the call has already ended.
             amd_result = None
-            amd_cancelled = True
-        if models is not None and (
-            amd_result is None or amd_result.category != MACHINE_IVR_CATEGORY
-        ):
-            # Only the phone menu check uses the classifier after AMD.
-            await models.aclose()
     if not inbound:
         await write_call_event(
             call_id,
@@ -2487,7 +2479,9 @@ async def _run_call(
                 "delay": amd_result.delay if amd_result else None,
             },
         )
-    if amd_cancelled:
+    if shutting_down:
+        # The call ended during AMD or while its row was written. Shutdown
+        # closed AMD's classifier: never arm the phone menu with it.
         return
 
     async def hangup_no_answer(end_reason: str) -> None:
@@ -2512,10 +2506,6 @@ async def _run_call(
         return
 
     if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:
-        if shutting_down:
-            # Shutdown ran while the AMD row was written and closed AMD's
-            # classifier: never arm the phone menu with it.
-            return
         # A phone tree answered. Do NOT speak the greeting here: `session.say`
         # is TTS-only and never invokes the LLM, so the model would get no
         # turn in which to press a key, observed in production as the agent
@@ -2536,7 +2526,7 @@ async def _run_call(
             agent=agent,
             on_machine=hangup_machine,
             # AMD's classifier, built once per call (see build_amd_models).
-            classifier=amd_models.llm if amd_models is not None else None,
+            classifier=models.llm,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)

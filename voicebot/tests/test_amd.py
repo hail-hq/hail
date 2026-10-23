@@ -1068,10 +1068,13 @@ async def test_menu_check_reuses_amd_classifier_until_call_end(
     models.aclose.assert_awaited_once()
 
 
-@pytest.mark.parametrize("category", ["human", "uncertain", "machine-vm", None])
-async def test_classifier_closes_after_amd_when_no_menu_uses_it(
+@pytest.mark.parametrize(
+    "category", ["human", "uncertain", "machine-vm", "machine-unavailable", None]
+)
+async def test_classifier_closes_once_at_call_end_on_every_path(
     async_session, monkeypatch, category
 ):
+    """The classifier closes in one place: shutdown, once per call."""
     models = amd_mod.AMDModels(_GreetingLLM("human"), object())
     models.aclose = AsyncMock()
     _count_amd_models(monkeypatch, models)
@@ -1083,7 +1086,54 @@ async def test_classifier_closes_after_amd_when_no_menu_uses_it(
         amd_result=_prediction(category) if category else None,
         real_amd_models=True,
     )
-    assert seen["closed_before_shutdown"] >= 1
+    assert seen == {"closed_before_shutdown": 0}
+    models.aclose.assert_awaited_once()
+
+
+async def test_shutdown_started_before_amd_models_assigned_closes_them_once(
+    async_session, monkeypatch
+):
+    """Shutdown starts while the AMD clients are being built: it still
+    closes them, once, and the call never speaks."""
+    import sys
+
+    from hailhq.voicebot import agent as agent_mod
+    from hailhq.voicebot.agent import entrypoint
+
+    models = amd_mod.AMDModels(_GreetingLLM("human"), object())
+    models.aclose = AsyncMock()
+    holder: dict = {}
+
+    def build(*args, **kwargs):
+        # Shutdown is scheduled before amd_models is assigned.
+        holder["shutdown"] = asyncio.create_task(holder["ctx"].shutdown_callbacks[0]())
+        return models
+
+    monkeypatch.setattr(agent_mod, "build_amd_models", build)
+
+    async def run_with_shutdown(ctx):
+        holder["ctx"] = ctx
+        await entrypoint(ctx)
+        await holder["shutdown"]
+        ctx.shutdown_callbacks.clear()
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "entrypoint_under_test", run_with_shutdown
+    )
+
+    async def checking(session, call_id, **kwargs):
+        await asyncio.Event().wait()
+
+    call_id, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        run_amd_override=checking,
+        real_amd_models=True,
+    )
+    models.aclose.assert_awaited_once()
+    assert session.say_calls == []
+    assert len(await _amd_events(async_session, call_id)) == 1
 
 
 async def test_shutdown_stops_amd_before_closing_the_classifier(
@@ -1131,7 +1181,7 @@ async def test_shutdown_stops_amd_before_closing_the_classifier(
         run_amd_override=checking,
         real_amd_models=True,
     )
-    assert order[:2] == ["amd stopped", "closed"]
+    assert order == ["amd stopped", "closed"]
     assert session.say_calls == []
     events = await _amd_events(async_session, call_id)
     assert len(events) == 1
