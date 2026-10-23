@@ -472,7 +472,7 @@ async def run_amd(
     except TimeoutError:
         logger.warning(
             "call_id=%s answering machine detection timed out after %ss; "
-            "leaving pickup unconfirmed",
+            "opening the call without a verdict",
             call_id,
             DETECTION_TIMEOUT_SECONDS,
         )
