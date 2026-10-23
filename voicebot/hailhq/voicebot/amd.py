@@ -277,13 +277,6 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
     "machine-unavailable": CallEndReason.MACHINE_UNAVAILABLE,
 }
 
-# ``AMDPredictionEvent.reason`` when an unavailable verdict was rechecked and
-# the recheck gave a confident verdict.
-UNAVAILABLE_RECHECK_REASON = "unavailable_recheck"
-# ``AMDPredictionEvent.reason`` when an unavailable verdict was rechecked and
-# kept as a menu because the recheck failed, timed out, or was unsure.
-UNAVAILABLE_UNSURE_REASON = "unavailable_unsure"
-
 # Ceiling on how long a live-but-silent callee waits before hearing the
 # disclosure. A recipient waiting for us to speak should not have to say hello
 # before hearing anything. Classification uncertainty must not mean dead air.
@@ -372,16 +365,16 @@ async def settle_verdict(
         # A business welcome was wrongly labelled unavailable on call 70fc43e4.
         started = time.monotonic()
         verified = await classify_remote_speech(llm, result.transcript or "")
-        reason = UNAVAILABLE_RECHECK_REASON
         if verified == AMDCategory.UNCERTAIN:
-            # Keep listening silently; uncertainty cannot prove unavailability.
-            # A failed classifier also returns uncertain.
-            verified = AMDCategory.MACHINE_IVR
-            reason = UNAVAILABLE_UNSURE_REASON
+            # An unsure or failed recheck cannot clear the detector's
+            # verdict, so hang up as unavailable. A silence timer kept
+            # the line open instead, and broke on menu replies and long
+            # turns.
+            verified = AMDCategory.MACHINE_UNAVAILABLE
         result = AMDPredictionEvent(
             category=verified,
             transcript=result.transcript,
-            reason=reason,
+            reason="unavailable_recheck",
             speech_duration=result.speech_duration,
             delay=result.delay + time.monotonic() - started,
         )
@@ -508,8 +501,6 @@ __all__ = [
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
-    "UNAVAILABLE_RECHECK_REASON",
-    "UNAVAILABLE_UNSURE_REASON",
     "amd_end_reason",
     "ivr_navigation_instructions",
     "run_amd",
