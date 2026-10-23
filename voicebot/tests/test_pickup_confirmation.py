@@ -463,3 +463,21 @@ async def test_probe_that_runs_past_its_time_limit_is_stopped(monkeypatch):
     assert result.reason == confirmation.UNAVAILABLE_REASON
     assert heard is False
     assert_detached(session)
+
+
+@pytest.mark.parametrize("reply", ["Hi?", "Hello", "Yes."])
+async def test_one_word_reply_is_never_echo(reply):
+    """The default disclosure starts with "Hi"; a "Hi?" reply must count."""
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    session.say = Mock(return_value=Handle(lambda _h: session.transcribe(reply)))
+    task = asyncio.create_task(
+        confirmation.confirm_pickup(
+            session,
+            llm=llm,
+            prompt="Hi, this is an AI assistant. Hello, yes? Can you hear me?",
+        )
+    )
+    result, _heard = await task
+    assert result.category == AMDCategory.HUMAN
+    assert len(llm.calls) == 1

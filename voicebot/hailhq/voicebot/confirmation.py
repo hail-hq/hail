@@ -117,8 +117,13 @@ def _words(text: str) -> set[str]:
 
 
 def is_probe_echo(text: str, prompt: str) -> bool:
-    """Every word is in our own probe: the line or STT echoed it back."""
-    return _words(text) <= _words(prompt)
+    """Two or more words, all from our own probe: the line echoed it back.
+
+    One word is never echo: a reply such as "Hi?" may also be a word of the
+    disclosure ("Hi, this is an AI...").
+    """
+    words = _words(text)
+    return len(words) >= 2 and words <= _words(prompt)
 
 
 def probe_line(language: str | None) -> str:
