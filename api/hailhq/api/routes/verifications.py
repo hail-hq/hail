@@ -732,7 +732,10 @@ def _duplicate_detail(subject_type: str, subject_name: str | None) -> str:
     detail is not logged."""
     who = "a person" if subject_type == "person" else "a company"
     if subject_name is None:
-        return f"You already have a verification as {who} for this number type."
+        return (
+            f"You already have a verification as {who} for this number type "
+            "with no name on it."
+        )
     return (
         f"You already have a verification for {subject_name} as {who} "
         "for this number type."
@@ -841,7 +844,9 @@ async def create_verification(
     example the business name, or the first and last name) and is shown
     back as `subject_name`. For a number you may hold several verifications
     of each subject type (several people, several companies); a second live
-    one of the same subject type and the same name is a 409.
+    one of the same subject type and the same name is a 409, and so is a
+    second live one of the same subject type when the form holds no name.
+    A 409 comes before your files are checked and before anything is filed.
 
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
@@ -911,15 +916,62 @@ async def create_verification(
 
     if sub.purpose == "sms":
         # Held until the row is saved: a second filing at the same time
-        # waits here, then sees the first row and gets 409 before any
-        # carrier call (two filings would register two brands).
+        # waits here, then sees the first row and gets 409.
         await org_lock(db, principal.organization_id)
+    # The form for this offer. A read from the carrier; nothing is filed.
+    # Some plug-ins need its field labels to find the name below.
     requirements = await _requirements(
         provider, sub.country_code, sub.number_type, sub.subject_type, where="body"
     )
     if not requirements.required:
         raise unprocessable(
             "this number does not need verification", loc=["body", "number_type"]
+        )
+
+    # The name the customer typed, as the plug-in reads it from this form.
+    # Some plug-ins read it from a document's fields; none reads the files,
+    # so they are not read yet. Stored on the row; never logged.
+    subject_name = provider.subject_name(
+        requirements,
+        sub.fields,
+        sub.address,
+        {
+            slot: DocumentInput(option=value.option, fields=value.fields)
+            for slot, value in sub.documents.items()
+        },
+    )
+
+    # Every 409 comes before the uploads are checked and copied, and before
+    # any filing with the carrier. Number: several live verifications per
+    # subject type, but not the same name twice, and only one with no name.
+    # SMS: one live registration. (The live unique indexes on carrier_verifications.)
+    live = select(CarrierVerification).where(
+        CarrierVerification.organization_id == principal.organization_id,
+        CarrierVerification.provider == provider_name,
+        CarrierVerification.purpose == sub.purpose,
+        CarrierVerification.country_code == sub.country_code,
+        CarrierVerification.number_type == sub.number_type,
+        CarrierVerification.state.in_(_LIVE_STATES),
+    )
+    if sub.purpose == "number":
+        live = live.where(
+            CarrierVerification.subject_type == sub.subject_type,
+            (
+                CarrierVerification.subject_name.is_(None)
+                if subject_name is None
+                else func.lower(CarrierVerification.subject_name)
+                == func.lower(subject_name)
+            ),
+        )
+    existing = (await db.execute(live)).scalars().first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                _duplicate_detail(sub.subject_type, subject_name)
+                if sub.purpose == "number"
+                else f"a verification already exists ({existing.state}); id {existing.id}"
+            ),
         )
 
     documents: dict[str, DocumentInput] = {}
@@ -932,43 +984,6 @@ async def create_verification(
                 await _read_file(upload)
                 if upload is not None and hasattr(upload, "read")
                 else None
-            ),
-        )
-    # The name the customer typed, as the plug-in reads it from this form.
-    # Stored on the row; never logged.
-    subject_name = provider.subject_name(
-        requirements, sub.fields, sub.address, documents
-    )
-
-    # Number: several live verifications per subject type, but not the same
-    # name twice. SMS: one live registration. (The live unique indexes on
-    # carrier_verifications.)
-    live = select(CarrierVerification).where(
-        CarrierVerification.organization_id == principal.organization_id,
-        CarrierVerification.provider == provider_name,
-        CarrierVerification.purpose == sub.purpose,
-        CarrierVerification.country_code == sub.country_code,
-        CarrierVerification.number_type == sub.number_type,
-        CarrierVerification.state.in_(_LIVE_STATES),
-    )
-    if sub.purpose == "number":
-        # Without a name there is nothing to compare: no 409.
-        live = live.where(
-            CarrierVerification.subject_type == sub.subject_type,
-            func.lower(CarrierVerification.subject_name) == func.lower(subject_name),
-        )
-    existing = (
-        (await db.execute(live)).scalars().first()
-        if sub.purpose != "number" or subject_name is not None
-        else None
-    )
-    if existing is not None:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                _duplicate_detail(sub.subject_type, subject_name)
-                if sub.purpose == "number"
-                else f"a verification already exists ({existing.state}); id {existing.id}"
             ),
         )
 

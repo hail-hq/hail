@@ -1813,7 +1813,6 @@ class CarrierVerification(Base):
         ),
         # Several live number verifications per subject type (several people,
         # several companies), but never the same name twice for one kind.
-        # One live SMS registration.
         Index(
             "carrier_verifications_number_live_uniq",
             "organization_id",
@@ -1828,6 +1827,21 @@ class CarrierVerification(Base):
                 "AND subject_name IS NOT NULL"
             ),
         ),
+        # A form with no name: one live number verification per subject type.
+        Index(
+            "carrier_verifications_number_nameless_live_uniq",
+            "organization_id",
+            "provider",
+            "country_code",
+            "number_type",
+            "subject_type",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'number' AND state NOT IN ('cancelled','rejected') "
+                "AND subject_name IS NULL"
+            ),
+        ),
+        # One live SMS registration.
         Index(
             "carrier_verifications_sms_live_uniq",
             "organization_id",

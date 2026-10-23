@@ -103,11 +103,11 @@ class QuoteOffer(BaseModel):
     )
     verifications: list[OfferVerification] = Field(
         default_factory=list,
-        description="Every verification of your organization for this offer's country and number type, leaving out cancelled and rejected ones: approved first, then newest first. Pass one's `id` as `verification_id` to POST /numbers to buy with it.",
+        description="The verifications you can buy this offer with, approved first, then newest first: yours of a subject type in `subject_types` that are under review, and the approved ones the carrier still accepts for this offer. Once one is approved, pass its `id` as `verification_id` to POST /numbers to buy with it.",
     )
     verification: OfferVerification | None = Field(
         default=None,
-        description="Deprecated: read `verifications`. The verification a purchase without verification_id would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.",
+        description="Deprecated: read `verifications`. The verification a purchase without verification_id would use: the one approved verification in `verifications`, else the newest one there; null when there is none.",
     )
     by_request: bool = Field(
         default=False,

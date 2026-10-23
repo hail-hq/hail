@@ -2917,10 +2917,10 @@ type QuoteOffer struct {
 	// SubjectTypes Who can verify for this number: 'person' (you), 'business' (your company), or both. Empty when no verification is needed.
 	SubjectTypes *[]QuoteOfferSubjectTypes `json:"subject_types,omitempty"`
 
-	// Verification Deprecated: read `verifications`. The verification a purchase without verification_id would use: your one approved verification, else the newest one that is not cancelled or rejected; null when there is none.
+	// Verification Deprecated: read `verifications`. The verification a purchase without verification_id would use: the one approved verification in `verifications`, else the newest one there; null when there is none.
 	Verification *OfferVerification `json:"verification,omitempty"`
 
-	// Verifications Every verification of your organization for this offer's country and number type, leaving out cancelled and rejected ones: approved first, then newest first. Pass one's `id` as `verification_id` to POST /numbers to buy with it.
+	// Verifications The verifications you can buy this offer with, approved first, then newest first: yours of a subject type in `subject_types` that are under review, and the approved ones the carrier still accepts for this offer. Once one is approved, pass its `id` as `verification_id` to POST /numbers to buy with it.
 	Verifications *[]OfferVerification `json:"verifications,omitempty"`
 }
 

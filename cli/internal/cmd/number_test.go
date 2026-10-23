@@ -258,7 +258,8 @@ func TestNumberAcquire_NoReadyOfferDoesNotBuy(t *testing.T) {
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"numbers", "acquire", "--country", "US",
 	)
-	if err == nil || !strings.Contains(err.Error(), "no number ready to buy") {
+	if err == nil || !strings.Contains(err.Error(), "no number ready to buy") ||
+		!strings.Contains(err.Error(), "hail numbers quotes --country US --type local") {
 		t.Fatalf("err = %v", err)
 	}
 	if srv.buys != 0 {
@@ -738,5 +739,99 @@ func TestNumberGet_PrintsVerifiedName(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Verified for: Ada Lovelace (person)") {
 		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+func TestNumberQuotes_PrintsOffersAndVerifications(t *testing.T) {
+	bought := samplePhoneNumber("11111111-1111-1111-1111-111111111111", "+447700900001", []string{"voice"})
+	offer := sampleOffer(quoteCheap, 125, 50, "ready")
+	offer.NumberType = "mobile"
+	name := "Acme Ltd"
+	named := client.OfferVerification{
+		Id:          openapi_types.UUID(uuid.MustParse("3c9a7d10-0000-4000-8000-000000000001")),
+		State:       "approved",
+		SubjectType: "business",
+		SubjectName: &name,
+	}
+	nameless := client.OfferVerification{
+		Id:          openapi_types.UUID(uuid.MustParse("3c9a7d10-0000-4000-8000-000000000002")),
+		State:       "submitted",
+		SubjectType: "person",
+	}
+	offer.Verifications = &[]client.OfferVerification{named, nameless}
+	srv := newAcquireServer(t, []client.QuoteOffer{offer}, bought)
+	env := map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL}
+
+	stdout, _, err := runRoot(t, env,
+		"numbers", "quotes", "--country", "GB", "--type", "mobile", "--voice-only",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.buys != 0 {
+		t.Fatalf("quotes must not buy, got %d purchases", srv.buys)
+	}
+	var quote client.NumberQuoteRequest
+	if err := json.Unmarshal(srv.quoteBody, &quote); err != nil {
+		t.Fatalf("quote body: %v", err)
+	}
+	if quote.CountryCode != "GB" || quote.NumberType == nil || *quote.NumberType != "mobile" ||
+		len(quote.Capabilities) != 1 || quote.Capabilities[0] != "voice" {
+		t.Fatalf("quote request = %+v", quote)
+	}
+	for _, want := range []string{
+		"+14155550000", "mobile", "$1.25/mo + $0.50 setup", "ready", "quote " + quoteCheap,
+		"verification 3c9a7d10-0000-4000-8000-000000000001  Acme Ltd  company  approved",
+		"verification 3c9a7d10-0000-4000-8000-000000000002  (no name)  person  submitted",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+
+	stdout, _, err = runRoot(t, env, "numbers", "quotes", "--country", "GB", "--type", "mobile", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got client.NumberQuotesResponse
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("--json output is not the response: %v\n%s", err, stdout)
+	}
+	if len(got.Offers) != 1 || got.Offers[0].Verifications == nil || len(*got.Offers[0].Verifications) != 2 {
+		t.Fatalf("--json offers = %+v", got.Offers)
+	}
+}
+
+func TestNumberAcquire_VerificationIDErrorPointsAtQuotes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"loc":["body","verification_id"],"msg":"You have more than one verification for this number. Pass verification_id.","type":"value_error"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "GB", "--type", "mobile", "--quote-id", quoteCheap,
+	)
+	if err == nil || !strings.Contains(err.Error(), "Pass verification_id") ||
+		!strings.Contains(err.Error(), "hail numbers quotes --country GB --type mobile") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNumberAcquire_HintWithoutTypeDoesNotGuessIt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"loc":["body","verification_id"],"msg":"Pass verification_id.","type":"value_error"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"numbers", "acquire", "--country", "GB", "--quote-id", quoteCheap, "--city", "New York",
+	)
+	want := "hail numbers quotes --country GB --type <local|mobile|toll_free|national> --city 'New York'"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v", err)
 	}
 }
