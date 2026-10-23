@@ -2479,10 +2479,6 @@ async def _run_call(
                 "delay": amd_result.delay if amd_result else None,
             },
         )
-    if shutting_down:
-        # The call ended during AMD or while its row was written. Shutdown
-        # closed AMD's classifier: never arm the phone menu with it.
-        return
 
     async def hangup_no_answer(end_reason: str) -> None:
         # Voicemail or a dead mailbox, hang up without speaking. We never
@@ -2503,6 +2499,11 @@ async def _run_call(
 
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         await hangup_machine(amd_result.category)
+        return
+
+    if shutting_down:
+        # The call ended during AMD or while its row was written. Shutdown
+        # closes AMD's classifier: never arm the phone menu with it.
         return
 
     if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:

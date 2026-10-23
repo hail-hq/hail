@@ -1090,10 +1090,10 @@ async def test_classifier_closes_once_at_call_end_on_every_path(
     models.aclose.assert_awaited_once()
 
 
-async def test_shutdown_started_before_amd_models_assigned_closes_them_once(
+async def test_shutdown_scheduled_during_amd_build_closes_the_classifier_once(
     async_session, monkeypatch
 ):
-    """Shutdown starts while the AMD clients are being built: it still
+    """Shutdown is scheduled while the AMD clients are being built: it still
     closes them, once, and the call never speaks."""
     import sys
 
@@ -1187,6 +1187,61 @@ async def test_shutdown_stops_amd_before_closing_the_classifier(
     assert len(events) == 1
     assert events[0].payload["reason"] == "detection_failed"
     assert events[0].payload["category"] is None
+
+
+async def test_machine_verdict_racing_shutdown_keeps_its_end_reason(
+    async_session, monkeypatch
+):
+    """Shutdown starts while the amd_result row is written: the machine
+    verdict still hangs up and is stored as machine_unavailable."""
+    import sys
+
+    from hailhq.voicebot import agent as agent_mod
+    from hailhq.voicebot.agent import entrypoint
+
+    holder: dict = {}
+    write = agent_mod.write_call_event
+
+    async def write_then_shut_down(call_id, kind, payload):
+        await write(call_id, kind, payload)
+        if kind == "amd_result":
+            holder["shutdown"] = asyncio.create_task(
+                holder["ctx"].shutdown_callbacks[0]()
+            )
+            await asyncio.sleep(0)
+
+    monkeypatch.setattr(agent_mod, "write_call_event", write_then_shut_down)
+    reconcile = agent_mod.reconcile_sip_rejection
+
+    async def slow_reconcile(*args):
+        # Keeps the shutdown running until the entrypoint has resumed.
+        await asyncio.sleep(0.05)
+        await reconcile(*args)
+
+    monkeypatch.setattr(agent_mod, "reconcile_sip_rejection", slow_reconcile)
+
+    async def run_with_shutdown(ctx):
+        holder["ctx"] = ctx
+        await entrypoint(ctx)
+        await holder["shutdown"]
+        ctx.shutdown_callbacks.clear()
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "entrypoint_under_test", run_with_shutdown
+    )
+    call_id, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("machine-unavailable")
+    )
+    end_reason = CallEndReason.MACHINE_UNAVAILABLE.value
+    assert session.say_calls == []
+    assert ctx.shutdown_calls == [end_reason]
+    assert len(await _amd_events(async_session, call_id)) == 1
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status == "no_answer"
+    assert refreshed.end_reason == end_reason
 
 
 @pytest.mark.parametrize(
