@@ -8,9 +8,7 @@ import logfire
 from hailhq.core.telemetry import configure_telemetry, flush_telemetry, instrument
 from hailhq.mcp.auth import AuthMode, select_auth_mode
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import register_tools
-
-from mcp.server.fastmcp import FastMCP
+from hailhq.mcp.tools import TaggedFastMCP, register_tools
 
 
 async def serve() -> None:
@@ -22,7 +20,7 @@ async def serve() -> None:
 
     try:
         async with HailClient() as client:
-            server = FastMCP(name="hail")
+            server = TaggedFastMCP(name="hail")
             register_tools(server, mode=mode, singleton=client)
             await server.run_stdio_async()
     finally:

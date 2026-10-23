@@ -10,6 +10,7 @@ LOGFIRE_ENVIRONMENT=production
 LOGFIRE_BASE_URL=https://logfire-eu.pydantic.dev
 LOGFIRE_SERVICE_VERSION=<release SHA>
 HAIL_LOGFIRE_SAMPLE_RATE=1.0
+HAIL_LOGFIRE_CAPTURE_CONTENT=true
 ```
 
 For local development, select the same project with the CLI and point
@@ -30,7 +31,55 @@ HTTP, and database instrumentation. The API injects W3C trace context into
 outbound LiveKit dispatch metadata. SMS work is correlated by SMS, agent and
 organization IDs; it starts a new trace when claimed from the database.
 
-The common export boundary removes conversation content, tool arguments/results,
+## Trace tags
+
+Every span and log of a call, SMS, email or MCP tool call carries these
+attributes. Child spans (Hail and native LiveKit) and logs get them from the
+scope, set with `tag_context()` in
+[`telemetry_identity.py`](../../core/hailhq/core/telemetry_identity.py).
+
+| Attribute | Values |
+| --- | --- |
+| `hail.channel` | `voice`, `sms`, `email`, `mcp`, `api` |
+| `hail.direction` | `inbound`, `outbound` |
+| `hail.call_id`, `hail.sms_id`, `hail.email_id`, `hail.agent_id` | record ids |
+| `hail.from`, `hail.to` | the two parties |
+| `mcp.tool.name` | the MCP tool called |
+| `organization_id`, `organization_name` | the organization |
+
+The Hail side (`hail.from` on outbound, `hail.to` on inbound) is the full
+number or address. The other party is masked: a phone keeps its country code
+and last 4 digits (`+46 ***4567`), an email keeps its domain
+(`***@example.com`). The trace's root span also gets Logfire tags, for
+example `voice` and `outbound`, shown in the Live view.
+
+```sql
+SELECT start_timestamp, span_name, attributes->>'hail.to' AS to_party
+FROM records
+WHERE attributes->>'hail.channel' = 'voice'
+  AND attributes->>'hail.direction' = 'inbound'
+ORDER BY start_timestamp DESC LIMIT 20
+```
+
+## LLM content
+
+`HAIL_LOGFIRE_CAPTURE_CONTENT=true` exports these keys in full, not masked:
+`gen_ai.system_instructions`, `gen_ai.input.messages`,
+`gen_ai.output.messages`, `gen_ai.tool.call.arguments`,
+`gen_ai.tool.call.result` and `lk.pii.user_transcript`. Logfire shows the
+`llm_request` spans of a voice call or SMS reply in its LLM view: the system
+prompt, the conversation and the reply. Tool definitions stay dropped. The
+default is `false`: those keys are dropped at export.
+
+There is no attribute length limit: the OpenTelemetry SDK default is
+unlimited and Hail does not set `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, so
+long prompts are not cut. LiveKit sends the content unless the LiveKit Cloud
+project turns on redaction (LiveKit Cloud dashboard), which strips it for
+every exporter.
+
+## Export filter
+
+Unless content capture is on, the common export boundary removes conversation content, tool arguments/results,
 MCP payloads, SQL text, URL credentials/query strings/fragments, and GenAI content
 events. Authenticated actor identity fields intentionally retain the acting user's
 email and organization name; these fields propagate into child spans and logs.
@@ -40,7 +89,11 @@ phone numbers and credential patterns. Free-form application logs must still
 avoid sensitive data; regex redaction cannot identify arbitrary personal prose.
 Console logs and database audit records retain their existing behavior.
 
-Health probes and duplicate Uvicorn access logs are excluded. Empty SMS claims
+Health probes and duplicate Uvicorn access logs are excluded. On `hail-mcp`,
+the discovery spans (`ping`, `tools/list`, `prompts/list`, `resources/list`,
+`resources/templates/list`), `GET /` (the event stream), `/.well-known/*`,
+successful `POST /` envelopes (a `POST /` with status 400 or more is kept)
+and 404s on unknown paths (scanners) are not exported; `tools/call` is. Empty SMS claims
 are suppressed; other worker polling SQL remains visible. Sampling applies to
 traces and logs within them; standalone logs are retained. At 1.0 nothing is
 sampled out. All HTTP export uses the EU endpoint, with five-second network

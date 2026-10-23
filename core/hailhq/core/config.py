@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     logfire_environment: str = "development"
     logfire_service_version: str = ""
     hail_logfire_sample_rate: float = Field(default=1.0, ge=0, le=1)
+    # Export LLM prompts, messages, replies and the caller transcript unmasked.
+    hail_logfire_capture_content: bool = False
 
     # LLM providers
     openai_api_base_url: str = "https://api.openai.com/v1"

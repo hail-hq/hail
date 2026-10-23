@@ -67,10 +67,12 @@ from hailhq.core.telemetry import (
     telemetry_enabled,
 )
 from hailhq.core.telemetry_identity import (
+    bind_root,
     get_identity,
     identity_scope,
     resolve_identity,
     set_identity,
+    tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
@@ -1914,6 +1916,8 @@ async def entrypoint(ctx: JobContext) -> None:
         await _run_call(ctx)
         return
     connect_livekit_tracing()
+    # LiveKit's job_entrypoint span is current here: tag_context() tags it too.
+    bind_root()
     try:
         raw = json.loads(ctx.job.metadata or "{}")
     except ValueError:
@@ -1922,22 +1926,33 @@ async def entrypoint(ctx: JobContext) -> None:
     parent = TraceContextTextMapPropagator().extract(
         carrier if isinstance(carrier, dict) else {}
     )
+    if not trace.get_current_span(parent).get_span_context().is_valid:
+        # Inbound: no API trace to join, so stay under job_entrypoint.
+        parent = None
     identity = raw.get("hail_actor_identity", {}) if isinstance(raw, dict) else {}
     identity = identity if isinstance(identity, dict) else {}
-    try:
-        # The dispatch carries ids only; look up the org name and email here.
-        org_id = UUID(str(identity["organization_id"]))
-        user_id = UUID(str(identity["user_id"])) if identity.get("user_id") else None
-        async with session_scope() as db:
-            identity = {
-                **identity,
-                **await resolve_identity(
-                    db, org_id, user_id, actor_kind=identity.get("actor_kind", "agent")
-                ),
-            }
-    except Exception:
-        logger.warning("actor telemetry lookup failed")
-    with identity_scope(identity if isinstance(identity, dict) else {}):
+    # Inbound dispatches carry no organization yet; _run_call sets it once
+    # the call is opened.
+    if identity.get("organization_id"):
+        try:
+            # The dispatch carries ids only; look up the org name and email here.
+            org_id = UUID(str(identity["organization_id"]))
+            user_id = (
+                UUID(str(identity["user_id"])) if identity.get("user_id") else None
+            )
+            async with session_scope() as db:
+                identity = {
+                    **identity,
+                    **await resolve_identity(
+                        db,
+                        org_id,
+                        user_id,
+                        actor_kind=identity.get("actor_kind", "agent"),
+                    ),
+                }
+        except Exception:
+            logger.warning("actor telemetry lookup failed")
+    with identity_scope(identity):
         await _run_traced_call(ctx, parent)
 
 
@@ -2006,6 +2021,14 @@ async def _run_call(
             "organization_id", str(metadata.get("organization_id", ""))
         )
         telemetry_span.set_attribute("agent_id", str(metadata.get("agent_id", "")))
+        tag_context(
+            channel="voice",
+            direction=metadata.get("direction") or "outbound",
+            agent_id=metadata.get("agent_id"),
+            call_id=call_id,
+            from_=metadata.get("from_e164"),
+            to=metadata.get("to_e164"),
+        )
 
     # Captured terminal status / end_reason set by the SIP-participant
     # disconnect handler below. Read by `_shutdown` to override the default

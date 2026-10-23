@@ -69,6 +69,8 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.sms_registration_gate import us_registration_block
+from hailhq.core.telemetry import bind_organization
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
     MAX_REPLIES_PER_THREAD,
@@ -149,6 +151,21 @@ async def _load_call_for_update(db: AsyncSession, call_id: UUID) -> Call | None:
     return (
         await db.execute(select(Call).where(Call.id == call_id).with_for_update())
     ).scalar_one_or_none()
+
+
+async def _tag_call(db: AsyncSession, call: Call | None) -> None:
+    """Tag this request like the voicebot trace that called it."""
+    if call is None:
+        return
+    await bind_organization(db, call.organization_id)
+    tag_context(
+        channel="voice",
+        direction=call.direction,
+        agent_id=call.agent_id,
+        call_id=call.id,
+        from_=call.from_e164,
+        to=call.to_e164,
+    )
 
 
 async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
@@ -246,6 +263,7 @@ async def agent_send_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentSendResponse:
     call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
     if call is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
     org = call.organization_id
@@ -427,6 +445,14 @@ async def agent_reply_sms(
     if inbound is None or inbound.direction != "inbound":
         return AgentReplySmsResponse(ok=False, state="failed", reason="unknown_sms")
     org = inbound.organization_id
+    await bind_organization(db, org)
+    tag_context(
+        channel="sms",
+        direction="inbound",
+        sms_id=inbound.id,
+        from_=inbound.from_e164,
+        to=inbound.to_e164,
+    )
     number = (
         await db.get(PhoneNumber, inbound.to_number_id)
         if inbound.to_number_id
@@ -538,6 +564,7 @@ async def agent_send_email(
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentSendResponse:
     call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
     if call is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
     org = call.organization_id
@@ -770,6 +797,7 @@ async def agent_handover(
 ) -> AgentHandoverResponse:
     deny = AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
     call = await db.get(Call, body.call_id)
+    await _tag_call(db, call)
     if call is None or call.status != "in_progress":
         return deny
     if await has_answered_handover(db, call.id):
@@ -828,6 +856,7 @@ async def agent_handover_result(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
     call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
     if call is None:
         return {"ok": False}
     # The dial already happened. Record it even if the person left the org

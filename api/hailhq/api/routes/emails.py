@@ -92,6 +92,7 @@ from hailhq.core.schemas import (
     EmailStatus,
     EmailSummary,
 )
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.unsubscribe import build_unsubscribe_url
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import build_event_data, fanout_email_event
@@ -594,6 +595,13 @@ async def create_email(
     db.add(email)
     await db.commit()
     await db.refresh(email)
+    tag_context(
+        channel="email",
+        direction="outbound",
+        email_id=email.id,
+        from_=email.from_address,
+        to=email.to_addresses[0] if email.to_addresses else None,
+    )
 
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(

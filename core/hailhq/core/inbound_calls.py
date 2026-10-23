@@ -280,6 +280,8 @@ async def _answer_or_refuse(
             "direction": "inbound",
             "organization_id": str(org_id),
             "agent_id": str(agent.id),
+            "from_e164": attrs.caller,
+            "to_e164": attrs.dialed,
             "max_duration_seconds": max_duration,
             "voice_config": dict(agent.voice_config),
             "system_prompt": agent.system_prompt,
