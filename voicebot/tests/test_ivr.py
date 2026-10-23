@@ -175,7 +175,7 @@ async def test_classifier_timeout_is_bounded(monkeypatch):
             pass
 
     menu.llm.chat = lambda **kwargs: SlowStream()
-    monkeypatch.setattr(classify, "CLASSIFIER_REQUEST_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(classify, "CLASSIFY_TIMEOUT_SECONDS", 0.01)
     result = await asyncio.wait_for(menu.observe("Hello"), 0.2)
     assert entered.is_set()
     assert result == AMDCategory.UNCERTAIN
@@ -204,6 +204,38 @@ async def test_aclose_waits_for_a_running_check(monkeypatch):
     finish.set()
     await asyncio.wait_for(closing, 1)
     assert check.done()
+
+
+async def test_aclose_stops_new_checks_and_drops_a_running_verdict(monkeypatch):
+    """Shutdown: a check that ends after aclose starts greets nobody, and no
+    new check or greeting timer starts."""
+    from hailhq.voicebot import ivr
+
+    menu, outcomes = menu_for("human")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def slow(*args, **kwargs):
+        calls.append(args)
+        entered.set()
+        await finish.wait()
+        return AMDCategory.HUMAN
+
+    monkeypatch.setattr(ivr, "classify_remote_speech", slow)
+    check = asyncio.create_task(menu.observe("Hello?"))
+    await entered.wait()
+    closing = asyncio.create_task(menu.aclose())
+    await asyncio.sleep(0)
+    assert not menu.active
+    assert await menu.observe("Hello again?") == AMDCategory.UNCERTAIN
+    menu.finished_speaking()
+    menu.transcript_progress("Hello")
+    assert menu._timeout_task is None
+    finish.set()
+    await asyncio.wait_for(closing, 1)
+    assert await check == AMDCategory.UNCERTAIN
+    assert len(calls) == 1
+    assert outcomes == []
 
 
 async def test_cancellation_cannot_release_greeting(monkeypatch):

@@ -13,18 +13,17 @@ from livekit.agents.voice.amd import AMDCategory
 CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
 # Provider request timeout. Google rejects a deadline under 10s.
 CLASSIFIER_REQUEST_TIMEOUT_SECONDS = 10.0
-# Time to open each classifier's stream, on top of its try.
-STREAM_SETUP_MARGIN_SECONDS = 0.5
+# Total for one check: the first classifier gets its 3s try, the next one
+# gets the rest.
+CLASSIFY_TIMEOUT_SECONDS = 5.0
 
 
 async def classify_speech(llm: LLM, prompt: str, *messages: str) -> AMDCategory | None:
     """The category the model saved, or None when it saved none.
 
     Provider errors, bad labels and timeouts raise. Callers log errors by
-    type only, since provider error bodies can hold the transcript.
-
-    A ``ClassifierFailover`` bounds the wait with its one chain deadline.
-    Any other LLM (a customer's own) is capped at its request timeout here.
+    type only, since provider error bodies can hold the transcript. The
+    whole check is capped at ``CLASSIFY_TIMEOUT_SECONDS``.
     """
 
     @function_tool
@@ -35,10 +34,8 @@ async def classify_speech(llm: LLM, prompt: str, *messages: str) -> AMDCategory 
     ctx.add_message(role="system", content=prompt)
     for message in messages:
         ctx.add_message(role="user", content=message)
-    # A ClassifierFailover has a ``deadline`` and enforces it itself.
-    limit = None if hasattr(llm, "deadline") else CLASSIFIER_REQUEST_TIMEOUT_SECONDS
     async with (
-        asyncio.timeout(limit),
+        asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS),
         llm.chat(
             chat_ctx=ctx,
             tools=[save_prediction],

@@ -25,16 +25,10 @@ from hailhq.core.config import settings
 from hailhq.voicebot.classify import (
     CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
     CLASSIFIER_REQUEST_TIMEOUT_SECONDS,
-    STREAM_SETUP_MARGIN_SECONDS,
 )
 from hailhq.voicebot.ivr import try_classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
-from hailhq.voicebot.pipeline import (
-    ResolvedLayer,
-    build_stt,
-    house_anthropic,
-    house_anthropic_ready,
-)
+from hailhq.voicebot.pipeline import ResolvedLayer, build_stt, house_llm, org_llm
 from livekit import rtc
 from livekit.agents import APIConnectOptions, APIError
 from livekit.agents.llm import LLM, ChatContext, LLMStream, Tool, ToolChoice
@@ -42,7 +36,7 @@ from livekit.agents.stt import STT
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN, NotGivenOr
 from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMD, AMDCategory, AMDPredictionEvent
-from livekit.plugins import deepgram, google, openai
+from livekit.plugins import deepgram, openai
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -88,15 +82,6 @@ class ClassifierFailover(LLM):
         self.backups = backups
 
     @property
-    def deadline(self) -> float:
-        """One deadline for the whole chain, so the last classifier still
-        gets its full try. Callers add no cap of their own."""
-        count = 1 + len(self.backups)
-        return count * (
-            CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS + STREAM_SETUP_MARGIN_SECONDS
-        )
-
-    @property
     def model(self) -> str:
         return self.primary.model
 
@@ -131,10 +116,6 @@ class _ClassifierFailoverStream(LLMStream):
         self._tool_choice = tool_choice
 
     async def _run(self) -> None:
-        async with asyncio.timeout(self._failover.deadline):
-            await self._try_each()
-
-    async def _try_each(self) -> None:
         models = (self._failover.primary, *self._failover.backups)
         for model in models:
             sent = False
@@ -212,40 +193,38 @@ def build_classifier(
 
     These checks force their tool. Haiku 5.5 (``ANTHROPIC_BACKUP_MODEL``),
     OpenAI and Gemini accept that; Sonnet 5.5 does not, so the call's chain
-    is never used. A customer's own LLM is their choice and is used as is.
-    With no house classifier, this returns None and the checks are skipped
+    is never used: an org's fallback chain also holds Sonnet 5.5. A per-call
+    LLM, or an org LLM without fallback, is the customer's choice and is used
+    alone. An org LLM with fallback goes first, then the house checkers.
+    With no classifier, this returns None and the checks are skipped
     (docs/operations/voice-llm.md). Independent clients: closing them must
     not close the conversation's providers.
     """
-    if llm_override or "llm" in (org_cfgs or {}):
+    org = (org_cfgs or {}).get("llm")
+    if llm_override or (org is not None and not org.fallback_enabled):
         # run_amd skips AMD when this is not a plain LLM.
         return session.llm, []  # type: ignore[return-value]
-    builders: list[Callable[[], LLM]] = []
-    if settings.anthropic_backup_model and house_anthropic_ready():
-        builders.append(lambda: house_anthropic(settings.anthropic_backup_model))
-    if settings.openai_api_key and settings.openai_model:
-        builders.append(
-            lambda: openai.LLM(
-                model=settings.openai_model, api_key=settings.openai_api_key
-            )
-        )
-    if settings.google_api_key and settings.google_amd_model:
-        builders.append(
-            lambda: google.LLM(
-                model=settings.google_amd_model, api_key=settings.google_api_key
-            )
-        )
+    builders: list[Callable[[], LLM | None]] = [
+        lambda: house_llm("anthropic", settings.anthropic_backup_model),
+        lambda: house_llm("openai", settings.openai_model),
+        lambda: house_llm("google", settings.google_amd_model),
+    ]
+    if org is not None:
+        builders.insert(0, lambda: org_llm(org))
     classifiers: list[LLM] = []
     for build in builders:
         try:
-            classifiers.append(build())
+            llm = build()
         except Exception:
             logger.exception("AMD classifier setup failed; skipping it")
+            continue
+        if llm is not None:
+            classifiers.append(llm)
     if not classifiers:
-        logger.warning("no house classifier has a model and a key; skipping checks")
+        logger.warning("no classifier has a model and a key; skipping checks")
         return None, []
     # One try each, without spending the detection budget retrying an
-    # overloaded provider. Wrapped even when alone, for the chain deadline.
+    # overloaded provider. Wrapped even when alone, for its 3s per try.
     return ClassifierFailover(*classifiers), classifiers
 
 

@@ -857,8 +857,8 @@ def arm_deferred_greeting(
     """Release the greeting once completed speech is not a recorded menu.
 
     ``classifier`` is AMD's classifier (``AMDModels.llm``, built once per
-    call by ``build_classifier``), never the call's chain. None skips the menu check: speech stays uncertain and greets after
-    the bounded wait.
+    call by ``build_classifier``), never the call's chain. None skips the
+    menu check: speech stays uncertain and greets after the bounded wait.
 
     A keypress and subsequent VAD/transcript used to be treated as a handoff.
     A multi-stage menu satisfies both, so classification now runs in the
@@ -2512,6 +2512,10 @@ async def _run_call(
         return
 
     if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:
+        if shutting_down:
+            # Shutdown ran while the AMD row was written and closed AMD's
+            # classifier: never arm the phone menu with it.
+            return
         # A phone tree answered. Do NOT speak the greeting here: `session.say`
         # is TTS-only and never invokes the LLM, so the model would get no
         # turn in which to press a key, observed in production as the agent

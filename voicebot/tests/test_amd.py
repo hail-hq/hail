@@ -420,7 +420,7 @@ def _break_checker(monkeypatch, session, failure: str) -> None:
         session.llm.chat = Mock(side_effect=RuntimeError("classifier failed"))
     elif failure == "timeout":
 
-        # The classifier chain hit its deadline.
+        # The check hit its five-second total.
         monkeypatch.setattr(
             ivr_mod, "classify_speech", AsyncMock(side_effect=TimeoutError)
         )
@@ -517,7 +517,11 @@ async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
         return await run_amd(session, call_id)
 
     call_id, ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=None, run_amd_override=detect
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        run_amd_override=detect,
+        shutdown=False,
     )
     # The later menu turns use a working checker.
     monkeypatch.setattr(ivr_mod, "classify_speech", classify_speech)
@@ -680,8 +684,12 @@ async def _drive_entrypoint(
     answered: bool = False,
     classifier: Any = "fake",
     real_amd_models: bool = False,
+    shutdown: bool = True,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
-    """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
+    """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback.
+
+    ``shutdown=False`` keeps the call up, for tests that drive later turns:
+    shutdown closes the phone menu."""
     from hailhq.voicebot import agent as agent_mod
 
     org_id = UUID("11111111-2222-3333-4444-555555555555")
@@ -732,7 +740,7 @@ async def _drive_entrypoint(
 
     # The job releases after entrypoint returns; run the callback the same
     # way the SDK would so on_call_end lands.
-    for cb in ctx.shutdown_callbacks:
+    for cb in ctx.shutdown_callbacks if shutdown else []:
         await cb()
     await asyncio.sleep(0)
     return call_id, ctx, session
@@ -963,7 +971,10 @@ async def test_greeting_fires_once_across_both_triggers(
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        shutdown=False,
     )
 
     session.emit_keypress()
@@ -984,7 +995,10 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        shutdown=False,
     )
     assert session.say_calls == []
 

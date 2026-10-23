@@ -16,8 +16,8 @@ from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 
 logger = logging.getLogger("hailhq.voicebot")
 
-# Cap on the transcription step only. The classifier's chain deadline
-# bounds the classification.
+# Cap on the transcription step only. classify_speech caps the
+# classification at its own five seconds.
 RECOGNIZE_TIMEOUT_SECONDS = 5.0
 MIN_SPEECH_SECONDS = 1.0
 SAMPLE_RATE = 16000

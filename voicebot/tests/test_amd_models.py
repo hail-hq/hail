@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from hailhq.core.config import settings
-from hailhq.voicebot import amd, classify
+from hailhq.voicebot import amd, pipeline
 from hailhq.voicebot.pipeline import ResolvedLayer
 from livekit.agents import APIStatusError
 from livekit.agents.llm import (
@@ -38,7 +38,7 @@ def layers(monkeypatch):
     monkeypatch.setattr(amd.openai, "STT", transcribe)
     monkeypatch.setattr(amd.deepgram, "STT", Mock(return_value=object()))
     monkeypatch.setattr(amd.openai, "LLM", Mock(return_value=FakeLLM()))
-    monkeypatch.setattr(amd.google, "LLM", google)
+    monkeypatch.setattr(pipeline.google_plugin, "LLM", google)
     return session, transcribe, google
 
 
@@ -168,18 +168,42 @@ def test_haiku_classifies_first_then_openai_then_gemini(layers, monkeypatch):
     monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
     monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
     monkeypatch.setattr(
-        amd, "house_anthropic", lambda model: built.append(model) or haiku
+        pipeline, "house_anthropic", lambda model: built.append(model) or haiku
     )
     result = amd.build_amd_models(session)
     assert built == ["claude-haiku-5-5"]
     assert isinstance(result.llm, amd.ClassifierFailover)
     assert result.llm.primary is haiku
     assert result.llm.backups == (amd.openai.LLM.return_value, google.return_value)
-    # One deadline for the chain: a full try and stream setup per classifier.
-    assert result.llm.deadline == 3 * (
-        classify.CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS
-        + classify.STREAM_SETUP_MARGIN_SECONDS
+
+
+def test_org_llm_with_fallback_checks_first_then_house_checkers(layers, monkeypatch):
+    """The org's fallback chain holds Sonnet 5.5, which rejects a forced
+    tool: the checks use the org's own LLM, then the house checkers."""
+    session, _, google = layers
+    haiku, org_client = FakeLLM(), FakeLLM()
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
+    built = []
+    monkeypatch.setattr(
+        pipeline, "house_anthropic", lambda model: built.append(model) or haiku
     )
+    monkeypatch.setattr(amd, "org_llm", lambda org: org_client)
+    org = ResolvedLayer("anthropic", "org-llm", {"model": "org-model"}, True)
+    llm, owned = amd.build_classifier(session, org_cfgs={"llm": org})
+    assert built == ["claude-haiku-5-5"]
+    assert llm.primary is org_client
+    assert llm.backups == (haiku, amd.openai.LLM.return_value, google.return_value)
+    assert owned == [org_client, *llm.backups]
+    assert session.llm not in owned
+
+
+def test_org_llm_without_fallback_is_the_only_checker(layers, monkeypatch):
+    session, _, google = layers
+    org = ResolvedLayer("anthropic", "org-llm", {"model": "org-model"}, False)
+    assert amd.build_classifier(session, org_cfgs={"llm": org}) == (session.llm, [])
+    google.assert_not_called()
 
 
 def test_haiku_skipped_without_anthropic_keys(layers, monkeypatch):

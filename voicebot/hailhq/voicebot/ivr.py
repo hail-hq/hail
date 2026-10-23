@@ -63,7 +63,6 @@ async def try_classify_remote_speech(
         messages.append(f"Earlier speech:\n{earlier[-3000:]}")
     messages.append(f"Latest speech:\n{text[-3000:]}")
     try:
-        # The classifier's chain deadline bounds the wait.
         return await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
     except Exception as exc:
         # Provider error bodies may contain the transcript.
@@ -198,13 +197,17 @@ class PhoneMenu:
         self._timeout_task = asyncio.create_task(greet_when_unconfirmed())
 
     async def aclose(self) -> None:
+        # First stop new checks and greeting timers, and drop the verdict of
+        # a running check.
+        self.active = False
+        self._ending = True
         if self._timeout_task is not None:
             if self._timeout_task is not asyncio.current_task():
                 self._timeout_task.cancel()
                 await asyncio.gather(self._timeout_task, return_exceptions=True)
             self._timeout_task = None
         # The caller closes the classifier next. A running check ends within
-        # the classifier's chain deadline.
+        # CLASSIFY_TIMEOUT_SECONDS.
         await self._idle.wait()
 
     async def observe(self, text: str) -> AMDCategory:

@@ -14,13 +14,14 @@ every yes/no check on a call: AMD, the pickup recheck, the unavailable
 recheck and the phone menu check. It is built once per call. It closes when
 AMD ends, or at call end when a phone menu answered and the menu check still
 uses it. It never uses the call's chain. With none of them, AMD is skipped
-and the call talks. A customer's own LLM is used as is.
+and the call talks. A per-call LLM, or an org LLM without fallback, is used
+alone. An org LLM with fallback goes first, then the house classifiers: its
+fallback chain starts with Sonnet 5.5, which rejects a forced tool.
 
-Each classifier gets one 3 s try (`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in
-`classify.py`). The chain has one deadline (`ClassifierFailover.deadline` in
-`amd.py`): the number of classifiers times (3 s plus 0.5 s for stream setup).
-So the last classifier still gets its full try. Checks add no cap of their
-own. A customer's own LLM is capped at its 10 s request timeout.
+Each check is capped at 5 s in total (`CLASSIFY_TIMEOUT_SECONDS` in
+`classify.py`). Each classifier gets one 3 s try
+(`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS`), so the next one gets the 2 s left.
+The pickup recheck caps its transcription step separately, at 5 s.
 
 ```bash
 # .env

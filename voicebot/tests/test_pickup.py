@@ -278,9 +278,9 @@ async def test_caller_cancellation_propagates_and_closes_recheck():
 
 
 async def test_classifier_deadline_cancels_slow_llm(monkeypatch):
-    """The transcription cap does not cover the classifier: its own deadline
-    does (here a customer's LLM, capped at its request timeout)."""
-    monkeypatch.setattr(classify, "CLASSIFIER_REQUEST_TIMEOUT_SECONDS", 0.04)
+    """The transcription cap does not cover the classifier: the check's own
+    five-second total does."""
+    monkeypatch.setattr(classify, "CLASSIFY_TIMEOUT_SECONDS", 0.04)
     cancelled = asyncio.Event()
 
     class HangingStream(LLMStream):

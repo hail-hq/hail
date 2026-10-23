@@ -12,7 +12,7 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
-from hailhq.voicebot.pipeline import build_llm, build_session, build_stt
+from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -148,6 +148,11 @@ def test_thinking_off_per_model() -> None:
         "type": "disabled"
     }
     assert _thinking_off("claude-opus-5-5") is None
+    # Anthropic API ids can carry a date.
+    assert _thinking_off("claude-sonnet-5-5-20261001") == {"type": "between_tools"}
+    assert _thinking_off("eu.anthropic.claude-sonnet-5-5-20261001-v1:0") == {
+        "type": "between_tools"
+    }
 
 
 def test_thinking_off_unknown_model_warns_and_disables(caplog) -> None:
@@ -181,6 +186,22 @@ def test_stt_takes_keyterms_only_on_nova_3(monkeypatch) -> None:
     assert stt_takes_keyterms(stt_fallback([nova3, nova3]))
     assert not stt_takes_keyterms(None)
     assert not stt_takes_keyterms(build_stt(language="da", provider="speechmatics"))
+
+
+def test_keyterms_reach_each_deepgram_inside_the_stt_fallback(monkeypatch) -> None:
+    """``session.update_options(keyterms=...)`` hands the terms to the STT's
+    ``_update_session_keyterms``; the fallback forwards them to each STT."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "deepgram_api_key", "dg-house")
+    monkeypatch.setattr(settings, "deepgram_model", "nova-3")
+    org = ResolvedLayer("deepgram", "dg-org", {"model": "nova-3"}, True)
+    stt = build_stt(org, language="en")
+    assert isinstance(stt, stt_fallback)
+    stt._update_session_keyterms(["Ana Lopez"])
+    instances = stt._stt_instances
+    assert len(instances) == 2
+    assert all(s._opts.keyterm == ["Ana Lopez"] for s in instances)
 
 
 def test_build_llm_mode_b_returns_openai_with_overridden_endpoint() -> None:
