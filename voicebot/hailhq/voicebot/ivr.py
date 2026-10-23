@@ -98,6 +98,7 @@ class PhoneMenu:
         self._revision = 0
         self._history: deque[str] = deque(maxlen=4)
         self._timeout_task: asyncio.Task[None] | None = None
+        self._silence_task: asyncio.Task[None] | None = None
         self._speaking = False
         self._speech_has_text = True
         self._needs_confirmation = False
@@ -123,12 +124,14 @@ class PhoneMenu:
         """Audio energy is not confirmation; wait for the speech to finish."""
         if not self.active or self._ending:
             return
+        self._cancel_silence()
         self.invalidate()
         self._speaking = True
         self._speech_has_text = False
         self._cancel_wait()
 
     def finished_speaking(self) -> None:
+        self._cancel_silence()
         self._speaking = False
         if not self._speech_has_text:
             # LiveKit drops a turn with an empty transcript before the
@@ -147,6 +150,7 @@ class PhoneMenu:
 
     def transcript_progress(self, text: str) -> None:
         if text.strip():
+            self._cancel_silence()
             self._cancel_wait()
             # Interim/final STT progress is not a completed turn. If speech
             # has ended, keep a bounded wait for observe() to receive it.
@@ -154,6 +158,31 @@ class PhoneMenu:
                 not self._speech_has_text or self._needs_confirmation
             ):
                 self._arm_deadline()
+
+    def expect_speech(self) -> None:
+        """Hang up as unavailable if nothing is heard within the wait.
+
+        For a pickup that was first classified unavailable and then kept as a
+        menu only because the recheck failed or was unsure. If that line goes
+        silent, no speech event ever starts the greeting wait, so without this
+        the call would run until its maximum duration. Any speech cancels it.
+        """
+        if not self.active or self._ending or self._silence_task is not None:
+            return
+
+        async def hang_up_when_silent() -> None:
+            await asyncio.sleep(GREET_TIMEOUT_SECONDS)
+            if self.active and not self._ending and not self.checking:
+                # Latch first, so late input cannot cancel the hangup.
+                self._ending = True
+                await self.on_machine(AMDCategory.MACHINE_UNAVAILABLE)
+
+        self._silence_task = asyncio.create_task(hang_up_when_silent())
+
+    def _cancel_silence(self) -> None:
+        if self._silence_task is not None and not self._ending:
+            self._silence_task.cancel()
+            self._silence_task = None
 
     def _cancel_wait(self) -> None:
         # Once the greeting starts, it owns the call. Late input must never
@@ -184,15 +213,17 @@ class PhoneMenu:
         self._timeout_task = asyncio.create_task(greet_when_unconfirmed())
 
     async def aclose(self) -> None:
-        if self._timeout_task is not None:
-            if self._timeout_task is not asyncio.current_task():
-                self._timeout_task.cancel()
-                await asyncio.gather(self._timeout_task, return_exceptions=True)
-            self._timeout_task = None
+        for task in (self._timeout_task, self._silence_task):
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self._timeout_task = None
+        self._silence_task = None
 
     async def observe(self, text: str) -> AMDCategory:
         if not self.active or self._ending or not text.strip():
             return AMDCategory.UNCERTAIN
+        self._cancel_silence()
         self._speech_has_text = True
         self._needs_confirmation = False
         self.transcript_progress(text)

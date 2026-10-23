@@ -472,6 +472,84 @@ async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
     await agent.phone_menu.aclose()
 
 
+async def _drive_dead_line(async_session, monkeypatch, verification, *, speech):
+    """A dead-line recording whose unavailable recheck was not confirmed.
+
+    The driver closes the call after ``entrypoint`` returns, which cancels
+    the menu's timers, so the line's audio and the wait run before that.
+    Returns the context and the menu state seen when the wait ended.
+    """
+    import sys
+
+    from hailhq.voicebot import ivr
+    from hailhq.voicebot.agent import entrypoint
+
+    monkeypatch.setattr(ivr, "GREET_TIMEOUT_SECONDS", 0.01)
+    original = _prediction("machine-unavailable")
+    original.transcript = "The number you have dialed is not in service."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    sessions = []
+    seen = {}
+
+    async def detect(session, call_id, **kwargs):
+        sessions.append(session)
+        session.stt = object()
+        session.llm = _GreetingLLM(verification)
+        if verification == "provider-error":
+            session.llm.chat = Mock(side_effect=RuntimeError("classifier failed"))
+        session._start_ivr_detection = AsyncMock()
+        return await run_amd(session, call_id)
+
+    async def run_then_wait(ctx):
+        await entrypoint(ctx)
+        session = sessions[0]
+        menu = session.start_options["agent"].phone_menu
+        assert menu._silence_task is not None
+        if speech:
+            session.emit_vad_speaking()
+        await asyncio.sleep(0.05)
+        seen.update(
+            active=menu.active,
+            say_calls=list(session.say_calls),
+            delete_room_calls=ctx.delete_room_calls,
+            shutdown_calls=list(ctx.shutdown_calls),
+        )
+
+    monkeypatch.setattr(sys.modules[__name__], "entrypoint_under_test", run_then_wait)
+    call_id, _ctx, _session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=None, run_amd_override=detect
+    )
+    events = await _amd_events(async_session, call_id)
+    assert events[0].payload["category"] == "machine-ivr"
+    assert events[0].payload["reason"] == "unavailable_recheck"
+    return seen
+
+
+@pytest.mark.parametrize("verification", ["uncertain", "provider-error"])
+async def test_silent_line_after_unconfirmed_unavailable_hangs_up(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, verification: str
+) -> None:
+    """Nothing follows the recording: hang up as unavailable, never greet."""
+    seen = await _drive_dead_line(
+        async_session, monkeypatch, verification, speech=False
+    )
+    assert seen["delete_room_calls"] == 1
+    assert seen["shutdown_calls"] == [CallEndReason.MACHINE_UNAVAILABLE.value]
+    assert seen["say_calls"] == []
+
+
+async def test_speech_after_unconfirmed_unavailable_cancels_the_hangup(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Speech before the wait ends keeps the normal menu handling."""
+    seen = await _drive_dead_line(async_session, monkeypatch, "uncertain", speech=True)
+    assert seen["active"]
+    assert seen["delete_room_calls"] == 0
+    assert seen["shutdown_calls"] == []
+    assert seen["say_calls"] == []
+
+
 # --------------------------------------------------------------------------- #
 # entrypoint wiring
 # --------------------------------------------------------------------------- #

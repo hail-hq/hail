@@ -78,6 +78,7 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
+    UNAVAILABLE_RECHECK_REASON,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
@@ -864,6 +865,7 @@ def arm_deferred_greeting(
     *,
     agent: SpeechSanitizingAgent,
     on_machine: Callable[[AMDCategory], Awaitable[None]],
+    hang_up_if_silent: bool = False,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -873,6 +875,8 @@ def arm_deferred_greeting(
     Speech that stays unclassified greets after a bounded wait, and only an
     explicit voicemail or unavailable verdict hangs up (see :class:`PhoneMenu`).
     A greeting that fails is logged; it never sets a call status.
+    ``hang_up_if_silent`` ends the call as unavailable when nothing is heard
+    (see :meth:`PhoneMenu.expect_speech`).
     """
 
     async def greet(text: str) -> None:
@@ -903,6 +907,8 @@ def arm_deferred_greeting(
         on_human=greet,
         on_machine=on_machine,
     )
+    if hang_up_if_silent:
+        agent.phone_menu.expect_speech()
 
     @session.on("user_state_changed")
     def _on_speech(ev: Any) -> None:
@@ -2571,6 +2577,10 @@ async def _run_call(
             on_greeted=recovery.start,
             agent=agent,
             on_machine=hangup_machine,
+            # A pickup first heard as unavailable ("not in service", "mailbox
+            # full") is kept as a menu when the recheck is unsure. If the line
+            # then stays silent, hang up as unavailable.
+            hang_up_if_silent=amd_result.reason == UNAVAILABLE_RECHECK_REASON,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)
