@@ -4,6 +4,17 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.31.0] (2026-10-23)
+
+The API stops naming the carrier behind numbers, quotes and verifications.
+Verifications are kept per person or company, and a call's own recording
+choice wins over the workspace setting.
+
+Component versions cut alongside this release:
+**`cli-v0.30.0`** (Homebrew + GitHub Releases) and **`sdk-v0.21.0`** (PyPI).
+`hail-sdk` 0.20.0 cannot read quotes from this API; upgrade to 0.21.0.
+Database migrations run on deploy.
+
 ### Added
 
 - Verifications: `GET /verifications/requirements` and `POST /verifications` accept a number offer's `quote_id` (for `purpose=number`) or one of your `number_id`s (for `purpose=sms`).
