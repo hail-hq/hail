@@ -497,9 +497,7 @@ async def test_fast_failures_reach_the_third_checker():
         _Checker("down", calls),
         _Checker("ok", calls),
     ]
-    async with amd.ClassifierFailover(*checkers).chat(
-        chat_ctx=ChatContext()
-    ) as stream:
+    async with amd.ClassifierFailover(*checkers).chat(chat_ctx=ChatContext()) as stream:
         response = await stream.collect()
     assert calls == checkers
     assert [call.name for call in response.tool_calls] == ["save_prediction"]
