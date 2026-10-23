@@ -22,7 +22,7 @@ and the corresponding IDs as Live/Explore columns to scan who did what.
 Filter by `service_name`: `hail-api`, `hail-voicebot`, or `hail-mcp`.
 
 Coverage: existing Hail INFO+ logs and dependency WARNING+ logs, exceptions,
-FastAPI/Starlette requests, HTTPX/Requests/aiohttp clients, SQLAlchemy operations,
+FastAPI/Starlette requests, HTTPX/Requests/aiohttp clients,
 MCP requests, native LiveKit voice/model/tool spans, SMS agent invocations,
 webhook deliveries, and email forwards. Request spans carry a generated
 `request_id`; authenticated API requests carry `organization_name`, `organization_id`, `user_email`, `user_id`, and `auth_kind`. Other API workers share the API's log,
@@ -95,7 +95,9 @@ the discovery spans (`ping`, `tools/list`, `prompts/list`, `resources/list`,
 `POST /` envelopes and `DELETE /` session closes (kept when the status is
 400 or more), and 404s on unknown paths (scanners) are not exported;
 `tools/call` is. Empty SMS claims
-are suppressed; other worker polling SQL remains visible. Sampling applies to
+are suppressed. SQL query spans are off: the SQLAlchemy instrumentation does
+not support SQLAlchemy 2.1 yet, and the API logs "SQLAlchemy tracing is off"
+at startup. They return once a release supports it. Sampling applies to
 traces and logs within them; standalone logs are retained. At 1.0 nothing is
 sampled out. All HTTP export uses the EU endpoint, with five-second network
 and flush timeouts. Shutdown flushes pending telemetry. Existing LiveKit Cloud exporters are
