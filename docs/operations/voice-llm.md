@@ -8,32 +8,45 @@ key is skipped (Anthropic needs `ANTHROPIC_BEDROCK_REGION` or
 effort `low`, so the first word comes fast. Calls and texts use the same
 chain.
 
-Each model in the chain gets one try of up to 10 s, with no retry
-(`max_retry_per_llm=0` in `_house_llm`). The setting is one value for the
-whole LiveKit `FallbackAdapter`, not per model (livekit-agents 1.8.8,
-`livekit/agents/llm/fallback_adapter.py`). A failed model is skipped for later
-turns, and the adapter sends it one background request to see when it is back.
+Each model in the chain gets one try, with no retry (`max_retry_per_llm=0`
+in `_house_llm`, and in `build_llm` for an org LLM with fallback). The
+setting is one value for the whole LiveKit `FallbackAdapter`, not per model
+(livekit-agents 1.8.8, `livekit/agents/llm/fallback_adapter.py`).
 
-The classifier (`build_classifier` in `amd.py`) is `ANTHROPIC_BACKUP_MODEL`
-(or `ANTHROPIC_MODEL` when the backup is empty), then `OPENAI_MODEL`, then
-`GOOGLE_AMD_MODEL`, with the same skip rule. Only the first 2 usable ones are
-built (`MAX_CLASSIFIERS`): a third never runs inside the 5 s cap. It runs
-every yes/no check on a call: AMD, the pickup recheck, the unavailable
+- `attempt_timeout=10.0` is not a total cap on a try. The adapter passes it
+  as the request's `timeout`, and the Anthropic and OpenAI clients apply it
+  to each httpx phase (connect, each read). A try fails after 10 s with no
+  bytes; a reply that keeps streaming has no total limit.
+- A failed model is marked unavailable and skipped on later turns. On every
+  turn, each unavailable model gets one background request with that turn's
+  chat, unless its last one is still running. The model is back in the chain
+  once such a request succeeds.
+
+The classifier (`build_classifier` in `amd.py`) is `ANTHROPIC_BACKUP_MODEL`,
+then `OPENAI_MODEL`, then `GOOGLE_AMD_MODEL`, with the same skip rule. Every
+usable one is built: a fast failure (403, 429) leaves time for the next one.
+`ANTHROPIC_MODEL` is the classifier only when none of these can be built. It
+runs every yes/no check on a call: AMD, the pickup recheck, the unavailable
 recheck and the phone menu check. It is built once per call and closes once,
 at call end. It never uses the call's chain. With none of them, AMD is skipped
 and the call talks. A per-call LLM, or an org LLM without fallback, is used
-alone. An org LLM with fallback goes first, then one house classifier: its
-fallback chain starts with Sonnet 5.5, which rejects a forced tool.
+alone. An org LLM with fallback goes first, then every usable house
+classifier: its fallback chain starts with Sonnet 5.5, which rejects a forced
+tool.
 
 `ANTHROPIC_MODEL` as the classifier works only when that model accepts a
 forced tool (Haiku 5.5 does, Sonnet 5.5 does not, see Forced tools). With
 Sonnet 5.5 there and no other classifier, every check fails with HTTP 400.
 
-Each check is capped at 5 s in total (`CLASSIFY_TIMEOUT_SECONDS` in
-`classify.py`). Each classifier gets one 3 s try
-(`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in `amd.py`), so the next one gets the
-2 s left. The pickup recheck caps transcription and classification together
-at 5 s (`RECHECK_TIMEOUT_SECONDS` in `pickup.py`).
+Each classifier gets one try of at most 3 s
+(`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in `amd.py`), then the next one runs.
+
+- A menu or unavailable check is capped at 5 s in total
+  (`CLASSIFY_TIMEOUT_SECONDS` in `classify.py`). A first try that times out
+  leaves the next classifier 2 s.
+- The pickup recheck has one 5 s cap for transcription and classification
+  together (`RECHECK_TIMEOUT_SECONDS` in `pickup.py`). A slow transcript can
+  leave less than 3 s, so the backup classifier may not be reached.
 
 ```bash
 # .env
