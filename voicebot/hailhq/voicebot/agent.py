@@ -78,7 +78,6 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
-    UNAVAILABLE_UNSURE_REASON,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
@@ -854,7 +853,6 @@ def arm_deferred_greeting(
     *,
     agent: SpeechSanitizingAgent,
     on_machine: Callable[[AMDCategory], Awaitable[None]],
-    hang_up_if_silent: bool = False,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -864,9 +862,6 @@ def arm_deferred_greeting(
     Speech that stays unclassified greets after a bounded wait, and only an
     explicit voicemail or unavailable verdict hangs up (see :class:`PhoneMenu`).
     A greeting that fails is logged; it never sets a call status.
-    ``hang_up_if_silent`` ends the call as unavailable when nothing is heard.
-    Set it only when an unavailable recheck failed or was unsure (see
-    :meth:`PhoneMenu.expect_speech`).
     """
 
     async def greet(text: str) -> None:
@@ -897,14 +892,6 @@ def arm_deferred_greeting(
         on_human=greet,
         on_machine=on_machine,
     )
-    if hang_up_if_silent:
-        agent.phone_menu.expect_speech()
-
-    @session.on("agent_state_changed")
-    def _on_agent_state(_ev: Any) -> None:
-        # Every step of our own turn (thinking, speaking, back to listening)
-        # restarts the silent-line wait, so our time is not the line's silence.
-        agent.phone_menu.agent_acted()
 
     @session.on("user_state_changed")
     def _on_speech(ev: Any) -> None:
@@ -2497,11 +2484,6 @@ async def _run_call(
             on_greeted=recovery.start,
             agent=agent,
             on_machine=hangup_machine,
-            # A pickup first heard as unavailable ("not in service", "mailbox
-            # full") is kept as a menu when the recheck failed or was unsure.
-            # If the line then stays silent, hang up as unavailable. A
-            # confident machine-ivr recheck gets normal menu handling.
-            hang_up_if_silent=amd_result.reason == UNAVAILABLE_UNSURE_REASON,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)
