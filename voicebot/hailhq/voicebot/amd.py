@@ -22,10 +22,7 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
-from hailhq.voicebot.classify import (
-    CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS,
-    CLASSIFIER_REQUEST_TIMEOUT_SECONDS,
-)
+from hailhq.voicebot.classify import CLASSIFIER_REQUEST_TIMEOUT_SECONDS
 from hailhq.voicebot.ivr import try_classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt, house_llm, org_llm
@@ -61,11 +58,14 @@ a country from the greeting's language alone.
 """
 
 
-# One try per classifier, no retries (CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS in
-# classify.py). Limit elapsed time locally: the Google plugin forwards
-# conn_options.timeout to its provider, which rejects <10s.
+# One try per classifier, no retries. Limit elapsed time locally: the Google
+# plugin forwards conn_options.timeout to its provider, which rejects <10s.
 # https://docs.livekit.io/reference/python/livekit/plugins/google/index.html
 # POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
+CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
+# A check stops at 5s (classify.CLASSIFY_TIMEOUT_SECONDS), so with 3s tries a
+# third classifier never runs: build two at most.
+MAX_CLASSIFIERS = 2
 
 
 class ClassifierFailover(LLM):
@@ -193,9 +193,11 @@ def build_classifier(
 
     These checks force their tool. Haiku 5.5 (``ANTHROPIC_BACKUP_MODEL``),
     OpenAI and Gemini accept that; Sonnet 5.5 does not, so the call's chain
-    is never used: an org's fallback chain also holds Sonnet 5.5. A per-call
+    is never used: an org's fallback chain also holds Sonnet 5.5. Without a
+    backup model, ``ANTHROPIC_MODEL`` is the Anthropic checker. A per-call
     LLM, or an org LLM without fallback, is the customer's choice and is used
-    alone. An org LLM with fallback goes first, then the house checkers.
+    alone. An org LLM with fallback goes first, then the house checkers. Only
+    the first ``MAX_CLASSIFIERS`` usable ones are built.
     With no classifier, this returns None and the checks are skipped
     (docs/operations/voice-llm.md). Independent clients: closing them must
     not close the conversation's providers.
@@ -205,7 +207,9 @@ def build_classifier(
         # run_amd skips AMD when this is not a plain LLM.
         return session.llm, []  # type: ignore[return-value]
     builders: list[Callable[[], LLM | None]] = [
-        lambda: house_llm("anthropic", settings.anthropic_backup_model),
+        lambda: house_llm(
+            "anthropic", settings.anthropic_backup_model or settings.anthropic_model
+        ),
         lambda: house_llm("openai", settings.openai_model),
         lambda: house_llm("google", settings.google_amd_model),
     ]
@@ -213,6 +217,8 @@ def build_classifier(
         builders.insert(0, lambda: org_llm(org))
     classifiers: list[LLM] = []
     for build in builders:
+        if len(classifiers) == MAX_CLASSIFIERS:
+            break
         try:
             llm = build()
         except Exception:

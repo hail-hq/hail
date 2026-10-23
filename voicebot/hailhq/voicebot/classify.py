@@ -9,12 +9,10 @@ from livekit.agents import APIConnectOptions
 from livekit.agents.llm import LLM, ChatContext, function_tool
 from livekit.agents.voice.amd import AMDCategory
 
-# One try per classifier in ``amd.ClassifierFailover``, no retries.
-CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
 # Provider request timeout. Google rejects a deadline under 10s.
 CLASSIFIER_REQUEST_TIMEOUT_SECONDS = 10.0
-# Total for one check: the first classifier gets its 3s try, the next one
-# gets the rest.
+# Total for one check: the first classifier gets its 3s try
+# (``amd.CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS``), the next one gets the rest.
 CLASSIFY_TIMEOUT_SECONDS = 5.0
 
 

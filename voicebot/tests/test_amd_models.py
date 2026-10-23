@@ -31,6 +31,7 @@ def layers(monkeypatch):
     monkeypatch.setattr(settings, "google_api_key", "house-google")
     monkeypatch.setattr(settings, "google_amd_model", "gemini-3.1-flash-lite")
     # No Anthropic classifier unless a test sets one.
+    monkeypatch.setattr(settings, "anthropic_model", "")
     monkeypatch.setattr(settings, "anthropic_backup_model", "")
     session = SimpleNamespace(llm=object(), stt=object(), vad=object())
     transcribe = Mock(return_value=object())
@@ -129,11 +130,9 @@ def test_optional_classifier_setup_failure_skips_that_classifier(layers):
 
 
 def test_no_classifier_never_falls_back_to_the_call_chain(layers, monkeypatch):
-    """The call's chain starts with Sonnet 5.5, which rejects a forced tool:
-    with no house classifier, AMD and the checks are skipped instead."""
+    """With no house classifier, AMD and the checks are skipped; the call's
+    chain is never used."""
     session, _, _ = layers
-    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
-    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
     monkeypatch.setattr(settings, "openai_api_key", "")
     monkeypatch.setattr(settings, "google_api_key", "")
     assert amd.build_amd_models(session).llm is None
@@ -159,9 +158,10 @@ def test_customer_llm_stays_the_classifier(layers):
     assert amd.build_classifier(session, llm_override=True) == (session.llm, [])
 
 
-def test_haiku_classifies_first_then_openai_then_gemini(layers, monkeypatch):
+def test_haiku_classifies_first_then_openai_only(layers, monkeypatch):
     """LiveKit's AMD forces its tool: Haiku 5.5 accepts that, Sonnet 5.5
-    does not, so ANTHROPIC_BACKUP_MODEL goes first."""
+    does not, so ANTHROPIC_BACKUP_MODEL goes first. Two checkers at most:
+    Gemini is never built."""
     session, _, google = layers
     haiku = FakeLLM()
     built = []
@@ -174,7 +174,29 @@ def test_haiku_classifies_first_then_openai_then_gemini(layers, monkeypatch):
     assert built == ["claude-haiku-5-5"]
     assert isinstance(result.llm, amd.ClassifierFailover)
     assert result.llm.primary is haiku
-    assert result.llm.backups == (amd.openai.LLM.return_value, google.return_value)
+    assert result.llm.backups == (amd.openai.LLM.return_value,)
+    google.assert_not_called()
+
+
+def test_anthropic_only_uses_anthropic_model_as_checker(layers, monkeypatch):
+    """No backup model, no OpenAI, no Gemini: ANTHROPIC_MODEL checks, so AMD
+    still runs."""
+    session, _, _ = layers
+    checker = FakeLLM()
+    built = []
+    monkeypatch.setattr(settings, "anthropic_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(
+        pipeline, "house_anthropic", lambda model: built.append(model) or checker
+    )
+    llm, owned = amd.build_classifier(session)
+    assert built == ["claude-haiku-5-5"]
+    assert isinstance(llm, amd.ClassifierFailover)
+    assert llm.primary is checker
+    assert llm.backups == ()
+    assert owned == [checker]
 
 
 def test_org_llm_with_fallback_checks_first_then_house_checkers(layers, monkeypatch):
@@ -195,8 +217,10 @@ def test_org_llm_with_fallback_checks_first_then_house_checkers(layers, monkeypa
     assert llm is not session.llm
     assert built == ["claude-haiku-5-5"]
     assert llm.primary is org_client
-    assert llm.backups == (haiku, amd.openai.LLM.return_value, google.return_value)
-    assert owned == [org_client, *llm.backups]
+    assert llm.backups == (haiku,)
+    assert owned == [org_client, haiku]
+    amd.openai.LLM.assert_not_called()
+    google.assert_not_called()
     assert session.llm not in owned
 
 
