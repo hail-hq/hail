@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import SpeechSanitizingAgent
-from hailhq.voicebot.ivr import PhoneMenu, classify_remote_speech
+from hailhq.voicebot.ivr import (
+    PhoneMenu,
+    classify_remote_speech,
+    try_classify_remote_speech,
+)
 from livekit.agents import Agent, AgentSession
 from livekit.agents.llm import ChatContext, ChatMessage
 from livekit.agents.voice.amd import AMDCategory
@@ -218,6 +222,26 @@ async def test_menu_turn_classification_uses_earlier_speech_as_context_only():
 
 async def test_missing_classifier_is_uncertain():
     assert await classify_remote_speech(None, "Welcome") == AMDCategory.UNCERTAIN
+
+
+async def test_failed_check_gives_no_verdict():
+    """The unavailable recheck tells a failure apart from an unsure answer."""
+    assert await try_classify_remote_speech(None, "Welcome") is None
+    assert (
+        await try_classify_remote_speech(
+            Classifier(json.dumps({"label": "human"})), " "
+        )
+        is None
+    )
+    failing = Classifier(json.dumps({"label": "human"}))
+    failing.chat = Mock(side_effect=RuntimeError("down"))
+    assert await try_classify_remote_speech(failing, "Welcome") is None
+    assert (
+        await try_classify_remote_speech(
+            Classifier(json.dumps({"label": "uncertain"})), "Welcome"
+        )
+        == AMDCategory.UNCERTAIN
+    )
 
 
 async def test_new_remote_speech_discards_a_pending_human_verdict(monkeypatch):

@@ -45,23 +45,33 @@ async def classify_remote_speech(
     llm: LLM | None, text: str, *, earlier: str = ""
 ) -> AMDCategory:
     """A bounded, tool-only classification; errors never confirm a person."""
+    category = await try_classify_remote_speech(llm, text, earlier=earlier)
+    return AMDCategory.UNCERTAIN if category is None else category
+
+
+async def try_classify_remote_speech(
+    llm: LLM | None, text: str, *, earlier: str = ""
+) -> AMDCategory | None:
+    """The checker's own verdict, or None when it gave none.
+
+    None means no LLM, no transcript, a timeout, a provider error, or no
+    saved label. A returned ``uncertain`` is the checker's answer.
+    """
     if llm is None or not text.strip():
-        return AMDCategory.UNCERTAIN
+        return None
     messages = []
     if earlier:
         messages.append(f"Earlier speech:\n{earlier[-3000:]}")
     messages.append(f"Latest speech:\n{text[-3000:]}")
     try:
         async with asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS):
-            category = await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
-        if category is not None:
-            return category
+            return await classify_speech(llm, REMOTE_SPEECH_PROMPT, *messages)
     except Exception as exc:
         # Provider error bodies may contain the transcript.
         logger.warning(
             "remote speech classification unavailable (%s)", type(exc).__name__
         )
-    return AMDCategory.UNCERTAIN
+    return None
 
 
 class PhoneMenu:
