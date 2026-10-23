@@ -128,8 +128,12 @@ spans = memory.get_finished_spans()
 assert any(s.name == "test.operation" for s in spans)
 assert any(s.attributes.get("logfire.msg") == "Setup INFO log" for s in spans)
 assert all(s.resource.attributes["service.name"] == "hail-api" for s in spans)
-assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in spans)
-assert all(s.attributes.get("organization_name") == "Session Team" for s in spans)
+# instrument_sqlalchemy refuses the locked SQLAlchemy; the warning logs before identity_scope.
+assert any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
+inside = [s for s in spans if s.name == "test.operation" or s.attributes.get("logfire.msg") == "Setup INFO log"]
+assert len(inside) == 2
+assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in inside)
+assert all(s.attributes.get("organization_name") == "Session Team" for s in inside)
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -178,6 +182,28 @@ def test_native_provider_keeps_its_exporter_and_mirrors_private_spans(monkeypatc
         == "hail-voicebot"
     )
     provider.shutdown()
+
+
+def test_export_drops_livekit_tool_definitions():
+    context = SpanContext(111, 222, False, TraceFlags(1))
+    original = ReadableSpan(
+        "llm_request",
+        context=context,
+        attributes={
+            "gen_ai.tool.definitions": "PRIVATE TOOL DEFINITIONS",
+            "tool.definitions": "PRIVATE TOOL DEFINITIONS",
+            "gen_ai.tool.name": "lookup",
+            "gen_ai.tool.call.id": "call-1",
+        },
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert "PRIVATE" not in str(exported.attributes)
+    assert exported.attributes["gen_ai.tool.name"] == "lookup"
+    assert exported.attributes["gen_ai.tool.call.id"] == "call-1"
 
 
 def test_export_drops_mcp_tool_call_arguments_by_design():

@@ -353,11 +353,11 @@ wheels = [
 
 [[package]]
 name = "certifi"
-version = "2026.4.22"
+version = "2026.10.23"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/25/ee/6caf7a40c36a1220410afe15a1cc64993a1f864871f698c0f93acb72842a/certifi-2026.4.22.tar.gz", hash = "sha256:8d455352a37b71bf76a79caa83a3d6c25afee4a385d632127b6afb3963f1c580", size = 137077, upload-time = "2026-04-22T11:26:11.191Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/11/b524cbd9bbdaca58608e4cf4053fd463417549e1959fa8d3aa18319f9555/certifi-2026.10.23.tar.gz", hash = "sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd", size = 136225, upload-time = "2026-10-23T11:36:16.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/30/7cd8fdcdfbc5b869528b079bfb76dcdf6056b1a2097a662e5e8c04f42965/certifi-2026.4.22-py3-none-any.whl", hash = "sha256:3cb2210c8f88ba2318d29b0388d1023c8492ff72ecdde4ebdaddbb13a31b1c4a", size = 135707, upload-time = "2026-04-22T11:26:09.372Z" },
+    { url = "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1", size = 135082, upload-time = "2026-10-23T11:36:14.763Z" },
 ]
 
 [[package]]
@@ -1117,7 +1117,7 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "limits", specifier = ">=3" },
-    { name = "logfire", extras = ["fastapi"], specifier = ">=5.1.1" },
+    { name = "logfire", extras = ["fastapi"], specifier = ">=5.3.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -1174,7 +1174,7 @@ requires-dist = [
     { name = "didww", specifier = ">=3.1" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "livekit-api", specifier = ">=1.1" },
-    { name = "logfire", extras = ["aiohttp-client", "httpx", "requests", "sqlalchemy"], specifier = ">=5.1.1" },
+    { name = "logfire", extras = ["aiohttp-client", "httpx", "requests", "sqlalchemy"], specifier = ">=5.3.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "phonenumbers", specifier = ">=9.0.39" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
@@ -1222,7 +1222,7 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'" },
-    { name = "logfire", extras = ["starlette"], specifier = ">=5.1.1" },
+    { name = "logfire", extras = ["starlette"], specifier = ">=5.3.0" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -1962,9 +1962,42 @@ wheels = [
 
 [[package]]
 name = "logfire"
-version = "5.2.0"
+version = "5.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "logfire-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/08/8e5388d272d1d90e7a9f60fb2efadfbea65d7058e396f82da4ef1cfc730b/logfire-5.3.0.tar.gz", hash = "sha256:b3be3e29b14147fdf8a0e3ca3aa5b3e8b96d5e2539d6ea8c7e5eecec2dd40490", size = 3228, upload-time = "2026-10-23T15:11:01.751Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/a8/200e8f24fa205c045a0622e6d2c032c51b7b335b3b54f987106ed832db7b/logfire-5.3.0-py3-none-any.whl", hash = "sha256:8949827f0e92c8eec373310feadd92fe9f87605d6a212e82a7a5491068d56b84", size = 3066, upload-time = "2026-10-23T15:10:56.791Z" },
+]
+
+[package.optional-dependencies]
+aiohttp-client = [
+    { name = "logfire-sdk", extra = ["aiohttp-client"] },
+]
+fastapi = [
+    { name = "logfire-sdk", extra = ["fastapi"] },
+]
+httpx = [
+    { name = "logfire-sdk", extra = ["httpx"] },
+]
+requests = [
+    { name = "logfire-sdk", extra = ["requests"] },
+]
+sqlalchemy = [
+    { name = "logfire-sdk", extra = ["sqlalchemy"] },
+]
+starlette = [
+    { name = "logfire-sdk", extra = ["starlette"] },
+]
+
+[[package]]
+name = "logfire-sdk"
+version = "5.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
     { name = "executing" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -1976,9 +2009,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/5a/e6cccc98d30358b8beee47c61c2a1ca66ac7a76a07de9ba333aa5219b9a6/logfire-5.2.0.tar.gz", hash = "sha256:5fb9ddda303759766e86f5704a1ae96f3a0072906d52e21fbaad2e3c3b03f823", size = 1404990, upload-time = "2026-10-13T17:36:30.746Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/c9/8c93f9eac2eb7e4eecad8a7074e16063bcc81fe6fa68e314599c8abc0a5e/logfire_sdk-5.3.0.tar.gz", hash = "sha256:a90a220724d5e09f9a0d792ae01b2aa9ed6b59f9b99c17cfc00d57bb5916ef87", size = 1443999, upload-time = "2026-10-23T15:11:03.98Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/cb/bfcd484c16eeac8cdeb2defe1a2ee39bb1b4b6e69324b85515e7818eb678/logfire-5.2.0-py3-none-any.whl", hash = "sha256:c73dd02cfe048f2254e803962aa992d7f53217d121f3488e797926c30442342c", size = 495128, upload-time = "2026-10-13T17:36:27.305Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/7f/315b7895de489b6c7b8c8bd1a6089d573d8c24ca247b38c43f4d720e7472/logfire_sdk-5.3.0-py3-none-any.whl", hash = "sha256:160a8e280a949001caf4563d2836bd29cdb61b209774cb9634893c0cc5d60e0b", size = 992445, upload-time = "2026-10-23T15:10:59.952Z" },
 ]
 
 [package.optional-dependencies]

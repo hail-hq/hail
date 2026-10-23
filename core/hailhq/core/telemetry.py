@@ -1,8 +1,9 @@
 """Optional EU Logfire telemetry shared by every backend process.
 
 A filtering OTLP exporter keeps conversation/tool content out of native LiveKit
-spans too (Agents 1.6 lacks the newer allow_pii option). No exporter is created
-unless explicitly enabled. Existing console logging is preserved.
+spans too. Agents 1.8 has set_tracer_provider(..., allow_pii=); Hail does not
+use it and relies on this exporter for every span instead. No exporter is
+created unless explicitly enabled. Existing console logging is preserved.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ _span_processor: BatchSpanProcessor | None = None
 _extra_providers: list[TracerProvider] = []
 _CONTENT = re.compile(
     r"(?:^|[._])(?:arguments|result|body|content|messages|"
-    r"input_messages|output_messages|system_instructions|tool_definitions|"
+    r"input_messages|output_messages|system_instructions|tool[._]definitions|"
     r"chat_ctx|instructions|transcript|user_input|input_text|user_transcript|text|audio|"
     r"tool_call_arguments|tool_call_result|function_call|function_call_output|"
     r"phone|email|otp|authorization|cookie|token|secret|api_key)(?:$|[._])",

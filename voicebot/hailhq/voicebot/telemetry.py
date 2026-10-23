@@ -7,9 +7,9 @@ from opentelemetry.sdk.trace import TracerProvider
 
 
 def connect_livekit_tracing() -> None:
-    # Agents 1.6 exposes its dynamic tracer publicly but not a provider getter.
-    # Verified against pinned telemetry/traces.py. Preserve a Cloud SDK provider
-    # if the job runner installed one before invoking Hail's entrypoint.
+    # Agents 1.8 exposes its dynamic tracer publicly but not a provider getter.
+    # Verified against the locked telemetry/traces.py. Preserve a Cloud SDK
+    # provider if the job runner installed one before invoking Hail's entrypoint.
     native = getattr(tracer, "_tracer_provider", None)
     if isinstance(native, TracerProvider):
         share_native_provider(native)
