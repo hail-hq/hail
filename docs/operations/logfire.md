@@ -92,8 +92,9 @@ Console logs and database audit records retain their existing behavior.
 Health probes and duplicate Uvicorn access logs are excluded. On `hail-mcp`,
 the discovery spans (`ping`, `tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`), `GET /` (the event stream), `/.well-known/*`,
-successful `POST /` envelopes (a `POST /` with status 400 or more is kept)
-and 404s on unknown paths (scanners) are not exported; `tools/call` is. Empty SMS claims
+`POST /` envelopes and `DELETE /` session closes (kept when the status is
+400 or more), and 404s on unknown paths (scanners) are not exported;
+`tools/call` is. Empty SMS claims
 are suppressed; other worker polling SQL remains visible. Sampling applies to
 traces and logs within them; standalone logs are retained. At 1.0 nothing is
 sampled out. All HTTP export uses the EU endpoint, with five-second network

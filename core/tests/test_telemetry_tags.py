@@ -219,6 +219,7 @@ def test_inbound_masks_the_sender_and_keeps_the_hail_number():
         ("GET /.well-known/glama.json", {"http.route": "/.well-known/glama.json"}),
         ("POST /", {"http.route": "/", "http.status_code": 200}),
         ("POST /", {"http.route": "/", "http.response.status_code": 202}),
+        ("DELETE /", {"http.route": "/", "http.status_code": 200}),
     ],
 )
 def test_mcp_noise_is_not_exported(name, attributes):
@@ -241,10 +242,15 @@ def test_mcp_tool_calls_and_other_services_are_exported():
             ),
             # A failed POST stays: it is where a 401 shows.
             _span("POST /", **{"http.route": "/", "http.status_code": 401}),
+            _span("DELETE /", **{"http.route": "/", "http.status_code": 404}),
         ],
         service="hail-mcp",
     )
-    assert [s.name for s in kept] == ["MCP server handle request: tools/call", "POST /"]
+    assert [s.name for s in kept] == [
+        "MCP server handle request: tools/call",
+        "POST /",
+        "DELETE /",
+    ]
     assert kept[0].attributes["mcp.tool.name"] == "place_call"
     assert kept[0].attributes["hail.channel"] == "mcp"
     # The same route on another service is not MCP traffic.
