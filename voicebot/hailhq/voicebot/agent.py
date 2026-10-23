@@ -78,12 +78,20 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
+    NO_PROBE_REASONS,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
     run_amd,
+    settle_verdict,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
+from hailhq.voicebot.confirmation import (
+    UNANSWERED_REASON,
+    UNAVAILABLE_REASON,
+    confirm_pickup,
+    probe_line,
+)
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -97,7 +105,7 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLMError
+from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
 from livekit.api import CreateSIPParticipantRequest, SipCallError
@@ -371,6 +379,17 @@ def disclosure_line(
     """The exact disclosure to speak, named when the org name resolved."""
     return disclosure_text(
         "inbound" if direction == "inbound" else "outbound", org_name, template
+    )
+
+
+def metadata_disclosure(metadata: dict[str, Any]) -> str | None:
+    """The disclosure this dispatch speaks, or None when opted out."""
+    if not metadata.get("ai_disclosure", True):
+        return None
+    return disclosure_line(
+        metadata.get("org_name"),
+        metadata.get("direction"),
+        metadata.get("ai_disclosure_line"),
     )
 
 
@@ -761,6 +780,7 @@ async def speak_greeting(
     *,
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
+    already_introduced: bool = False,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -794,15 +814,7 @@ async def speak_greeting(
     premise would be false. A greeting after the bounded wait has no such
     turn, so it keeps the generated opening.
     """
-    disclosure = (
-        disclosure_line(
-            metadata.get("org_name"),
-            metadata.get("direction"),
-            metadata.get("ai_disclosure_line"),
-        )
-        if metadata.get("ai_disclosure", True)
-        else None
-    )
+    disclosure = metadata_disclosure(metadata)
     first_message = metadata.get("first_message")
     try:
         if first_message:
@@ -836,7 +848,7 @@ async def speak_greeting(
         session.generate_reply(
             instructions=opening_instructions(
                 " ".join(filter(None, (pickup_transcript, heard))),
-                already_introduced=bool(disclosure),
+                already_introduced=bool(disclosure) or already_introduced,
             )
         )
 
@@ -2390,8 +2402,9 @@ async def _run_call(
 
     # Answering machine detection: classify the greeting before we say
     # anything. The event is written on every call, machine or not, so
-    # classification quality is observable per call. A detection failure
-    # returns None and the call proceeds exactly as it did before AMD.
+    # classification quality is observable per call. An uncertain verdict gets
+    # a neutral conversational check before the business opening; failed
+    # detection (None) opens the call as before that check existed.
     #
     # Skipped outright when the SIP leg is already gone. `captured["status"]`
     # is only ever set by the participant-disconnect handler above, so a
@@ -2399,6 +2412,9 @@ async def _run_call(
     # no audio track to classify, and AMD would sit on its 30s backstop
     # before giving up (observed: a leg rejected at :20.475 still held the
     # job until :50.700, then "entrypoint did not exit in time").
+    confirmation_result = None
+    pickup_disclosed = False
+    probe_heard = False
     if inbound:
         # The caller dialed us: a person is on the line, no machine to detect.
         amd_result = None
@@ -2423,9 +2439,46 @@ async def _run_call(
             llm_override=llm_cfg is not None,
             language=language,
         )
-        amd_result = await run_amd(
-            session, call_id, models=models, on_ready=signal_ready, room=ctx.room
-        )
+        try:
+            amd_result = await run_amd(
+                session, call_id, models=models, on_ready=signal_ready, room=ctx.room
+            )
+            classifier = None
+            if (
+                not shutting_down
+                and captured["status"] is None
+                and captured["end_reason"] is None
+                and amd_result is not None
+                and amd_result.category == AMDCategory.UNCERTAIN
+                # No audio, or speech with no verdict in time: talk, as
+                # before the probe.
+                and amd_result.reason not in NO_PROBE_REASONS
+            ):
+                classifier = models.llm if models is not None else session.llm
+            # Without a classifier or transcripts the reply cannot be judged,
+            # so skip the probe and talk.
+            if isinstance(classifier, LLM) and session.stt is not None:
+                disclosure = metadata_disclosure(metadata)
+                prompt = probe_line(language)
+                if disclosure:
+                    prompt = f"{disclosure} {prompt}"
+                    pickup_disclosed = True
+                confirmation_result, probe_heard = await confirm_pickup(
+                    session, llm=classifier, prompt=prompt
+                )
+                # Same dead-line recheck and IVR start as the AMD verdict.
+                confirmation_result = await settle_verdict(
+                    session,
+                    call_id,
+                    confirmation_result,
+                    llm=classifier,
+                    previous_category=AMDCategory.UNCERTAIN,
+                )
+                # A failed or interrupted probe did not deliver the disclosure.
+                pickup_disclosed = pickup_disclosed and probe_heard
+        finally:
+            if models is not None:
+                await models.aclose()
     if not inbound:
         await write_call_event(
             call_id,
@@ -2440,6 +2493,17 @@ async def _run_call(
                 ),
                 "reason": amd_result.reason if amd_result else "detection_failed",
                 "delay": amd_result.delay if amd_result else None,
+                **(
+                    {
+                        "confirmation": {
+                            "category": confirmation_result.category.value,
+                            "reason": confirmation_result.reason,
+                            "delay": confirmation_result.delay,
+                        }
+                    }
+                    if confirmation_result is not None
+                    else {}
+                ),
             },
         )
 
@@ -2459,6 +2523,33 @@ async def _run_call(
     async def hangup_machine(category: AMDCategory) -> None:
         logger.info("call_id=%s answered by %s, hanging up", call_id, category.value)
         await hangup_no_answer(amd_end_reason(category))
+
+    if (
+        shutting_down
+        or captured["status"] is not None
+        or captured["end_reason"] is not None
+    ):
+        return
+    # The words heard at pickup. A probe reply is not added here: it was
+    # held while the opening was pending, and the opening gets it from there.
+    pickup_transcript = amd_result.transcript if amd_result else None
+    if confirmation_result is not None:
+        if confirmation_result.category != AMDCategory.MACHINE_IVR and probe_heard:
+            # The probe played in full and already identified us to this
+            # listener; the business opening stays pending, including an
+            # explicit first_message. A phone tree is not a person, so the
+            # IVR path keeps the disclosure for whoever the tree hands us to.
+            # A failed or interrupted probe keeps the disclosure too.
+            metadata = {**metadata, "ai_disclosure": False}
+        if confirmation_result.reason == UNAVAILABLE_REASON:
+            # The reply could not be judged. When in doubt, talk.
+            logger.info("call_id=%s pickup check unavailable, opening", call_id)
+        elif confirmation_result.reason == UNANSWERED_REASON:
+            # Full silence after the probe: do not label this voicemail.
+            await hangup_no_answer(CallEndReason.USER_UNAVAILABLE.value)
+            return
+        else:
+            amd_result = confirmation_result
 
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         await hangup_machine(amd_result.category)
@@ -2498,8 +2589,9 @@ async def _run_call(
             await speak_greeting(
                 session,
                 metadata,
-                pickup_transcript=amd_result.transcript if amd_result else None,
+                pickup_transcript=pickup_transcript,
                 on_opened=agent.release_opening,
+                already_introduced=pickup_disclosed,
             )
             recovery.start()
         except Exception:
