@@ -101,7 +101,7 @@ from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
-from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
+from livekit.agents.voice.amd import AMDCategory
 from livekit.api import CreateSIPParticipantRequest, SipCallError
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
@@ -2346,18 +2346,14 @@ async def _run_call(
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None
-    amd_task: asyncio.Task[AMDPredictionEvent | None] | None = None
 
     async def _shutdown_body() -> None:
         nonlocal shutting_down
         shutting_down = True
         try:
             await recovery.aclose()
-            # Never close the classifier under a running check: stop AMD
-            # first, and let the menu finish its check.
-            if amd_task is not None and not amd_task.done():
-                amd_task.cancel()
-                await asyncio.gather(amd_task, return_exceptions=True)
+            # Never close the classifier under a running check: let the
+            # menu finish its check first.
             if agent.phone_menu is not None:
                 await agent.phone_menu.aclose()
             if amd_models is not None:
@@ -2450,19 +2446,9 @@ async def _run_call(
             llm_override=llm_cfg is not None,
             language=language,
         )
-        amd_task = asyncio.create_task(
-            run_amd(
-                session, call_id, models=models, on_ready=signal_ready, room=ctx.room
-            )
+        amd_result = await run_amd(
+            session, call_id, models=models, on_ready=signal_ready, room=ctx.room
         )
-        try:
-            amd_result = await amd_task
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling():
-                raise
-            # Shutdown stopped AMD: the call has already ended.
-            amd_result = None
     if not inbound:
         await write_call_event(
             call_id,
@@ -2499,11 +2485,6 @@ async def _run_call(
 
     if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
         await hangup_machine(amd_result.category)
-        return
-
-    if shutting_down:
-        # The call ended during AMD or while its row was written. Shutdown
-        # closes AMD's classifier: never arm the phone menu with it.
         return
 
     if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:
