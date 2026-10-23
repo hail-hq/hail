@@ -325,11 +325,12 @@ def _house_llm() -> agents_llm.LLM:
     llms = _house_llms()
     if not llms:
         raise ProviderKeyError("no house LLM has a model and a key")
+    # One try per model, no retry: a failed model hands over to the next at
+    # once (docs/operations/voice-llm.md).
     return agents_llm.FallbackAdapter(
         llm=llms,
         attempt_timeout=10.0,
-        max_retry_per_llm=1,
-        retry_interval=5.0,
+        max_retry_per_llm=0,
     )
 
 

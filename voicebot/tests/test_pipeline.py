@@ -93,6 +93,17 @@ def test_build_llm_mode_a_returns_fallback_adapter(monkeypatch) -> None:
     ]
 
 
+def test_house_chain_gives_each_model_one_try(monkeypatch) -> None:
+    """One adapter-wide setting: no retry on a failed model, 10 s per try."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    adapter = build_llm(None)
+    assert isinstance(adapter, FallbackAdapter)
+    assert adapter._max_retry_per_llm == 0
+    assert adapter._attempt_timeout == 10.0
+
+
 @pytest.mark.parametrize(
     ("google_model", "google_api_key"),
     [("", "test-google-placeholder"), ("gemini-3.5-flash-lite", "")],
