@@ -10,16 +10,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /usr/local/bin/
 
 COPY core /app/core
 COPY mcp  /app/mcp
 
-# Minimal workspace root so `[tool.uv.sources] hailhq-core = { workspace = true }`
-# in mcp/pyproject.toml resolves without the repo-root pyproject in the build
-# context. Stays in the builder layer; doesn't reach runtime.
-RUN printf '[tool.uv.workspace]\nmembers = ["core", "mcp"]\n' > /app/pyproject.toml && \
-    uv sync --package hailhq-mcp --no-editable --no-dev
+# Retain the workspace manifests so --frozen installs exactly the reviewed lock.
+# Only core and mcp are installed; other workspace packages need metadata only.
+COPY pyproject.toml uv.lock /app/
+COPY api/pyproject.toml /app/api/pyproject.toml
+COPY sdk/pyproject.toml /app/sdk/pyproject.toml
+COPY voicebot/pyproject.toml /app/voicebot/pyproject.toml
+RUN uv sync --frozen --package hailhq-mcp --no-editable --no-dev
 
 # ─── Stage 2: runtime ─────────────────────────────────────────────
 FROM python:3.12-slim AS runtime

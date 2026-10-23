@@ -2,6 +2,7 @@
 
 import logging
 
+import pytest
 from hailhq.core import telemetry
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -220,3 +221,23 @@ def test_instrument_turns_off_tracing_instead_of_failing(caplog):
 
     instrument("Example", refuse)
     assert "Example tracing is off" in caplog.text
+
+
+def test_instrument_turns_off_tracing_when_a_module_is_missing(caplog):
+    from hailhq.core.telemetry import instrument
+
+    def missing():
+        raise ModuleNotFoundError("No module named 'mcp.shared.session'")
+
+    instrument("Missing", missing)
+    assert "Missing tracing is off" in caplog.text
+
+
+def test_instrument_raises_a_mistake_in_our_own_call():
+    from hailhq.core.telemetry import instrument
+
+    def setup(*, engine):
+        return engine
+
+    with pytest.raises(TypeError):
+        instrument("Example", setup, engin=None)

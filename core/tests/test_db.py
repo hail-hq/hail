@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import parse_qs, urlsplit
 
 from hailhq.core.db import to_async_url, to_sync_url
@@ -73,5 +74,8 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     monkeypatch.setattr(db, "_sessionmaker", None)
     monkeypatch.setattr(db, "telemetry_enabled", lambda: True)
     monkeypatch.setattr(db.logfire, "instrument_sqlalchemy", refuse)
-    assert db._ensure_initialized() is not None
-    assert calls == [{"engine": db._engine}]
+    try:
+        assert db._ensure_initialized() is not None
+        assert calls == [{"engine": db._engine}]
+    finally:
+        asyncio.run(db._engine.dispose())

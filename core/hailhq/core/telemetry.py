@@ -29,6 +29,7 @@ from hailhq.core.urls import join_url
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.dependencies import DependencyConflictError
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
@@ -203,11 +204,17 @@ def instrument(
     name: str, setup: Callable[..., object], /, *args: Any, **kwargs: Any
 ) -> None:
     """Run one optional tracing setup. Telemetry is a nice-to-have: a library
-    version the instrumentation does not support (it raises) must never stop
-    a service, so a failure turns that tracing off and logs a warning."""
+    version the instrumentation does not support must never stop a service,
+    so that failure turns the tracing off and logs a warning.
+
+    Only the errors an instrumentation raises for an unsupported or missing
+    library are caught: logfire raises RuntimeError (version out of range,
+    missing extra), a missing module raises ImportError, and OpenTelemetry
+    raises DependencyConflictError. A mistake in our own call (TypeError,
+    AttributeError) still raises, so tests catch it."""
     try:
         setup(*args, **kwargs)
-    except Exception as exc:
+    except (RuntimeError, ImportError, DependencyConflictError) as exc:
         logger.warning("Telemetry: %s tracing is off (%s)", name, exc)
 
 
@@ -274,6 +281,9 @@ def configure_telemetry(service_name: str) -> bool:
             distributed_tracing=True,
         )
     except Exception as exc:
+        # Broad on purpose: logfire.configure touches the environment (OTel
+        # providers, metric readers, settings), and any failure there must
+        # leave the service running without telemetry.
         # Stop the exporter thread; it would never be flushed or reused.
         processor.shutdown()
         logger.warning("Telemetry disabled: Logfire setup failed (%s)", exc)
