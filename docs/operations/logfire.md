@@ -60,3 +60,11 @@ and dashboards require a separate infrastructure rollout. Production deployments
 the deploy workflow writes `LOGFIRE_SERVICE_VERSION` into the VM `.env` as the deployed commit SHA for API, MCP, and voicebot.
 CLI and SDK package versions are unaffected. This change does not
 deploy or restart production services.
+
+Data protection: Pydantic Logfire (EU region) is a listed sub-processor of the
+hosted service. The legal records ([RoPA](../legal/ropa.md),
+[DPIA summary](../legal/dpia-summary.md)) also cover voice and SMS agent
+prompts, transcripts and replies, and call, SMS and email tags with the
+counterparty's number masked to its last 4 digits and email to its domain.
+Update them if what is exported changes. Retention follows the Logfire project
+retention setting.
