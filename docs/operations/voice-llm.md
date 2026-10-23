@@ -9,7 +9,8 @@ effort `low`, so the first word comes fast. Calls and texts use the same
 chain.
 
 Each model in the chain gets one try, with no retry (`max_retry_per_llm=0`
-in `_house_llm`, and in `build_llm` for an org LLM with fallback). The
+in `_fallback_chain`, used by `_house_llm` and by `build_llm` for an org LLM
+with fallback). The
 setting is one value for the whole LiveKit `FallbackAdapter`, not per model
 (livekit-agents 1.8.8, `livekit/agents/llm/fallback_adapter.py`).
 
@@ -17,10 +18,13 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
   as the request's `timeout`, and the Anthropic and OpenAI clients apply it
   to each httpx phase (connect, each read). A try fails after 10 s with no
   bytes; a reply that keeps streaming has no total limit.
-- A failed model is marked unavailable and skipped on later turns. On every
-  turn, each unavailable model gets one background request with that turn's
-  chat, unless its last one is still running. The model is back in the chain
-  once such a request succeeds.
+- A failed model is marked unavailable and skipped on later turns. On a
+  turn, the adapter walks the chain until a model answers (`_run`). Each
+  model it passes without an answer gets one background request with that
+  turn's chat (`_try_recovery`): an unavailable model it skips, and a model
+  that just failed, right away. Models after the one that answers get none.
+  A model never has two such requests at once. The model is back in the
+  chain once such a request succeeds.
 
 The classifier (`build_classifier` in `amd.py`) is `ANTHROPIC_BACKUP_MODEL`,
 then `OPENAI_MODEL`, then `GOOGLE_AMD_MODEL`, with the same skip rule. Every
@@ -41,9 +45,12 @@ Sonnet 5.5 there and no other classifier, every check fails with HTTP 400.
 Each classifier gets one try of at most 3 s
 (`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in `amd.py`), then the next one runs.
 
-- A menu or unavailable check is capped at 5 s in total
-  (`CLASSIFY_TIMEOUT_SECONDS` in `classify.py`). A first try that times out
-  leaves the next classifier 2 s.
+- A check is capped at 5 s in total (`CLASSIFY_TIMEOUT_SECONDS` in
+  `classify.py`). `ClassifierFailover` applies it to all its tries, so it
+  also stops LiveKit's AMD call, which has no timeout of its own. A first
+  try that times out leaves the next classifier 2 s. `classify_speech`
+  applies the same cap to a customer's LLM used alone in the menu and
+  unavailable checks; its AMD check has only the 20 s detection limit.
 - The pickup recheck has one 5 s cap for transcription and classification
   together (`RECHECK_TIMEOUT_SECONDS` in `pickup.py`). A slow transcript can
   leave less than 3 s, so the backup classifier may not be reached.
