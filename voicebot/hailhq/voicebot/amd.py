@@ -301,11 +301,12 @@ POST_ANSWER_TIMEOUT_SECONDS = 20.0
 # ringing left 5s and the greeting was spoken into the mailbox.
 DETECTION_TIMEOUT_SECONDS = 90.0
 
-# Uncertain verdicts that skip the pickup probe; the call talks right away.
-# LiveKit Agents 1.8.8 sets these reasons in ``voice/amd/detector.py``
-# (``participant_missing``: the leg never published audio) and
-# ``voice/amd/classifier.py`` (``detection_timeout``: the post-answer budget
-# ran out with no verdict). A probe cannot judge a reply on such a line.
+# Uncertain verdicts that skip the pickup probe; the call talks right away,
+# as before the probe existed. LiveKit Agents 1.8.8 sets these reasons in
+# ``voice/amd/detector.py`` (``participant_missing``: the leg never published
+# audio) and ``voice/amd/classifier.py`` (``detection_timeout``: speech
+# started but no verdict came within the post-answer budget; a silent line
+# settles ``no_speech_timeout`` instead).
 NO_PROBE_REASONS: frozenset[str] = frozenset(
     {"participant_missing", "detection_timeout"}
 )

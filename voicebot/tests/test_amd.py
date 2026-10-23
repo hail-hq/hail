@@ -1151,7 +1151,7 @@ async def test_failed_detection_skips_the_probe_and_opens_the_call(
 async def test_no_audio_verdict_skips_the_probe_and_opens_the_call(
     async_session, monkeypatch, reason
 ):
-    """LiveKit heard no usable audio: a probe cannot judge a reply. Talk."""
+    """No audio, or speech with no verdict in time: talk, as before the probe."""
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _, ctx, session = await _drive_entrypoint(

@@ -2450,7 +2450,8 @@ async def _run_call(
                 and captured["end_reason"] is None
                 and amd_result is not None
                 and amd_result.category == AMDCategory.UNCERTAIN
-                # No audio reached the detector: talk, as before the probe.
+                # No audio, or speech with no verdict in time: talk, as
+                # before the probe.
                 and amd_result.reason not in NO_PROBE_REASONS
             ):
                 classifier = models.llm if models is not None else session.llm
