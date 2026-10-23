@@ -158,10 +158,10 @@ def test_customer_llm_stays_the_classifier(layers):
     assert amd.build_classifier(session, llm_override=True) == (session.llm, [])
 
 
-def test_haiku_classifies_first_then_openai_only(layers, monkeypatch):
+def test_haiku_classifies_first_then_every_usable_checker(layers, monkeypatch):
     """LiveKit's AMD forces its tool: Haiku 5.5 accepts that, Sonnet 5.5
-    does not, so ANTHROPIC_BACKUP_MODEL goes first. Two checkers at most:
-    Gemini is never built."""
+    does not, so ANTHROPIC_BACKUP_MODEL goes first. Every usable checker is
+    built: a fast failure leaves time for the third."""
     session, _, google = layers
     haiku = FakeLLM()
     built = []
@@ -174,8 +174,24 @@ def test_haiku_classifies_first_then_openai_only(layers, monkeypatch):
     assert built == ["claude-haiku-5-5"]
     assert isinstance(result.llm, amd.ClassifierFailover)
     assert result.llm.primary is haiku
-    assert result.llm.backups == (amd.openai.LLM.return_value,)
-    google.assert_not_called()
+    assert result.llm.backups == (amd.openai.LLM.return_value, google.return_value)
+
+
+def test_sonnet_never_checks_when_another_checker_exists(layers, monkeypatch):
+    """No backup model: ANTHROPIC_MODEL (Sonnet 5.5) rejects a forced tool,
+    so OpenAI and Gemini check without it."""
+    session, _, google = layers
+    built = []
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "eu-central-1")
+    monkeypatch.setattr(
+        pipeline, "house_anthropic", lambda model: built.append(model) or FakeLLM()
+    )
+    llm, owned = amd.build_classifier(session)
+    assert built == []
+    assert llm.primary is amd.openai.LLM.return_value
+    assert llm.backups == (google.return_value,)
+    assert owned == [amd.openai.LLM.return_value, google.return_value]
 
 
 def test_anthropic_only_uses_anthropic_model_as_checker(layers, monkeypatch):
@@ -217,10 +233,9 @@ def test_org_llm_with_fallback_checks_first_then_house_checkers(layers, monkeypa
     assert llm is not session.llm
     assert built == ["claude-haiku-5-5"]
     assert llm.primary is org_client
-    assert llm.backups == (haiku,)
-    assert owned == [org_client, haiku]
-    amd.openai.LLM.assert_not_called()
-    google.assert_not_called()
+    house = (haiku, amd.openai.LLM.return_value, google.return_value)
+    assert llm.backups == house
+    assert owned == [org_client, *house]
     assert session.llm not in owned
 
 

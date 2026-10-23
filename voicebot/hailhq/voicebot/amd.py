@@ -63,9 +63,6 @@ a country from the greeting's language alone.
 # https://docs.livekit.io/reference/python/livekit/plugins/google/index.html
 # POST_ANSWER_TIMEOUT_SECONDS still caps the whole detection.
 CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS = 3.0
-# A check stops at 5s (classify.CLASSIFY_TIMEOUT_SECONDS), so with 3s tries a
-# third classifier never runs: build two at most.
-MAX_CLASSIFIERS = 2
 
 
 class ClassifierFailover(LLM):
@@ -73,7 +70,7 @@ class ClassifierFailover(LLM):
 
     Replaces ``FallbackAdapter``, which after a failure sends an extra
     background request to the failed provider. That request is wasted here:
-    the adapter only lives for one call, and AMD closes the clients first.
+    the adapter only lives for one call, and its clients close at shutdown.
     """
 
     def __init__(self, primary: LLM, *backups: LLM) -> None:
@@ -154,8 +151,8 @@ class _ClassifierFailoverStream(LLMStream):
 @dataclass
 class AMDModels:
     """AMD's own clients. ``owned`` are the transcription clients, closed
-    when ``run_amd`` ends. ``classifiers`` back ``llm``; the caller closes
-    them after AMD, or at call end when the phone menu check uses them."""
+    when ``run_amd`` ends. ``classifiers`` back ``llm``; they also back the
+    phone menu check, so they close only at shutdown (``aclose``)."""
 
     llm: LLM | None
     stt: STT | None
@@ -182,6 +179,14 @@ async def _close_all(models: list) -> None:
             logger.exception("could not close AMD model")
 
 
+def _try_build(build: Callable[[], LLM | None]) -> LLM | None:
+    try:
+        return build()
+    except Exception:
+        logger.exception("AMD classifier setup failed; skipping it")
+        return None
+
+
 def build_classifier(
     session: AgentSession,
     *,
@@ -193,11 +198,11 @@ def build_classifier(
 
     These checks force their tool. Haiku 5.5 (``ANTHROPIC_BACKUP_MODEL``),
     OpenAI and Gemini accept that; Sonnet 5.5 does not, so the call's chain
-    is never used: an org's fallback chain also holds Sonnet 5.5. Without a
-    backup model, ``ANTHROPIC_MODEL`` is the Anthropic checker. A per-call
-    LLM, or an org LLM without fallback, is the customer's choice and is used
-    alone. An org LLM with fallback goes first, then the house checkers. Only
-    the first ``MAX_CLASSIFIERS`` usable ones are built.
+    is never used: an org's fallback chain also holds Sonnet 5.5.
+    ``ANTHROPIC_MODEL`` is the checker only when no other one can be built.
+    A per-call LLM, or an org LLM without fallback, is the customer's choice
+    and is used alone. An org LLM with fallback goes first, then the house
+    checkers. Every usable one is built.
     With no classifier, this returns None and the checks are skipped
     (docs/operations/voice-llm.md). Independent clients: closing them must
     not close the conversation's providers.
@@ -207,25 +212,18 @@ def build_classifier(
         # run_amd skips AMD when this is not a plain LLM.
         return session.llm, []  # type: ignore[return-value]
     builders: list[Callable[[], LLM | None]] = [
-        lambda: house_llm(
-            "anthropic", settings.anthropic_backup_model or settings.anthropic_model
-        ),
+        lambda: house_llm("anthropic", settings.anthropic_backup_model),
         lambda: house_llm("openai", settings.openai_model),
         lambda: house_llm("google", settings.google_amd_model),
     ]
     if org is not None:
         builders.insert(0, lambda: org_llm(org))
-    classifiers: list[LLM] = []
-    for build in builders:
-        if len(classifiers) == MAX_CLASSIFIERS:
-            break
-        try:
-            llm = build()
-        except Exception:
-            logger.exception("AMD classifier setup failed; skipping it")
-            continue
-        if llm is not None:
-            classifiers.append(llm)
+    classifiers = [llm for build in builders if (llm := _try_build(build)) is not None]
+    if not classifiers:
+        # Last resort: ANTHROPIC_MODEL may be Sonnet 5.5, which rejects a
+        # forced tool, so it checks only when nothing else can.
+        last = _try_build(lambda: house_llm("anthropic", settings.anthropic_model))
+        classifiers = [] if last is None else [last]
     if not classifiers:
         logger.warning("no classifier has a model and a key; skipping checks")
         return None, []
