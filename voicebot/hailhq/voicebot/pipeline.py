@@ -321,17 +321,19 @@ def _house_llms() -> list[agents_llm.LLM]:
     return [llm for llm in llms if llm is not None]
 
 
+def _fallback_chain(llms: list[agents_llm.LLM]) -> agents_llm.LLM:
+    # One try per model, no retry: a failed model hands over to the next at
+    # once (docs/operations/voice-llm.md).
+    return agents_llm.FallbackAdapter(
+        llm=llms, attempt_timeout=10.0, max_retry_per_llm=0
+    )
+
+
 def _house_llm() -> agents_llm.LLM:
     llms = _house_llms()
     if not llms:
         raise ProviderKeyError("no house LLM has a model and a key")
-    # One try per model, no retry: a failed model hands over to the next at
-    # once (docs/operations/voice-llm.md).
-    return agents_llm.FallbackAdapter(
-        llm=llms,
-        attempt_timeout=10.0,
-        max_retry_per_llm=0,
-    )
+    return _fallback_chain(llms)
 
 
 def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
@@ -380,11 +382,7 @@ def build_llm(
     if org is not None:
         byo = org_llm(org)
         if org.fallback_enabled:
-            return agents_llm.FallbackAdapter(
-                llm=[byo, *_house_llms()],
-                attempt_timeout=10.0,
-                max_retry_per_llm=0,
-            )
+            return _fallback_chain([byo, *_house_llms()])
         return byo
     return _house_llm()
 

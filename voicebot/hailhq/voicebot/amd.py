@@ -225,11 +225,16 @@ def build_classifier(
     if org is not None:
         builders.insert(0, lambda: org_llm(org))
     classifiers = [llm for build in builders if (llm := _try_build(build)) is not None]
-    if not classifiers:
-        # Last resort: ANTHROPIC_MODEL may be Sonnet 5.5, which rejects a
-        # forced tool, so it checks only when nothing else can.
-        last = _try_build(lambda: house_llm("anthropic", settings.anthropic_model))
-        classifiers = [] if last is None else [last]
+    # Last resort: ANTHROPIC_MODEL may be Sonnet 5.5, which rejects a
+    # forced tool, so it checks only when nothing else can.
+    if (
+        not classifiers
+        and (
+            last := _try_build(lambda: house_llm("anthropic", settings.anthropic_model))
+        )
+        is not None
+    ):
+        classifiers = [last]
     if not classifiers:
         logger.warning("no classifier has a model and a key; skipping checks")
         return None, []
