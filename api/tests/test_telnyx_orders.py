@@ -812,6 +812,7 @@ async def test_quote_route_shows_the_live_verification(
     org, _, key = org_and_key
     other_org, _, _ = await insert_org_and_key(async_session)
     _, offer = await seed_quote(async_session, org, readiness="verification_required")
+    offer = offer.model_copy(update={"subject_types": ["business"]})
     twilio_offer = offer.model_copy(
         update={"provider": "twilio", "e164": "+351211234568"}
     )
@@ -938,6 +939,50 @@ async def test_quote_route_lists_several_people_with_their_names(
         (str(acme.id), "submitted", "business", "Acme"),
     ]
     assert got["verification"]["id"] == str(acme.id)
+
+
+async def test_quote_route_lists_only_verifications_that_can_buy_the_offer(
+    client, async_session, org_and_key, monkeypatch
+):
+    """An offer lists the verifications that can buy it: of a subject type
+    it accepts, and, once approved, only those the carrier still accepts
+    for it. Rows under review of an accepted kind stay listed."""
+    from hailhq.core.carrier_offer import Approval
+
+    org, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    valid = _verification(org, "approved", subject_name="Valid", created_at=now)
+    stale = _verification(org, "approved", subject_name="Stale", created_at=now)
+    pending = _verification(org, "submitted", subject_name="Pending", created_at=now)
+    person = _verification(org, "approved", subject_name="Ada", created_at=now)
+    person_pending = _verification(
+        org, "submitted", subject_name="Grace", created_at=now
+    )
+    for row in (person, person_pending):
+        row.subject_type = "person"
+    async_session.add_all([valid, stale, pending, person, person_pending])
+    await async_session.commit()
+    _, offer = await seed_quote(async_session, org)
+    offer = offer.model_copy(
+        update={
+            "subject_types": ["business"],
+            "approvals": [
+                Approval(row_id=r.id, subject_type=r.subject_type, verification_id="g")
+                for r in (valid, person)
+            ],
+        }
+    )
+    no_verification = offer.model_copy(
+        update={"e164": "+351211234569", "subject_types": [], "approvals": []}
+    )
+    result = await _quote(client, key, monkeypatch, [offer, no_verification])
+    by_e164 = {o["e164"]: o for o in result["offers"]}
+    got = by_e164[offer.e164]
+    assert [v["subject_name"] for v in got["verifications"]] == ["Valid", "Pending"]
+    assert got["verification"]["id"] == str(valid.id)
+    # An offer that needs no verification lists none.
+    assert by_e164[no_verification.e164]["verifications"] == []
+    assert by_e164[no_verification.e164]["verification"] is None
 
 
 async def test_quote_route_verification_is_null_without_a_live_row(

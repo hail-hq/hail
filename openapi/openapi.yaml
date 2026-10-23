@@ -2525,13 +2525,17 @@ paths:
 
         Each offer lists `subject_types` (who may verify for it: a person, a
 
-        business, or both) and all your `verifications` for it that are not
+        business, or both) and the `verifications` you can buy it with, each
 
-        cancelled or rejected, each with the name of its person or company
+        with the name of its person or company (`subject_name`), approved first:
 
-        (`subject_name`), approved first. It is `ready` when one of your
+        yours of an accepted subject type that are under review, and the
 
-        approved verifications of an accepted subject type is still valid."
+        approved ones the carrier still accepts for this offer. Pass an approved
+
+        one's `id` as `verification_id` to POST /numbers. An offer that needs
+
+        verification is `ready` when one of them is approved."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -4590,8 +4594,7 @@ paths:
 
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 
-        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one
-        file
+        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
 
         part per slot named `file.<slot>`. Get the slot and field names from
 
@@ -4606,13 +4609,16 @@ paths:
 
         of each subject type (several people, several companies); a second live
 
-        one of the same subject type and the same name is a 409.
+        one of the same subject type and the same name is a 409, and so is a
+
+        second live one of the same subject type when the form holds no name.
+
+        A 409 comes before your files are checked and before anything is filed.
 
 
         The carrier checks the details right away. Problems come back as 422 with
 
-        the field named, and nothing is kept. When it passes, the verification
-        is
+        the field named, and nothing is kept. When it passes, the verification is
 
         submitted to the carrier for its review; read it back to follow the state.
 
@@ -8549,19 +8555,20 @@ components:
             $ref: "#/components/schemas/OfferVerification"
           type: array
           title: Verifications
-          description: "Every verification of your organization for this offer's
-            country and number type, leaving out cancelled and rejected ones: approved
-            first, then newest first. Pass one's `id` as `verification_id` to POST
-            /numbers to buy with it."
+          description:
+            "The verifications you can buy this offer with, approved first,
+            then newest first: yours of a subject type in `subject_types` that are under
+            review, and the approved ones the carrier still accepts for this offer. Once
+            one is approved, pass its `id` as `verification_id` to POST /numbers to buy
+            with it."
         verification:
           anyOf:
             - $ref: "#/components/schemas/OfferVerification"
             - type: "null"
           description:
-            "Deprecated: read `verifications`. The verification a purchase
-            without verification_id would use: your one approved verification, else
-            the newest one that is not cancelled or rejected; null when there is
-            none."
+            "Deprecated: read `verifications`. The verification a purchase without
+            verification_id would use: the one approved verification in `verifications`,
+            else the newest one there; null when there is none."
         by_request:
           type: boolean
           title: By Request

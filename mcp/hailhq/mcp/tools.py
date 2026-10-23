@@ -2292,10 +2292,11 @@ def register_tools(
 
         ``subject_types`` says who may verify for the number: ``person``
         (the user), ``business`` (the user's company), or both; empty when no
-        verification is needed. ``verifications`` lists every verification
-        of the organization for the offer that is not cancelled or rejected
-        (``id``, ``state``, ``subject_type``, ``subject_name``), approved
-        first. ``subject_name`` is the person's or company's name from the
+        verification is needed. ``verifications`` lists the verifications
+        the offer can be bought with (``id``, ``state``, ``subject_type``,
+        ``subject_name``), approved first: those of an accepted subject type
+        still under review, and the approved ones the carrier still accepts
+        for the offer. ``subject_name`` is the person's or company's name from the
         verification form. When several are approved, show the user the
         names and ask which one buys the number; pass its ``id`` as
         ``verification_id`` to acquire_number.
