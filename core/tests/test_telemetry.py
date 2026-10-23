@@ -31,7 +31,7 @@ def test_export_removes_content_but_preserves_trace_and_usage():
             "lk.function_tool.output": "PRIVATE OUTPUT",
             "lk.function_tools": "PRIVATE DEFINITIONS",
             "lk.pii.chat_ctx": "PRIVATE NEW SDK CHAT",
-            "gen_ai.input.messages": "PRIVATE GENAI CHAT",
+            "gen_ai.input.messages": '[{"role": "user"}]',
             "gen_ai.input_messages": "PRIVATE GENAI CHAT",
             "request": "PRIVATE MCP REQUEST",
             "response": "PRIVATE MCP RESPONSE",
@@ -66,6 +66,8 @@ def test_export_removes_content_but_preserves_trace_and_usage():
     assert exported.attributes["call_id"] == "call-123"
     assert exported.attributes["email_id"] == "email-123"
     assert exported.attributes["url.full"] == "https://example.org/test"
+    # LLM content is exported whole; other content keys stay out.
+    assert exported.attributes["gen_ai.input.messages"] == '[{"role": "user"}]'
     assert "PRIVATE" not in str(exported.attributes)
     assert "person@example.org" not in str(exported.attributes)
     assert "abcdef" not in str(exported.attributes)
