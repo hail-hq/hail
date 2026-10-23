@@ -2526,6 +2526,9 @@ async def _run_call(
         or captured["end_reason"] is not None
     ):
         return
+    # The words heard at pickup. A probe reply is not added here: it was
+    # held while the opening was pending, and the opening gets it from there.
+    pickup_transcript = amd_result.transcript if amd_result else None
     if confirmation_result is not None:
         if confirmation_result.category != AMDCategory.MACHINE_IVR and probe_heard:
             # The probe played in full and already identified us to this
@@ -2582,7 +2585,7 @@ async def _run_call(
             await speak_greeting(
                 session,
                 metadata,
-                pickup_transcript=amd_result.transcript if amd_result else None,
+                pickup_transcript=pickup_transcript,
                 on_opened=agent.release_opening,
                 already_introduced=pickup_disclosed,
             )

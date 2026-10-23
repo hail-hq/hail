@@ -11,7 +11,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, ClassVar
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, PropertyMock
 from uuid import UUID
 
 import pytest
@@ -25,9 +25,11 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from livekit import rtc
+from livekit.agents import StopResponse
 from livekit.agents.llm import (
     ChatChunk,
     ChatContext,
+    ChatMessage,
     ChoiceDelta,
     FunctionToolCall,
     LLMStream,
@@ -609,6 +611,7 @@ async def _drive_entrypoint(
     confirmation_category: str = "uncertain",
     confirmation_reason: str = "pickup_confirmation",
     probe_heard: bool = True,
+    probe_reply: str | None = None,
     metadata_overrides: dict | None = None,
     stt: bool = True,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
@@ -628,9 +631,17 @@ async def _drive_entrypoint(
         models.aclose.assert_not_awaited()
         if probe_heard:
             await _session.say(prompt)
-        result = _prediction(confirmation_category).model_copy(
-            update={"reason": confirmation_reason}
-        )
+        update: dict[str, Any] = {"reason": confirmation_reason}
+        if probe_reply is not None:
+            # The reply is a held user turn too, as in a real call.
+            agent = _session.start_options["agent"]
+            agent.update_chat_ctx = AsyncMock()
+            with pytest.raises(StopResponse):
+                await agent.on_user_turn_completed(
+                    ChatContext(), ChatMessage(role="user", content=[probe_reply])
+                )
+            update["transcript"] = probe_reply
+        result = _prediction(confirmation_category).model_copy(update=update)
         return result, probe_heard
 
     session.confirm = AsyncMock(side_effect=_confirm)
@@ -1152,6 +1163,25 @@ async def test_probe_unavailable_verdict_is_rechecked_before_hangup(
     assert len(session.say_calls) == 1
     assert len(session.replies) == 1
     assert "send_dtmf" in session.replies[0]
+
+
+async def test_probe_reply_is_in_the_opening_once(async_session, monkeypatch):
+    from hailhq.voicebot.agent import SpeechSanitizingAgent
+
+    monkeypatch.setattr(
+        SpeechSanitizingAgent, "session", PropertyMock(return_value=Mock())
+    )
+    reply = "Yes, who is calling?"
+    _, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("uncertain"),
+        confirmation_category="human",
+        probe_reply=reply,
+        metadata_overrides={"first_message": None},
+    )
+    assert len(session.replies) == 1
+    assert session.replies[0].count(reply) == 1
 
 
 async def test_probe_phone_tree_starts_ivr_detection(async_session, monkeypatch):
