@@ -22,7 +22,7 @@ from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
-from hailhq.voicebot.ivr import classify_remote_speech
+from hailhq.voicebot.ivr import try_classify_remote_speech
 from hailhq.voicebot.pickup import PickupAudio, needs_recheck, recheck_greeting
 from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
 from livekit import rtc
@@ -424,12 +424,18 @@ async def run_amd(
             # Check the final verdict, including one returned by the audio recheck.
             # A business welcome was wrongly labelled unavailable on call 70fc43e4.
             started = time.monotonic()
-            verified = await classify_remote_speech(
+            verified = await try_classify_remote_speech(
                 session_llm, result.transcript or ""
             )
-            if verified == AMDCategory.UNCERTAIN:
-                # Keep listening silently; uncertainty cannot prove unavailability.
+            if verified is None:
+                # The checker failed (error, timeout, no LLM, no transcript):
+                # keep listening as a phone menu, since a failure proves
+                # nothing.
                 verified = AMDCategory.MACHINE_IVR
+            elif verified == AMDCategory.UNCERTAIN:
+                # The checker answered unsure, so it cannot clear the
+                # detector's verdict: hang up as unavailable.
+                verified = AMDCategory.MACHINE_UNAVAILABLE
             result = AMDPredictionEvent(
                 category=verified,
                 transcript=result.transcript,
