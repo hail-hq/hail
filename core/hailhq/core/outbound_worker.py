@@ -39,7 +39,7 @@ from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
     resolve_identity,
-    tag_context,
+    tag_outbound_email,
 )
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -205,13 +205,7 @@ class OutboundForwardWorker:
             email_id=str(row.id),
             organization_id=str(row.organization_id),
         ) as span:
-            tag_context(
-                channel="email",
-                direction="outbound",
-                email_id=row.id,
-                from_=row.from_address,
-                to=row.to_addresses[0] if row.to_addresses else None,
-            )
+            tag_outbound_email(row)
             outcome = await self._send_one_impl(session, row)
             if span is not None:
                 span.set_attribute("outcome", outcome)

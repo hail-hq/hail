@@ -139,6 +139,17 @@ def tag_context(
         logging.getLogger(__name__).warning("trace tagging failed", exc_info=True)
 
 
+def tag_outbound_email(email: Any) -> None:
+    """tag_context() for an outbound Email row; its first To is the other party."""
+    tag_context(
+        channel="email",
+        direction="outbound",
+        email_id=email.id,
+        from_=email.from_address,
+        to=email.to_addresses[0] if email.to_addresses else None,
+    )
+
+
 def _tag_context(
     *, channel, direction, agent_id, call_id, sms_id, email_id, from_, to, tool
 ):

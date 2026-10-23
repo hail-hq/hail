@@ -1,4 +1,4 @@
-"""Trace tags, the LLM content switch and the MCP noise filter."""
+"""Trace tags, exported LLM content and the MCP noise filter."""
 
 import logging
 import os

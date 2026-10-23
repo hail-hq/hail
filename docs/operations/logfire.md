@@ -67,8 +67,9 @@ The export always sends these keys in full, not masked:
 `gen_ai.output.messages`, `gen_ai.tool.call.arguments`,
 `gen_ai.tool.call.result` and `lk.pii.user_transcript`. Logfire shows the
 `llm_request` spans of a voice call or SMS reply in its LLM view: the system
-prompt, the conversation and the reply. Tool definitions stay dropped. The
-default is `false`: those keys are dropped at export.
+prompt, the conversation and the reply. Tool definitions stay dropped.
+This content can hold the other party's full number, address or name:
+masking applies only to the `hail.from` and `hail.to` tags.
 
 There is no attribute length limit: the OpenTelemetry SDK default is
 unlimited and Hail does not set `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, so
@@ -78,9 +79,9 @@ every exporter.
 
 ## Export filter
 
-Unless content capture is on, the common export boundary removes conversation content, tool arguments/results,
-MCP payloads, SQL text, URL credentials/query strings/fragments, and GenAI content
-events. Authenticated actor identity fields intentionally retain the acting user's
+Apart from the LLM content keys above, the common export boundary removes
+conversation content, tool arguments/results, MCP payloads, SQL text, URL
+credentials/query strings/fragments, and GenAI content events. Authenticated actor identity fields intentionally retain the acting user's
 email and organization name; these fields propagate into child spans and logs.
 Automated inbound voice/SMS agents carry organization identity and `actor_kind=agent`,
 without inventing a human actor. Other logs and exceptions redact email addresses, international

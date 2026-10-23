@@ -30,7 +30,7 @@ from hailhq.core.system_email import (
     render_forward_stopped,
 )
 from hailhq.core.telemetry import bind_organization
-from hailhq.core.telemetry_identity import tag_context
+from hailhq.core.telemetry_identity import tag_outbound_email
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,13 +132,7 @@ async def apply_delivery_event(
         # Expected for mail sent outside Hail from the same SES account.
         return ApplyResult(email_id=None, inserted=False, status_changed=False)
     await bind_organization(db, email.organization_id)
-    tag_context(
-        channel="email",
-        direction="outbound",
-        email_id=email.id,
-        from_=email.from_address,
-        to=email.to_addresses[0] if email.to_addresses else None,
-    )
+    tag_outbound_email(email)
 
     ins = (
         pg_insert(EmailEvent)
