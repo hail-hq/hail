@@ -16,9 +16,8 @@ from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 
 logger = logging.getLogger("hailhq.voicebot")
 
-# Cap on the transcription step only. classify_speech caps the
-# classification at its own five seconds.
-RECOGNIZE_TIMEOUT_SECONDS = 5.0
+# Cap on the whole recheck: transcription and classification together.
+RECHECK_TIMEOUT_SECONDS = 5.0
 MIN_SPEECH_SECONDS = 1.0
 SAMPLE_RATE = 16000
 # The shared prompt describes live, partial greetings and a postpone tool.
@@ -125,14 +124,16 @@ async def recheck_greeting(
 
     started = time.monotonic()
     try:
-        async with asyncio.timeout(RECOGNIZE_TIMEOUT_SECONDS):
+        async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
             event = await stt.recognize(
                 audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
             )
-        transcript = event.alternatives[0].text.strip() if event.alternatives else ""
-        if not transcript:
-            return result
-        category = await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
+            transcript = (
+                event.alternatives[0].text.strip() if event.alternatives else ""
+            )
+            if not transcript:
+                return result
+            category = await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
         if category is None or category == AMDCategory.UNCERTAIN:
             return result
         return AMDPredictionEvent(

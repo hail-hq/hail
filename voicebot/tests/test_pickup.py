@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
@@ -230,7 +231,7 @@ async def test_empty_or_failed_transcription_does_not_reach_llm(caplog):
 
 
 async def test_recheck_deadline_cancels_provider_and_preserves_original(monkeypatch):
-    monkeypatch.setattr(pickup, "RECOGNIZE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.02)
     cancelled = asyncio.Event()
 
     async def hang(*args, **kwargs):
@@ -277,9 +278,44 @@ async def test_caller_cancellation_propagates_and_closes_recheck():
     assert cancelled.is_set()
 
 
+async def test_slow_recognize_and_slow_classify_end_at_one_total(monkeypatch):
+    """One cap covers transcription and classification together."""
+    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.1)
+
+    async def slow_recognize(*args, **kwargs):
+        await asyncio.sleep(0.06)
+        return SimpleNamespace(alternatives=[SimpleNamespace(text="hello")])
+
+    class HangingStream(LLMStream):
+        async def _run(self):
+            await asyncio.Event().wait()
+
+    class HangingLLM(FakeLLM):
+        def chat(self, **kwargs):
+            return HangingStream(
+                self,
+                chat_ctx=kwargs["chat_ctx"],
+                tools=kwargs["tools"],
+                conn_options=kwargs["conn_options"],
+            )
+
+    original = prediction()
+    started = time.monotonic()
+    result = await pickup.recheck_greeting(
+        original,
+        frame(),
+        stt=SimpleNamespace(recognize=slow_recognize),
+        llm=HangingLLM(),
+        prompt="",
+    )
+    elapsed = time.monotonic() - started
+    assert result is original
+    # Not 0.06 + the classifier's own 5 s cap.
+    assert 0.09 <= elapsed < 0.5
+
+
 async def test_classifier_deadline_cancels_slow_llm(monkeypatch):
-    """The transcription cap does not cover the classifier: the check's own
-    five-second total does."""
+    """The check's own total also stops a slow classifier."""
     monkeypatch.setattr(classify, "CLASSIFY_TIMEOUT_SECONDS", 0.04)
     cancelled = asyncio.Event()
 
