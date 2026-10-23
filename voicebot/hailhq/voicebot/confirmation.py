@@ -12,6 +12,7 @@ from livekit.agents.voice import AgentSession
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 
 from .classify import classify_speech
+from .ivr import CLASSIFY_TIMEOUT_SECONDS
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -21,12 +22,12 @@ PROBE_TIMEOUT_SECONDS = 10.0
 # Slow speech, so a long admin-set disclosure line still finishes playing.
 PROBE_CHARS_PER_SECOND = 10.0
 # Safety cap on waiting for a verdict once voice was heard. It never cancels
-# a running classification; that one ends under its own provider timeout.
+# a running classification; that one ends under CLASSIFY_TIMEOUT_SECONDS.
 SPEECH_CAP_SECONDS = 5.0
 # Only full silence (or a closed session) hangs up.
 UNANSWERED_REASON = "pickup_confirmation_unanswered"
-# The reply could not be judged (probe playout failed, classifier error or
-# bad label). The caller talks, as it did before this check existed.
+# The reply could not be judged (probe playout failed, classifier error,
+# timeout or bad label). The caller talks, as it did before this check existed.
 UNAVAILABLE_REASON = "pickup_confirmation_unavailable"
 # Voice was heard but no verdict came in time (for example the person spoke
 # a language the call's STT does not transcribe). The caller talks.
@@ -85,7 +86,9 @@ it answers our question.
 human: any live reply, such as a greeting, yes/no, "I hear you", "who is
 calling?", or asking us to repeat. A live response takes precedence over
 background music.
-machine-vm: a voicemail greeting inviting a message or speech after a tone.
+machine-vm: a voicemail greeting: an invitation to leave a message or speak
+after a tone, or a recorded personal greeting such as "you've reached <name>"
+or "<name> here, I can't take your call".
 machine-ivr: an automated menu, call screening, a recorded business welcome,
 or a hold or queue announcement, with or without music. These are not a
 dead line.
@@ -96,7 +99,9 @@ Mandatory examples:
 "Hello?" / "Hej" / "Bonjour" -> human (a greeting replies to our question).
 "Yes" / "No" / "Ja, jag hör dig" -> human (answers our question).
 "Who is this?" / "Who's calling?" -> human (conversational response).
-"Hello, you have reached Sam" -> uncertain (no invitation to leave a message).
+"Hi, this is Sam" -> human (a live introduction).
+"Hello, you've reached Sam" -> machine-vm (a recorded greeting).
+"Sam here, I can't take your call right now" -> machine-vm.
 "Leave a message after the tone" -> machine-vm.
 "Please stay on the line for the next available agent" -> machine-ivr.
 "Welcome to Acme. Your call is important to us" -> machine-ivr.
@@ -121,14 +126,18 @@ async def confirm_pickup(
     Follows LiveKit's AMD guidance: uncertain is treated as a person.
     Only full silence returns ``UNANSWERED_REASON`` (the caller hangs up).
     Voice counts: a final transcript or VAD ``speaking`` stops the no-speech
-    timer, which starts after probe playout. Final transcripts are then
+    timer, which starts after probe playout. Final transcripts and VAD
+    during playout may be our own probe echoed back, so they are dropped,
+    unless the probe was interrupted: then words after the interruption
+    count. Final transcripts are then
     classified; a human or uncertain verdict opens the call, a machine
     verdict keeps its handling. Words that arrive during a classification
     trigger one more classification while the speech cap allows. The cap
     never cancels a running classification, so the worst-case wait after
-    voice is ``SPEECH_CAP_SECONDS`` plus one provider timeout (10 s). Voice
-    with no verdict by the cap returns ``HEARD_REASON``. A failed probe or
-    classifier returns ``UNAVAILABLE_REASON``. Both open the call. The
+    voice is ``SPEECH_CAP_SECONDS`` plus one ``CLASSIFY_TIMEOUT_SECONDS``.
+    Voice with no verdict by the cap returns ``HEARD_REASON``. A failed
+    probe, or a classifier that fails or runs out of time, returns
+    ``UNAVAILABLE_REASON``. Both open the call. The
     caller retains the opening latch.
     Verified against LiveKit Agents 1.8.8 and:
     https://docs.livekit.io/telephony/features/answering-machine-detection/
@@ -141,10 +150,17 @@ async def confirm_pickup(
     words: list[str] = []
     closed = False
     probe_heard = False
+    # The probe's speech handle, and whether it is still playing.
+    speech: Any = None
+    playing = False
     started = time.monotonic()
 
     def transcribed(event: Any) -> None:
         if event.is_final and (text := event.transcript.strip()):
+            # Words while the probe plays may be our own voice echoed back.
+            # They count only once the person talked over the probe.
+            if playing and getattr(speech, "interrupted", False) is not True:
+                return
             words.append(text)
             # Bound noisy input as well as elapsed time.
             if len(words) > 32:
@@ -179,9 +195,10 @@ async def confirm_pickup(
         if not isinstance(llm, LLM):
             return None
         try:
-            category = await classify_speech(
-                llm, CONFIRMATION_PROMPT, " ".join(words)[-2000:]
-            )
+            async with asyncio.timeout(CLASSIFY_TIMEOUT_SECONDS):
+                category = await classify_speech(
+                    llm, CONFIRMATION_PROMPT, " ".join(words)[-2000:]
+                )
         except Exception as exc:
             logger.warning(
                 "pickup response classifier unavailable (%s)", type(exc).__name__
@@ -193,10 +210,14 @@ async def confirm_pickup(
     session.on("close", on_close)
     try:
         try:
+            playing = True
+            # ``say`` returns the speech handle; awaiting it waits for playout.
+            speech = session.say(prompt, allow_interruptions=True)
             async with asyncio.timeout(
                 PROBE_TIMEOUT_SECONDS + len(prompt) / PROBE_CHARS_PER_SECOND
             ):
-                handle = await session.say(prompt, allow_interruptions=True)
+                handle = await speech
+            playing = False
             # A person who talks over the probe may have missed part of it.
             probe_heard = getattr(handle, "interrupted", False) is not True
         except Exception as exc:

@@ -3,7 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hailhq.core.languages import SUPPORTED_LANGUAGES
@@ -27,6 +27,24 @@ class Session(EventEmitter):
 
     def speak(self):
         self.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
+
+
+class Handle:
+    """A speech handle: ``during`` runs while the probe plays."""
+
+    def __init__(self, during=None):
+        self.interrupted = False
+        self.during = during
+
+    def __await__(self):
+        return self.play().__await__()
+
+    async def play(self):
+        await asyncio.sleep(0)
+        if self.during:
+            self.during(self)
+        await asyncio.sleep(0)
+        return self
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +121,7 @@ async def test_greeting_reply_opens_the_call(text):
 async def test_uncertain_reply_opens_the_call():
     session = Session()
     task = await start(session, Classifier('{"label":"uncertain"}'))
-    session.transcribe("Hello, you have reached Sam")
+    session.transcribe("Mm-hm")
     result, _heard = await task
     assert result.category == AMDCategory.UNCERTAIN
     assert result.reason == "pickup_confirmation"
@@ -144,16 +162,65 @@ async def test_words_from_before_probe_are_not_confirmation():
 
 
 async def test_human_can_answer_during_probe():
+    """Words after an interruption count; echo before it does not."""
     session = Session()
     llm = Classifier('{"label":"human"}')
 
-    async def say(*args, **kwargs):
+    def during(handle):
+        session.transcribe("Can you hear me?")
+        handle.interrupted = True
         session.transcribe("Who is calling?")
-        await asyncio.sleep(0)
 
-    session.say.side_effect = say
-    result, _heard = await (await start(session, llm))
+    session.say = Mock(return_value=Handle(during))
+    result, heard = await (await start(session, llm))
     assert result.category == AMDCategory.HUMAN
+    assert result.transcript == "Who is calling?"
+    assert not heard
+
+
+async def test_transcribed_echo_during_the_probe_then_silence_hangs_up():
+    session = Session()
+    llm = Classifier('{"label":"human"}')
+    session.say = Mock(
+        return_value=Handle(lambda _handle: session.transcribe("Can you hear me?"))
+    )
+    result, heard = await (await start(session, llm))
+    assert result.reason == confirmation.UNANSWERED_REASON
+    assert result.transcript == ""
+    assert heard is True
+    assert llm.calls == []
+    assert_detached(session)
+
+
+async def test_slow_classifier_opens_the_call(monkeypatch):
+    monkeypatch.setattr(confirmation, "CLASSIFY_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(confirmation, "SPEECH_CAP_SECONDS", 1.0)
+    session = Session()
+    llm = Classifier('{"label":"machine-vm"}')
+    original = llm.chat
+
+    class SlowStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        async def __aenter__(self):
+            await self.stream.__aenter__()
+            return self
+
+        async def collect(self):
+            await asyncio.sleep(0.5)
+            return await self.stream.collect()
+
+        async def __aexit__(self, *args):
+            await self.stream.__aexit__(*args)
+
+    llm.chat = lambda **kwargs: SlowStream(original(**kwargs))
+    task = await start(session, llm)
+    session.transcribe("Yes")
+    result, _heard = await asyncio.wait_for(task, timeout=0.3)
+    assert result.category == AMDCategory.UNCERTAIN
+    assert result.reason == confirmation.UNAVAILABLE_REASON
+    assert_detached(session)
 
 
 async def test_deadline_starts_after_probe_playback():
@@ -199,7 +266,7 @@ async def test_new_words_during_classification_prevent_stale_human_verdict():
 
 
 async def test_cap_never_cancels_a_running_classifier():
-    """The classifier ends under its own provider timeout, not the cap."""
+    """The classifier ends under its own time limit, not the cap."""
     session = Session()
     llm = Classifier('{"label":"machine-vm"}')
     original = llm.chat
@@ -307,13 +374,13 @@ async def test_long_probe_gets_time_to_play(monkeypatch):
 
     async def say(*args, **kwargs):
         await asyncio.sleep(0.05)
-        session.transcribe("Yes")
 
     session.say.side_effect = say
     result, _heard = await confirmation.confirm_pickup(
         session, llm=Classifier('{"label":"human"}'), prompt="x" * 20
     )
-    assert result.category == AMDCategory.HUMAN
+    # Playout finished; a cut probe would be UNAVAILABLE_REASON.
+    assert result.reason == confirmation.UNANSWERED_REASON
 
 
 def test_probe_line_covers_every_supported_language():
