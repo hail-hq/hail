@@ -49,12 +49,14 @@ human: a live person addressing the caller.
 machine-vm: recorded voicemail inviting a message, including requests to speak after a tone.
 machine-unavailable: mailbox full, not configured, or cannot accept messages.
 machine-ivr: automated menus, requests to press keys, or call screening.
-uncertain: insufficient evidence.
-A short live greeting that waits for a reply, such as 'Hi', 'Hello?', 'Yes?',
-'Hej?' or 'Allô ?', is human. Identify voicemail by its own cues: an invitation
-to leave a message, a tone, "you've reached", or "not available".
-Use postpone_termination, for at most 2 seconds, only when the greeting is
-clearly cut off mid-sentence.
+uncertain: insufficient evidence. A recording can start with a person's name or 'hello'
+and continue; while a greeting is still going, wait for the voicemail cues.
+A short live greeting that ends and waits for a reply, such as 'Hi', 'Hello?',
+'Yes?', 'Hej?' or 'Allô ?', is human.
+Voicemail has its own cues: an invitation to leave a message, a tone,
+"you've reached", or "not available".
+For a greeting that is clearly mid-sentence, use postpone_termination for at most
+2 seconds to hear the rest.
 Examples: 'laissez un message après le bip' and 'اترك رسالة بعد الصافرة' are
 machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
 An unrelated recorded broadcast or song lyrics without a live conversational greeting
@@ -256,9 +258,8 @@ def build_amd_models(
     """Independent house AMD; explicit customer choices keep precedence.
 
     No Inference auto-selection: house keys keep provider billing direct.
-    GPT Live Transcribe and the Deepgram recheck transcribe in the call's
-    ``language`` (English when the call sets none). Detecting the language
-    turned a short English "Hi" into mixed-language text.
+    GPT Live Transcribe explicitly detects the greeting's language. Omitting
+    Cartesia's language is insufficient: its provider default is English.
     Speechmatics BYO retains its selected language (no automatic language mode).
     """
     models = AMDModels(session.llm, session.stt)
@@ -274,7 +275,7 @@ def build_amd_models(
             # https://developers.openai.com/api/docs/guides/realtime-transcription
             models.stt = openai.STT(
                 model=settings.openai_transcribe_model,
-                language=language or "en",
+                detect_language=True,
                 api_key=settings.openai_api_key,
                 **({"vad": session.vad} if session.vad is not None else {}),
             )
@@ -282,10 +283,12 @@ def build_amd_models(
             if settings.deepgram_api_key and settings.deepgram_model:
                 # The live model cannot take a finished recording. Recheck
                 # the whole greeting only when the live result is inconclusive.
+                # Deepgram detects the language only in one-shot requests.
+                # https://developers.deepgram.com/docs/language-detection
                 try:
                     models.recheck_stt = deepgram.STT(
                         model=settings.deepgram_model,
-                        language=language or "en",
+                        detect_language=True,
                         api_key=settings.deepgram_api_key,
                     )
                     models.owned.append(models.recheck_stt)
@@ -327,12 +330,6 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
     "machine-unavailable": CallEndReason.MACHINE_UNAVAILABLE,
 }
 
-# Once the callee starts talking, AMD has this long to reach a verdict.
-# Without one, the call proceeds as if a person answered, like LiveKit's own
-# guidance for uncertain: https://docs.livekit.io/telephony/features/answering-machine-detection/
-# A "Hi." the classifier keeps calling uncertain otherwise waits for the 20s cap.
-SPEECH_VERDICT_SECONDS = 3.0
-
 # Ceiling on how long a live-but-silent callee waits before hearing the
 # disclosure. A recipient waiting for us to speak should not have to say hello
 # before hearing anything. Classification uncertainty must not mean dead air.
@@ -340,10 +337,9 @@ NO_SPEECH_THRESHOLD_SECONDS = 3.0
 
 # Starts at SIP answer, unlike the dispatch-wide backstop below. Keep the
 # SDK's standard 20s budget so a recorded greeting can finish and be
-# transcribed before fallback. Silence still releases at 3s above; speech
-# without a verdict releases SPEECH_VERDICT_SECONDS after it starts. Keep
-# wait_until_finished false so continuous noise or a failed classifier
-# cannot hold indefinitely.
+# transcribed before fallback. Silence still releases at 3s above; short
+# human greetings release as soon as classified. Keep wait_until_finished
+# false so continuous noise or a failed classifier cannot hold indefinitely.
 # https://docs.livekit.io/telephony/features/answering-machine-detection/#parameters
 POST_ANSWER_TIMEOUT_SECONDS = 20.0
 
@@ -400,19 +396,6 @@ def ivr_navigation_instructions(transcript: str | None) -> str:
 def amd_end_reason(category: str) -> str:
     """The ``call_end_reason`` for a machine category we hang up on."""
     return _END_REASON_BY_CATEGORY[category].value
-
-
-def settle_without_verdict(detector: AMD) -> None:
-    """Stop waiting: settle as uncertain, which the caller treats as a person.
-
-    A verdict the classifier already saved (a voicemail still talking, say)
-    is emitted instead. Its own reason keeps the slow audio recheck
-    (``needs_recheck``) out of this path. ``_classifier`` is private in
-    livekit-agents 1.8.8 (``voice/amd/detector.py``).
-    """
-    classifier = detector._classifier
-    if classifier is not None and classifier.listening:
-        classifier.settle(AMDCategory.UNCERTAIN, reason="speech_timeout")
 
 
 async def run_amd(
@@ -478,29 +461,10 @@ async def run_amd(
                 "prompt": GREETING_CLASSIFICATION_PROMPT,
             },
         ) as detector:
-            # Started by the first speech after SIP answer (``started`` stays
-            # False before it, so ringback cannot arm it). AMD closes when this
-            # block exits, so a verdict after the release is never acted on,
-            # the same as after a silent pickup.
-            timer: asyncio.TimerHandle | None = None
-
-            def _on_user_state(ev: Any) -> None:
-                nonlocal timer
-                if timer is None and ev.new_state == "speaking" and detector.started:
-                    timer = asyncio.get_running_loop().call_later(
-                        SPEECH_VERDICT_SECONDS, settle_without_verdict, detector
-                    )
-
-            session.on("user_state_changed", _on_user_state)
-            try:
-                await _release()
-                result = await asyncio.wait_for(
-                    detector.execute(), timeout=DETECTION_TIMEOUT_SECONDS
-                )
-            finally:
-                session.off("user_state_changed", _on_user_state)
-                if timer is not None:
-                    timer.cancel()
+            await _release()
+            result = await asyncio.wait_for(
+                detector.execute(), timeout=DETECTION_TIMEOUT_SECONDS
+            )
         # The detector is closed here, so its live STT stops while we recheck.
         original_category = result.category
         if pickup_audio is not None:
@@ -574,7 +538,6 @@ __all__ = [
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",
-    "SPEECH_VERDICT_SECONDS",
     "amd_end_reason",
     "build_classifier",
     "ivr_navigation_instructions",

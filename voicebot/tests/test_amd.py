@@ -26,7 +26,6 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.classify import classify_speech
-from hailhq.voicebot.pickup import needs_recheck
 from livekit import rtc
 from livekit.agents.llm import (
     ChatChunk,
@@ -36,7 +35,6 @@ from livekit.agents.llm import (
     LLMStream,
 )
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
-from livekit.agents.utils import EventEmitter
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,10 +79,7 @@ def _prediction(category: str) -> AMDPredictionEvent:
 
 
 def _session_with_layers() -> SimpleNamespace:
-    emitter = EventEmitter()
-    return SimpleNamespace(
-        llm=FakeLLM(), stt=object(), on=emitter.on, off=emitter.off, emit=emitter.emit
-    )
+    return SimpleNamespace(llm=FakeLLM(), stt=object())
 
 
 async def test_run_amd_passes_session_layers_and_identity(
@@ -312,95 +307,25 @@ async def test_continuous_speech_remains_bounded_with_production_options(monkeyp
 
 
 def test_prompt_calls_a_short_live_greeting_a_person() -> None:
-    prompt = amd_mod.GREETING_CLASSIFICATION_PROMPT
+    flat = " ".join(amd_mod.GREETING_CLASSIFICATION_PROMPT.split())
     for greeting in ("'Hi'", "'Hello?'", "'Yes?'", "'Hej?'", "'Allô ?'"):
-        assert greeting in prompt
-    flat = " ".join(prompt.split())
-    assert "is human. Identify voicemail by its own cues" in flat
-    assert "do not guess human just because the greeting is short" not in prompt
-    assert "can start with a person's name or 'hello'" not in prompt
-    # Voicemail cues, machine rules and multilingual examples stay.
+        assert greeting in flat
+    assert "A short live greeting that ends and waits for a reply" in flat
+    assert "do not guess human just because the greeting is short" not in flat
+    # A greeting that continues still waits for the voicemail cues.
+    assert "wait for the voicemail cues" in flat
     for kept in (
-        "invitation to leave a message",
+        "an invitation to leave a message",
+        "a tone",
         "you've reached",
+        "not available",
         "machine-vm:",
         "machine-ivr:",
         "machine-unavailable:",
         "laissez un message après le bip",
-        "clearly cut off mid-sentence",
+        "clearly mid-sentence, use postpone_termination",
     ):
         assert kept in flat
-
-
-class _LiveAMD(_RecordingAMD):
-    """AMD stand-in around a real classifier, as run_amd sees it."""
-
-    classifier: Any = None
-
-    def __init__(self, session: Any, **kwargs: Any) -> None:
-        super().__init__(session, **kwargs)
-        self._classifier = type(self).classifier
-
-    @property
-    def started(self) -> bool:
-        return self._classifier.listening
-
-    async def execute(self) -> AMDPredictionEvent:
-        await self._classifier._verdict_ready.wait()
-        return self._classifier._verdict_result
-
-
-async def _speak_into_amd(monkeypatch, llm, *, ringback=False):
-    """Run run_amd on a real classifier; the callee starts talking."""
-    classifier = await _timed_classifier(monkeypatch, llm)
-    monkeypatch.setattr(amd_mod, "SPEECH_VERDICT_SECONDS", 0.1)
-    _LiveAMD.classifier = classifier
-    monkeypatch.setattr(amd_mod, "AMD", _LiveAMD)
-    session = _session_with_layers()
-    session._start_ivr_detection = AsyncMock()
-    task = asyncio.create_task(run_amd(session, UUID(int=1)))
-    await asyncio.sleep(0)
-    if ringback:
-        classifier._listening = False
-        session.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
-        classifier._listening = True
-    else:
-        session.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
-    classifier.on_user_speech_started()
-    classifier.push_text("Or 嗯 走 Hi.")
-    started = asyncio.get_running_loop().time()
-    try:
-        result = await asyncio.wait_for(task, timeout=3)
-    finally:
-        await classifier.close()
-    return result, asyncio.get_running_loop().time() - started
-
-
-async def test_speech_without_a_verdict_proceeds_as_a_person(monkeypatch):
-    """A classifier that keeps answering unsure must not hold a "Hi." 20s."""
-    result, waited = await _speak_into_amd(monkeypatch, _GreetingLLM("uncertain"))
-    assert result.category == AMDCategory.UNCERTAIN
-    assert result.reason == "speech_timeout"
-    # Released by the speech timer, well before the (scaled) 2s cap.
-    assert waited < 1.0
-    # Not routed to the slow audio recheck.
-    assert not needs_recheck(result)
-
-
-async def test_speech_release_emits_a_saved_voicemail_verdict(monkeypatch):
-    """A voicemail still talking at release keeps its machine verdict."""
-    result, _ = await _speak_into_amd(monkeypatch, _GreetingLLM("machine-vm"))
-    assert result.category == AMDCategory.MACHINE_VM
-    assert result.reason == "llm"
-
-
-async def test_speech_before_answer_does_not_start_the_speech_timer(monkeypatch):
-    """Ringback is not the callee: only speech after answer starts the timer."""
-    result, waited = await _speak_into_amd(
-        monkeypatch, _GreetingLLM("uncertain"), ringback=True
-    )
-    assert result.reason == "detection_timeout"
-    assert waited > 1.0
 
 
 async def test_dial_gate_is_released_when_amd_is_skipped() -> None:
@@ -661,15 +586,12 @@ class _FakeAmdSession:
         self.llm = _GreetingLLM("human")
         self.turn_tasks: set[asyncio.Task] = set()
 
-    def on(self, event: str, callback: Any = None):
+    def on(self, event: str):
         def _register(fn):
             self.handlers.setdefault(event, []).append(fn)
             return fn
 
-        return _register if callback is None else _register(callback)
-
-    def off(self, event: str, callback: Any) -> None:
-        self.handlers[event].remove(callback)
+        return _register
 
     def emit_user_turn(self, text: str = "Hello.") -> None:
         item = SimpleNamespace(role="user", text_content=text)

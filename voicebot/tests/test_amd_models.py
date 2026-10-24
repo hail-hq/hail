@@ -45,22 +45,18 @@ def layers(monkeypatch):
     return session, transcribe, google
 
 
-@pytest.mark.parametrize("language,expected", [(None, "en"), ("fr", "fr")])
-def test_house_greeting_transcription_uses_the_call_language(
-    layers, language, expected
-):
+def test_house_greeting_transcription_does_not_pin_the_call_language(layers):
     session, transcribe, google = layers
-    result = amd.build_amd_models(session, language=language)
+    result = amd.build_amd_models(session, language="en")
     assert result.stt is not session.stt
     primary = transcribe.call_args
     assert primary.kwargs["model"] == "gpt-live-transcribe"
-    assert primary.kwargs["language"] == expected
-    assert "detect_language" not in primary.kwargs
+    assert primary.kwargs["detect_language"] is True
     assert primary.kwargs["vad"] is session.vad
     recheck = amd.deepgram.STT.call_args
     assert recheck.kwargs["model"] == "nova-3"
-    assert recheck.kwargs["language"] == expected
-    assert "detect_language" not in recheck.kwargs
+    assert recheck.kwargs["detect_language"] is True
+    assert "language" not in recheck.kwargs
     assert google.call_args.kwargs["model"] == "gemini-3.1-flash-lite"
 
 
@@ -395,14 +391,12 @@ async def test_real_provider_constructors_support_independent_autodetection(
     try:
         assert isinstance(models.stt, openai.STT)
         assert models.stt.model == "gpt-live-transcribe"
-        assert models.stt._opts.languages == ["en"]
-        assert models.stt._opts.detect_language is False
+        assert models.stt._opts.languages == []  # wire config must not force English
         assert models.stt._vad is session.vad
         assert models.stt is not session.stt
         assert isinstance(models.recheck_stt, deepgram.STT)
         assert models.recheck_stt is not session.stt
-        assert models.recheck_stt._opts.detect_language is False
-        assert models.recheck_stt._opts.language == "en"
+        assert models.recheck_stt._opts.detect_language is True
     finally:
         await models.aclose()
         await models.aclose()  # safe when detection and shutdown both clean up
