@@ -306,6 +306,28 @@ async def test_continuous_speech_remains_bounded_with_production_options(monkeyp
         await classifier.close()
 
 
+def test_prompt_calls_a_short_live_greeting_a_person() -> None:
+    flat = " ".join(amd_mod.GREETING_CLASSIFICATION_PROMPT.split())
+    for greeting in ("'Hi'", "'Hello?'", "'Yes?'", "'Hej?'", "'Allô ?'"):
+        assert greeting in flat
+    assert "A short live greeting that ends and waits for a reply" in flat
+    assert "do not guess human just because the greeting is short" not in flat
+    # A greeting that continues still waits for the voicemail cues.
+    assert "wait for the voicemail cues" in flat
+    for kept in (
+        "an invitation to leave a message",
+        "a tone",
+        "you've reached",
+        "not available",
+        "machine-vm:",
+        "machine-ivr:",
+        "machine-unavailable:",
+        "laissez un message après le bip",
+        "clearly mid-sentence, use postpone_termination",
+    ):
+        assert kept in flat
+
+
 async def test_dial_gate_is_released_when_amd_is_skipped() -> None:
     """A session without a plain LLM skips AMD but must still let the API dial."""
     released = []

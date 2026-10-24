@@ -49,9 +49,14 @@ human: a live person addressing the caller.
 machine-vm: recorded voicemail inviting a message, including requests to speak after a tone.
 machine-unavailable: mailbox full, not configured, or cannot accept messages.
 machine-ivr: automated menus, requests to press keys, or call screening.
-uncertain: insufficient evidence. A recording can start with a person's name or 'hello'.
-For partial ambiguous greetings, use postpone_termination for at most 2 seconds to
-hear the rest; do not guess human just because the greeting is short.
+uncertain: insufficient evidence. A recording can start with a person's name or 'hello'
+and continue; while a greeting is still going, wait for the voicemail cues.
+A short live greeting that ends and waits for a reply, such as 'Hi', 'Hello?',
+'Yes?', 'Hej?' or 'Allô ?', is human.
+Voicemail has its own cues: an invitation to leave a message, a tone,
+"you've reached", or "not available".
+For a greeting that is clearly mid-sentence, use postpone_termination for at most
+2 seconds to hear the rest.
 Examples: 'laissez un message après le bip' and 'اترك رسالة بعد الصافرة' are
 machine-vm; 'drücken Sie die Eins' is machine-ivr; a live 'bonjour ?' is human.
 An unrelated recorded broadcast or song lyrics without a live conversational greeting
