@@ -69,6 +69,9 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - The contact sees your Hail number as caller ID.
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message.
+- When the phone picks up, the agent first listens. If voicemail, a phone
+  menu or a carrier message answers, it hangs up that line and comes back
+  the same way. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
 - On answer, the agent says who is calling and why, then goes silent. If
   either side hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.

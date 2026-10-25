@@ -2160,3 +2160,87 @@ async def test_known_name_reaches_the_stt_as_a_keyterm():
     assert session.keyterms == ["Sam"]
     session._keyterm_detector.start(session, stt=stt)
     assert stt._opts.keyterm == ["Sam"]
+
+
+# --- handover pickup check -------------------------------------------------
+
+
+def _screen(verdict):
+    seen: list[str] = []
+
+    async def screen(identity: str):
+        seen.append(identity)
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+
+    return screen, seen
+
+
+@pytest.mark.parametrize(
+    "verdict", ["machine-vm", "machine-unavailable", "machine-ivr"]
+)
+async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
+    """Call 83119e48: a French mobile's voicemail picked up after 24 s and
+    the agent introduced the caller to it. A machine pickup is now no_answer:
+    the leg is dropped, nothing is said, no answer is reported, and the
+    pending time limit stays."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    soft_cap = asyncio.create_task(asyncio.sleep(3600))
+    state: dict = {"human": None, "connected": False, "soft_cap_task": soft_cap}
+    answered: list[int] = []
+
+    async def _post(ring_ms: int) -> None:
+        answered.append(ring_ms)
+
+    screen, seen = _screen(verdict)
+    route = BridgeRoute("+33600000000", "+1", "ST", None, "Rym", "", on_answered=_post)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(route)
+    assert out.outcome == "no_answer" and out.sip_status is None
+    assert seen == [f"human-{CALL_ID}"]
+    req = ctx.api.room.remove_participant.await_args.args[0]
+    assert req.room == ctx.room.name and req.identity == f"human-{CALL_ID}"
+    assert session.said == [] and answered == []
+    assert session.input.enabled == [] and session.output.enabled == []
+    assert state["human"] is None and state["connected"] is False
+    assert state["soft_cap_task"] is soft_cap and not soft_cap.done()
+    soft_cap.cancel()
+    await asyncio.gather(soft_cap, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "verdict", ["human", "uncertain", None, RuntimeError("classifier down")]
+)
+async def test_bridge_person_or_unknown_pickup_connects(verdict) -> None:
+    """A person, an unsure verdict, or a failed check connects as before."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    screen, _ = _screen(verdict)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "answered"
+    assert len(session.said) == 1 and state["connected"] is True
+    ctx.api.room.remove_participant.assert_not_awaited()
+
+
+async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
+    """The contact hung up while the check listened: the agent keeps the
+    caller instead of going silent on an empty leg."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+
+    async def screen(identity: str):
+        ctx.room.remote_participants.pop(identity)
+        return "human"
+
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "no_answer"
+    assert session.said == [] and state == {"human": None, "connected": False}

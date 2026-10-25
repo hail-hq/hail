@@ -166,11 +166,13 @@ class FakeLocalParticipant:
 
 
 class FakeRoom:
-    """Minimal ``ctx.room``: the local participant plus a name."""
+    """Minimal ``ctx.room``: the local participant, a name, and the remote
+    participants by identity."""
 
     def __init__(self, name: str = "hail-test") -> None:
         self.name = name
         self.local_participant = FakeLocalParticipant()
+        self.remote_participants: dict[str, object] = {}
 
 
 class FakeSip:
@@ -180,11 +182,19 @@ class FakeSip:
         self.create_sip_participant = AsyncMock()
 
 
+class FakeRoomService:
+    """``ctx.api.room``: ``remove_participant`` is an ``AsyncMock``."""
+
+    def __init__(self) -> None:
+        self.remove_participant = AsyncMock()
+
+
 class FakeLKApi:
-    """``ctx.api`` (a ``LiveKitAPI``): only the SIP service is used."""
+    """``ctx.api`` (a ``LiveKitAPI``): the SIP and room services."""
 
     def __init__(self) -> None:
         self.sip = FakeSip()
+        self.room = FakeRoomService()
 
 
 class FakeAudioToggle:
@@ -235,6 +245,12 @@ class FakeJobContext:
         self.delete_room_error: Exception | None = None
         self.room = FakeRoom()
         self.api = FakeLKApi()
+        # An answered dial puts the contact's leg in the room.
+        self.api.sip.create_sip_participant.side_effect = self._join
+
+    def _join(self, req: object) -> None:
+        identity = req.participant_identity  # type: ignore[attr-defined]
+        self.room.remote_participants[identity] = object()
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
