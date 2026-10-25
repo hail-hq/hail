@@ -75,35 +75,22 @@ async def test_automatic_replies_resume_only_after_introduction(first_message):
         await asyncio.gather(greeting, return_exceptions=True)
 
 
-async def test_generated_opening_answers_words_held_during_greeting(monkeypatch):
-    started, finish = asyncio.Event(), asyncio.Event()
+async def test_generated_opening_answers_words_held_before_greeting(monkeypatch):
+    # A turn that ends during the outbound opening never reaches the hook:
+    # LiveKit skips it because the opening is not interruptible. Words are
+    # held only when the turn ends before the opening starts (during AMD).
     agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
-
-    class Session(FakeAnnouncingSession):
-        async def say(self, text, *, allow_interruptions):
-            started.set()
-            await finish.wait()
-
-    session = Session()
+    session = FakeAnnouncingSession()
     agent.update_chat_ctx = AsyncMock()
     monkeypatch.setattr(
         SpeechSanitizingAgent, "session", PropertyMock(return_value=Mock())
     )
-    greeting = asyncio.create_task(
-        speak_greeting(session, {}, on_opened=agent.release_opening)
-    )
-    try:
-        await started.wait()
-        with pytest.raises(StopResponse):
-            await agent.on_user_turn_completed(
-                ChatContext(), ChatMessage(role="user", content=["Who is this?"])
-            )
-        finish.set()
-        await greeting
-        assert 'saying: "Who is this?"' in session.generate_reply_calls[0]
-    finally:
-        greeting.cancel()
-        await asyncio.gather(greeting, return_exceptions=True)
+    with pytest.raises(StopResponse):
+        await agent.on_user_turn_completed(
+            ChatContext(), ChatMessage(role="user", content=["Who is this?"])
+        )
+    await speak_greeting(session, {}, on_opened=agent.release_opening)
+    assert 'saying: "Who is this?"' in session.generate_reply_calls[0]
 
 
 def test_release_drops_the_empty_early_reply():

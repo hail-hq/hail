@@ -805,18 +805,16 @@ async def speak_greeting(
         else None
     )
     first_message = metadata.get("first_message")
-    # On a call Hail placed, the pickup "Hello?" is held until this opening
-    # ends. The turn detector can wait 2.5 s on it, and a held turn that ends
-    # mid-opening would cut the opening off. So the opening plays through.
-    interruptible = metadata.get("direction") == "inbound"
+    inbound = metadata.get("direction") == "inbound"
+    # On a call Hail placed, the turn detector can wait up to its max_delay on
+    # a pickup "Hello?". A turn that ends mid-opening would cut the opening
+    # off, so the opening plays through and LiveKit drops that turn.
+    interruptible = inbound
     try:
         if first_message:
             if not disclosure:
                 greeting = first_message
-            elif (
-                metadata.get("direction") == "inbound"
-                and not (metadata.get("ai_disclosure_line") or "").strip()
-            ):
+            elif inbound and not (metadata.get("ai_disclosure_line") or "").strip():
                 greeting = greeting_with_ai_line(
                     first_message, after_greeting_text(metadata.get("org_name"))
                 )
@@ -836,7 +834,7 @@ async def speak_greeting(
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
     # calling") and would tell the caller the agent called them.
-    if generate_opening and metadata.get("direction") != "inbound":
+    if generate_opening and not inbound:
         session.generate_reply(
             instructions=opening_instructions(
                 " ".join(filter(None, (pickup_transcript, heard))),
