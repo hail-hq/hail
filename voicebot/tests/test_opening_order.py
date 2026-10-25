@@ -134,6 +134,11 @@ async def test_held_turns_end_at_min_delay_until_the_opening_is_released():
         # A second release (IVR path, then greeting) changes nothing.
         agent.release_opening()
         assert endpointing["max_delay"] == default["max_delay"]
+        # The deferred IVR greeting holds again, with the same fast end.
+        agent.hold_opening()
+        assert endpointing["max_delay"] == default["min_delay"]
+        agent.release_opening()
+        assert endpointing["max_delay"] == default["max_delay"]
 
 
 async def test_inbound_agent_keeps_the_default_max_delay():

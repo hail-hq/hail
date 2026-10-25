@@ -217,10 +217,16 @@ class SpeechSanitizingAgent(Agent):
 
     async def on_enter(self) -> None:
         if self._opening_pending:
-            # A held turn gets no reply, so waiting for the turn detector gains
-            # nothing. It scores a bare "Hello?" as unfinished, and the commit
-            # it delays by max_delay then cuts off the greeting. End held turns
-            # at min_delay; release_opening restores the session default.
+            self.hold_opening()
+
+    def hold_opening(self) -> None:
+        """Block replies until :meth:`release_opening`."""
+        self._opening_pending = True
+        # A held turn gets no reply, so waiting for the turn detector gains
+        # nothing. It scores a bare "Hello?" as unfinished, and the commit it
+        # delays by max_delay then cuts off the greeting. End held turns at
+        # min_delay; release_opening restores the session default.
+        if self._max_delay_after_opening is None and self._activity is not None:
             endpointing = self.session.options.endpointing
             self._max_delay_after_opening = endpointing["max_delay"]
             self.session.update_options(
@@ -890,7 +896,7 @@ def arm_deferred_greeting(
     """
 
     async def greet(text: str) -> None:
-        agent._opening_pending = True
+        agent.hold_opening()
         marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
