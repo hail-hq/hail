@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from hailhq.voicebot import handover_screen
+from hailhq.voicebot import handover_screen, pickup
 from livekit import rtc
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
 from livekit.agents.vad import VADEventType
@@ -143,7 +143,7 @@ async def test_classify_voicemail(monkeypatch) -> None:
         assert "complete greeting" in prompt
         return AMDCategory.MACHINE_VM
 
-    monkeypatch.setattr(handover_screen, "classify_speech", classify)
+    monkeypatch.setattr(pickup, "classify_speech", classify)
     text = "Bonjour, vous êtes sur la messagerie de Rym, laissez un message."
     verdict = await handover_screen.classify_greeting(
         b"\x01\x00" * 16000, stt=_stt(text), llm=object()
@@ -154,7 +154,7 @@ async def test_classify_voicemail(monkeypatch) -> None:
 
 async def test_classify_skips_empty_or_tiny_audio(monkeypatch) -> None:
     monkeypatch.setattr(
-        handover_screen, "classify_speech", AsyncMock(side_effect=AssertionError)
+        pickup, "classify_speech", AsyncMock(side_effect=AssertionError)
     )
     assert (
         await handover_screen.classify_greeting(b"", stt=_stt("x"), llm=object())

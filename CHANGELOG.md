@@ -13,6 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 - Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
+- Handover: the agent's intro to the contact now reads "Reason given: …", and the agent writes no extra reply after the two people are connected.
 
 ## [0.31.0] (2026-10-23)
 

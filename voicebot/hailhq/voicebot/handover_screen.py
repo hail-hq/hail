@@ -22,18 +22,16 @@ from hailhq.voicebot.amd import (
     GREETING_CLASSIFICATION_PROMPT,
     _close_all,
     build_classifier,
+    recheck_stt,
 )
-from hailhq.voicebot.classify import classify_speech
-from hailhq.voicebot.pickup import RECHECK_NOTE, SAMPLE_RATE
+from hailhq.voicebot.pickup import SAMPLE_RATE, transcribe_and_classify
 from hailhq.voicebot.pipeline import ResolvedLayer
 from livekit import rtc
-from livekit.agents import APIConnectOptions
 from livekit.agents.llm import LLM
 from livekit.agents.stt import STT
 from livekit.agents.utils.participant import wait_for_track_publication
 from livekit.agents.vad import VAD, VADEventType
 from livekit.agents.voice import AgentSession
-from livekit.plugins import deepgram
 
 logger = logging.getLogger("hailhq.voicebot")
 
@@ -51,8 +49,6 @@ END_SILENCE_SECONDS = 0.8
 # Cap on listening. A voicemail greeting names itself early; a person does
 # not talk this long before hearing anyone.
 MAX_LISTEN_SECONDS = 8.0
-# Cap on transcription plus classification.
-CLASSIFY_BUDGET_SECONDS = 5.0
 TRACK_WAIT_SECONDS = 5.0
 
 
@@ -128,16 +124,9 @@ async def classify_greeting(pcm: bytes, *, stt: STT, llm: LLM) -> str | None:
         num_channels=1,
         samples_per_channel=len(pcm) // 2,
     )
-    async with asyncio.timeout(CLASSIFY_BUDGET_SECONDS):
-        event = await stt.recognize(
-            audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
-        )
-        transcript = event.alternatives[0].text.strip() if event.alternatives else ""
-        if not transcript:
-            return None
-        category = await classify_speech(
-            llm, GREETING_CLASSIFICATION_PROMPT + RECHECK_NOTE, transcript
-        )
+    _, category = await transcribe_and_classify(
+        audio, stt=stt, llm=llm, prompt=GREETING_CLASSIFICATION_PROMPT
+    )
     return category.value if category is not None else None
 
 
@@ -164,7 +153,7 @@ def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
         return None
     if not (model and api_key):
         return None
-    return deepgram.STT(model=model, detect_language=True, api_key=api_key)
+    return recheck_stt(model, api_key)
 
 
 async def screen_handover_pickup(

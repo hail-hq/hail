@@ -106,6 +106,25 @@ def needs_recheck(result: AMDPredictionEvent) -> bool:
     )
 
 
+async def transcribe_and_classify(
+    audio: rtc.AudioFrame, *, stt: STT, llm: LLM, prompt: str
+) -> tuple[str, AMDCategory | None]:
+    """Transcribe a finished greeting once, then classify it.
+
+    Returns ("", None) when nothing was heard. Capped at
+    ``RECHECK_TIMEOUT_SECONDS``; provider errors and timeouts raise.
+    Shared by the outbound recheck and the handover pickup check.
+    """
+    async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
+        event = await stt.recognize(
+            audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
+        )
+        transcript = event.alternatives[0].text.strip() if event.alternatives else ""
+        if not transcript:
+            return "", None
+        return transcript, await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
+
+
 async def recheck_greeting(
     result: AMDPredictionEvent,
     audio: rtc.AudioFrame | None,
@@ -124,16 +143,11 @@ async def recheck_greeting(
 
     started = time.monotonic()
     try:
-        async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
-            event = await stt.recognize(
-                audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
-            )
-            transcript = (
-                event.alternatives[0].text.strip() if event.alternatives else ""
-            )
-            if not transcript:
-                return result
-            category = await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
+        transcript, category = await transcribe_and_classify(
+            audio, stt=stt, llm=llm, prompt=prompt
+        )
+        if not transcript:
+            return result
         if category is None or category == AMDCategory.UNCERTAIN:
             return result
         return AMDPredictionEvent(

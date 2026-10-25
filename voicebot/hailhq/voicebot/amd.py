@@ -248,6 +248,14 @@ def build_classifier(
     return ClassifierFailover(*classifiers), classifiers
 
 
+def recheck_stt(model: str, api_key: str) -> STT:
+    """One-shot Deepgram for a finished greeting. Deepgram detects the
+    language only in one-shot requests, and its default is English.
+    https://developers.deepgram.com/docs/language-detection
+    """
+    return deepgram.STT(model=model, detect_language=True, api_key=api_key)
+
+
 def build_amd_models(
     session: AgentSession,
     *,
@@ -286,10 +294,8 @@ def build_amd_models(
                 # Deepgram detects the language only in one-shot requests.
                 # https://developers.deepgram.com/docs/language-detection
                 try:
-                    models.recheck_stt = deepgram.STT(
-                        model=settings.deepgram_model,
-                        detect_language=True,
-                        api_key=settings.deepgram_api_key,
+                    models.recheck_stt = recheck_stt(
+                        settings.deepgram_model, settings.deepgram_api_key
                     )
                     models.owned.append(models.recheck_stt)
                 except Exception:
@@ -541,5 +547,6 @@ __all__ = [
     "amd_end_reason",
     "build_classifier",
     "ivr_navigation_instructions",
+    "recheck_stt",
     "run_amd",
 ]
