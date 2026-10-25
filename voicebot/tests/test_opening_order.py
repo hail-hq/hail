@@ -75,22 +75,35 @@ async def test_automatic_replies_resume_only_after_introduction(first_message):
         await asyncio.gather(greeting, return_exceptions=True)
 
 
-async def test_generated_opening_answers_words_held_before_greeting(monkeypatch):
-    # A turn that ends during the outbound opening never reaches the hook:
-    # LiveKit skips it because the opening is not interruptible. Words are
-    # held only when the turn ends before the opening starts (during AMD).
+async def test_generated_opening_answers_words_held_during_greeting(monkeypatch):
+    started, finish = asyncio.Event(), asyncio.Event()
     agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
-    session = FakeAnnouncingSession()
+
+    class Session(FakeAnnouncingSession):
+        async def say(self, text, *, allow_interruptions):
+            started.set()
+            await finish.wait()
+
+    session = Session()
     agent.update_chat_ctx = AsyncMock()
     monkeypatch.setattr(
         SpeechSanitizingAgent, "session", PropertyMock(return_value=Mock())
     )
-    with pytest.raises(StopResponse):
-        await agent.on_user_turn_completed(
-            ChatContext(), ChatMessage(role="user", content=["Who is this?"])
-        )
-    await speak_greeting(session, {}, on_opened=agent.release_opening)
-    assert 'saying: "Who is this?"' in session.generate_reply_calls[0]
+    greeting = asyncio.create_task(
+        speak_greeting(session, {}, on_opened=agent.release_opening)
+    )
+    try:
+        await started.wait()
+        with pytest.raises(StopResponse):
+            await agent.on_user_turn_completed(
+                ChatContext(), ChatMessage(role="user", content=["Who is this?"])
+            )
+        finish.set()
+        await greeting
+        assert 'saying: "Who is this?"' in session.generate_reply_calls[0]
+    finally:
+        greeting.cancel()
+        await asyncio.gather(greeting, return_exceptions=True)
 
 
 def test_release_drops_the_empty_early_reply():
@@ -106,31 +119,41 @@ def test_release_drops_the_empty_early_reply():
 
 
 @pytest.mark.parametrize(
-    "metadata, generate_opening, interruptible",
+    "metadata, generate_opening, cleared_after",
     [
-        # Outbound: a held pickup "Hello?" whose turn ends mid-opening must not
-        # cut it off (LiveKit skips that turn when speech is uninterruptible).
-        ({"direction": "outbound"}, True, False),
-        ({"direction": "outbound", "first_message": "About your order."}, True, False),
-        # The deferred phone-menu greeting goes through the same call.
-        ({"direction": "outbound"}, False, False),
+        # Outbound: drop the unfinished pickup turn before anything is spoken,
+        # so its late end of turn cannot cut the opening off.
+        ({"direction": "outbound"}, True, [0]),
+        ({"direction": "outbound", "first_message": "About your order."}, True, [0]),
+        # Deferred menu greeting: the person just spoke; the turn loop answers.
+        ({"direction": "outbound"}, False, []),
         # Inbound is unchanged.
-        ({"direction": "inbound"}, True, True),
-        ({"direction": "inbound", "first_message": "Hi, Acme here."}, True, False),
-        (
-            {
-                "direction": "inbound",
-                "first_message": "Hi, Acme here.",
-                "ai_disclosure_line": "Custom AI line.",
-            },
-            True,
-            True,
-        ),
+        ({"direction": "inbound"}, True, []),
+        ({"direction": "inbound", "first_message": "Hi, Acme here."}, True, []),
     ],
 )
-async def test_outbound_opening_plays_through(
-    metadata, generate_opening, interruptible
+async def test_outbound_opening_clears_the_pickup_turn_first(
+    metadata, generate_opening, cleared_after
 ):
     session = FakeAnnouncingSession()
     await speak_greeting(session, metadata, generate_opening=generate_opening)
-    assert [allow for _, allow in session.say_calls] == [interruptible]
+    assert session.cleared_after == cleared_after
+
+
+async def test_clearing_the_pickup_turn_after_hangup_is_safe():
+    class Session(FakeAnnouncingSession):
+        def clear_user_turn(self):
+            raise RuntimeError("AgentSession isn't running")
+
+    session = Session()
+    await speak_greeting(session, {"direction": "outbound"})
+    assert len(session.say_calls) == 1
+
+
+async def test_cleared_turn_with_no_words_gets_no_reply():
+    # The cleared turn's end of turn can still fire, with an empty transcript.
+    agent = SpeechSanitizingAgent(instructions="test")
+    with pytest.raises(StopResponse):
+        await agent.on_user_turn_completed(
+            ChatContext(), ChatMessage(role="user", content=[""])
+        )

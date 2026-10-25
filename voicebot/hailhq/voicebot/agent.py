@@ -231,6 +231,11 @@ class SpeechSanitizingAgent(Agent):
         return heard or None
 
     async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
+        if new_message is not None and not (new_message.text_content or "").strip():
+            # An empty turn has nothing to answer. speak_greeting clears the
+            # pickup turn, and its end of turn can still fire with no words
+            # (LiveKit's "ignore empty turns" pattern).
+            raise StopResponse()
         if self._opening_pending:
             # AMD pauses playback, but still allows automatic replies to queue.
             # The explicit introduction owns the first turn, including when a
@@ -806,12 +811,22 @@ async def speak_greeting(
     )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
-    # On a call Hail placed, the turn detector can wait up to its max_delay on
-    # a pickup "Hello?". A turn that ends mid-opening would cut the opening
-    # off, so the opening plays through and LiveKit drops that turn.
-    interruptible = inbound
+    if generate_opening and not inbound:
+        # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
+        # "Hello?". If that turn ends after this opening starts, it cuts the
+        # opening off. AMD's transcript already carries those words to the
+        # generated opening, so drop the unfinished turn. Its late end of turn
+        # then has no words: it cannot interrupt (interruption min_words) and
+        # on_user_turn_completed ignores it. Not on the deferred menu path:
+        # there the person just spoke and the turn loop answers them.
+        try:
+            session.clear_user_turn()
+        except RuntimeError:
+            # The callee hung up and the session stopped.
+            pass
     try:
         if first_message:
+            interruptible = True
             if not disclosure:
                 greeting = first_message
             elif inbound and not (metadata.get("ai_disclosure_line") or "").strip():
@@ -826,7 +841,7 @@ async def speak_greeting(
             await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
-            await session.say(disclosure, allow_interruptions=interruptible)
+            await session.say(disclosure, allow_interruptions=True)
     finally:
         # Release even when say fails, so the agent is never left unable to reply.
         heard = on_opened() if on_opened is not None else None
