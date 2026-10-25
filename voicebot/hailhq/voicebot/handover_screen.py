@@ -25,7 +25,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.classify import classify_speech
 from hailhq.voicebot.pickup import RECHECK_NOTE, SAMPLE_RATE
-from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
+from hailhq.voicebot.pipeline import ResolvedLayer
 from livekit import rtc
 from livekit.agents import APIConnectOptions
 from livekit.agents.llm import LLM
@@ -146,21 +146,25 @@ def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
 
     Hail's Deepgram only when the org has no STT of its own, as in the
     outbound recheck (``amd.build_amd_models``). An org on Deepgram uses its
-    own key. An org on another provider skips the check: its audio never
-    goes to a provider it did not pick.
+    own key and model. An org on another provider skips the check: its audio
+    never goes to a provider it did not pick. Language detection is on in
+    both cases: the contact's greeting can be in any language, and
+    Deepgram's default is English.
     """
     org_stt = org_cfgs.get("stt")
     if org_stt is None:
-        if not (settings.deepgram_api_key and settings.deepgram_model):
-            return None
-        return deepgram.STT(
-            model=settings.deepgram_model,
-            detect_language=True,
-            api_key=settings.deepgram_api_key,
+        model, api_key = settings.deepgram_model, settings.deepgram_api_key
+    elif org_stt.provider == "deepgram":
+        model = org_stt.params.get("model") or settings.deepgram_model
+        # Hail's key only when the org allows fallback to Hail.
+        api_key = org_stt.api_key or (
+            settings.deepgram_api_key if org_stt.fallback_enabled else ""
         )
-    if org_stt.provider == "deepgram":
-        return build_stt(org_stt, provider="deepgram")
-    return None
+    else:
+        return None
+    if not (model and api_key):
+        return None
+    return deepgram.STT(model=model, detect_language=True, api_key=api_key)
 
 
 async def screen_handover_pickup(

@@ -177,18 +177,22 @@ def test_transcriber_follows_the_org_stt(monkeypatch) -> None:
     """Audio goes only to a provider the org allows."""
     monkeypatch.setattr(handover_screen.settings, "deepgram_api_key", "dg")
     monkeypatch.setattr(handover_screen.settings, "deepgram_model", "nova-3")
-    built: list = []
-    monkeypatch.setattr(
-        handover_screen,
-        "build_stt",
-        lambda org, provider: built.append((org, provider)) or "org-stt",
-    )
     house = handover_screen._build_stt({})
     assert type(house).__name__ == "STT" and house.model == "nova-3"
+    assert house._opts.detect_language is True
 
-    org_dg = SimpleNamespace(provider="deepgram")
-    assert handover_screen._build_stt({"stt": org_dg}) == "org-stt"
-    assert built == [(org_dg, "deepgram")]
+    org_dg = SimpleNamespace(
+        provider="deepgram", params={"model": "nova-2"}, api_key="org-key"
+    )
+    org = handover_screen._build_stt({"stt": org_dg})
+    assert org.model == "nova-2" and org._opts.detect_language is True
+
+    keyless = SimpleNamespace(
+        provider="deepgram", params={}, api_key=None, fallback_enabled=False
+    )
+    assert handover_screen._build_stt({"stt": keyless}) is None
+    keyless.fallback_enabled = True
+    assert handover_screen._build_stt({"stt": keyless}).model == "nova-3"
 
     org_sm = SimpleNamespace(provider="speechmatics")
     assert handover_screen._build_stt({"stt": org_sm}) is None

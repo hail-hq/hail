@@ -490,8 +490,14 @@ def handover_intro(name: str, reason: str | None) -> str:
 
 
 async def _remove_handover_leg(ctx: JobContext, identity: str, call_id: UUID) -> bool:
-    """Hang up the contact's leg. Two tries; False when both failed."""
+    """Hang up the contact's leg. Two tries; False when both failed.
+
+    A leg already gone counts as removed: a "mailbox full" message often
+    hangs up by itself while the check classifies it.
+    """
     for _ in range(2):
+        if identity not in ctx.room.remote_participants:
+            return True
         try:
             await ctx.api.room.remove_participant(
                 RoomParticipantIdentity(room=ctx.room.name, identity=identity)

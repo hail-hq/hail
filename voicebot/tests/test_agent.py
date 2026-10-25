@@ -2246,6 +2246,25 @@ async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
     assert session.said == [] and state == {"human": None, "connected": False}
 
 
+async def test_bridge_mailbox_that_hung_up_itself_is_no_answer() -> None:
+    """A "mailbox full" message often hangs up by itself during the check.
+    The leg is gone, so nothing is removed and the call goes on."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+
+    async def screen(identity: str):
+        ctx.room.remote_participants.pop(identity)
+        return "machine-unavailable"
+
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "no_answer"
+    ctx.api.room.remove_participant.assert_not_awaited()
+    assert ctx.shutdown_calls == [] and "ending" not in state
+
+
 async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
     """If the mailbox leg cannot be removed it would record the caller, so
     the room is deleted instead."""
