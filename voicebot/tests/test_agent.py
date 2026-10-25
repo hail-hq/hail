@@ -1049,7 +1049,7 @@ async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
     await speak_greeting(session, {"first_message": "Hi, calling about your order."})
 
     assert session.say_calls == [
-        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
+        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", False)
     ]
 
 
@@ -1060,7 +1060,7 @@ async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:
     await speak_greeting(
         session, {"ai_disclosure": False, "first_message": "Hi, about your order."}
     )
-    assert session.say_calls == [("Hi, about your order.", True)]
+    assert session.say_calls == [("Hi, about your order.", False)]
     assert session.generate_reply_calls == []
 
     session = FakeAnnouncingSession()
@@ -1076,7 +1076,7 @@ async def test_speak_greeting_speaks_disclosure_when_no_first_message() -> None:
 
     await speak_greeting(session, {})
 
-    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, False)]
     assert session.generate_reply_calls == [
         opening_instructions(None, already_introduced=True)
     ]
@@ -1218,7 +1218,7 @@ async def test_speak_greeting_deferred_path_skips_generated_opening() -> None:
 
     await speak_greeting(session, {}, generate_opening=False)
 
-    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, False)]
     assert session.generate_reply_calls == []
 
 
@@ -1236,7 +1236,7 @@ async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:
     assert len(session.say_calls) == 1
     text, allow_interruptions = session.say_calls[0]
     assert text.startswith(AI_DISCLOSURE_LINE)
-    assert allow_interruptions is True
+    assert allow_interruptions is False
 
 
 async def test_speak_greeting_names_the_org_when_dispatch_metadata_has_it() -> None:
@@ -1247,7 +1247,7 @@ async def test_speak_greeting_names_the_org_when_dispatch_metadata_has_it() -> N
     await speak_greeting(session, {"org_name": "Acme Corp"})
 
     assert session.say_calls == [
-        ("Hi, this is an AI assistant calling on behalf of Acme Corp.", True)
+        ("Hi, this is an AI assistant calling on behalf of Acme Corp.", False)
     ]
 
 
@@ -1255,7 +1255,7 @@ async def test_speak_greeting_blank_or_missing_org_name_falls_back_to_generic() 
     for meta in ({}, {"org_name": None}, {"org_name": ""}, {"org_name": "   "}):
         session = FakeAnnouncingSession()
         await speak_greeting(session, meta)
-        assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+        assert session.say_calls == [(AI_DISCLOSURE_LINE, False)]
 
 
 # --------------------------------------------------------------------------- #

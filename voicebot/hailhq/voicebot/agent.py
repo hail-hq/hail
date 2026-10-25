@@ -212,36 +212,11 @@ class SpeechSanitizingAgent(Agent):
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
-        self._max_delay_after_opening: float | None = None
         self.phone_menu: PhoneMenu | None = None
-
-    async def on_enter(self) -> None:
-        if self._opening_pending:
-            self.hold_opening()
-
-    def hold_opening(self) -> None:
-        """Block replies until :meth:`release_opening`."""
-        self._opening_pending = True
-        # A held turn gets no reply, so waiting for the turn detector gains
-        # nothing. It scores a bare "Hello?" as unfinished, and the commit it
-        # delays by max_delay then cuts off the greeting. End held turns at
-        # min_delay; release_opening restores the session default.
-        if self._max_delay_after_opening is None and self._activity is not None:
-            endpointing = self.session.options.endpointing
-            self._max_delay_after_opening = endpointing["max_delay"]
-            self.session.update_options(
-                endpointing_opts={"max_delay": endpointing["min_delay"]}
-            )
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
         self._opening_pending = False
-        # The callee can hang up during AMD; then there is no session to update.
-        if self._max_delay_after_opening is not None and self._activity is not None:
-            self.session.update_options(
-                endpointing_opts={"max_delay": self._max_delay_after_opening}
-            )
-            self._max_delay_after_opening = None
         # An early (preemptive) reply started while held is empty, because
         # llm_node returned None. Drop it so the next turn is generated fresh
         # instead of reusing it. Private in livekit-agents 1.8.8;
@@ -830,9 +805,12 @@ async def speak_greeting(
         else None
     )
     first_message = metadata.get("first_message")
+    # On a call Hail placed, the pickup "Hello?" is held until this opening
+    # ends. The turn detector can wait 2.5 s on it, and a held turn that ends
+    # mid-opening would cut the opening off. So the opening plays through.
+    interruptible = metadata.get("direction") == "inbound"
     try:
         if first_message:
-            interruptible = True
             if not disclosure:
                 greeting = first_message
             elif (
@@ -850,7 +828,7 @@ async def speak_greeting(
             await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
-            await session.say(disclosure, allow_interruptions=True)
+            await session.say(disclosure, allow_interruptions=interruptible)
     finally:
         # Release even when say fails, so the agent is never left unable to reply.
         heard = on_opened() if on_opened is not None else None
@@ -896,7 +874,7 @@ def arm_deferred_greeting(
     """
 
     async def greet(text: str) -> None:
-        agent.hold_opening()
+        agent._opening_pending = True
         marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
