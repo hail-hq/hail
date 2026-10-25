@@ -86,6 +86,22 @@ async def test_handover_returns_route(client, async_session, add_phone_number):
     assert data["trunk_id"] == "ST_out_tw"
 
 
+async def test_handover_to_country_another_carrier_sells(
+    client, async_session, add_phone_number
+):
+    # Twilio sells no voice number in Sweden; Telnyx and DIDWW do.
+    call, contact = await _seed(async_session, add_phone_number, phone="+46762000000")
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+    data = r.json()
+    assert data["ok"] is True
+    assert data["to_e164"] == "+46762000000"
+    assert data["trunk_id"] == "ST_out_tw"
+
+
 @pytest.mark.parametrize("case", ["unlinked", "ended", "suppressed", "unsold", "done"])
 async def test_handover_denied(client, async_session, add_phone_number, case):
     call, contact = await _seed(

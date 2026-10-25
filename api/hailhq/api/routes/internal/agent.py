@@ -809,10 +809,12 @@ async def agent_handover(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
+    # Any carrier, as on save: the second leg dials a person, not a number
+    # the call's carrier sells.
     country = country_of(contact.phone_e164)
     try:
-        sold = country is not None and sells_in(country, call.provider)
-    except Exception:  # e.g. provider without a catalog file
+        sold = country is not None and sells_in(country)
+    except Exception:  # e.g. a missing catalog file
         sold = False
     if not sold:
         return await _deny_handover(call, body, "country_not_sold")
