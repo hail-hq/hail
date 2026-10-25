@@ -815,15 +815,28 @@ async def speak_greeting(
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the
         # opening off. AMD's transcript already carries those words to the
-        # generated opening, so drop the unfinished turn. Its late end of turn
-        # then has no words: it cannot interrupt (interruption min_words) and
-        # on_user_turn_completed ignores it. Not on the deferred menu path:
-        # there the person just spoke and the turn loop answers them.
+        # generated opening, so drop the unfinished turn. Not when a person
+        # just spoke on the menu path (generate_opening=False): there the turn
+        # loop answers them.
         try:
             session.clear_user_turn()
         except RuntimeError:
             # The callee hung up and the session stopped.
             pass
+        except Exception:
+            logger.exception("could not clear the pickup turn")
+        # clear_user_turn leaves the running end-of-turn wait alone. If that
+        # wait ends while no speech is current (before the scheduler picks up
+        # the opening), LiveKit interrupts the opening before
+        # on_user_turn_completed can drop the empty turn. Cancel the wait, as
+        # LiveKit does on new speech. Private in livekit-agents 1.8.8;
+        # test_opening_order.py fails if it moves.
+        recognition = getattr(
+            getattr(session, "_activity", None), "_audio_recognition", None
+        )
+        eou_task = getattr(recognition, "_end_of_turn_task", None)
+        if eou_task is not None:
+            eou_task.cancel()
     try:
         if first_message:
             interruptible = True

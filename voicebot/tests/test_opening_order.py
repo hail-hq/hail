@@ -157,3 +157,31 @@ async def test_cleared_turn_with_no_words_gets_no_reply():
         await agent.on_user_turn_completed(
             ChatContext(), ChatMessage(role="user", content=[""])
         )
+
+
+@pytest.mark.parametrize(
+    "metadata, generate_opening, cancelled",
+    [
+        ({"direction": "outbound"}, True, True),
+        ({"direction": "outbound"}, False, False),
+        ({"direction": "inbound"}, True, False),
+    ],
+)
+async def test_outbound_opening_cancels_the_pending_end_of_turn(
+    metadata, generate_opening, cancelled
+):
+    # The cleared turn's end-of-turn wait must not fire while no speech is
+    # current: LiveKit would interrupt the opening before the hook runs.
+    import inspect
+
+    from livekit.agents.voice.agent_activity import AgentActivity
+    from livekit.agents.voice.audio_recognition import AudioRecognition
+
+    assert "self._activity" in inspect.getsource(AgentSession.__init__)
+    assert "self._audio_recognition" in inspect.getsource(AgentActivity.__init__)
+    assert "self._end_of_turn_task" in inspect.getsource(AudioRecognition.__init__)
+    session = FakeAnnouncingSession()
+    session._activity = Mock()
+    await speak_greeting(session, metadata, generate_opening=generate_opening)
+    task = session._activity._audio_recognition._end_of_turn_task
+    assert task.cancel.called is cancelled
