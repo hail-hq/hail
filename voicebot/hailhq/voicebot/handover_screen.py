@@ -102,12 +102,11 @@ async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
                     heard, silent_since = True, None
                 elif event.type == VADEventType.END_OF_SPEECH:
                     silent_since = now
-                elif not heard and now - started >= NO_SPEECH_SECONDS:
-                    break
-                elif (
+                elif (not heard and now - started >= NO_SPEECH_SECONDS) or (
                     silent_since is not None
                     and now - silent_since >= END_SILENCE_SECONDS
                 ):
+                    # Silent pickup, or the greeting ended.
                     break
     except TimeoutError:
         pass
