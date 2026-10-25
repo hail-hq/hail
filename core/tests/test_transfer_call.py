@@ -105,14 +105,14 @@ async def test_result_post_failure_still_connected() -> None:
     ctx, api, _ = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
     api.post.side_effect = [ROUTE, RuntimeError("boom")]
     assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == (
-        transfer_call._CONNECTED
+        transfer_call.CONNECTED
     )
 
 
 def test_connected_line_tells_the_model_to_stay_silent() -> None:
     """After the tool returns, the LLM gets a turn with end_call still bound;
     the result must tell it to say nothing and not hang up."""
-    assert transfer_call._CONNECTED == (
+    assert transfer_call.CONNECTED == (
         "Connected. They are talking now. Say nothing and do not end the call."
     )
 
@@ -172,7 +172,7 @@ async def test_answered_posted_before_intro_and_once() -> None:
     api.post.side_effect = post
     ctx.bridge = _answering_bridge(order)
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
-    assert said == transfer_call._CONNECTED
+    assert said == transfer_call.CONNECTED
     assert order == ["route", "answered", "intro"]
     result = api.post.await_args_list[1].args[1]
     assert result["ring_ms"] == 9000 and result["contact_id"] == CID
@@ -186,7 +186,7 @@ async def test_answered_post_retries(monkeypatch) -> None:
     api.post.side_effect = [ROUTE, RuntimeError("a"), RuntimeError("b"), {"ok": True}]
     ctx.bridge = _answering_bridge(order)
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
-    assert said == transfer_call._CONNECTED
+    assert said == transfer_call.CONNECTED
     assert api.post.await_count == 4
 
 
@@ -197,5 +197,5 @@ async def test_answered_post_gives_up_after_the_last_attempt(monkeypatch) -> Non
     api.post.side_effect = [ROUTE] + [RuntimeError("x")] * 5
     ctx.bridge = _answering_bridge([])
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
-    assert said == transfer_call._CONNECTED
+    assert said == transfer_call.CONNECTED
     assert api.post.await_count == 4

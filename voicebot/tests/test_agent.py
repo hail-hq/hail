@@ -1633,7 +1633,7 @@ async def test_bridge_answered_mutes_agent() -> None:
     assert session.said == [
         (
             "Hi Sam, I have a caller on the line. "
-            "They say it is about an invoice. Connecting you now."
+            "Reason given: an invoice. Connecting you now."
         )
     ]
     assert session.input.enabled == [False] and session.output.enabled == [False]

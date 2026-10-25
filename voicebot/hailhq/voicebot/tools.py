@@ -17,6 +17,7 @@ import time
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
@@ -69,7 +70,7 @@ class SpeechTracker:
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
-    async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str:
+    async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
             if spec.uninterruptible:
                 # The caller talking while a dial rings must not cancel this
@@ -92,7 +93,13 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
                     return STILL_TALKING
-            return await spec.execute(tctx, raw_arguments)
+            said = await spec.execute(tctx, raw_arguments)
+            if spec.name == "transfer_call" and said == transfer_call.CONNECTED:
+                # The agent is muted and the two people are talking. None
+                # tells LiveKit not to generate a reply turn
+                # (livekit-agents 1.8.8 voice/generation.py: reply_required).
+                return None
+            return said
         except Exception:
             logger.exception(
                 "agent tool %s failed for call_id=%s", spec.name, tctx.call_id

@@ -476,7 +476,7 @@ def handover_intro(name: str, reason: str | None) -> str:
     """What the agent says to the contact once they answer.
 
     ``reason`` is LLM-written and a caller can steer it, so it is attributed
-    to the caller ("They say …") and kept short. ``name`` is the tool label;
+    to the caller ("Reason given: …") and kept short. ``name`` is the tool label;
     a dedupe suffix (``"Sam (2)"``) is dropped so the contact hears their name.
     """
     name = _DEDUPE_SUFFIX.sub("", name)
@@ -484,7 +484,7 @@ def handover_intro(name: str, reason: str | None) -> str:
     if said:
         return (
             f"Hi {name}, I have a caller on the line. "
-            f"They say it is about {said}. Connecting you now."
+            f"Reason given: {said}. Connecting you now."
         )
     return f"Hi {name}, I have a caller on the line. Connecting you now."
 
