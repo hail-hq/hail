@@ -116,3 +116,31 @@ def test_release_drops_the_empty_early_reply():
     agent._activity = Mock()
     agent.release_opening()
     agent._activity._cancel_preemptive_generation.assert_called_once()
+
+
+async def test_held_turns_end_at_min_delay_until_the_opening_is_released():
+    # The turn detector scores a bare "Hello?" as unfinished and waits
+    # max_delay. While held there is no reply to protect, so end the turn fast.
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    async with AgentSession(llm=FakeLLM(reply="hi")) as session:
+        default = dict(session.options.endpointing)
+        await session.start(agent=agent)
+        endpointing = session.options.endpointing
+        assert endpointing["max_delay"] == default["min_delay"]
+        assert agent._activity.endpointing_opts["max_delay"] == default["min_delay"]
+        agent.release_opening()
+        assert endpointing["max_delay"] == default["max_delay"]
+        assert agent._activity.endpointing_opts["max_delay"] == default["max_delay"]
+        # A second release (IVR path, then greeting) changes nothing.
+        agent.release_opening()
+        assert endpointing["max_delay"] == default["max_delay"]
+
+
+async def test_inbound_agent_keeps_the_default_max_delay():
+    agent = SpeechSanitizingAgent(instructions="test")
+    async with AgentSession(llm=FakeLLM(reply="hi")) as session:
+        default = session.options.endpointing["max_delay"]
+        await session.start(agent=agent)
+        assert session.options.endpointing["max_delay"] == default
+        agent.release_opening()
+        assert session.options.endpointing["max_delay"] == default

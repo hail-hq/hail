@@ -212,11 +212,30 @@ class SpeechSanitizingAgent(Agent):
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
+        self._max_delay_after_opening: float | None = None
         self.phone_menu: PhoneMenu | None = None
+
+    async def on_enter(self) -> None:
+        if self._opening_pending:
+            # A held turn gets no reply, so waiting for the turn detector gains
+            # nothing. It scores a bare "Hello?" as unfinished, and the commit
+            # it delays by max_delay then cuts off the greeting. End held turns
+            # at min_delay; release_opening restores the session default.
+            endpointing = self.session.options.endpointing
+            self._max_delay_after_opening = endpointing["max_delay"]
+            self.session.update_options(
+                endpointing_opts={"max_delay": endpointing["min_delay"]}
+            )
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
         self._opening_pending = False
+        # The callee can hang up during AMD; then there is no session to update.
+        if self._max_delay_after_opening is not None and self._activity is not None:
+            self.session.update_options(
+                endpointing_opts={"max_delay": self._max_delay_after_opening}
+            )
+            self._max_delay_after_opening = None
         # An early (preemptive) reply started while held is empty, because
         # llm_node returned None. Drop it so the next turn is generated fresh
         # instead of reusing it. Private in livekit-agents 1.8.8;
