@@ -50,7 +50,7 @@ Each classifier gets one try of at most 3 s
   also stops LiveKit's AMD call, which has no timeout of its own. A first
   try that times out leaves the next classifier 2 s. `classify_speech`
   applies the same cap to a customer's LLM used alone in the menu and
-  unavailable checks. Its AMD check has no timeout of its own: detection
+  unavailable checks. In AMD, that LLM has no timeout of its own: detection
   still ends 20 s after SIP answer (`POST_ANSWER_TIMEOUT_SECONDS`).
 - The pickup recheck has one 5 s cap for transcription and classification
   together (`RECHECK_TIMEOUT_SECONDS` in `pickup.py`). A slow transcript can
