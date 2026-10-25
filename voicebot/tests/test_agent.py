@@ -2244,3 +2244,20 @@ async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "no_answer"
     assert session.said == [] and state == {"human": None, "connected": False}
+
+
+async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
+    """If the mailbox leg cannot be removed it would record the caller, so
+    the room is deleted instead."""
+    ctx = FakeJobContext()
+    ctx.api.room.remove_participant.side_effect = RuntimeError("livekit down")
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    screen, _ = _screen("machine-vm")
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "failed"
+    assert ctx.api.room.remove_participant.await_count == 2
+    assert ctx.delete_room_calls == 1 and ctx.shutdown_calls == ["handover_leg_stuck"]
+    assert state["ending"] is True and session.said == []

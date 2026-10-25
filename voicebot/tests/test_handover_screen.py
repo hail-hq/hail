@@ -171,3 +171,27 @@ async def test_classify_skips_empty_or_tiny_audio(monkeypatch) -> None:
 def test_person_verdicts_connect() -> None:
     assert "human" not in handover_screen.NOT_A_PERSON
     assert "uncertain" not in handover_screen.NOT_A_PERSON
+
+
+def test_transcriber_follows_the_org_stt(monkeypatch) -> None:
+    """Audio goes only to a provider the org allows."""
+    monkeypatch.setattr(handover_screen.settings, "deepgram_api_key", "dg")
+    monkeypatch.setattr(handover_screen.settings, "deepgram_model", "nova-3")
+    built: list = []
+    monkeypatch.setattr(
+        handover_screen,
+        "build_stt",
+        lambda org, provider: built.append((org, provider)) or "org-stt",
+    )
+    house = handover_screen._build_stt({})
+    assert type(house).__name__ == "STT" and house.model == "nova-3"
+
+    org_dg = SimpleNamespace(provider="deepgram")
+    assert handover_screen._build_stt({"stt": org_dg}) == "org-stt"
+    assert built == [(org_dg, "deepgram")]
+
+    org_sm = SimpleNamespace(provider="speechmatics")
+    assert handover_screen._build_stt({"stt": org_sm}) is None
+
+    monkeypatch.setattr(handover_screen.settings, "deepgram_api_key", "")
+    assert handover_screen._build_stt({}) is None

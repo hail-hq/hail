@@ -489,13 +489,17 @@ def handover_intro(name: str, reason: str | None) -> str:
     return f"Hi {name}, I have a caller on the line. Connecting you now."
 
 
-async def _remove_handover_leg(ctx: JobContext, identity: str, call_id: UUID) -> None:
-    try:
-        await ctx.api.room.remove_participant(
-            RoomParticipantIdentity(room=ctx.room.name, identity=identity)
-        )
-    except Exception:
-        logger.exception("call_id=%s could not drop the handover leg", call_id)
+async def _remove_handover_leg(ctx: JobContext, identity: str, call_id: UUID) -> bool:
+    """Hang up the contact's leg. Two tries; False when both failed."""
+    for _ in range(2):
+        try:
+            await ctx.api.room.remove_participant(
+                RoomParticipantIdentity(room=ctx.room.name, identity=identity)
+            )
+            return True
+        except Exception:
+            logger.exception("call_id=%s could not drop the handover leg", call_id)
+    return False
 
 
 def _sip_outcome(code: int | None) -> str:
@@ -629,7 +633,12 @@ def make_agent_bridge(
                     call_id,
                     picked_up_by,
                 )
-                await _remove_handover_leg(ctx, identity, call_id)
+                if not await _remove_handover_leg(ctx, identity, call_id):
+                    # The mailbox would record the caller: end the call.
+                    bridge_state["ending"] = True
+                    await _drop_room(ctx, call_id)
+                    ctx.shutdown(reason="handover_leg_stuck")
+                    return BridgeOutcome("failed", None, ring_ms)
                 bridge_state["human"] = None
                 return BridgeOutcome("no_answer", None, ring_ms)
         if identity not in ctx.room.remote_participants:

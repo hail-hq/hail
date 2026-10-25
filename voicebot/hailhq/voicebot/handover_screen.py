@@ -25,7 +25,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.classify import classify_speech
 from hailhq.voicebot.pickup import RECHECK_NOTE, SAMPLE_RATE
-from hailhq.voicebot.pipeline import ResolvedLayer
+from hailhq.voicebot.pipeline import ResolvedLayer, build_stt
 from livekit import rtc
 from livekit.agents import APIConnectOptions
 from livekit.agents.llm import LLM
@@ -142,6 +142,28 @@ async def classify_greeting(pcm: bytes, *, stt: STT, llm: LLM) -> str | None:
     return category.value if category is not None else None
 
 
+def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
+    """A one-shot transcriber that follows the org's STT choice.
+
+    Hail's Deepgram only when the org has no STT of its own, as in the
+    outbound recheck (``amd.build_amd_models``). An org on Deepgram uses its
+    own key. An org on another provider skips the check: its audio never
+    goes to a provider it did not pick.
+    """
+    org_stt = org_cfgs.get("stt")
+    if org_stt is None:
+        if not (settings.deepgram_api_key and settings.deepgram_model):
+            return None
+        return deepgram.STT(
+            model=settings.deepgram_model,
+            detect_language=True,
+            api_key=settings.deepgram_api_key,
+        )
+    if org_stt.provider == "deepgram":
+        return build_stt(org_stt, provider="deepgram")
+    return None
+
+
 async def screen_handover_pickup(
     room: rtc.Room,
     identity: str,
@@ -153,27 +175,23 @@ async def screen_handover_pickup(
     """Who answered the contact's leg: an AMD category, or None when the
     check could not run. A None or ``human``/``uncertain`` verdict connects
     the call, as before this check existed."""
-    if session.vad is None or not (
-        settings.deepgram_api_key and settings.deepgram_model
-    ):
-        logger.warning("handover pickup check unavailable (no VAD or Deepgram)")
+    if session.vad is None:
+        logger.warning("handover pickup check unavailable (no VAD)")
         return None
     owned: list = []
     try:
-        llm, owned = build_classifier(
+        stt = _build_stt(org_cfgs or {})
+        if stt is None:
+            logger.warning("handover pickup check has no transcriber; skipping")
+            return None
+        owned.append(stt)
+        llm, classifiers = build_classifier(
             session, org_cfgs=org_cfgs, llm_override=llm_override
         )
+        owned.extend(classifiers)
         if not isinstance(llm, LLM):
             logger.warning("handover pickup check has no classifier; skipping")
             return None
-        # One-shot transcription with language detection, as in the
-        # outbound greeting recheck (amd.build_amd_models).
-        stt = deepgram.STT(
-            model=settings.deepgram_model,
-            detect_language=True,
-            api_key=settings.deepgram_api_key,
-        )
-        owned.append(stt)
         pcm = await listen_for_greeting(room, identity, session.vad)
         return await classify_greeting(pcm, stt=stt, llm=llm)
     except Exception as exc:
