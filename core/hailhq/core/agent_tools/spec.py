@@ -1,6 +1,8 @@
 """ToolSpec / ToolContext: the contract between core tools and the voicebot.
 
-``execute`` returns a short plain sentence the agent speaks. Expected
+``execute`` returns a short plain sentence the agent speaks, or None when
+the agent must stay silent: LiveKit then generates no reply turn
+(livekit-agents 1.8.8 ``voice/generation.py``, ``reply_required``). Expected
 failures (unavailable channel, denied send) come back as speakable
 sentences, not exceptions; the voicebot wrapper catches anything else.
 """
@@ -84,7 +86,7 @@ class ToolSpec:
     parameters: dict[str, Any]  # JSON schema, type: object
     risk_tier: RiskTier
     is_available: Callable[[uuid.UUID, AsyncSession], Awaitable[bool]]
-    execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str]]
+    execute: Callable[[ToolContext, dict[str, Any]], Awaitable[str | None]]
     # Per-call shaping from dispatch metadata (names in the description,
     # enum of choices). None result hides the tool for this call.
     bind: Callable[[dict[str, Any]], ToolSpec | None] | None = None

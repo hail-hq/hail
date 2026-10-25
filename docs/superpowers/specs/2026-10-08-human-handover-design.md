@@ -111,7 +111,7 @@ New `ToolContext.bridge` handle, built in `agent.py` as `make_agent_bridge`:
    - fan out `call.transferred`;
    - agent says one line to both: "Hi {name}, I have a caller on the line. Reason given: {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
    - disable the session's audio input and output; the agent stays in the room;
-   - the tool returns "Connected. They are talking now. Say nothing and do not end the call." and `end_call` does nothing while connected.
+   - the tool returns nothing (None), so the agent gets no reply turn, and `end_call` does nothing while connected.
 5. `SipCallError` or timeout:
    - write `handover` event with `outcome: "no_answer" | "busy" | "failed"` and the SIP status;
    - return "They could not pick up." The agent offers to take a message.
