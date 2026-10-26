@@ -1127,6 +1127,11 @@ async def _submit_row(
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)
         await db.refresh(row)
+        if row.state != "rejected":
+            # The discard failed: wait for the next try, as when it is down.
+            row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+            row.approved_by = None
+            await db.commit()
         return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)

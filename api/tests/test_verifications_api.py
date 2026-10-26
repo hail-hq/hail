@@ -1813,6 +1813,24 @@ async def test_create_rejects_when_the_carrier_refuses_the_submit(
     assert audit.payload["carrier_reason"] == "Group is not fulfilled"
 
 
+async def test_create_keeps_waiting_when_a_refused_draft_cannot_be_discarded(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.submit, carrier.discard = refuse, boom
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    # Not stuck in 'submitting': the sweeper tries again.
+    assert resp.json()["state"] == "awaiting_review"
+
+
 async def test_superadmin_approve_reports_a_refused_submit(
     client, org_and_key, carrier, async_session
 ) -> None:
