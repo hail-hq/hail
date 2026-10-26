@@ -321,19 +321,26 @@ def _house_llms() -> list[agents_llm.LLM]:
     return [llm for llm in llms if llm is not None]
 
 
-def _fallback_chain(llms: list[agents_llm.LLM]) -> agents_llm.LLM:
+def _fallback_chain(
+    llms: list[agents_llm.LLM], *, retry_on_chunk_sent: bool
+) -> agents_llm.LLM:
     # One try per model, no retry: a failed model hands over to the next at
-    # once (docs/operations/voice-llm.md).
+    # once. ``retry_on_chunk_sent`` lets a call hand over even after the
+    # failed model sent text; the next model restarts the reply
+    # (docs/operations/voice-llm.md).
     return agents_llm.FallbackAdapter(
-        llm=llms, attempt_timeout=10.0, max_retry_per_llm=0
+        llm=llms,
+        attempt_timeout=10.0,
+        max_retry_per_llm=0,
+        retry_on_chunk_sent=retry_on_chunk_sent,
     )
 
 
-def _house_llm() -> agents_llm.LLM:
+def _house_llm(*, retry_on_chunk_sent: bool) -> agents_llm.LLM:
     llms = _house_llms()
     if not llms:
         raise ProviderKeyError("no house LLM has a model and a key")
-    return _fallback_chain(llms)
+    return _fallback_chain(llms, retry_on_chunk_sent=retry_on_chunk_sent)
 
 
 def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
@@ -370,9 +377,16 @@ def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
 
 
 def build_llm(
-    llm_cfg: dict[str, Any] | None, org: ResolvedLayer | None = None
+    llm_cfg: dict[str, Any] | None,
+    org: ResolvedLayer | None = None,
+    *,
+    retry_on_chunk_sent: bool = False,
 ) -> agents_llm.LLM:
-    """Precedence: per-call llm (mode B) > org BYO (mode C) > house chain (mode A)."""
+    """Precedence: per-call llm (mode B) > org BYO (mode C) > house chain (mode A).
+
+    ``retry_on_chunk_sent`` is True for calls: a model that fails mid-reply
+    hands over to the next one. Texts keep it False, so a failed reply is
+    retried whole instead of carrying the failed model's first words."""
     if llm_cfg is not None:
         return openai_plugin.LLM(
             base_url=llm_cfg["base_url"],
@@ -382,9 +396,11 @@ def build_llm(
     if org is not None:
         byo = org_llm(org)
         if org.fallback_enabled:
-            return _fallback_chain([byo, *_house_llms()])
+            return _fallback_chain(
+                [byo, *_house_llms()], retry_on_chunk_sent=retry_on_chunk_sent
+            )
         return byo
-    return _house_llm()
+    return _house_llm(retry_on_chunk_sent=retry_on_chunk_sent)
 
 
 def _house_tts(
@@ -751,7 +767,7 @@ def build_session(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
-        llm=build_llm(llm_cfg, org_cfgs.get("llm")),
+        llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
             # Only the setting that differs from the SDK defaults: a transcribed
