@@ -400,7 +400,8 @@ class _CallLLMStream(FallbackLLMStream):
             return
         if self._failure is not None:
             raise _ToolCallSent()
-        pending = "" if self._said else None
+        restart = bool(self._said)
+        pending = "" if restart else None
         # The words said end with a space: drop the spaces before this
         # model's first new word, also when they come in a later chunk.
         trim = self._said[-1:].isspace()
@@ -419,11 +420,8 @@ class _CallLLMStream(FallbackLLMStream):
                         if end is None:
                             # So far only a repeat of the words said: hold
                             # it. The chunk still goes out, for its usage,
-                            # extra or tool call. A tool call drops the held
-                            # repeat; the text after it is matched again.
+                            # extra or tool call.
                             rest = ""
-                            if delta.tool_calls:
-                                pending = ""
                         elif end == -1:
                             # Not a repeat: keep it, apart from the words said.
                             gap = self._said[-1:].isspace() or pending[:1].isspace()
@@ -441,6 +439,10 @@ class _CallLLMStream(FallbackLLMStream):
                     self._said += delta.content
                 if delta and delta.tool_calls:
                     self._tool_call_sent = True
+                    if restart:
+                        # A tool call drops a held repeat; the text after it
+                        # is matched and spaced again.
+                        pending = ""
                 yield chunk
         except Exception as e:
             if self._tool_call_sent:

@@ -307,3 +307,15 @@ async def test_every_model_failing_mid_reply_runs_the_chain_once() -> None:
 )
 def test_after_repeat(said: str, new: str, end: int | None) -> None:
     assert _after_repeat(said, new) == end
+
+
+async def test_text_after_a_matched_repeat_and_a_tool_call_is_matched() -> None:
+    first = _ScriptedLLM(["Sure"], fail=_overloaded())
+    second = _ScriptedLLM(["Sure", _SMS, "Sure, sent."])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        assert await _reply(adapter, tools=tools) == "Sure, sent."
+        assert tools == ["send_sms"]
+    finally:
+        await adapter.aclose()
