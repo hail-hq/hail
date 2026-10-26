@@ -616,9 +616,25 @@ async def test_submit_posts_for_approval() -> None:
     assert call.url.path == f"/v2/requirement_groups/{GROUP}/submit_for_approval"
 
 
-async def test_submit_refused_by_telnyx_is_final() -> None:
+def _submit_422(group_status: str):
     errors = {"errors": [{"title": "Invalid", "detail": "Group is not fulfilled"}]}
-    fake = Telnyx(lambda request: httpx.Response(422, json=errors))
+
+    def answers(request):
+        if request.method == "POST":
+            return httpx.Response(422, json=errors)
+        return httpx.Response(200, json={"data": _group("mobile", group_status)})
+
+    return Telnyx(answers)
+
+
+@pytest.mark.parametrize("group_status", ["pending-approval", "approved"])
+async def test_submit_of_a_group_already_sent_succeeds(group_status) -> None:
+    # Telnyx answers 422 when a group is sent again; it is already in review.
+    await provider(_submit_422(group_status)).submit({"group_id": GROUP})
+
+
+async def test_submit_refused_by_telnyx_is_final() -> None:
+    fake = _submit_422("unapproved")
     with pytest.raises(SubmitRefused) as refused:
         await provider(fake).submit({"group_id": GROUP})
     assert [(p.message, p.raw) for p in refused.value.problems] == [

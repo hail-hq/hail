@@ -411,8 +411,17 @@ class TelnyxVerificationProvider(VerificationProvider):
                 f"/requirement_groups/{path_id(refs['group_id'])}/submit_for_approval",
             )
         except httpx.HTTPStatusError as exc:
-            # 422: Telnyx will not take this group for review as it is.
+            # 422: Telnyx will not take this group for review as it is. It
+            # also answers 422 for a group already sent, which is a success.
             if exc.response.status_code == 422:
+                try:
+                    state = (await self._group(refs)).get("status")
+                except httpx.HTTPError as read_exc:
+                    raise VerificationProviderError(
+                        "Telnyx request failed"
+                    ) from read_exc
+                if state in ("pending-approval", "approved"):
+                    return
                 raise SubmitRefused(
                     [
                         Problem(
