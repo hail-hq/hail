@@ -381,6 +381,10 @@
   .navActions .primary {
     display: none;
   }
+  /* Signed in, there is no Sign in link, so the Console button keeps its place in the bar. */
+  .navActions .signedIn {
+    display: inline-flex;
+  }
 }
 @media (max-width: 360px) {
   .shell {
