@@ -233,8 +233,8 @@ class SpeechSanitizingAgent(Agent):
     async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
         if new_message is not None and not (new_message.text_content or "").strip():
             # An empty turn has nothing to answer. speak_greeting clears the
-            # pickup turn, and its end of turn can still fire with no words
-            # (LiveKit's "ignore empty turns" pattern).
+            # pickup turn and cancels its end of turn. This is the backup if
+            # that cancel misses (LiveKit's "ignore empty turns" pattern).
             raise StopResponse()
         if self._opening_pending:
             # AMD pauses playback, but still allows automatic replies to queue.
@@ -814,10 +814,11 @@ async def speak_greeting(
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the
-        # opening off. AMD's transcript already carries those words to the
-        # generated opening, so drop the unfinished turn. Not when a person
-        # just spoke on the menu path (generate_opening=False): there the turn
-        # loop answers them.
+        # opening off, so drop the unfinished turn. Its words reach the
+        # generated opening only through pickup_transcript (AMD's transcript
+        # at the verdict). A first_message opening does not answer them. Not
+        # when a person just spoke on the menu path (generate_opening=False):
+        # there the turn loop answers them.
         try:
             session.clear_user_turn()
         except RuntimeError:
@@ -829,8 +830,10 @@ async def speak_greeting(
         # wait ends while no speech is current (before the scheduler picks up
         # the opening), LiveKit interrupts the opening before
         # on_user_turn_completed can drop the empty turn. Cancel the wait, as
-        # LiveKit does on new speech. Private in livekit-agents 1.8.8;
-        # test_opening_order.py fails if it moves.
+        # LiveKit does on new speech. Cancel even when the clear raised: it
+        # empties the transcript first. A turn whose end already fired is not
+        # stopped here. Private in livekit-agents 1.8.8; test_opening_order.py
+        # fails if it moves.
         recognition = getattr(
             getattr(session, "_activity", None), "_audio_recognition", None
         )

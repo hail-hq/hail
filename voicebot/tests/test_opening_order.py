@@ -182,6 +182,11 @@ async def test_outbound_opening_cancels_the_pending_end_of_turn(
     assert "self._end_of_turn_task" in inspect.getsource(AudioRecognition.__init__)
     session = FakeAnnouncingSession()
     session._activity = Mock()
-    await speak_greeting(session, metadata, generate_opening=generate_opening)
     task = session._activity._audio_recognition._end_of_turn_task
-    assert task.cancel.called is cancelled
+    # Utterances already spoken or requested at each cancel().
+    task.cancel.side_effect = lambda: cancelled_after.append(
+        len(session.say_calls) + len(session.generate_reply_calls)
+    )
+    cancelled_after: list[int] = []
+    await speak_greeting(session, metadata, generate_opening=generate_opening)
+    assert cancelled_after == ([0] if cancelled else [])
