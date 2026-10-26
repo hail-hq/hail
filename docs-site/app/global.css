@@ -371,3 +371,9 @@
 }
 
 button, [role="button"], a:is(.btn,.docs-cta) { text-decoration:none!important; }
+
+/* The shared hail.so header stays at the top. Fumadocs offsets its sticky
+   sidebar, table of contents, and phone bar by --fd-banner-height. */
+:root {
+  --fd-banner-height: var(--hail-header-h, 0px);
+}

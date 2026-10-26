@@ -406,9 +406,15 @@
 }
 
 /* Docked bar for the docs and costs apps (scripts/sync-site-header.mjs). */
+:global(:root) {
+  --hail-header-h: 64px;
+}
 .header {
-  position: relative;
-  top: auto;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  box-sizing: border-box;
+  height: var(--hail-header-h);
   padding: 0;
   pointer-events: auto;
   background: var(--bg);
@@ -417,7 +423,8 @@
 .shell {
   width: min(1100px, calc(100% - 40px));
   max-width: none;
-  padding: 12px 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
