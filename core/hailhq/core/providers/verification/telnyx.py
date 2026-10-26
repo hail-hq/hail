@@ -17,7 +17,12 @@ import logging
 import re
 
 import httpx
-from hailhq.core.providers.telnyx import TelnyxClient, path_id
+from hailhq.core.providers.telnyx import (
+    TelnyxClient,
+    path_id,
+    rule_applies_to,
+    subject_types_for,
+)
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
@@ -32,6 +37,7 @@ from hailhq.core.providers.verification.base import (
     ProviderStatus,
     Requirements,
     SubjectType,
+    UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
 )
@@ -46,24 +52,10 @@ logger = logging.getLogger(__name__)
 
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 _UPLOAD_TIMEOUT_SECONDS = 60
-_SUBJECT_TYPES: tuple[SubjectType, ...] = ("person", "business")
-# Telnyx returns one list for both kinds of end user and marks a rule that
-# applies to only one kind with a tag in its name. "Sole Proprietorships"
-# tags (Italy) can mean either kind, so those rules stay for both. Telnyx
-# still refuses to submit a group with any value missing, so a text rule
-# for the other kind is sent as _NOT_APPLICABLE; a file or address rule is
-# asked of everyone.
+# Telnyx refuses to submit a group with any value missing, even a rule tagged
+# for the other kind of end user. Such a text rule is sent as this; a file or
+# address rule is asked of everyone who may buy (see subject_types_for).
 _NOT_APPLICABLE = "N/A"
-_ONLY_FOR: dict[SubjectType, tuple[str, ...]] = {
-    "business": ("(business use only)", "(legal entity only)"),
-    "person": ("(personal use only)", "(personal only)"),
-}
-
-
-def _applies_to(rule: dict, subject_type: SubjectType) -> bool:
-    name = (rule.get("name") or "").lower()
-    other = "person" if subject_type == "business" else "business"
-    return not any(tag in name for tag in _ONLY_FOR[other])
 
 
 def _customer_reference(organization_id: str) -> str:
@@ -197,7 +189,7 @@ class TelnyxVerificationProvider(VerificationProvider):
         return {
             r["id"]
             for r in rules
-            if r.get("field_type") == "textual" and not _applies_to(r, subject_type)
+            if r.get("field_type") == "textual" and not rule_applies_to(r, subject_type)
         }
 
     async def requirements(
@@ -207,23 +199,30 @@ class TelnyxVerificationProvider(VerificationProvider):
             rules = await self._rules(country_code, number_type)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
+        allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
+        if subject_type not in allowed:
+            raise UnsupportedSubjectType(
+                f"{subject_type} is not accepted for {number_type} numbers in "
+                f"{country_code}",
+                allowed=allowed,
+            )
         base = {
             "provider": self.name,
             "country_code": country_code,
             "number_type": number_type,
             "subject_type": subject_type,
-            "subject_types": _SUBJECT_TYPES,
+            "subject_types": allowed,
         }
         if not rules:
             return Requirements(required=False, **base)
         return Requirements(
             required=True,
-            # Both subjects are accepted; text rules tagged for the other
-            # kind are filled in by create_draft, not asked.
+            # Text rules tagged for the other kind are filled in by
+            # create_draft, not asked.
             fields=tuple(
                 _field_spec(r)
                 for r in rules
-                if r.get("field_type") == "textual" and _applies_to(r, subject_type)
+                if r.get("field_type") == "textual" and rule_applies_to(r, subject_type)
             ),
             documents=tuple(
                 _document_slot(r) for r in rules if r.get("field_type") == "document"

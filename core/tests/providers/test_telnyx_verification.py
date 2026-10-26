@@ -13,9 +13,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+from hailhq.core.providers.telnyx import subject_types_for
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
+    UnsupportedSubjectType,
     UploadedFile,
     VerificationProviderError,
     get_verification_provider,
@@ -271,8 +273,7 @@ async def test_rules_tagged_for_the_other_subject_are_left_out(
     assert [f.name for f in req.fields] == expected
 
 
-async def test_tagged_document_is_asked_of_everyone() -> None:
-    # A file cannot be filled in for the customer, so Telnyx's tag is ignored.
+def _with_business_file() -> dict:
     payload = _tagged_rules()
     payload["data"][0]["regulatory_requirements"].append(
         {
@@ -281,9 +282,40 @@ async def test_tagged_document_is_asked_of_everyone() -> None:
             "field_type": "document",
         }
     )
-    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
-    req = await provider(fake).requirements("BR", "local", "person")
+    return payload
+
+
+async def test_business_only_file_means_only_a_business_can_buy() -> None:
+    # A file cannot be filled in, and Telnyx will not submit without it.
+    fake = Telnyx(lambda request: httpx.Response(200, json=_with_business_file()))
+    with pytest.raises(UnsupportedSubjectType) as refused:
+        await provider(fake).requirements("BR", "local", "person")
+    assert refused.value.allowed == ("business",)
+    req = await provider(fake).requirements("BR", "local", "business")
+    assert req.subject_types == ("business",)
     assert [d.name for d in req.documents] == ["biz-doc"]
+
+
+@pytest.mark.parametrize(
+    ("rule", "allowed"),
+    [
+        ({"name": "Company Registration (Business Use Only)"}, ("business",)),
+        ({"name": "Legal Rep Address (Legal Entity Only)"}, ("business",)),
+        # A business can give its representative's ID.
+        ({"name": "ID/Passport Copy (Personal Use Only)"}, ("person", "business")),
+        (
+            {"name": "VAT (For Legal Entities and Sole Proprietorships Only)"},
+            ("person", "business"),
+        ),
+    ],
+)
+def test_subject_types_for_file_rules(rule, allowed) -> None:
+    assert subject_types_for([{**rule, "field_type": "document"}]) == allowed
+    # A text rule never limits who can buy: Hail sends N/A for it.
+    assert subject_types_for([{**rule, "field_type": "textual"}]) == (
+        "person",
+        "business",
+    )
 
 
 async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
