@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from hailhq.voicebot.pipeline import _after_repeat, _fallback_chain
+from hailhq.voicebot.pipeline import _after_repeat, _fallback_chain, _ToolCallSent
 from livekit.agents import APIConnectionError, APIConnectOptions, APIStatusError
 from livekit.agents.llm import (
     LLM,
@@ -214,6 +214,48 @@ async def test_tool_call_error_keeps_its_cause() -> None:
         with pytest.raises(APIConnectionError) as raised:
             await _reply(adapter)
         assert isinstance(raised.value.__cause__, OSError)
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_error_keeps_its_context() -> None:
+    """With no cause, the error is raised as LiveKit hands it over: context
+    shown, not replaced by the chain's stop. (LiveKit's own
+    ``LLMStream.__anext__``, llm.py:511, already sets the context.)"""
+    error = _overloaded()
+    first = _ScriptedLLM([_SMS], fail=error)
+    adapter = _fallback_chain([first, _ScriptedLLM(["x"])], retry_on_chunk_sent=True)
+    try:
+        with pytest.raises(APIStatusError) as raised:
+            await _reply(adapter)
+        assert raised.value.__cause__ is None
+        assert raised.value.__suppress_context__ is False
+        assert not isinstance(raised.value.__context__, _ToolCallSent)
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_failure_logs_no_retry(caplog) -> None:
+    first = _ScriptedLLM([_SMS], fail=_overloaded())
+    adapter = _fallback_chain([first, _ScriptedLLM(["x"])], retry_on_chunk_sent=True)
+    try:
+        with pytest.raises(APIStatusError):
+            await _reply(adapter)
+        messages = [r.getMessage() for r in caplog.records]
+        assert not any("retrying" in m for m in messages)
+        assert any("no hand-over" in m for m in messages)
+        # The next model was not picked for an attempt.
+        assert adapter._status[1].selection_id == 0
+    finally:
+        await adapter.aclose()
+
+
+async def test_no_space_before_punctuation_after_the_repeat() -> None:
+    first = _ScriptedLLM(["Aw "], fail=_overloaded())
+    second = _ScriptedLLM(["Aw", ", great."])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    try:
+        assert await _reply(adapter) == "Aw, great."
     finally:
         await adapter.aclose()
 

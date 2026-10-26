@@ -78,7 +78,6 @@ from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import (
     AgentSession,
-    APIConnectionError,
     APIConnectOptions,
     TurnHandlingOptions,
     inference,
@@ -351,18 +350,16 @@ def _after_repeat(sent: str, new: str) -> int | None:
 
 
 class _ToolCallSent(BaseException):
-    """Stops the chain after a tool call was sent and its model failed.
-    A BaseException, so ``FallbackLLMStream._run`` lets it through without
-    marking the next model as failed. ``_CallLLMStream._run`` turns it back
-    into the model's error."""
+    """Stops the chain when a model fails after it sent a tool call. A
+    BaseException, so ``FallbackLLMStream._run`` lets it through: no
+    hand-over, and no "retrying" log for a retry that does not happen."""
 
 
 class _CallLLMStream(FallbackLLMStream):
     """One call reply over the chain (docs/operations/voice-llm.md):
 
-    * After a tool call was sent, a model that fails ends the reply, as
-      LiveKit does without ``retry_on_chunk_sent``. The tool already runs,
-      so the next model must not send it again.
+    * After a tool call was sent, a model that fails ends the reply. The
+      tool already runs, so the next model must not send it again.
     * After text was sent, the next model restarts the reply. Its repeat of
       the words already sent is dropped, so they are said once.
     * When every model failed, the session reruns the chain (its
@@ -376,20 +373,40 @@ class _CallLLMStream(FallbackLLMStream):
         # True here; the hand-over reads the adapter's own flag.
         self._retry_on_chunk_sent = False
         self._said = ""
+        # Trailing spaces go out with the next text, so a model that takes
+        # over decides the space after the words said ("Aw" + ", great.").
+        self._space = ""
         self._tool_call_sent = False
-        self._failure: BaseException | None = None
+        self._failed: tuple[agents_llm.LLM, Exception] | None = None
 
     async def _run(self) -> None:
         try:
             await super()._run()
-        except (_ToolCallSent, APIConnectionError):
-            # APIConnectionError: the model that sent the tool call was the
-            # last one, so the chain ended with "all LLMs failed".
-            if self._failure is None:
-                raise
-            # Keep the model error's own cause: APIConnectionError names
-            # the root failure from it.
-            raise self._failure from self._failure.__cause__
+            return
+        except _ToolCallSent:
+            assert self._failed is not None
+            llm, error = self._failed
+        # What the adapter does for a failed model: mark it down until a
+        # background request succeeds (fallback_adapter.py, _run).
+        adapter = self._fallback_adapter
+        status = adapter._status[adapter._llm_instances.index(llm)]
+        if status.available:
+            status.available = False
+            adapter.emit(
+                "llm_availability_changed",
+                agents_llm.AvailabilityChangedEvent(llm=llm, available=False),
+            )
+        self._try_recovery(llm)
+        logger.warning("%s failed after a tool call was sent; no hand-over", llm.label)
+        # Raised outside the except block, so its cause and context stay.
+        raise error
+
+    def _out(self, content: str) -> str:
+        text = self._space + content
+        body = text.rstrip()
+        self._space = text[len(body) :]
+        self._said += body
+        return body
 
     async def _try_generate(
         self, *, llm: agents_llm.LLM, check_recovery: bool = False
@@ -398,21 +415,14 @@ class _CallLLMStream(FallbackLLMStream):
             async for chunk in super()._try_generate(llm=llm, check_recovery=True):
                 yield chunk
             return
-        if self._failure is not None:
-            raise _ToolCallSent()
+        # The failed model's trailing spaces are not said.
+        self._space = ""
         restart = bool(self._said)
         pending = "" if restart else None
-        # The words said end with a space: drop the spaces before this
-        # model's first new word, also when they come in a later chunk.
-        trim = self._said[-1:].isspace()
         try:
             async for chunk in super()._try_generate(llm=llm):
                 delta = chunk.delta
-                if (
-                    delta
-                    and (delta.content or pending)
-                    and (pending is not None or trim)
-                ):
+                if delta and (delta.content or pending):
                     rest = delta.content or ""
                     if pending is not None:
                         pending += rest
@@ -424,19 +434,16 @@ class _CallLLMStream(FallbackLLMStream):
                             rest = ""
                         elif end == -1:
                             # Not a repeat: keep it, apart from the words said.
-                            gap = self._said[-1:].isspace() or pending[:1].isspace()
+                            gap = pending[:1].isspace()
                             rest = pending if gap else " " + pending
                             pending = None
                         else:
                             rest = pending[end:]
                             pending = None
-                    if trim and pending is None:
-                        rest = rest.lstrip()
-                        trim = not rest
-                    delta = delta.model_copy(update={"content": rest or None})
+                    delta = delta.model_copy(
+                        update={"content": self._out(rest) or None}
+                    )
                     chunk = chunk.model_copy(update={"delta": delta})
-                if delta and delta.content:
-                    self._said += delta.content
                 if delta and delta.tool_calls:
                     self._tool_call_sent = True
                     if restart:
@@ -445,9 +452,10 @@ class _CallLLMStream(FallbackLLMStream):
                         pending = ""
                 yield chunk
         except Exception as e:
-            if self._tool_call_sent:
-                self._failure = e
-            raise
+            if not self._tool_call_sent:
+                raise
+            self._failed = (llm, e)
+            raise _ToolCallSent() from None
 
 
 class _CallFallbackAdapter(agents_llm.FallbackAdapter):

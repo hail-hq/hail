@@ -25,37 +25,16 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
   that just failed, right away. Models after the one that answers get none.
   A model never has two such requests at once. The model is back in the
   chain once such a request succeeds.
-- On a call, a model that fails after it sent text hands over too
-  (`_CallFallbackAdapter` in `pipeline.py`, built by `build_session`, with
-  LiveKit's `retry_on_chunk_sent=True`). The next model restarts the reply
-  with the same chat. The words already sent are not said again: the call
-  stream drops the next model's repeat of them (case and spaces ignored).
-  "Aw", then "Aw, that is great." gives "Aw, that is great." in the speech,
-  the chat history and the stored transcript. When the next model starts
-  differently, its text is kept, after one space ("Aw Oh, that is
-  great."). Known limit: a next model that starts with some of the words
-  said, then says something else, keeps all of its text, so those words
-  are said twice ("Let me check that Let me check the order."). Without
-  the hand-over, the adapter re-raises, the reply is
-  lost, and the agent is silent until the person speaks again. Anthropic's
-  `overloaded_error` comes inside a 200 stream after text, so it needs this.
-- A model that fails after it sent a tool call does not hand over. LiveKit
-  runs a tool call as soon as it streams, so the next model could send it
-  again and run it twice (two texts or emails, digits pressed twice, two
-  transfers). The reply ends with the error, as without
-  `retry_on_chunk_sent`.
-- When every model failed, the session reruns the whole chain, up to 3
-  more times (LiveKit's default `max_retry=3`: the first rerun after 0.1 s,
-  then every 2 s). It does so only when nothing was sent yet, so a turn
-  where every model failed before its first word still gets a reply. Once
-  text or a tool call was sent, there is no rerun, so no word is said twice
-  and no tool runs twice. The call stream sets its own
-  `_retry_on_chunk_sent = False` for this (`llm/llm.py`, `_main_task`); the
-  hand-over between models reads the adapter's `retry_on_chunk_sent=True`.
-  So on a call, a model can get more than one try in a turn, one per rerun.
-- Texts keep the default (`build_llm` without `retry_on_chunk_sent`). A
-  model that fails after text fails the reply, and the text is retried
-  whole later, so an SMS never carries the failed model's first words.
+- Calls only ([`_CallLLMStream`](../../voicebot/hailhq/voicebot/pipeline.py)):
+  - A model that fails mid-reply hands over. The next one restarts the
+    reply, and its repeat of the words already said is dropped.
+  - After a tool call, there is no hand-over, so a tool never runs twice.
+  - When every model fails before any output, the session reruns the chain,
+    up to 3 more times. After any output, there is no rerun.
+  - Known limits: a next model that repeats only part of the words said, or
+    two mid-reply failures in one turn, can say some words twice.
+- Texts keep LiveKit's default: a failure after text fails the reply, which
+  is retried whole later.
 
 The classifier (`build_classifier` in `amd.py`) is `ANTHROPIC_BACKUP_MODEL`,
 then `OPENAI_MODEL`, then `GOOGLE_AMD_MODEL`, with the same skip rule. Every
