@@ -20,7 +20,11 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
-from hailhq.core.providers.verification.base import VALUE_NOT_ACCEPTED
+from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
+    SubmitRefused,
+)
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
@@ -424,6 +428,33 @@ async def test_submit_sets_pending_review(provider) -> None:
     )
     await provider.submit(REFS)
     assert parse_qs(responses.calls[0].request.body)["Status"] == ["pending-review"]
+
+
+def _submit_400(bundle_status: str) -> None:
+    url = f"{NUMBERS}/Bundles/{REFS['bundle_sid']}"
+    responses.add(
+        responses.POST, url, json={"message": "Bundle is not compliant"}, status=400
+    )
+    responses.add(
+        responses.GET, url, json={"sid": REFS["bundle_sid"], "status": bundle_status}
+    )
+
+
+@responses.activate
+async def test_submit_refused_by_twilio_is_final(provider) -> None:
+    _submit_400("draft")
+    with pytest.raises(SubmitRefused) as refused:
+        await provider.submit(REFS)
+    (problem,) = refused.value.problems
+    assert problem.message == NOT_ACCEPTED
+    assert "Bundle is not compliant" in (problem.raw or "")
+
+
+@responses.activate
+@pytest.mark.parametrize("bundle_status", ["pending-review", "twilio-approved"])
+async def test_submit_of_a_bundle_already_sent_succeeds(provider, bundle_status):
+    _submit_400(bundle_status)
+    await provider.submit(REFS)
 
 
 @responses.activate

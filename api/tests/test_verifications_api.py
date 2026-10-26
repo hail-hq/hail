@@ -1841,12 +1841,20 @@ async def test_superadmin_approve_reports_a_refused_submit(
     )
 
     async def refuse(refs):
-        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+        raise SubmitRefused(
+            [Problem(field="", message=NOT_ACCEPTED, raw="Group is not fulfilled")]
+        )
 
     carrier.submit = refuse
     resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
     assert resp.status_code == 409
-    assert NOT_ACCEPTED in resp.json()["detail"]
+    assert "Group is not fulfilled" in resp.json()["detail"]
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "rejected"
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    # A rejected row never names an approving admin.
+    assert row.approved_by is None
 
 
 async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(

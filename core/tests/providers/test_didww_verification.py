@@ -14,7 +14,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
-from hailhq.core.providers.verification.base import NOT_ACCEPTED
+from hailhq.core.providers.verification.base import NOT_ACCEPTED, SubmitRefused
 from hailhq.core.providers.verification.didww import DidwwVerificationProvider
 from hailhq.core.providers.voice import didww as voice_mod
 from responses import matchers
@@ -678,6 +678,26 @@ async def test_submit_stamps_approved_reference(provider):
         "type": "addresses",
         "attributes": {"external_reference_id": f"hail:{ORG}:PT:national"},
     }
+
+
+@responses.activate
+async def test_submit_refused_by_didww_is_final(provider):
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/addresses/addr-1",
+        status=422,
+        json={"errors": [{"title": "Address is not valid"}]},
+    )
+    with pytest.raises(SubmitRefused) as refused:
+        await provider.submit(
+            {
+                "address_id": "addr-1",
+                "organization_id": ORG,
+                "country_code": "PT",
+                "number_type": "national",
+            }
+        )
+    assert [p.raw for p in refused.value.problems] == ["Address is not valid"]
 
 
 @responses.activate
