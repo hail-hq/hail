@@ -37,7 +37,7 @@ const fontMono = JetBrains_Mono({
   display: "swap",
 });
 
-// Icons/OG match hail.so's own app/layout.tsx (same monogram, same palette,
+// Icons/OG match hail.so's own app/layout.tsx (same bird icon, same palette,
 // same og:image template) so /costs reads as a page of the site rather than
 // a neighbouring property — see the palette note in global.css. Paths need
 // the explicit /costs prefix: Next's basePath config isn't applied to the
