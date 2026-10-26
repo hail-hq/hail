@@ -9,19 +9,19 @@ export type SiteHeaderActive = "docs" | null;
 
 const RESOURCES = [
   {
-    label: "product",
+    label: "Product",
     items: [
       { label: "Voice API", href: "/voice" },
       { label: "SMS API", href: "/sms" },
       { label: "Email API", href: "/email" },
-      { label: "integrations", href: "/integrations" },
+      { label: "Integrations", href: "/integrations" },
       { label: "MCP connections", href: "/mcp" },
     ],
   },
   {
-    label: "guides",
+    label: "Guides",
     items: [
-      { label: "engineering blog", href: "/blog" },
+      { label: "Engineering blog", href: "/blog" },
       { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
       { label: "Domain warmup guide", href: "/email#domain-warmup" },
       { label: "Compare platforms", href: "/compare" },
@@ -68,6 +68,24 @@ export function SiteHeader({
             setMobileOpen(false);
             setOpen(false);
             menuButton.current?.focus();
+          }
+          // The open phone menu covers the page: Tab cycles between the toggle and the menu links.
+          if (event.key === "Tab" && mobileOpen && menuButton.current) {
+            const nav = document.getElementById(navId);
+            const items = [
+              menuButton.current,
+              ...(nav
+                ? Array.from(nav.querySelectorAll<HTMLElement>("a, button"))
+                : []),
+            ];
+            // The toggle is last in the DOM, so step through this list instead of letting Tab leave it.
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            if (at >= 0) {
+              event.preventDefault();
+              items[
+                (at + (event.shiftKey ? items.length - 1 : 1)) % items.length
+              ].focus();
+            }
           }
         }}
       >
@@ -128,16 +146,25 @@ export function SiteHeader({
           <a href={siteHref("/blog")} className={navLinkClass(false)}>
             Resources
           </a>
+          <a
+            className={`${styles.primary} ${styles.menuCta}`}
+            href={siteHref("/signup")}
+          >
+            Get started
+          </a>
         </nav>
         <div className={styles.navActions}>
           <div className={styles.themeButton}>{themeControl}</div>
+          <a className={styles.account} href={siteHref("/signin")}>
+            Sign in
+          </a>
           <a className={styles.primary} href={siteHref("/signup")}>
-            Create account
+            Get started
           </a>
           <button
             ref={menuButton}
             type="button"
-            className={styles.menuToggle}
+            className={`${styles.menuToggle} ${mobileOpen ? styles.menuOpen : ""}`}
             aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
             aria-expanded={mobileOpen}
             aria-controls={navId}
@@ -146,21 +173,9 @@ export function SiteHeader({
               setOpen(false);
             }}
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              aria-hidden="true"
-            >
-              {mobileOpen ? (
-                <path d="m5 5 10 10M15 5 5 15" />
-              ) : (
-                <path d="M3 5h14M3 10h14M3 15h14" />
-              )}
-            </svg>
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
           </button>
         </div>
       </div>

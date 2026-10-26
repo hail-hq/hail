@@ -1,33 +1,44 @@
+/* Primary button. Synced to the docs and costs apps, so values are literal (Evolve: spec 2026-10-25). */
 .primary {
   composes: brand-action-direct from "./brand-actions.module.css";
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 48px;
-  padding: 12px 20px;
+  padding: 12px 16px;
   border: 1px solid #1665ff;
-  border-radius: 7px;
+  border-radius: 12px;
   background: #1665ff;
   color: #fff !important;
-  font-family: var(--font-grotesk), Arial, sans-serif;
-  font-size: 14px;
+  font-family: var(--font-ui, var(--font-grotesk)), Arial, sans-serif;
+  font-size: 16px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 24px;
   text-decoration: none !important;
   cursor: pointer;
+  box-shadow: 0 8px 24px -8px rgba(22, 101, 255, 0.55);
+  transition:
+    background-color 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 700ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 700ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .primary:hover:not(:disabled) {
   background: #124fcb;
   border-color: #124fcb;
+  transform: translateY(-1px);
+}
+.primary:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .primary:focus-visible {
   outline: 2px solid #1665ff;
-  outline-offset: 4px;
+  outline-offset: 2px;
 }
 .primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
 }
 /* Shared motion lives in brand-actions.css. Flex gap supplies the arrow spacing here. */
 .primary::after {

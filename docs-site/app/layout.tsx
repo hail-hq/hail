@@ -3,7 +3,7 @@ import { HeaderTheme } from "@/components/header-theme";
 import { SiteFooter } from "@/components/site-footer";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
-import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 import { DOCS_SITE_COPY } from "@/lib/site-copy";
 import "./global.css";
@@ -12,6 +12,21 @@ const fontSans = Space_Grotesk({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-grotesk",
+  display: "swap",
+});
+
+// The shared hail.so header and footer (components/hail-header, hail-footer) read --font-ui and --font-code.
+const fontUi = Geist({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-ui",
+  display: "swap",
+});
+
+const fontCode = Geist_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-code",
   display: "swap",
 });
 
@@ -56,7 +71,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${fontMono.variable} ${fontSans.variable}`}
+      className={`${fontMono.variable} ${fontSans.variable} ${fontUi.variable} ${fontCode.variable}`}
     >
       <body className="hail-docs flex min-h-screen flex-col">
         <RootProvider theme={{ storageKey: "hail-theme" }}>

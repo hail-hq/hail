@@ -3,6 +3,7 @@
    See branding/README.md for the card and CTA pattern. */
 .brand-action-label::after,
 .brand-action-direct::after,
+:is(.su-submit, .cf-cta, .cf-link, .cf-link-ghost, .cf-result-console)::after,
 .hsite
   :is(
     .hcta-nav,
@@ -46,13 +47,17 @@
     100% 100%,
     0 100%;
   transition:
-    -webkit-mask-size 0.22s ease,
-    mask-size 0.22s ease,
-    transform 0.22s ease;
+    -webkit-mask-size 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    mask-size 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .brand-action-direct:is(:hover, :focus-visible):not(:disabled):not(
     [aria-disabled="true"]
   )::after,
+:is(.su-submit, .cf-cta, .cf-link, .cf-link-ghost, .cf-result-console):is(
+    :hover,
+    :focus-visible
+  ):not(:disabled)::after,
 .brand-action:is(:hover, :focus-visible):not(:disabled):not(
     [aria-disabled="true"]
   )
@@ -80,6 +85,7 @@
 @media (prefers-reduced-motion: reduce) {
   .brand-action-label::after,
   .brand-action-direct::after,
+  :is(.su-submit, .cf-cta, .cf-link, .cf-link-ghost, .cf-result-console)::after,
   .hsite
     :is(
       .hcta-nav,
