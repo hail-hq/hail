@@ -133,6 +133,10 @@ async def test_tool_call_then_failure_does_not_hand_over() -> None:
     first = _ScriptedLLM(["One moment.", _SMS], fail=_overloaded())
     second = _ScriptedLLM(["One moment.", _SMS])
     adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    events: list[tuple[LLM, bool]] = []
+    adapter.on(
+        "llm_availability_changed", lambda e: events.append((e.llm, e.available))
+    )
     tools: list[str] = []
     try:
         with pytest.raises(APIStatusError):
@@ -141,6 +145,9 @@ async def test_tool_call_then_failure_does_not_hand_over() -> None:
         assert second.calls == 0
         # The failed model is marked down; the unused one is not.
         assert [s.available for s in adapter._status] == [False, True]
+        assert events == [(first, False)]
+        assert adapter._status[0].recovering_task is not None
+        assert adapter._status[1].recovering_task is None
     finally:
         await adapter.aclose()
 
@@ -359,5 +366,33 @@ async def test_text_after_a_matched_repeat_and_a_tool_call_is_matched() -> None:
     try:
         assert await _reply(adapter, tools=tools) == "Sure, sent."
         assert tools == ["send_sms"]
+    finally:
+        await adapter.aclose()
+
+
+async def test_held_space_before_a_tool_call_is_said_once() -> None:
+    first = _ScriptedLLM(["Sure"], fail=_overloaded())
+    second = _ScriptedLLM(["Sure, one sec. ", _SMS, "Sending now."])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    try:
+        assert await _reply(adapter) == "Sure, one sec. Sending now."
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.parametrize(
+    ("chunks", "reply"),
+    [
+        (["Hi.", " How"], "Hi. How"),
+        (["Hi. ", "How"], "Hi. How"),
+        (["Hello", "\n\n", "World"], "Hello\n\nWorld"),
+        # Trailing spaces at the end of the reply are not said.
+        (["Bye. "], "Bye."),
+    ],
+)
+async def test_one_model_keeps_its_spaces(chunks: list[_Item], reply: str) -> None:
+    adapter = _fallback_chain([_ScriptedLLM(chunks)], retry_on_chunk_sent=True)
+    try:
+        assert await _reply(adapter) == reply
     finally:
         await adapter.aclose()

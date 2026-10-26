@@ -390,6 +390,7 @@ class _CallLLMStream(FallbackLLMStream):
         # background request succeeds (fallback_adapter.py, _run).
         adapter = self._fallback_adapter
         status = adapter._status[adapter._llm_instances.index(llm)]
+        status.selection_id = 0
         if status.available:
             status.available = False
             adapter.emit(
@@ -397,7 +398,12 @@ class _CallLLMStream(FallbackLLMStream):
                 agents_llm.AvailabilityChangedEvent(llm=llm, available=False),
             )
         self._try_recovery(llm)
-        logger.warning("%s failed after a tool call was sent; no hand-over", llm.label)
+        # LiveKit already logged "switching to next LLM" in _try_generate.
+        logger.warning(
+            "%s failed after a tool call was sent; no hand-over, "
+            "no switch to the next LLM",
+            llm.label,
+        )
         # Raised outside the except block, so its cause and context stay.
         raise error
 
@@ -434,7 +440,8 @@ class _CallLLMStream(FallbackLLMStream):
                             rest = ""
                         elif end == -1:
                             # Not a repeat: keep it, apart from the words said.
-                            gap = pending[:1].isspace()
+                            # A space held from before a tool call counts.
+                            gap = pending[:1].isspace() or bool(self._space)
                             rest = pending if gap else " " + pending
                             pending = None
                         else:
