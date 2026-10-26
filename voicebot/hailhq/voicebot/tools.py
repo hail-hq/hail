@@ -69,7 +69,7 @@ class SpeechTracker:
 
 
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
-    async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str:
+    async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
             if spec.uninterruptible:
                 # The caller talking while a dial rings must not cancel this
@@ -92,6 +92,7 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
                     return STILL_TALKING
+            # None (a connected handover) means no reply turn.
             return await spec.execute(tctx, raw_arguments)
         except Exception:
             logger.exception(

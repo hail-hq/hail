@@ -109,9 +109,9 @@ New `ToolContext.bridge` handle, built in `agent.py` as `make_agent_bridge`:
 4. Answered:
    - write `call_events` kind `handover`, payload `{contact_id, name, outcome: "answered", ring_ms}`, right away, before the intro plays (`BridgeRoute.on_answered`; the post runs in the background so the intro is never delayed; up to 3 attempts, 0.5 s and 1 s apart; never raises into the call; job shutdown waits up to 5 s for it, then cancels it). The tool does not post "answered" again after the bridge returns;
    - fan out `call.transferred`;
-   - agent says one line to both: "Hi {name}, I have a caller on the line. They say it is about {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
+   - agent says one line to both: "Hi {name}, I have a caller on the line. Reason given: {reason}. Connecting you now." (`{name}` without the " (n)" suffix; without a reason: "Hi {name}, I have a caller on the line. Connecting you now.");
    - disable the session's audio input and output; the agent stays in the room;
-   - the tool returns "Connected. They are talking now. Say nothing and do not end the call." and `end_call` does nothing while connected.
+   - the tool returns nothing (None), so the agent gets no reply turn, and `end_call` does nothing while connected.
 5. `SipCallError` or timeout:
    - write `handover` event with `outcome: "no_answer" | "busy" | "failed"` and the SIP status;
    - return "They could not pick up." The agent offers to take a message.

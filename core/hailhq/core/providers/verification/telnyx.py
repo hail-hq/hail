@@ -19,6 +19,8 @@ import re
 import httpx
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -35,6 +37,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import (
     address_complete,
+    display_name,
     pick_option,
     validate_input,
 )
@@ -44,6 +47,19 @@ logger = logging.getLogger(__name__)
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 _UPLOAD_TIMEOUT_SECONDS = 60
 _SUBJECT_TYPES: tuple[SubjectType, ...] = ("person", "business")
+# Telnyx returns one list for both kinds of end user and marks a rule that
+# applies to only one kind with a tag in its name. "Sole Proprietorships"
+# tags (Italy) can mean either kind, so those rules stay for both.
+_ONLY_FOR: dict[SubjectType, tuple[str, ...]] = {
+    "business": ("(business use only)", "(legal entity only)"),
+    "person": ("(personal use only)", "(personal only)"),
+}
+
+
+def _applies_to(rule: dict, subject_type: SubjectType) -> bool:
+    name = (rule.get("name") or "").lower()
+    other = "person" if subject_type == "business" else "business"
+    return not any(tag in name for tag in _ONLY_FOR[other])
 
 
 def _customer_reference(organization_id: str) -> str:
@@ -157,24 +173,35 @@ class TelnyxVerificationProvider(VerificationProvider):
 
     # -- requirements ------------------------------------------------------
 
+    async def _rules(self, country_code: str, number_type: str) -> list[dict]:
+        payload = await self._api.request(
+            "GET",
+            "/regulatory_requirements",
+            params={
+                "filter[country_code]": country_code,
+                "filter[phone_number_type]": number_type,
+                "filter[action]": "ordering",
+            },
+        )
+        return _rules_for(payload, country_code, number_type)
+
+    async def _not_for(
+        self, country_code: str, number_type: str, subject_type: SubjectType
+    ) -> set[str]:
+        """Ids of the rules Telnyx tags for the other kind of end user."""
+        rules = await self._rules(country_code, number_type)
+        return {r["id"] for r in rules if not _applies_to(r, subject_type)}
+
     async def requirements(
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> Requirements:
         try:
-            payload = await self._api.request(
-                "GET",
-                "/regulatory_requirements",
-                params={
-                    "filter[country_code]": country_code,
-                    "filter[phone_number_type]": number_type,
-                    "filter[action]": "ordering",
-                },
-            )
+            all_rules = await self._rules(country_code, number_type)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
-        rules = _rules_for(payload, country_code, number_type)
-        # Telnyx does not distinguish a person from a business here; the same
-        # form applies to both, so no subject type is ever refused.
+        # Both subjects are accepted; the form leaves out the rules tagged
+        # for the other kind.
+        rules = [r for r in all_rules if _applies_to(r, subject_type)]
         base = {
             "provider": self.name,
             "country_code": country_code,
@@ -182,7 +209,8 @@ class TelnyxVerificationProvider(VerificationProvider):
             "subject_type": subject_type,
             "subject_types": _SUBJECT_TYPES,
         }
-        if not rules:
+        # Any rule means a group is needed, even if none is left to fill.
+        if not all_rules:
             return Requirements(required=False, **base)
         return Requirements(
             required=True,
@@ -237,10 +265,17 @@ class TelnyxVerificationProvider(VerificationProvider):
             # type, including the address ones the form only reported as
             # address_required. The create response is not relied on for that.
             group = await self._group(refs)
+            skipped = await self._not_for(
+                requirements.country_code,
+                requirements.number_type,
+                requirements.subject_type,
+            )
             values: list[dict] = []
             address_id: str | None = None
             for req in group.get("regulatory_requirements") or []:
                 req_id, kind = req["requirement_id"], req.get("field_type")
+                if req_id in skipped:
+                    continue
                 if kind == "textual":
                     value = (fields.get(req_id) or "").strip()
                     if value:
@@ -287,7 +322,13 @@ class TelnyxVerificationProvider(VerificationProvider):
             if 400 <= exc.response.status_code < 500:
                 return DraftResult(
                     refs={},
-                    problems=[Problem(field="", message=_rejection(exc.response))],
+                    problems=[
+                        Problem(
+                            field="",
+                            message=NOT_ACCEPTED,
+                            raw=_rejection(exc.response),
+                        )
+                    ],
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
@@ -298,7 +339,7 @@ class TelnyxVerificationProvider(VerificationProvider):
             await self.discard(refs)
             raise
         try:
-            problems = await self._problems(refs)
+            problems = await self._problems(refs, requirements.subject_type)
         except httpx.HTTPError as exc:
             await self.discard(refs)
             raise VerificationProviderError("Telnyx request failed") from exc
@@ -336,26 +377,29 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
         )["data"]
 
-    async def _problems(self, refs: dict) -> list[Problem]:
+    async def _problems(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         """Telnyx has no evaluation call. A draft is complete when every
-        requirement holds a value and no document was denied."""
+        requirement for this subject holds a value and none was declined."""
         group = await self._group(refs)
+        skipped = await self._not_for(
+            group["country_code"], group["phone_number_type"], subject_type
+        )
         problems: list[Problem] = []
         for req in group.get("regulatory_requirements") or []:
             req_id = req["requirement_id"]
+            if req_id in skipped:
+                continue
             if not req.get("field_value"):
                 problems.append(
                     Problem(field=req_id, message="This requirement is missing.")
                 )
             elif req.get("status") == "declined":
-                problems.append(
-                    Problem(field=req_id, message="The carrier declined this value.")
-                )
+                problems.append(Problem(field=req_id, message=VALUE_NOT_ACCEPTED))
         return problems
 
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         try:
-            return await self._problems(refs)
+            return await self._problems(refs, subject_type)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 
@@ -394,8 +438,55 @@ class TelnyxVerificationProvider(VerificationProvider):
             return ProviderStatus(state="pending")
         return ProviderStatus(state="draft")
 
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The address's ``customer_name`` (Telnyx files it as the business
+        name, or the first and last name). Telnyx's text fields are keyed by
+        requirement id and some are free text ("Name, Business Name, Phone
+        Number"), so without an address only a business's field whose label
+        starts with "Company name" or "Business name" is used."""
+        name = display_name(address.customer_name if address else None)
+        if name or requirements.subject_type != "business":
+            return name
+        return next(
+            (
+                n
+                for f in requirements.fields
+                if f.label.lower().startswith(("company name", "business name"))
+                and (n := display_name(fields.get(f.name)))
+            ),
+            None,
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The name on the address the group holds."""
+        if not refs.get("address_id"):
+            return None
+        try:
+            addr = (
+                await self._api.request(
+                    "GET", f"/addresses/{path_id(refs['address_id'])}"
+                )
+            )["data"]
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Telnyx request failed") from exc
+        if subject_type == "business":
+            return display_name(addr.get("business_name")) or display_name(
+                addr.get("first_name"), addr.get("last_name")
+            )
+        return display_name(addr.get("first_name"), addr.get("last_name")) or (
+            display_name(addr.get("business_name"))
+        )
+
     async def purchase_handle(self, refs: dict) -> dict:
-        return {"requirement_group_id": refs["group_id"]}
+        return {"verification_id": refs["group_id"], "address_id": None}
 
     # -- discard -----------------------------------------------------------
 
@@ -413,8 +504,9 @@ class TelnyxVerificationProvider(VerificationProvider):
                 logger.warning("telnyx verification cleanup step failed", exc_info=True)
 
 
-def _rejection(response: httpx.Response) -> str:
-    """Telnyx's own words for a 4xx, without the payload."""
+def _rejection(response: httpx.Response) -> str | None:
+    """Telnyx's own words for a 4xx, without the payload. Never logged or
+    shown to the customer (see ``Problem.raw``)."""
     try:
         errors = response.json().get("errors") or []
     except ValueError:
@@ -423,4 +515,4 @@ def _rejection(response: httpx.Response) -> str:
         (e.get("detail") or e.get("title") for e in errors if isinstance(e, dict)),
         None,
     )
-    return detail or "The carrier did not accept the details."
+    return detail

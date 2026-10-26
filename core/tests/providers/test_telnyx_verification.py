@@ -20,6 +20,7 @@ from hailhq.core.providers.verification import (
     VerificationProviderError,
     get_verification_provider,
 )
+from hailhq.core.providers.verification.base import NOT_ACCEPTED, VALUE_NOT_ACCEPTED
 from hailhq.core.providers.verification.telnyx import TelnyxVerificationProvider
 
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -125,6 +126,187 @@ async def test_requirements_sweden_local_email_field() -> None:
     assert email.kind == "email"
     assert len(req.fields) == 4 and len(req.documents) == 3
     assert req.address_required is True
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_uk_website_is_only_collected_for_businesses(subject) -> None:
+    # Captured from the carrier on 2026-10-26: the website explicitly says
+    # "Business Use Only"; contact, identity and address apply to both kinds.
+    payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    req = await provider(fake).requirements("GB", "mobile", subject)
+    fields = {f.name: f for f in req.fields}
+    website = "1ce58926-d0d9-41c7-be1b-23b7bbbc572d"
+    if subject == "business":
+        assert fields[website].required
+    else:
+        assert website not in fields
+    assert fields["2708e569-696a-4fc7-9305-5fdb3eb9c7dd"].required
+    assert req.address_required
+    assert {s.name for s in req.documents} == {
+        "1cfde0b1-f85e-4444-9c1a-413cfa3f079f",
+        "b0197fa1-c2fd-4500-9875-2c658b2396eb",
+    }
+
+
+async def test_uk_person_draft_and_later_checks_need_no_company_website() -> None:
+    payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
+    rules = payload["data"][0]["regulatory_requirements"]
+    stored: dict[str, str] = {}
+    website = "1ce58926-d0d9-41c7-be1b-23b7bbbc572d"
+
+    def answers(request):
+        path = request.url.path
+        if path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=payload)
+        if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if request.method == "POST" and path.endswith("/addresses"):
+            return httpx.Response(200, json={"data": {"id": "addr-person"}})
+        if request.method == "POST" and path.endswith("/documents"):
+            return httpx.Response(200, json={"data": {"id": "doc-person"}})
+        if request.method == "PATCH":
+            for item in json.loads(request.content)["regulatory_requirements"]:
+                stored[item["requirement_id"]] = item["field_value"]
+            return httpx.Response(200, json={"data": {}})
+        if request.method == "GET" and GROUP in path:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "country_code": "GB",
+                        "phone_number_type": "mobile",
+                        "regulatory_requirements": [
+                            {
+                                "requirement_id": r["id"],
+                                "field_type": r["field_type"],
+                                "field_value": stored.get(r["id"], ""),
+                                "status": "unapproved",
+                            }
+                            for r in rules
+                        ],
+                    }
+                },
+            )
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected {request.method} {path}")
+
+    fake = Telnyx(answers)
+    p = provider(fake)
+    req = await p.requirements("GB", "mobile", "person")
+    _, address, _ = _inputs("mobile")
+    fields = {
+        "2708e569-696a-4fc7-9305-5fdb3eb9c7dd": "Contact: Ada Lovelace | Business: N/A | Phone: +447700900123",
+        "c34075fd-dde8-4e5d-b2d1-73155062e77a": "Personal calls. No sub-allocation.",
+    }
+    docs = {
+        r["id"]: DocumentInput(
+            option="file",
+            file=UploadedFile(
+                filename="proof.pdf",
+                content_type="application/pdf",
+                data=b"%PDF-1.4 test",
+            ),
+        )
+        for r in rules
+        if r["field_type"] == "document"
+    }
+    result = await p.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=docs,
+    )
+    assert result.problems == []
+    assert result.refs["group_id"] == GROUP
+    assert website not in stored
+    # The operator's later check gets the persisted refs and the row's subject.
+    refs = json.loads(json.dumps(result.refs))
+    assert await provider(fake).check(refs, "person") == []
+    # The exemption must not hide other missing fields.
+    stored.pop("2708e569-696a-4fc7-9305-5fdb3eb9c7dd")
+    assert [p.field for p in await provider(fake).check(refs, "person")] == [
+        "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
+    ]
+    # A business must still give the website.
+    assert website in {p.field for p in await provider(fake).check(refs, "business")}
+
+
+def _tagged_rules() -> dict:
+    """Brazil-style rules: one shared, one per kind of end user."""
+    rules = [
+        ("shared", "Contact Information (Name, Business Name, Phone Number)"),
+        ("biz", "Brazilian CNPJ Tax Number (Business Use Only)"),
+        (
+            "ita",
+            "Italian VAT Number (For Legal Entities and Sole Proprietorships Only)",
+        ),
+        ("per", "Brazilian CPF Tax Number (Personal Use Only)"),
+    ]
+    return {
+        "data": [
+            {
+                "country_code": "BR",
+                "phone_number_type": "local",
+                "action": "ordering",
+                "regulatory_requirements": [
+                    {"id": rid, "name": name, "field_type": "textual"}
+                    for rid, name in rules
+                ],
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("subject", "expected"),
+    [("person", ["shared", "ita", "per"]), ("business", ["shared", "biz", "ita"])],
+)
+async def test_rules_tagged_for_the_other_subject_are_left_out(
+    subject, expected
+) -> None:
+    fake = Telnyx(lambda request: httpx.Response(200, json=_tagged_rules()))
+    req = await provider(fake).requirements("BR", "local", subject)
+    assert [f.name for f in req.fields] == expected
+
+
+async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
+    payload = _tagged_rules()
+    rules = payload["data"][0]["regulatory_requirements"]
+    payload["data"][0]["regulatory_requirements"] = [
+        r for r in rules if r["id"] == "biz"
+    ]
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    req = await provider(fake).requirements("BR", "local", "person")
+    # The carrier still wants a group, so the number is not open to buy.
+    assert req.required is True and req.fields == ()
+
+
+async def test_check_skips_rules_tagged_for_the_other_subject() -> None:
+    payload = _tagged_rules()
+    group = {
+        "id": GROUP,
+        "country_code": "BR",
+        "phone_number_type": "local",
+        "regulatory_requirements": [
+            {"requirement_id": r["id"], "field_type": "textual", "field_value": ""}
+            for r in payload["data"][0]["regulatory_requirements"]
+        ],
+    }
+
+    def answers(request):
+        if request.url.path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=payload)
+        return httpx.Response(200, json={"data": group})
+
+    p = provider(Telnyx(answers))
+    person = {pr.field for pr in await p.check({"group_id": GROUP}, "person")}
+    business = {pr.field for pr in await p.check({"group_id": GROUP}, "business")}
+    assert person == {"shared", "ita", "per"}
+    assert business == {"shared", "biz", "ita"}
 
 
 async def test_requirements_none_needed_when_telnyx_answers_empty() -> None:
@@ -331,7 +513,9 @@ async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft(
         documents=docs,
     )
     assert result.refs == {}
-    assert [pr.message for pr in result.problems] == ["File too large"]
+    # Hail's wording for the customer; the carrier's text is kept for the log.
+    assert [pr.message for pr in result.problems] == [NOT_ACCEPTED]
+    assert [pr.raw for pr in result.problems] == ["File too large"]
     # Telnyx lists the first document before the address, so the failed upload
     # happens before any address exists: only the group is deleted.
     deleted = [c.url.path for c in fake.calls if c.method == "DELETE"]
@@ -410,12 +594,17 @@ async def test_check_reports_missing_and_declined_values() -> None:
     for req in group["regulatory_requirements"]:
         if req["requirement_id"] == textual[0]:
             req["status"] = "declined"
-    fake = Telnyx(lambda request: httpx.Response(200, json={"data": group}))
-    problems = await provider(fake).check({"group_id": GROUP})
+
+    def answers(request):
+        if request.url.path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=_rules("mobile"))
+        return httpx.Response(200, json={"data": group})
+
+    problems = await provider(Telnyx(answers)).check({"group_id": GROUP}, "person")
     assert {p.field for p in problems} == {
         r["requirement_id"] for r in group["regulatory_requirements"]
     }
-    assert any("declined" in p.message for p in problems)
+    assert any(p.message == VALUE_NOT_ACCEPTED for p in problems)
 
 
 async def test_submit_posts_for_approval() -> None:
@@ -450,7 +639,8 @@ async def test_status_mapping(telnyx_status, state) -> None:
 async def test_purchase_handle_is_the_group_id() -> None:
     fake = Telnyx(lambda request: httpx.Response(200, json={"data": {}}))
     assert await provider(fake).purchase_handle({"group_id": GROUP}) == {
-        "requirement_group_id": GROUP
+        "verification_id": GROUP,
+        "address_id": None,
     }
 
 

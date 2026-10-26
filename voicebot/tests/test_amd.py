@@ -18,14 +18,22 @@ import pytest
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.voicebot import amd as amd_mod
+from hailhq.voicebot import ivr as ivr_mod
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     NO_SPEECH_THRESHOLD_SECONDS,
     amd_end_reason,
     run_amd,
 )
+from hailhq.voicebot.classify import classify_speech
 from livekit import rtc
-from livekit.agents.llm import ChatChunk, ChoiceDelta, FunctionToolCall, LLMStream
+from livekit.agents.llm import (
+    ChatChunk,
+    ChatContext,
+    ChoiceDelta,
+    FunctionToolCall,
+    LLMStream,
+)
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 from sqlalchemy import select
@@ -298,6 +306,28 @@ async def test_continuous_speech_remains_bounded_with_production_options(monkeyp
         await classifier.close()
 
 
+def test_prompt_calls_a_short_live_greeting_a_person() -> None:
+    flat = " ".join(amd_mod.GREETING_CLASSIFICATION_PROMPT.split())
+    for greeting in ("'Hi'", "'Hello?'", "'Yes?'", "'Hej?'", "'Allô ?'"):
+        assert greeting in flat
+    assert "A short live greeting that ends and waits for a reply" in flat
+    assert "do not guess human just because the greeting is short" not in flat
+    # A greeting that continues still waits for the voicemail cues.
+    assert "wait for the voicemail cues" in flat
+    for kept in (
+        "an invitation to leave a message",
+        "a tone",
+        "you've reached",
+        "not available",
+        "machine-vm:",
+        "machine-ivr:",
+        "machine-unavailable:",
+        "laissez un message après le bip",
+        "clearly mid-sentence, use postpone_termination",
+    ):
+        assert kept in flat
+
+
 async def test_dial_gate_is_released_when_amd_is_skipped() -> None:
     """A session without a plain LLM skips AMD but must still let the API dial."""
     released = []
@@ -381,6 +411,165 @@ def test_amd_end_reason_maps_to_call_end_reason_values() -> None:
     )
 
 
+async def test_unavailable_business_welcome_is_rechecked_before_hangup(monkeypatch):
+    original = _prediction("machine-unavailable")
+    original.transcript = "Welcome to Delta Vacations. We're so glad you called."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    session = _session_with_layers()
+    session.llm = _GreetingLLM("machine-ivr")
+    session._start_ivr_detection = AsyncMock()
+    result = await run_amd(session, UUID(int=1))
+    assert result.category == AMDCategory.MACHINE_IVR
+    assert result.reason == "unavailable_recheck"
+    session._start_ivr_detection.assert_awaited_once()
+
+
+async def test_explicit_unavailable_verdict_is_preserved_after_recheck(monkeypatch):
+    original = _prediction("machine-unavailable")
+    original.transcript = "This mailbox is full and cannot accept messages."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    session = _session_with_layers()
+    session.llm = _GreetingLLM("machine-unavailable")
+    result = await run_amd(session, UUID(int=1))
+    assert result.category == AMDCategory.MACHINE_UNAVAILABLE
+
+
+def _break_checker(monkeypatch, session, failure: str) -> None:
+    """Make the unavailable recheck fail without giving a verdict."""
+    if failure == "provider-error":
+        session.llm.chat = Mock(side_effect=RuntimeError("classifier failed"))
+    elif failure == "timeout":
+
+        # The check hit its five-second total.
+        monkeypatch.setattr(
+            ivr_mod, "classify_speech", AsyncMock(side_effect=TimeoutError)
+        )
+
+
+async def test_answered_uncertain_unavailable_recheck_hangs_up(monkeypatch):
+    original = _prediction("machine-unavailable")
+    original.transcript = "The number you have dialed is not in service."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    session = _session_with_layers()
+    session.llm = _GreetingLLM("uncertain")
+    session._start_ivr_detection = AsyncMock()
+    result = await run_amd(session, UUID(int=1))
+    assert result.category == AMDCategory.MACHINE_UNAVAILABLE
+    session._start_ivr_detection.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["provider-error", "timeout"])
+async def test_failed_unavailable_recheck_keeps_listening_as_menu(monkeypatch, failure):
+    original = _prediction("machine-unavailable")
+    original.transcript = "The number you have dialed is not in service."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+    session = _session_with_layers()
+    session.llm = _GreetingLLM("machine-unavailable")
+    _break_checker(monkeypatch, session, failure)
+    session._start_ivr_detection = AsyncMock()
+    result = await run_amd(session, UUID(int=1))
+    assert result.category == AMDCategory.MACHINE_IVR
+    assert result.reason == "unavailable_recheck"
+    session._start_ivr_detection.assert_awaited_once()
+
+
+async def test_answered_uncertain_unavailable_recheck_ends_call_without_greeting(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The checker answered unsure: keep the unavailable verdict, hang up now."""
+    original = _prediction("machine-unavailable")
+    original.transcript = "The number you have dialed is not in service."
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+
+    async def detect(session, call_id, **kwargs):
+        session.stt = object()
+        session.llm = _GreetingLLM("uncertain")
+        session._start_ivr_detection = AsyncMock()
+        return await run_amd(session, call_id)
+
+    call_id, ctx, session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=None, run_amd_override=detect
+    )
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == [CallEndReason.MACHINE_UNAVAILABLE.value]
+    assert session.say_calls == []
+    assert session.replies == []
+    events = await _amd_events(async_session, call_id)
+    assert events[0].payload["category"] == "machine-unavailable"
+
+
+@pytest.mark.parametrize("verification", ["machine-ivr", "provider-error", "timeout"])
+async def test_atlantis_welcome_misclassified_unavailable_keeps_late_menu_alive(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, verification: str
+) -> None:
+    """Call 435dd50f: the menu arrived one second after the unavailable verdict.
+
+    Exercise the real AMD verification and entrypoint outcome together. A
+    machine-ivr recheck, or a recheck that fails without a verdict, must keep
+    the call in menu mode. A missing recheck must terminate this call and fail
+    the test.
+    """
+    welcome = (
+        "Thank you for calling Atlantis Paradise Island, Bahamas. Your call may "
+        "be recorded for quality assurance and training purposes."
+    )
+    menu = (
+        "Please listen carefully as our menu options have recently changed. "
+        "For existing reservations made directly with Atlantis, please press one. "
+        "To make a new reservation, please press two."
+    )
+    original = _prediction("machine-unavailable")
+    original.transcript = welcome
+    _RecordingAMD.result = original
+    monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
+
+    async def detect(session, call_id, **kwargs):
+        session.stt = object()
+        session.llm = _GreetingLLM("machine-unavailable")
+        if verification == "machine-ivr":
+            session.llm = _GreetingLLM(verification)
+        else:
+            _break_checker(monkeypatch, session, verification)
+        session._start_ivr_detection = AsyncMock()
+        return await run_amd(session, call_id)
+
+    call_id, ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=None,
+        run_amd_override=detect,
+        shutdown=False,
+    )
+    # The later menu turns use a working checker.
+    monkeypatch.setattr(ivr_mod, "classify_speech", classify_speech)
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    assert session.say_calls == []
+    assert welcome in session.replies[0]
+    events = await _amd_events(async_session, call_id)
+    assert events[0].payload["category"] == "machine-ivr"
+    assert events[0].payload["reason"] == "unavailable_recheck"
+
+    # The rest of the recording arrives after AMD has returned. It must stay
+    # in menu mode, without speaking a disclosure or starting a hangup.
+    agent = session.start_options["agent"]
+    agent.phone_menu.llm = _GreetingLLM("machine-ivr")
+    session.emit_vad_speaking()
+    session.emit_user_turn(menu)
+    await session.drain_turns()
+    assert agent.phone_menu.active
+    assert agent.phone_menu.can_navigate
+    assert session.say_calls == []
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    await agent.phone_menu.aclose()
+
+
 # --------------------------------------------------------------------------- #
 # entrypoint wiring
 # --------------------------------------------------------------------------- #
@@ -394,6 +583,8 @@ class _FakeAmdSession:
         self.replies: list[str] = []
         self.started = False
         self.handlers: dict[str, list] = {}
+        self.llm = _GreetingLLM("human")
+        self.turn_tasks: set[asyncio.Task] = set()
 
     def on(self, event: str):
         def _register(fn):
@@ -406,6 +597,16 @@ class _FakeAmdSession:
         item = SimpleNamespace(role="user", text_content=text)
         for fn in self.handlers.get("conversation_item_added", []):
             fn(SimpleNamespace(item=item))
+        agent = self.start_options.get("agent")
+        if agent is not None and agent.phone_menu is not None:
+            task = asyncio.create_task(
+                agent.on_user_turn_completed(ChatContext(), item)
+            )
+            self.turn_tasks.add(task)
+            task.add_done_callback(self.turn_tasks.discard)
+
+    async def drain_turns(self):
+        await asyncio.gather(*list(self.turn_tasks))
 
     def emit_keypress(self, name: str = "send_dtmf") -> None:
         ev = SimpleNamespace(function_calls=[SimpleNamespace(name=name)])
@@ -425,6 +626,9 @@ class _FakeAmdSession:
     async def start(self, **_kwargs: object) -> None:
         self.started = True
         self.start_options = _kwargs
+
+    def clear_user_turn(self) -> None:
+        pass
 
     def say(self, text: str, *, allow_interruptions: bool = True) -> Any:
         self.say_calls.append(text)
@@ -503,14 +707,26 @@ async def _drive_entrypoint(
     run_amd_override: Any = None,
     disconnect_before_amd: bool = False,
     answered: bool = False,
+    classifier: Any = "fake",
+    real_amd_models: bool = False,
+    shutdown: bool = True,
     org_cfgs: dict | None = None,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
-    """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback."""
+    """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback.
+
+    ``shutdown=False`` keeps the call up, for tests that drive later turns:
+    shutdown closes the phone menu."""
     from hailhq.voicebot import agent as agent_mod
 
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
     session = _FakeAmdSession()
+    # AMD's classifier also backs the menu check; it hears a person.
+    models = amd_mod.AMDModels(
+        _GreetingLLM("human") if classifier == "fake" else classifier, object()
+    )
+    models.aclose = AsyncMock()
+    session.amd_models = models
 
     async def _no_org_cfgs(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
         return org_cfgs or {}
@@ -520,7 +736,8 @@ async def _drive_entrypoint(
 
     monkeypatch.setattr(agent_mod, "resolve_org_configs", _no_org_cfgs)
     monkeypatch.setattr(agent_mod, "build_session", lambda *a, **k: session)
-    monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: None)
+    if not real_amd_models:
+        monkeypatch.setattr(agent_mod, "build_amd_models", lambda *a, **k: models)
     monkeypatch.setattr(agent_mod, "run_amd", run_amd_override or _fake_run_amd)
     monkeypatch.setattr(
         agent_mod.settings, "hail_voice_max_duration_seconds", 0, raising=False
@@ -549,7 +766,7 @@ async def _drive_entrypoint(
 
     # The job releases after entrypoint returns; run the callback the same
     # way the SDK would so on_call_end lands.
-    for cb in ctx.shutdown_callbacks:
+    for cb in ctx.shutdown_callbacks if shutdown else []:
         await cb()
     await asyncio.sleep(0)
     return call_id, ctx, session
@@ -672,6 +889,28 @@ async def test_disclosure_follows_the_workspace_voice_language(
     ]
 
 
+async def test_failed_greeting_is_not_saved_as_no_answer(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A say()/TTS failure after a person answered is not an unanswered call."""
+
+    def broken_say(self: Any, text: str, **kwargs: Any) -> Any:
+        raise RuntimeError("tts failed")
+
+    monkeypatch.setattr(_FakeAmdSession, "say", broken_say)
+    call_id, ctx, _session = await _drive_entrypoint(
+        async_session, monkeypatch, amd_result=_prediction("human")
+    )
+
+    assert ctx.delete_room_calls == 0
+    assert ctx.shutdown_calls == []
+    refreshed = (
+        await async_session.execute(select(Call).where(Call.id == call_id))
+    ).scalar_one()
+    await async_session.refresh(refreshed)
+    assert refreshed.status != "no_answer"
+
+
 # --------------------------------------------------------------------------- #
 # machine-ivr: the production failure this branch fixes
 # --------------------------------------------------------------------------- #
@@ -737,14 +976,10 @@ async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
     assert "do not speak" in instructions.lower()
 
 
-async def test_greeting_fires_on_vad_with_no_transcript(
+async def test_vad_without_transcript_cannot_confirm_a_person(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression: call 9647b6c4. DTMF routed us to a clerk who answered in
-    Catalan against an en-US Deepgram, so no transcript ever landed and the
-    agent sat mute while a person said "bona tarda" twice. VAD does not care
-    what language it is."""
-    from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
+    """VAD alone does not greet at once; PhoneMenu waits a bounded time (test_ivr.py)."""
 
     _call_id, _ctx, session = await _drive_entrypoint(
         async_session, monkeypatch, amd_result=_prediction("machine-ivr")
@@ -755,7 +990,7 @@ async def test_greeting_fires_on_vad_with_no_transcript(
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
+    assert session.say_calls == []
 
 
 async def test_greeting_stays_held_until_keys_are_pressed(
@@ -780,7 +1015,10 @@ async def test_greeting_fires_once_across_both_triggers(
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        shutdown=False,
     )
 
     session.emit_keypress()
@@ -788,7 +1026,7 @@ async def test_greeting_fires_once_across_both_triggers(
         session.emit_vad_speaking()
         session.emit_user_turn("Hola?")
         await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await session.drain_turns()
 
     assert len(session.say_calls) == 1
     assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
@@ -801,14 +1039,16 @@ async def test_ivr_greeting_is_deferred_to_the_first_person(
     from hailhq.voicebot.agent import AI_DISCLOSURE_LINE
 
     _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        shutdown=False,
     )
     assert session.say_calls == []
 
     session.emit_keypress()
     session.emit_user_turn("Hello, reception.")
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await session.drain_turns()
 
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
 
@@ -824,6 +1064,74 @@ async def test_detection_failure_proceeds_like_a_human_answer(
 
     assert session.say_calls[0].startswith(AI_DISCLOSURE_LINE)
     assert ctx.delete_room_calls == 0
+
+
+def _count_amd_models(monkeypatch, models) -> list:
+    """Hand ``models`` to the entrypoint and count the builds."""
+    from hailhq.voicebot import agent as agent_mod
+
+    built: list = []
+    monkeypatch.setattr(
+        agent_mod, "build_amd_models", lambda *a, **k: built.append(1) or models
+    )
+    return built
+
+
+def _record_after_entrypoint(monkeypatch, seen: dict, models) -> None:
+    """Note whether the classifier was closed before shutdown callbacks run."""
+    import sys
+
+    from hailhq.voicebot.agent import entrypoint
+
+    async def run_then_check(ctx):
+        await entrypoint(ctx)
+        seen["closed_before_shutdown"] = models.aclose.await_count
+
+    monkeypatch.setattr(sys.modules[__name__], "entrypoint_under_test", run_then_check)
+
+
+async def test_menu_check_reuses_amd_classifier_until_call_end(
+    async_session, monkeypatch
+):
+    """One classifier per call: AMD's chain backs the menu check and closes
+    at call end, after the menu."""
+    models = amd_mod.AMDModels(_GreetingLLM("machine-ivr"), object())
+    models.aclose = AsyncMock()
+    built = _count_amd_models(monkeypatch, models)
+    seen: dict = {}
+    _record_after_entrypoint(monkeypatch, seen, models)
+    _, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        real_amd_models=True,
+    )
+    assert built == [1]
+    assert session.start_options["agent"].phone_menu.llm is models.llm
+    assert seen == {"closed_before_shutdown": 0}
+    models.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "category", ["human", "uncertain", "machine-vm", "machine-unavailable", None]
+)
+async def test_classifier_closes_once_at_call_end_on_every_path(
+    async_session, monkeypatch, category
+):
+    """The classifier closes in one place: shutdown, once per call."""
+    models = amd_mod.AMDModels(_GreetingLLM("human"), object())
+    models.aclose = AsyncMock()
+    _count_amd_models(monkeypatch, models)
+    seen: dict = {}
+    _record_after_entrypoint(monkeypatch, seen, models)
+    await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction(category) if category else None,
+        real_amd_models=True,
+    )
+    assert seen == {"closed_before_shutdown": 0}
+    models.aclose.assert_awaited_once()
 
 
 @pytest.mark.parametrize(

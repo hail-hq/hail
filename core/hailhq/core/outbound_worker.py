@@ -36,7 +36,11 @@ from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import operation, telemetry_enabled
-from hailhq.core.telemetry_identity import identity_scope, resolve_identity
+from hailhq.core.telemetry_identity import (
+    identity_scope,
+    resolve_identity,
+    tag_outbound_email,
+)
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,6 +205,7 @@ class OutboundForwardWorker:
             email_id=str(row.id),
             organization_id=str(row.organization_id),
         ) as span:
+            tag_outbound_email(row)
             outcome = await self._send_one_impl(session, row)
             if span is not None:
                 span.set_attribute("outcome", outcome)

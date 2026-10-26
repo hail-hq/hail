@@ -65,6 +65,7 @@ from hailhq.core.secret_cipher import SecretCipher, SecretKeyMissing
 from hailhq.core.telemetry import (
     configure_telemetry,
     flush_telemetry,
+    instrument,
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
@@ -334,7 +335,9 @@ app = FastAPI(
 )
 if _telemetry:
     app.add_middleware(IdentityMiddleware)
-    logfire.instrument_fastapi(
+    instrument(
+        "FastAPI",
+        logfire.instrument_fastapi,
         app,
         excluded_urls=r"/healthz$",
         extra_spans=False,

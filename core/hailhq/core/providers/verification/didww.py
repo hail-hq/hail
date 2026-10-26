@@ -16,6 +16,7 @@ from didww.encrypt import Encrypt
 from didww.exceptions import DidwwApiError
 from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
     Address,
     DocumentInput,
     DocumentOption,
@@ -30,6 +31,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.voice.base import CarrierNotConfigured
 from hailhq.core.providers.voice.didww import (
     _by_id,
@@ -67,6 +69,14 @@ _KINDS = {"phone_number": "phone"}
 _IDENTITY_ATTRS = frozenset(_LABELS) - {"service_description"}
 
 
+def _name_from(values: dict, subject_type: SubjectType) -> str | None:
+    """``company_name`` for a business, ``first_name`` and ``last_name``
+    for a person."""
+    if subject_type == "business":
+        return display_name(values.get("company_name"))
+    return display_name(values.get("first_name"), values.get("last_name"))
+
+
 def draft_address_ref(org: str, country: str, kind: str) -> str:
     return f"hail-draft:{org}:{country}:{kind}"
 
@@ -98,13 +108,13 @@ def _slots(
 
 
 def _problems(exc: DidwwApiError) -> list[Problem]:
-    return [
-        Problem(
-            field="",
-            message=e.get("detail") or e.get("title") or "Not accepted by the carrier.",
-        )
+    """One neutral problem; the carrier's own words go in ``raw``."""
+    raw = "; ".join(
+        str(e.get("detail") or e.get("title"))
         for e in exc.errors
-    ] or [Problem(field="", message="Not accepted by the carrier.")]
+        if e.get("detail") or e.get("title")
+    )
+    return [Problem(field="", message=NOT_ACCEPTED, raw=raw or None)]
 
 
 class DidwwVerificationProvider(VerificationProvider):
@@ -484,7 +494,7 @@ class DidwwVerificationProvider(VerificationProvider):
 
     # -- lifecycle -------------------------------------------------------
 
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         try:
             return await asyncio.to_thread(self._validate, refs)
         except DidwwApiError as exc:
@@ -519,8 +529,36 @@ class DidwwVerificationProvider(VerificationProvider):
         except DidwwApiError as exc:
             raise VerificationProviderError("DIDWW request failed") from exc
 
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The identity fields (``company_name``, or ``first_name`` and
+        ``last_name``), else the address's ``customer_name``."""
+        return _name_from(fields, requirements.subject_type) or display_name(
+            address.customer_name if address else None
+        )
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The identity's own name fields."""
+        if not refs.get("identity_id"):
+            return None
+        try:
+            identity = await asyncio.to_thread(
+                self._client.get, f"identities/{refs['identity_id']}"
+            )
+        except DidwwApiError as exc:
+            raise VerificationProviderError("DIDWW request failed") from exc
+        return _name_from(identity["data"]["attributes"], subject_type)
+
     async def purchase_handle(self, refs: dict) -> dict:
-        return {"identity_id": refs["identity_id"], "address_id": refs["address_id"]}
+        # DIDWW registers the end user by the address: it is both ids.
+        return {"verification_id": refs["address_id"], "address_id": refs["address_id"]}
 
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)

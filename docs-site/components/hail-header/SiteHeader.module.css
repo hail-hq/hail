@@ -1,53 +1,70 @@
 /*
- * Self-contained on purpose: this component is used on the landing page
- * (wrapped in its own `.site` root, app/(marketing)/landing.module.css) and
- * on every other marketing page (wrapped in `.hsite`, marketing.css) — two
- * different theme-variable scopes. Defining the header's own colour
- * variables here means it renders identically regardless of which ancestor
- * wraps it, instead of depending on either one.
+ * Self-contained on purpose: this header renders inside `.site` (home),
+ * `.hsite` (public pages), the auth frame, and the synced docs and costs apps,
+ * which do not load the Evolve tokens. Its colour variables live here, with
+ * the Evolve values (docs/superpowers/specs/2026-10-25-evolve-style-and-brand-kit-design.md).
+ * Desktop: a floating pill. Phone: a full screen glass overlay.
  */
 .header {
   --a: #1665ff;
+  --a-text: #1665ff;
   --bg: #f5f3ed;
-  --fg: #111;
+  --bg-rgb: 245, 243, 237;
+  --pill: rgba(255, 255, 255, 0.72);
+  --fg: #111111;
+  --body: #3f3f3f;
   --muted: #686868;
-  --hairline: color-mix(in srgb, var(--fg) 18%, transparent);
-  /* The header stays in view on scroll. It sits under the promotion bar,
-     which PromoBanner measures into --promo-h (0px when no bar renders). */
+  --hairline: #dedbd3;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* The header stays in view on scroll, under the promotion bar (PromoBanner sets --promo-h). */
   position: sticky;
   top: var(--promo-h, 0px);
   z-index: 40;
-  background: var(--bg);
-  border-bottom: 1px solid var(--hairline);
-  font-family: var(--font-grotesk), Arial, sans-serif;
+  padding: 16px 16px 0;
+  pointer-events: none;
+  font-family: var(--font-ui, var(--font-grotesk)), Arial, sans-serif;
   font-size: 14px;
+  line-height: 20px;
   text-transform: none;
   color: var(--fg);
 }
 @media (prefers-color-scheme: dark) {
   :global(html:not([data-theme="light"]):not(.light)) .header {
-    --bg: #0a0a0a;
-    --fg: #eeeae2;
-    --muted: #99968f;
-    --a: #4b82ff;
+    --a-text: #6b98ff;
+    --bg: #181818;
+    --bg-rgb: 24, 24, 24;
+    --pill: rgba(39, 39, 39, 0.72);
+    --fg: #f2f2f2;
+    --body: #b5b5b5;
+    --muted: #8f8f8f;
+    --hairline: #313131;
   }
 }
 :global(html[data-theme="dark"]) .header,
 :global(html.dark) .header {
-  --bg: #0a0a0a;
-  --fg: #eeeae2;
-  --muted: #99968f;
-  --a: #4b82ff;
+  --a-text: #6b98ff;
+  --bg: #181818;
+  --bg-rgb: 24, 24, 24;
+  --pill: rgba(39, 39, 39, 0.72);
+  --fg: #f2f2f2;
+  --body: #b5b5b5;
+  --muted: #8f8f8f;
+  --hairline: #313131;
 }
 :global(html[data-theme="light"]) .header,
 :global(html.light) .header {
+  --a-text: #1665ff;
   --bg: #f5f3ed;
-  --fg: #111;
+  --bg-rgb: 245, 243, 237;
+  --pill: rgba(255, 255, 255, 0.72);
+  --fg: #111111;
+  --body: #3f3f3f;
   --muted: #686868;
-  --a: #1665ff;
+  --hairline: #dedbd3;
 }
 .header.header {
-  font-family: var(--font-grotesk), Arial, sans-serif !important;
+  font-family:
+    var(--font-ui, var(--font-grotesk)), Arial, sans-serif !important;
   text-transform: none !important;
 }
 .header.header * {
@@ -56,55 +73,60 @@
 }
 .header a {
   color: inherit;
+  text-decoration: none;
 }
 
 .shell {
-  width: min(1100px, calc(100% - 40px));
+  pointer-events: auto;
+  width: max-content;
+  max-width: 100%;
   margin-inline: auto;
-  min-height: 76px;
   display: flex;
   align-items: center;
-  gap: 32px;
-  flex-wrap: wrap;
-  padding-block: 10px;
-}
-.header.header .logo {
-  font-family: var(--font-mono), monospace !important;
+  gap: 24px;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 9999px;
+  background: var(--pill);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px -16px rgba(60, 50, 20, 0.35);
 }
 .logo {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   font-weight: 700;
-  font-size: 20px;
-  letter-spacing: -0.045em;
-  margin-right: auto;
+  font-size: 18px;
+  line-height: 28px;
+  letter-spacing: -0.02em;
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: 26px;
-  flex-wrap: wrap;
+  gap: 16px;
 }
 .navLink {
-  color: inherit;
+  color: var(--body);
   border: 0;
   background: none;
   font: inherit;
-  text-transform: inherit;
   cursor: pointer;
-  padding: 8px 0;
+  padding: 8px 4px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  border-radius: 8px;
+  transition: color 200ms var(--ease);
 }
-.navLink:hover {
-  color: var(--a);
+.navLink:hover,
+.navLink.active {
+  color: var(--fg);
 }
 .navLink.active {
-  color: var(--a);
+  font-weight: 600;
 }
 
 .dropdown {
@@ -112,169 +134,310 @@
 }
 .panel {
   position: absolute;
-  top: calc(100% + 14px);
-  left: 0;
-  min-width: 200px;
+  top: calc(100% + 16px);
+  left: -16px;
+  min-width: 240px;
   background: var(--bg);
   border: 1px solid var(--hairline);
-  padding: 18px;
-  border-radius: 10px;
-  box-shadow: 0 12px 30px #00000012;
+  padding: 16px;
+  border-radius: 16px;
+  box-shadow: 0 24px 48px -24px rgba(60, 50, 20, 0.35);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .panel a {
   display: block;
-  padding: 3px 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--body);
+  transition:
+    color 200ms var(--ease),
+    background-color 200ms var(--ease);
 }
 .panel a:hover {
-  color: var(--a);
+  color: var(--fg);
+  background: rgba(var(--bg-rgb), 0.8);
 }
 .panelGroup {
   color: var(--muted);
   font-size: 12px;
-  letter-spacing: 0;
-  margin-bottom: 6px;
+  line-height: 16px;
+  padding-inline: 8px;
+  margin-bottom: 4px;
 }
 
 .navActions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
-.primary {
-  composes: primary from "./BrandButton.module.css";
+.account {
+  color: var(--muted);
+  padding: 8px 4px;
+  white-space: nowrap;
+  transition: color 200ms var(--ease);
+}
+.account:hover {
+  color: var(--fg);
 }
 .themeButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   width: 36px;
   height: 36px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 9999px;
   background: transparent;
-  color: var(--fg);
+  color: var(--muted);
   cursor: pointer;
+  transition:
+    color 200ms var(--ease),
+    background-color 200ms var(--ease);
 }
 .themeButton:hover {
-  border-color: var(--fg);
+  color: var(--fg);
+  background: rgba(var(--bg-rgb), 0.8);
 }
+.primary {
+  composes: primary from "./BrandButton.module.css";
+}
+.primary.primary {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 9999px;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+.header :is(a, button):focus-visible {
+  outline: 2px solid var(--a-text);
+  outline-offset: 2px;
+}
+
+/* Hamburger: three lines that turn into an X. */
 .menuToggle {
   display: none;
 }
-.header :is(a, button):focus-visible {
-  outline: 2px solid var(--a);
-  outline-offset: 4px;
+.menuToggle span {
+  position: absolute;
+  left: 13px;
+  width: 18px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: currentColor;
+  transition:
+    transform 700ms var(--ease),
+    opacity 200ms var(--ease);
 }
-.primary {
-  white-space: nowrap;
+.menuToggle span:nth-child(1) {
+  top: 15px;
 }
-@media (max-width: 1100px) {
+.menuToggle span:nth-child(2) {
+  top: 21px;
+}
+.menuToggle span:nth-child(3) {
+  top: 27px;
+}
+.menuOpen span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+.menuOpen span:nth-child(2) {
+  opacity: 0;
+}
+.menuOpen span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
+@media (max-width: 900px) {
+  .header {
+    padding: 12px 12px 0;
+  }
+  /* No backdrop filter here: it would make the fixed overlay below size to the pill. */
   .shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0 16px;
-    min-height: 72px;
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 4px 4px 16px;
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
-  .logo {
-    margin-right: 0;
-    justify-self: start;
+  .menuToggle {
+    position: relative;
+    z-index: 2;
+    display: block;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
   }
+  .logo,
   .navActions {
-    gap: 10px;
-    grid-column: 2;
-    grid-row: 1;
+    position: relative;
+    z-index: 2;
   }
   .themeButton {
     width: 44px;
     height: 44px;
   }
-  .menuToggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--fg);
-    cursor: pointer;
-  }
+  /* Full screen glass overlay. Links slide up one after another. */
   .nav {
-    display: none;
-    grid-column: 1 / -1;
-    grid-row: 2;
-    padding-top: 16px;
-    margin-top: 10px;
-    border-top: 1px solid var(--hairline);
-  }
-  .navOpen {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 0;
+    padding: calc(var(--promo-h, 0px) + 96px) 24px 32px;
+    overflow-y: auto;
+    background: rgba(var(--bg-rgb), 0.8);
+    -webkit-backdrop-filter: blur(64px);
+    backdrop-filter: blur(64px);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 700ms var(--ease),
+      visibility 0s linear 700ms;
+  }
+  .navOpen {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 700ms var(--ease);
+  }
+  .nav > * {
+    opacity: 0;
+    transform: translateY(48px);
+    transition:
+      transform 700ms var(--ease),
+      opacity 700ms var(--ease);
+  }
+  .navOpen > * {
+    opacity: 1;
+    transform: none;
+  }
+  .navOpen > :nth-child(1) {
+    transition-delay: 100ms;
+  }
+  .navOpen > :nth-child(2) {
+    transition-delay: 150ms;
+  }
+  .navOpen > :nth-child(3) {
+    transition-delay: 200ms;
+  }
+  .navOpen > :nth-child(4) {
+    transition-delay: 250ms;
+  }
+  .navOpen > :nth-child(5) {
+    transition-delay: 300ms;
   }
   .navLink {
     display: flex;
-    min-height: 44px;
-    padding: 10px 0;
     width: 100%;
+    min-height: 48px;
+    padding: 12px 0;
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 600;
+    color: var(--fg);
   }
   .panel {
     position: static;
     min-width: 0;
-    margin-bottom: 12px;
-    padding: 12px 16px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
   .panel a {
     display: flex;
     align-items: center;
     min-height: 44px;
-    padding: 8px 0;
+    font-size: 16px;
+    line-height: 24px;
   }
 }
-@media (max-width: 600px) {
-  .shell {
-    width: calc(100% - 28px);
-    gap: 0 10px;
-    min-height: 64px;
-  }
-  .navActions {
-    gap: 8px;
-  }
-  .primary {
-    padding: 11px 10px;
-    font-size: 12px;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
+.menuCta {
+  display: none;
+}
+@media (max-width: 900px) {
+  .menuCta.menuCta {
+    display: inline-flex;
+    margin-top: 24px;
+    align-self: flex-start;
   }
 }
-/* The "Create account" label needs more width than the 320px layout had. */
+@media (max-width: 480px) {
+  /* The page and the menu carry the main action; the bar keeps Sign in and the menu. */
+  .navActions .primary {
+    display: none;
+  }
+  /* Signed in, there is no Sign in link, so the Console button keeps its place in the bar. */
+  .navActions .signedIn {
+    display: inline-flex;
+  }
+}
 @media (max-width: 360px) {
   .shell {
-    width: calc(100% - 20px);
-    gap: 0 8px;
+    padding-left: 12px;
   }
-  .navActions {
+  .logo {
+    font-size: 16px;
     gap: 6px;
   }
-  .primary {
+  .primary.primary {
     padding-inline: 8px;
   }
-  .themeButton,
-  .menuToggle {
-    width: 40px;
-  }
-}
-@media (max-width: 360px) {
   .primary::after {
     display: none;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .header *,
+  .nav,
+  .nav > * {
+    transition: none !important;
+  }
+}
+
+/* Docked bar for the docs and costs apps (scripts/sync-site-header.mjs). */
+:global(:root) {
+  --hail-header-h: 64px;
+}
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  box-sizing: border-box;
+  height: var(--hail-header-h);
+  padding: 0;
+  pointer-events: auto;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+}
+.shell {
+  width: min(1100px, calc(100% - 40px));
+  max-width: none;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.navActions {
+  margin-left: auto;
 }
 
 .themeButton > button {

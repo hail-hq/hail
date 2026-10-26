@@ -29,9 +29,9 @@ def house_keys(monkeypatch):
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "deepgram_model", "nova-3")
     monkeypatch.setattr(settings, "speechmatics_model", "linden-1")
-    monkeypatch.setattr(settings, "openai_model", "gpt-5.4-mini")
-    monkeypatch.setattr(settings, "google_model", "gemini-3-flash")
-    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-4-6")
+    monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
 
 
 @dataclass
@@ -157,7 +157,7 @@ def test_byo_layer_without_key_or_house_key_fails_fast(
 def test_build_stt_unknown_org_provider_fails_fast(captured_plugins) -> None:
     """An org stt row on a provider other than deepgram must fail fast, not
     silently bill Hail's house Deepgram key for a BYO org (parity with
-    _org_llm/_org_tts)."""
+    org_llm/_org_tts)."""
     org = ResolvedLayer(
         provider="whisper-cloud", api_key="org-key", params={}, fallback_enabled=False
     )
@@ -265,7 +265,7 @@ def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
 
 async def test_resolve_org_configs_rejects_unsafe_llm_base_url(async_session) -> None:
     """The call-time SSRF guard runs inside resolve_org_configs (off the event
-    loop), not inside _org_llm, a stored base_url pointing at cloud metadata
+    loop), not inside org_llm, a stored base_url pointing at cloud metadata
     must raise ProviderKeyError rather than build an LLM against it."""
     org_id = uuid.uuid4()
     async_session.add(

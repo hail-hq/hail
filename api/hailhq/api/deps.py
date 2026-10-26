@@ -34,7 +34,11 @@ from hailhq.core.db import get_session, session_scope
 from hailhq.core.models import ApiKey, Organization, OrganizationMember
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import telemetry_enabled
-from hailhq.core.telemetry_identity import resolve_identity, set_identity
+from hailhq.core.telemetry_identity import (
+    resolve_identity,
+    set_identity,
+    tag_context,
+)
 from hailhq.core.urls import url_variants
 from opentelemetry import trace
 from pydantic import BaseModel
@@ -402,6 +406,8 @@ async def get_current_principal(
         if principal.api_key_id is not None:
             identity["api_key_id"] = str(principal.api_key_id)
         set_identity(identity)
+        # Routes that start a call, SMS or email retag the channel.
+        tag_context(channel="api")
     span = trace.get_current_span()
     if span.is_recording():
         span.set_attribute("organization_id", str(principal.organization_id))

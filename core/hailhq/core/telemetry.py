@@ -1,8 +1,9 @@
 """Optional EU Logfire telemetry shared by every backend process.
 
 A filtering OTLP exporter keeps conversation/tool content out of native LiveKit
-spans too (Agents 1.6 lacks the newer allow_pii option). No exporter is created
-unless explicitly enabled. Existing console logging is preserved.
+spans too. Agents 1.8 has set_tracer_provider(..., allow_pii=); Hail does not
+use it and relies on this exporter for every span instead. No exporter is
+created unless explicitly enabled. Existing console logging is preserved.
 """
 
 from __future__ import annotations
@@ -12,23 +13,28 @@ import json
 import logging
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 import logfire
 from hailhq.core.config import settings
 from hailhq.core.telemetry_identity import (
     IDENTITY_FIELDS,
+    TAG_FIELDS,
     IdentitySpanProcessor,
-    get_identity,
+    get_telemetry_attributes,
+    resolve_identity,
+    set_identity,
 )
 from hailhq.core.urls import join_url
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.dependencies import DependencyConflictError
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan, TracerProvider
@@ -37,7 +43,10 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
     SpanExportResult,
 )
-from opentelemetry.trace import Link, Status
+from opentelemetry.trace import Link, SpanKind, Status
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 _configured_pid: int | None = None
@@ -45,11 +54,34 @@ _span_processor: BatchSpanProcessor | None = None
 _extra_providers: list[TracerProvider] = []
 _CONTENT = re.compile(
     r"(?:^|[._])(?:arguments|result|body|content|messages|"
-    r"input_messages|output_messages|system_instructions|tool_definitions|"
+    r"input_messages|output_messages|system_instructions|tool[._]definitions|"
     r"chat_ctx|instructions|transcript|user_input|input_text|user_transcript|text|audio|"
     r"tool_call_arguments|tool_call_result|function_call|function_call_output|"
     r"phone|email|otp|authorization|cookie|token|secret|api_key)(?:$|[._])",
     re.IGNORECASE,
+)
+# LLM content, always exported unmasked:
+# the GenAI keys Logfire's LLM view renders, and the caller's transcript.
+CONTENT_FIELDS = frozenset(
+    {
+        "gen_ai.system_instructions",
+        "gen_ai.input.messages",
+        "gen_ai.output.messages",
+        "gen_ai.tool.call.arguments",
+        "gen_ai.tool.call.result",
+        "lk.pii.user_transcript",
+    }
+)
+_KEPT_FIELDS = IDENTITY_FIELDS | TAG_FIELDS
+# MCP spans that only answer discovery and keep-alive traffic.
+_MCP_NOISE_METHODS = frozenset(
+    {
+        "ping",
+        "tools/list",
+        "prompts/list",
+        "resources/list",
+        "resources/templates/list",
+    }
 )
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 _PHONE = re.compile(r"(?<![\w-])\+\d[\d ()-]{7,}\d")
@@ -67,7 +99,7 @@ def _safe_text(value: str) -> str:
 def _safe_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
     result = {}
     for key, value in (attributes or {}).items():
-        if key in IDENTITY_FIELDS:
+        if key in _KEPT_FIELDS or key in CONTENT_FIELDS:
             result[key] = value
             continue
         if key in {
@@ -146,6 +178,32 @@ def private_span(
     )
 
 
+def _is_noise(span: ReadableSpan, *, mcp: bool) -> bool:
+    attributes = span.attributes or {}
+    route = attributes.get("http.route")
+    if route == "/healthz":
+        return True
+    if not mcp:
+        return False
+    if span.name.startswith("MCP server handle request: "):
+        return span.name.rsplit(": ", 1)[1] in _MCP_NOISE_METHODS
+    if isinstance(route, str) and route.startswith("/.well-known/"):
+        return True
+    status = attributes.get(
+        "http.response.status_code", attributes.get("http.status_code")
+    )
+    if route == "/":
+        # GET / is the open SSE stream. A POST / is one JSON-RPC message (the
+        # tool call runs in its own trace) and DELETE / closes a session, so
+        # only their failures are kept.
+        if span.name == "GET /":
+            return True
+        if span.name in {"POST /", "DELETE /"}:
+            return isinstance(status, int) and status < 400
+    # A 404 with no matched route: a scanner probing paths like /.env.
+    return span.kind == SpanKind.SERVER and route is None and status == 404
+
+
 class PrivateSpanExporter(SpanExporter):
     def __init__(
         self,
@@ -156,10 +214,11 @@ class PrivateSpanExporter(SpanExporter):
         self.resource_attributes = resource_attributes
 
     def export(self, spans: Sequence[ReadableSpan]):
+        mcp = (self.resource_attributes or {}).get("service.name") == "hail-mcp"
         filtered = [
             private_span(span, self.resource_attributes)
             for span in spans
-            if (span.attributes or {}).get("http.route") != "/healthz"
+            if not _is_noise(span, mcp=mcp)
         ]
         if not filtered:
             return SpanExportResult.SUCCESS
@@ -175,7 +234,7 @@ class PrivateSpanExporter(SpanExporter):
 class BackendLoggingHandler(logfire.LogfireLoggingHandler):
     def fill_attributes(self, record: logging.LogRecord) -> dict[str, Any]:
         attributes = super().fill_attributes(record)
-        attributes.update(get_identity())
+        attributes.update(get_telemetry_attributes())
         return attributes
 
 
@@ -190,13 +249,33 @@ class BackendLogFilter(logging.Filter):
 
 
 def _scrub_identity(match: logfire.ScrubMatch):
-    if (
-        len(match.path) == 2
-        and match.path[0] == "attributes"
-        and match.path[1] in IDENTITY_FIELDS
-    ):
+    if len(match.path) < 2 or match.path[0] != "attributes":
+        return None
+    key = match.path[1]
+    if len(match.path) == 2 and key in _KEPT_FIELDS:
+        return match.value
+    # Content is exported whole: a prompt that says "password" stays readable.
+    if key in CONTENT_FIELDS:
         return match.value
     return None
+
+
+def instrument(
+    name: str, setup: Callable[..., object], /, *args: Any, **kwargs: Any
+) -> None:
+    """Run one optional tracing setup. Telemetry is a nice-to-have: a library
+    version the instrumentation does not support must never stop a service,
+    so that failure turns the tracing off and logs a warning.
+
+    Only the errors an instrumentation raises for an unsupported or missing
+    library are caught: logfire raises RuntimeError (version out of range,
+    missing extra), a missing module raises ImportError, and OpenTelemetry
+    raises DependencyConflictError. A mistake in our own call (TypeError,
+    AttributeError) still raises, so tests catch it."""
+    try:
+        setup(*args, **kwargs)
+    except (RuntimeError, ImportError, DependencyConflictError) as exc:
+        logger.warning("Telemetry: %s tracing is off (%s)", name, exc)
 
 
 def configure_telemetry(service_name: str) -> bool:
@@ -236,30 +315,39 @@ def configure_telemetry(service_name: str) -> bool:
         )
     )
     # One explicit exporter ensures every span passes through the privacy filter.
-    logfire.configure(
-        send_to_logfire=False,
-        console=False,
-        metrics=logfire.MetricsOptions(
-            additional_readers=[
-                PeriodicExportingMetricReader(
-                    OTLPMetricExporter(
-                        endpoint=join_url(settings.logfire_base_url, "v1/metrics"),
-                        headers={"Authorization": token},
-                        timeout=5,
-                    ),
-                    export_interval_millis=60000,
-                )
-            ]
-        ),
-        service_name=service_name,
-        service_version=settings.logfire_service_version or None,
-        environment=settings.logfire_environment,
-        additional_span_processors=[IdentitySpanProcessor(), processor],
-        sampling=logfire.SamplingOptions(head=settings.hail_logfire_sample_rate),
-        scrubbing=logfire.ScrubbingOptions(callback=_scrub_identity),
-        inspect_arguments=False,
-        distributed_tracing=True,
-    )
+    try:
+        logfire.configure(
+            send_to_logfire=False,
+            console=False,
+            metrics=logfire.MetricsOptions(
+                additional_readers=[
+                    PeriodicExportingMetricReader(
+                        OTLPMetricExporter(
+                            endpoint=join_url(settings.logfire_base_url, "v1/metrics"),
+                            headers={"Authorization": token},
+                            timeout=5,
+                        ),
+                        export_interval_millis=60000,
+                    )
+                ]
+            ),
+            service_name=service_name,
+            service_version=settings.logfire_service_version or None,
+            environment=settings.logfire_environment,
+            additional_span_processors=[IdentitySpanProcessor(), processor],
+            sampling=logfire.SamplingOptions(head=settings.hail_logfire_sample_rate),
+            scrubbing=logfire.ScrubbingOptions(callback=_scrub_identity),
+            inspect_arguments=False,
+            distributed_tracing=True,
+        )
+    except Exception as exc:
+        # Broad on purpose: logfire.configure touches the environment (OTel
+        # providers, metric readers, settings), and any failure there must
+        # leave the service running without telemetry.
+        # Stop the exporter thread; it would never be flushed or reused.
+        processor.shutdown()
+        logger.warning("Telemetry disabled: Logfire setup failed (%s)", exc)
+        return False
     handler = BackendLoggingHandler()
     handler.addFilter(BackendLogFilter())
     root = logging.getLogger()
@@ -268,9 +356,9 @@ def configure_telemetry(service_name: str) -> bool:
             root.removeHandler(existing)
     root.addHandler(handler)
     logging.getLogger("hailhq").setLevel(logging.INFO)
-    logfire.instrument_httpx()
-    logfire.instrument_requests()
-    logfire.instrument_aiohttp_client()
+    instrument("httpx", logfire.instrument_httpx)
+    instrument("requests", logfire.instrument_requests)
+    instrument("aiohttp", logfire.instrument_aiohttp_client)
     _span_processor = processor
     _extra_providers.clear()
     _configured_pid = os.getpid()
@@ -287,6 +375,13 @@ def flush_telemetry() -> None:
         logfire.force_flush(timeout_millis=5000)
         for provider in _extra_providers:
             provider.force_flush(timeout_millis=5000)
+
+
+async def bind_organization(db: AsyncSession, organization_id: UUID) -> None:
+    """Name the organization on this scope's spans and logs, for work no
+    signed-in actor started (inbound SMS, inbound email, carrier events)."""
+    if telemetry_enabled():
+        set_identity(await resolve_identity(db, organization_id, actor_kind="system"))
 
 
 @contextmanager

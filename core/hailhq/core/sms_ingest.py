@@ -23,6 +23,8 @@ from hailhq.core.compliance_gate import (
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.telemetry import bind_organization
+from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.threads import ACTIVE_CALL_SKIP, active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
@@ -200,6 +202,11 @@ async def ingest_inbound_sms(
             await db.execute(select(Sms).where(Sms.provider_message_sid == sid))
         ).scalar_one_or_none()
         return IngestResult(sms_id=existing.id if existing else None)
+
+    await bind_organization(db, organization_id)
+    tag_context(
+        channel="sms", direction="inbound", sms_id=sms.id, from_=from_e164, to=to_e164
+    )
 
     action = _opt_out_action(body, opt_out_type)
     # YES/START from someone who never opted out is an answer to the agent,

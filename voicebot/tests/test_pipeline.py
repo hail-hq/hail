@@ -12,9 +12,11 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
-from hailhq.voicebot.pipeline import build_llm, build_session
+from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
+from livekit.agents.stt import FallbackAdapter as stt_fallback
+from livekit.plugins import deepgram as deepgram_plugin
 from livekit.plugins import openai as openai_plugin
 
 
@@ -27,6 +29,12 @@ def _stub_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-placeholder")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg-test-placeholder")
+    # The house chain skips a model whose key is empty in settings.
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test-placeholder")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test-placeholder")
+    monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
     # Plugin TTS constructors read their API key from the env at construction,
     # so these env vars must be set even though build_tts() gates on settings.
     monkeypatch.setenv("CARTESIA_API_KEY", "ct-test-placeholder")
@@ -59,17 +67,170 @@ def _fake_job_context():
         yield
 
 
-def test_build_llm_mode_a_returns_fallback_adapter() -> None:
-    """No ``llm`` config -> Hail's three-provider fallback chain.
+def test_build_llm_mode_a_returns_fallback_adapter(monkeypatch) -> None:
+    """No ``llm`` config -> Hail's chain: Anthropic, its backup, OpenAI,
+    then Gemini last.
 
     Inner-list attribute name (``_llm_instances``) verified against
     livekit-agents/livekit/agents/llm/fallback_adapter.py at HEAD on
     2026-04-28; revisit if it changes.
     """
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
+    monkeypatch.setattr(settings, "google_model", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(settings, "google_api_key", "test-google-placeholder")
     adapter = build_llm(None)
     assert isinstance(adapter, FallbackAdapter)
     inner = adapter._llm_instances
-    assert len(inner) == 3, "fallback chain should compose three LLMs"
+    assert [m.model for m in inner] == [
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "gpt-4.1",
+        "gemini-3.5-flash-lite",
+    ]
+
+
+def test_house_chain_gives_each_model_one_try(monkeypatch) -> None:
+    """One adapter-wide setting: no retry on a failed model, 10 s per try."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    adapter = build_llm(None)
+    assert isinstance(adapter, FallbackAdapter)
+    assert adapter._max_retry_per_llm == 0
+    assert adapter._attempt_timeout == 10.0
+
+
+def test_org_chain_with_fallback_gives_each_model_one_try(monkeypatch) -> None:
+    """The org LLM with fallback uses the house chain's one-try settings."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    org = ResolvedLayer(
+        provider="openai-compatible",
+        api_key="org-key",
+        params={"base_url": "https://llm.example.com/v1", "model": "m"},
+        fallback_enabled=True,
+    )
+    adapter = build_llm(None, org)
+    assert isinstance(adapter, FallbackAdapter)
+    assert adapter._llm_instances[0].model == "m"
+    assert adapter._max_retry_per_llm == 0
+    assert adapter._attempt_timeout == 10.0
+
+
+@pytest.mark.parametrize(
+    ("google_model", "google_api_key"),
+    [("", "test-google-placeholder"), ("gemini-3.5-flash-lite", "")],
+)
+def test_build_llm_mode_a_skips_gemini_without_model_or_key(
+    monkeypatch, google_model: str, google_api_key: str
+) -> None:
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
+    monkeypatch.setattr(settings, "google_model", google_model)
+    monkeypatch.setattr(settings, "google_api_key", google_api_key)
+    inner = build_llm(None)._llm_instances
+    assert [m.model for m in inner] == [
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "gpt-4.1",
+    ]
+
+
+def test_build_llm_mode_a_without_anthropic_keys_uses_the_rest(monkeypatch) -> None:
+    """A self-host with no Anthropic key still gets a chain."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "google_model", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(settings, "google_api_key", "test-google-placeholder")
+    inner = build_llm(None)._llm_instances
+    assert [m.model for m in inner] == ["gpt-4.1", "gemini-3.5-flash-lite"]
+
+
+def test_build_llm_mode_a_with_no_keys_raises(monkeypatch) -> None:
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import ProviderKeyError
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    with pytest.raises(ProviderKeyError):
+        build_llm(None)
+
+
+def test_thinking_off_per_model() -> None:
+    from hailhq.voicebot.pipeline import _thinking_off
+
+    assert _thinking_off("claude-sonnet-5-5") == {"type": "between_tools"}
+    assert _thinking_off("eu.anthropic.claude-sonnet-5-5") == {"type": "between_tools"}
+    assert _thinking_off("eu.anthropic.claude-haiku-5-5") == {"type": "disabled"}
+    assert _thinking_off("global.anthropic.claude-haiku-5-5-v1:0") == {
+        "type": "disabled"
+    }
+    assert _thinking_off("claude-opus-5-5") is None
+    # Anthropic API ids can carry a date.
+    assert _thinking_off("claude-sonnet-5-5-20261001") == {"type": "between_tools"}
+    assert _thinking_off("eu.anthropic.claude-sonnet-5-5-20261001-v1:0") == {
+        "type": "between_tools"
+    }
+
+
+def test_thinking_off_unknown_model_warns_and_disables(caplog) -> None:
+    """An unknown id never stops the voicebot: thinking disabled, one warning."""
+    from hailhq.voicebot import pipeline
+
+    pipeline._warned_models.clear()
+    with caplog.at_level("WARNING", logger="hailhq.voicebot"):
+        # Not a near match: "sonnet-5-5" inside a longer id does not count.
+        assert pipeline._thinking_off("eu.anthropic.claude-sonnet-5-5-mini") == {
+            "type": "disabled"
+        }
+        assert pipeline._thinking_off("claude-sonnet-4-6") == {"type": "disabled"}
+        assert pipeline._thinking_off("claude-sonnet-4-6") == {"type": "disabled"}
+    warnings = [r.getMessage() for r in caplog.records]
+    assert len(warnings) == 2
+    assert "claude-sonnet-5-5-mini" in warnings[0]
+    assert "claude-sonnet-4-6" in warnings[1]
+
+
+def test_stt_takes_keyterms_only_on_nova_3(monkeypatch) -> None:
+    from hailhq.core.config import settings
+    from hailhq.voicebot.pipeline import stt_takes_keyterms
+
+    monkeypatch.setattr(settings, "deepgram_api_key", "dg-test")
+    nova3 = deepgram_plugin.STT(model="nova-3", api_key="dg-test")
+    nova2 = deepgram_plugin.STT(model="nova-2", api_key="dg-test")
+    assert stt_takes_keyterms(nova3)
+    assert not stt_takes_keyterms(nova2)
+    assert not stt_takes_keyterms(stt_fallback([nova2, nova3]))
+    assert stt_takes_keyterms(stt_fallback([nova3, nova3]))
+    assert not stt_takes_keyterms(None)
+    assert not stt_takes_keyterms(build_stt(language="da", provider="speechmatics"))
+
+
+def test_keyterms_reach_each_deepgram_inside_the_stt_fallback(monkeypatch) -> None:
+    """``session.update_options(keyterms=...)`` hands the terms to the STT's
+    ``_update_session_keyterms``; the fallback forwards them to each STT."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "deepgram_api_key", "dg-house")
+    monkeypatch.setattr(settings, "deepgram_model", "nova-3")
+    org = ResolvedLayer("deepgram", "dg-org", {"model": "nova-3"}, True)
+    stt = build_stt(org, language="en")
+    assert isinstance(stt, stt_fallback)
+    stt._update_session_keyterms(["Ana Lopez"])
+    instances = stt._stt_instances
+    assert len(instances) == 2
+    assert all(s._opts.keyterm == ["Ana Lopez"] for s in instances)
 
 
 def test_build_llm_mode_b_returns_openai_with_overridden_endpoint() -> None:

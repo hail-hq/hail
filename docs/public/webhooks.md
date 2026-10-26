@@ -133,6 +133,10 @@ Every `call.*` payload's `data` carries `id`, `status`, `direction`
 with an inline prompt) and, once terminal, `end_reason`
 ([`call_event_data`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_fanout.py)):
 
+Failed call responses and `call.failed` events also carry `failure_message`.
+For a confirmed geographic-permission block, it explains that calling the
+destination is disabled. Raw carrier error text is never returned.
+
 ```json
 {
   "type": "call.received",

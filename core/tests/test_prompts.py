@@ -34,17 +34,17 @@ def _sha(text: str) -> str:
 # Outputs before history left the prompt. Any change here changes what every
 # agent is told: update on purpose only.
 _BEFORE = {
-    (None, None): "d30e8eb91543cee42b1bc6a198b04b4805665c916546bf2ee7489e6e4c0fbadc",
+    (None, None): "188bd8eda58199867db9d25f7c36cb8af185a0df9fa00614ea84f390af04ad8d",
     (
         None,
         "inbound",
-    ): "1bfd27e02d284f661db9a69d7fc1a178ebc22fe6f0b4bcd739440064a5cf776c",
+    ): "dd4d0f7624103bbea95855042b716c42e3ea8c2a5100c3ad707f5cfad88961a7",
     (
         "Be kind.",
         None,
-    ): "521b8943ac711eec986decfd2f6c3160e74f7adbcabfd50d0ee4c039139038d9",
+    ): "0752153377cdb17345783c4559ccb885c4c4cd97e20e60f88f0dfc7603ddc775",
     ("Be kind.", "inbound"): (
-        "8bb85f9195020fd5182bae086f0d13c2b1ac7a7853f531a521cee769c47d09df"
+        "c173084fcc9c61c20992f92dd4d3ebb15bd59b88808574c3b47798159bff5c3d"
     ),
 }
 
@@ -60,10 +60,10 @@ def test_voice_instructions_are_byte_identical_to_before() -> None:
 
 def test_templates_are_byte_identical_to_before() -> None:
     assert _sha(prompts.prompt_template("calls_in")) == (
-        "f65256ef4cd1497ff1d237a92d6c5e35e412770f04c96e17dc8acc96a3fefa23"
+        "ecc48ada740c0899268e11d42332a75165d83c2803f5cbedccfbdcf65185ce93"
     )
     assert _sha(prompts.prompt_template("calls_out")) == (
-        "873c4a3bf407e1b948645d57c94f9ce4e67cb2b745dd5f658228e16a72a2d183"
+        "af95c83399e496f7ac7a7afd7228a9a3eb1336b9861560ed72b95b18ad755083"
     )
     assert _sha(prompts.prompt_template("texts")) == (
         "a1098eceb5c5be625839b1f096e88e9b3b6cead156af6ef927250c303b728e95"
@@ -132,3 +132,18 @@ def test_thanks_alone_does_not_end_the_call() -> None:
     for preamble in (prompts.VOICE_PREAMBLE, prompts.VOICE_PREAMBLE_INBOUND):
         assert "A thank-you alone does not end the call." in preamble
         assert "the channel (text or email)" in preamble
+
+
+def test_misheard_words_are_never_used_as_a_name() -> None:
+    for preamble in (prompts.VOICE_PREAMBLE, prompts.VOICE_PREAMBLE_INBOUND):
+        assert "Never call the other party by a name they did not" in preamble
+        assert "rephrase mid-sentence" not in preamble
+
+
+def test_contact_section_takes_a_clearly_given_name() -> None:
+    # Someone else on the contact's phone ("Hi, this is Anna") is called by
+    # the name they give; only an unclear word is treated as mishearing.
+    section = prompts.other_party_section("Sam", can_email=False)
+    assert "if the person clearly tells you their name, use it" in section
+    assert "An unclear or garbled word is speech-to-text mishearing" in section
+    assert "sounds like another name" not in section

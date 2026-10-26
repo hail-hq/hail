@@ -47,8 +47,10 @@ Exposes the following tools to the calling agent:
   (when a registration shows ``confirmation: "code"``)
 
 Every tool sets explicit ``ToolAnnotations`` hints (read-only, destructive,
-idempotent, open-world) and a human title; ``tests/test_tool_annotations.py``
-fails when a new tool is left unclassified.
+idempotent, open-world) and a human title, set both on the tool and as
+``annotations.title`` (directory listings read the latter);
+``tests/test_tool_annotations.py`` fails when a new tool is left
+unclassified.
 
 The tool docstrings are the agent's only documentation, so each one
 spells out the contract (required vs optional fields, how modes combine,
@@ -83,16 +85,16 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
-from hailhq.core.telemetry_identity import identity_scope
+from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
-from pydantic import StrictBool, ValidationError
+from pydantic import StrictBool, ValidationError, WithJsonSchema
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
@@ -559,6 +561,37 @@ async def create_agent(*, client: HailClient, **fields: Any) -> dict[str, Any]:
         return _format_api_error(exc)
 
 
+# Hail does not tell agents which carrier backs a number, an offer or a
+# verification. The public API no longer returns these keys; this stays as a
+# guard against an older API that still does.
+_CARRIER_KEYS = frozenset(
+    {
+        "provider",
+        "unavailable_providers",
+        "messaging_service_sid",
+        # Not ``verification_id``: on a number it is Hail's own verification
+        # id. Responses are parsed with the public models, which carry no
+        # carrier id under that name.
+        "address_id",
+    }
+)
+
+
+def _drop_carrier(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    return {k: v for k, v in value.items() if k not in _CARRIER_KEYS}
+
+
+def _without_carrier(result: Any) -> Any:
+    result = _drop_carrier(result)
+    if isinstance(result, dict):
+        for key in ("offers", "items"):
+            if isinstance(result.get(key), list):
+                result[key] = [_drop_carrier(item) for item in result[key]]
+    return result
+
+
 async def route_number(
     *,
     client: HailClient,
@@ -572,12 +605,14 @@ async def route_number(
     if number_id_ is None:
         return _not_uuid("number_id")
     try:
-        return await client.route_number(
-            number_id_,
-            voice_agent_id=voice_agent_id,
-            sms_agent_id=sms_agent_id,
-            clear_voice=clear_voice,
-            clear_sms=clear_sms,
+        return _without_carrier(
+            await client.route_number(
+                number_id_,
+                voice_agent_id=voice_agent_id,
+                sms_agent_id=sms_agent_id,
+                clear_voice=clear_voice,
+                clear_sms=clear_sms,
+            )
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -591,7 +626,6 @@ async def quote_numbers(
     country_code: str,
     capabilities: list[str] | None = None,
     number_type: str | None = None,
-    provider: str = "auto",
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
@@ -599,7 +633,6 @@ async def quote_numbers(
     fields: dict[str, Any] = {
         "country_code": country_code,
         "capabilities": ["voice", "sms"] if capabilities is None else capabilities,
-        "provider": provider,
     }
     if number_type is not None:
         fields["number_type"] = number_type
@@ -610,7 +643,7 @@ async def quote_numbers(
     if region is not None:
         fields["region"] = region
     try:
-        return await client.quote_numbers(**fields)
+        return _without_carrier(await client.quote_numbers(**fields))
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
     except HailAPIError as exc:
@@ -624,12 +657,20 @@ async def acquire_number(
     country_code: str,
     number_type: str,
     confirm_total_cents: int,
-    provider: str = "auto",
     idempotency_key: str | None = None,
+    subject_type: str | None = None,
+    verification_id: str | None = None,
 ) -> dict[str, Any]:
     quote_id_ = _as_uuid(quote_id)
     if quote_id_ is None:
         return _not_uuid("quote_id")
+    verification_id_ = None
+    if verification_id is not None:
+        verification_id_ = _as_uuid(verification_id)
+        if verification_id_ is None:
+            return _not_uuid("verification_id")
+    if subject_type is not None and subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}."}
     if idempotency_key is None:
         idempotency_key = str(uuid.uuid4())
     try:
@@ -637,9 +678,10 @@ async def acquire_number(
             quote_id=quote_id_,
             country_code=country_code,
             number_type=number_type,
-            provider=provider,
             expected_total_cents=confirm_total_cents,
             idempotency_key=idempotency_key,
+            **({"subject_type": subject_type} if subject_type else {}),
+            **({"verification_id": verification_id_} if verification_id_ else {}),
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -660,14 +702,14 @@ async def acquire_number(
         return error
     # Echo the key so the agent can retry this exact purchase safely.
     result.setdefault("idempotency_key", idempotency_key)
-    return result
+    return _without_carrier(result)
 
 
 async def list_numbers(
     *, client: HailClient, limit: int = 50, cursor: str | None = None
 ) -> dict[str, Any]:
     try:
-        return await client.list_numbers(limit=limit, cursor=cursor)
+        return _without_carrier(await client.list_numbers(limit=limit, cursor=cursor))
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -684,7 +726,7 @@ async def get_number(*, client: HailClient, number_id: str) -> dict[str, Any]:
     if number_id_ is None:
         return _not_uuid("number_id")
     try:
-        return await client.get_number(number_id_)
+        return _without_carrier(await client.get_number(number_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -762,6 +804,26 @@ def _is_str_map(value: Any) -> bool:
 
 _VERIFICATION_PURPOSES = ("number", "sms")
 _PURPOSE_ERROR = "purpose must be 'number' or 'sms'"
+_SUBJECT_TYPES = ("person", "business")
+_SUBJECT_TYPE_ERROR = (
+    "subject_type must be 'person' or 'business': ask the user whether this "
+    "is for them or for their company"
+)
+_QUOTE_REQUIRED = (
+    "quote_id is required for purpose='number': pass the quote_id of the "
+    "offer from quote_numbers"
+)
+
+
+# Typed in the JSON schema only. Validation stays ``Any`` so FastMCP never
+# echoes a submitted value; ``_verification_shape_error`` checks the shape.
+_JsonObject = Annotated[Any, WithJsonSchema({"type": "object"})]
+_JsonObjectList = Annotated[
+    Any, WithJsonSchema({"type": "array", "items": {"type": "object"}})
+]
+_JsonObjectOrNone = Annotated[
+    Any, WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "null"}]})
+]
 
 
 def _verification_shape_error(
@@ -866,19 +928,31 @@ async def get_verification_requirements(
     client: HailClient,
     country_code: str,
     number_type: str,
-    subject_type: str = "person",
-    provider: str | None = None,
+    subject_type: str,
+    quote_id: str | None = None,
+    number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}."}
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
+    if purpose == "number" and quote_id is None:
+        return {"error": f"{_QUOTE_REQUIRED}."}
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return _not_uuid("quote_id")
+    if number_id is not None and _as_uuid(number_id) is None:
+        return _not_uuid("number_id")
     try:
-        return await client.get_verification_requirements(
-            country_code=country_code,
-            number_type=number_type,
-            subject_type=subject_type,
-            provider=provider,
-            purpose=purpose,
+        return _without_carrier(
+            await client.get_verification_requirements(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                quote_id=quote_id,
+                number_id=number_id,
+                purpose=purpose,
+            )
         )
     except HailAPIError as exc:
         return _format_api_error(exc)
@@ -894,7 +968,7 @@ async def list_verifications(
     if purpose is not None and purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}."}
     try:
-        return await client.list_verifications(purpose=purpose)
+        return _without_carrier(await client.list_verifications(purpose=purpose))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -910,7 +984,7 @@ async def get_verification(
     if verification_id_ is None:
         return _not_uuid("verification_id")
     try:
-        return await client.get_verification(verification_id_)
+        return _without_carrier(await client.get_verification(verification_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -927,7 +1001,7 @@ async def cancel_verification(
     if verification_id_ is None:
         return _not_uuid("verification_id")
     try:
-        return await client.cancel_verification(verification_id_)
+        return _without_carrier(await client.cancel_verification(verification_id_))
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -946,7 +1020,9 @@ async def confirm_verification(
     if not isinstance(code, str) or not 4 <= len(code.strip()) <= 10:
         return {"error": "code must be the 4 to 10 characters the carrier texted"}
     try:
-        return await client.confirm_verification(verification_id_, code.strip())
+        return _without_carrier(
+            await client.confirm_verification(verification_id_, code.strip())
+        )
     except HailAPIError as exc:
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -964,13 +1040,22 @@ async def submit_verification(
     documents: Any,
     files: Any,
     attest_authorized: bool,
-    subject_type: str = "person",
+    subject_type: str | None,
     address: Any = None,
-    provider: str | None = None,
+    quote_id: str | None = None,
+    number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}. Nothing was sent."}
     if purpose not in _VERIFICATION_PURPOSES:
         return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
+    if purpose == "number" and quote_id is None:
+        return {"error": f"{_QUOTE_REQUIRED}. Nothing was sent."}
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return {"error": "quote_id must be a UUID. Nothing was sent."}
+    if number_id is not None and _as_uuid(number_id) is None:
+        return {"error": "number_id must be a UUID. Nothing was sent."}
     if attest_authorized is not True:
         return {
             "error": "attest_authorized must be true. Pass true only if the "
@@ -1004,16 +1089,19 @@ async def submit_verification(
     if error:
         return {"error": f"{error}. Nothing was sent."}
     try:
-        return await client.submit_verification(
-            country_code=country_code,
-            number_type=number_type,
-            subject_type=subject_type,
-            fields=fields,
-            documents=documents,
-            files=decoded,
-            address=address,
-            provider=provider,
-            purpose=purpose,
+        return _without_carrier(
+            await client.submit_verification(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                fields=fields,
+                documents=documents,
+                files=decoded,
+                address=address,
+                quote_id=quote_id,
+                number_id=number_id,
+                purpose=purpose,
+            )
         )
     except httpx.TransportError:
         return {
@@ -1036,6 +1124,15 @@ def _submit_error(exc: HailAPIError) -> dict[str, Any]:
             "error": "the carrier or the API rejected the submission; nothing "
             "was stored. Fix the listed problems with the user and submit again.",
             "problems": exc.problems or [],
+        }
+    if exc.status == 409 and str(exc.detail).startswith(
+        "You already have a verification"
+    ):
+        # This 409 names the person or company; never echo it.
+        return {
+            "error": "a live verification with the same subject type and the "
+            "same name already exists; nothing new was stored. Call "
+            "list_verifications to see it."
         }
     if exc.status in (401, 404, 409, 429, 503):
         return _format_api_error(exc)
@@ -1195,6 +1292,19 @@ async def _client_for(
         yield singleton
 
 
+class TaggedFastMCP(FastMCP):
+    """FastMCP that tags each tool call's trace with the tool name.
+
+    The tool call runs in the session's task, in its own trace, under the
+    "MCP server handle request: tools/call" span, so that span is the root.
+    """
+
+    async def call_tool(self, name, arguments):
+        bind_root()
+        tag_context(channel="mcp", tool=name)
+        return await super().call_tool(name, arguments)
+
+
 _ACTOR_TTL_SECONDS = 300
 _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -1270,6 +1380,7 @@ def register_tools(
         name="place_call",
         title="Place a phone call",
         annotations=ToolAnnotations(
+            title="Place a phone call",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1324,6 +1435,10 @@ def register_tools(
         artificial-voice calls (47 CFR 64.1200(b)(1)) and several AI
         bot-disclosure laws require it, and Hail does not verify this.
         The agent still identifies itself as an AI if asked.
+        ``recording_enabled``: omit it to follow the agent, then the
+        workspace recording setting. ``true`` records this call and
+        ``false`` does not, whatever the workspace setting. Pass it only
+        when the user asked for or against a recording.
         ``metadata`` is free-form JSON attached to the call record.
         ``tools`` are the agent tools to allow on this call. Omit for all
         available; pass ``[]`` to disable.
@@ -1382,6 +1497,7 @@ def register_tools(
         name="send_email",
         title="Send an email",
         annotations=ToolAnnotations(
+            title="Send an email",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1495,6 +1611,7 @@ def register_tools(
         name="upload_email_attachment",
         title="Upload an email attachment",
         annotations=ToolAnnotations(
+            title="Upload an email attachment",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1533,6 +1650,7 @@ def register_tools(
         name="get_call",
         title="Get a call",
         annotations=ToolAnnotations(
+            title="Get a call",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1558,6 +1676,7 @@ def register_tools(
         name="list_calls",
         title="List calls",
         annotations=ToolAnnotations(
+            title="List calls",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1592,6 +1711,7 @@ def register_tools(
         name="send_sms",
         title="Send a text message",
         annotations=ToolAnnotations(
+            title="Send a text message",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -1617,8 +1737,8 @@ def register_tools(
         carrier delivers a dynamic alphanumeric sender ID unchanged (about
         110 countries, see core/hailhq/core/sender_id_corridors.py) use
         your organization's sender ID
-        (or ``HAIL``, the platform default); Australia (+61) always uses
-        ``HAIL`` when that carrier is Twilio; every other destination,
+        (or ``HAIL``, the platform default); Australia (+61) may use
+        ``HAIL`` instead; every other destination,
         including the US and Canada,
         uses your organization's oldest active SMS-capable number and the
         API returns 422 when there is none.
@@ -1666,6 +1786,7 @@ def register_tools(
         name="get_sms",
         title="Get a text message",
         annotations=ToolAnnotations(
+            title="Get a text message",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1690,6 +1811,7 @@ def register_tools(
         name="list_sms",
         title="List text messages",
         annotations=ToolAnnotations(
+            title="List text messages",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1722,6 +1844,7 @@ def register_tools(
         name="get_email",
         title="Get an email",
         annotations=ToolAnnotations(
+            title="Get an email",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1749,6 +1872,7 @@ def register_tools(
         name="list_emails",
         title="List emails",
         annotations=ToolAnnotations(
+            title="List emails",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1797,6 +1921,7 @@ def register_tools(
         name="get_email_raw",
         title="Get raw email",
         annotations=ToolAnnotations(
+            title="Get raw email",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1822,6 +1947,7 @@ def register_tools(
         name="get_email_attachment",
         title="Get an email attachment",
         annotations=ToolAnnotations(
+            title="Get an email attachment",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1851,6 +1977,7 @@ def register_tools(
         name="get_email_events",
         title="Get email events",
         annotations=ToolAnnotations(
+            title="Get email events",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1891,6 +2018,7 @@ def register_tools(
         name="get_email_stats",
         title="Get email stats",
         annotations=ToolAnnotations(
+            title="Get email stats",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1935,6 +2063,7 @@ def register_tools(
         name="get_events",
         title="Get events",
         annotations=ToolAnnotations(
+            title="Get events",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -1986,6 +2115,7 @@ def register_tools(
         name="list_agents",
         title="List agents",
         annotations=ToolAnnotations(
+            title="List agents",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2012,6 +2142,7 @@ def register_tools(
         name="create_agent",
         title="Create an agent",
         annotations=ToolAnnotations(
+            title="Create an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -2091,6 +2222,7 @@ def register_tools(
         name="route_number",
         title="Route a number to an agent",
         annotations=ToolAnnotations(
+            title="Route a number to an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=True,
@@ -2133,6 +2265,7 @@ def register_tools(
         name="quote_numbers",
         title="Quote phone numbers",
         annotations=ToolAnnotations(
+            title="Quote phone numbers",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2144,7 +2277,6 @@ def register_tools(
         country_code: str,
         capabilities: list[str] | None = None,
         number_type: str | None = None,
-        provider: str = "auto",
         area_code: str | None = None,
         city: str | None = None,
         region: str | None = None,
@@ -2155,8 +2287,7 @@ def register_tools(
         ``country_code`` is an ISO alpha-2 code such as ``"US"``.
         ``capabilities`` is ``["voice"]``, ``["sms"]`` or both (default).
         ``number_type`` is ``local``, ``mobile``, ``national`` or
-        ``toll_free``; omit it to compare all types. ``provider`` is
-        ``auto`` (compare all carriers), ``twilio``, ``telnyx`` or ``didww``.
+        ``toll_free``; omit it to compare all types.
         ``area_code`` is an area code or the first digits of the number, as
         dialed in the country: ``"020"`` (London), ``"480"`` (Arizona).
         ``city`` is a city name such as ``"London"``. Each offer has
@@ -2165,19 +2296,38 @@ def register_tools(
         with ``city``) is a US/CA state code; list_number_regions lists them.
         Omit all three to search the whole country.
 
-        Returns ``{"offers": [...], "recommended_quote_id", "unavailable_providers",
-        "expires_at"}``. Each offer has ``e164``, ``provider``, ``number_type``,
+        Returns ``{"offers": [...], "recommended_quote_id", "expires_at"}``.
+        Each offer has ``e164``, ``number_type``,
         ``capabilities``, ``monthly_cents``, ``setup_cents``, ``readiness``,
-        ``requirements`` and ``quote_id``. Money fields are cents (USD).
+        ``requirements``, ``subject_types``, ``verifications`` and
+        ``quote_id``. Money fields are cents (USD).
         Quotes expire in 10 minutes (``expires_at``); quote again after that.
 
+        ``subject_types`` says who may verify for the number: ``person``
+        (the user), ``business`` (the user's company), or both; empty when no
+        verification is needed. ``verifications`` lists the verifications
+        the offer can be bought with (``id``, ``state``, ``subject_type``,
+        ``subject_name``), approved first: those of an accepted subject type
+        still under review, and the approved ones the carrier still accepts
+        for the offer. ``subject_name`` is the person's or company's name from the
+        verification form. When several are approved, show the user the
+        names and ask which one buys the number; pass its ``id`` as
+        ``verification_id`` to acquire_number.
+
         An offer with ``readiness == "verification_required"`` cannot be
-        bought until the organization is verified. Call
-        get_verification_requirements, ask the user for the details, then
-        submit_verification and poll get_verification (review takes business
-        days). ``requirements`` lists what the carrier needs. Prefer an offer whose
+        bought until the organization is verified. Ask the user "you or your
+        company?" to pick the ``subject_type`` (one of ``subject_types``).
+        Call get_verification_requirements, ask the user for the details,
+        then submit_verification, both with the offer's ``quote_id`` and that
+        ``subject_type``, and poll get_verification (review takes business
+        days). ``requirements``
+        lists what the carrier needs. Prefer an offer whose
         ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
         best one, or is null if none is ready.
+
+        An offer with ``by_request: true`` has no ``e164``: support orders
+        that number by hand. acquire_number refuses it; tell the user to ask
+        support. Its ``quote_id`` still works for verification.
 
         Errors come back as ``{"error": "<message>"}``."""
         try:
@@ -2187,7 +2337,6 @@ def register_tools(
                     country_code=country_code,
                     capabilities=capabilities,
                     number_type=number_type,
-                    provider=provider,
                     area_code=area_code,
                     city=city,
                     region=region,
@@ -2199,6 +2348,7 @@ def register_tools(
         name="acquire_number",
         title="Buy a phone number",
         annotations=ToolAnnotations(
+            title="Buy a phone number",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2211,8 +2361,9 @@ def register_tools(
         country_code: str,
         number_type: str,
         confirm_total_cents: int,
-        provider: str = "auto",
         idempotency_key: str | None = None,
+        subject_type: str | None = None,
+        verification_id: str | None = None,
     ) -> dict[str, Any]:
         """Buys a real phone number. It charges the setup fee and the first
         month now and renews monthly. Call quote_numbers first. Pass the
@@ -2226,13 +2377,22 @@ def register_tools(
         quote_id and idempotency_key, or check list_numbers. Never request a
         new quote after a timeout.
 
-        ``provider`` is ``auto`` (the quoted carrier) or the quoted carrier's
-        name. ``idempotency_key`` is optional; to retry after a timeout or a
+        ``idempotency_key`` is optional; to retry after a timeout or a
         5xx, pass the ``idempotency_key`` that result returned, so the number
         is bought once. A 4xx error returns no key: the API remembers that
         failure under it, so drop it and quote again.
 
-        Returns the number (``id``, ``e164``, ``provisioning_state``, ...)
+        ``verification_id`` picks which approved verification buys a number
+        that needs one: the ``id`` of an approved entry in the offer's
+        ``verifications``. Pass it when more than one is approved: show the
+        user each ``subject_name`` (the person's or company's name) and ask
+        which. With one approved, it is used. ``subject_type`` (``person`` or
+        ``business``) is optional: it keeps only that kind. A 422 on
+        ``verification_id`` means several are approved and none was picked,
+        or the id is not an approved verification for this number.
+
+        Returns the number (``id``, ``e164``, ``provisioning_state``,
+        ``verification_id``, ``subject_name``, ...)
         plus ``idempotency_key``, or ``{"error": "<message>",
         "idempotency_key": ...}``."""
         try:
@@ -2243,8 +2403,9 @@ def register_tools(
                     country_code=country_code,
                     number_type=number_type,
                     confirm_total_cents=confirm_total_cents,
-                    provider=provider,
                     idempotency_key=idempotency_key,
+                    subject_type=subject_type,
+                    verification_id=verification_id,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -2253,6 +2414,7 @@ def register_tools(
         name="list_numbers",
         title="List numbers",
         annotations=ToolAnnotations(
+            title="List numbers",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2269,7 +2431,7 @@ def register_tools(
         ``limit`` is 1..200 (default 50). Pass the returned ``next_cursor``
         as ``cursor`` for the next page.
 
-        Returns ``{"items": [{"id", "e164", "provider", "country_code",
+        Returns ``{"items": [{"id", "e164", "country_code",
         "number_type", "capabilities", "provisioning_state", "voice_agent_id",
         "sms_agent_id", ...}], "next_cursor"}``, or ``{"error": "<message>"}``."""
         try:
@@ -2282,6 +2444,7 @@ def register_tools(
         name="list_number_regions",
         title="List number search regions",
         annotations=ToolAnnotations(
+            title="List number search regions",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2305,6 +2468,7 @@ def register_tools(
         name="get_number",
         title="Get a number",
         annotations=ToolAnnotations(
+            title="Get a number",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2331,6 +2495,7 @@ def register_tools(
         name="release_number",
         title="Release a number",
         annotations=ToolAnnotations(
+            title="Release a number",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2370,6 +2535,7 @@ def register_tools(
         name="get_verification_requirements",
         title="Get verification requirements",
         annotations=ToolAnnotations(
+            title="Get verification requirements",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2380,8 +2546,9 @@ def register_tools(
         ctx: Context,
         country_code: str,
         number_type: str,
-        subject_type: str = "person",
-        provider: str | None = None,
+        subject_type: str,
+        quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Read what the carrier needs to verify the organization before it
@@ -2390,14 +2557,19 @@ def register_tools(
 
         ``country_code`` is ISO alpha-2 (for example ``"GB"``). ``number_type``
         is ``local``, ``mobile``, ``national`` or ``toll_free``.
-        ``subject_type`` is ``person`` (default) or ``business``; the result's
-        ``subject_types`` lists what the carrier accepts. ``provider`` is
-        optional.
+        ``subject_type`` is required: ``person`` (the user) or ``business``
+        (the user's company). Never guess it: ask the user "you or your
+        company?". The result's ``subject_types`` lists what the carrier
+        accepts. The organization may hold one verification of each. ``quote_id`` is the
+        offer's ``quote_id`` from quote_numbers. It is required for
+        ``purpose='number'``: the form is the one for that offer.
 
         ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
         ``purpose='sms'`` registers the organization to text US numbers from a
         US number (country_code US, number_type local). The carrier fee is
-        debited from credit at filing.
+        debited from credit at filing. If the error says to pass
+        ``number_id``, pass the ``id`` of one of the organization's US numbers
+        from list_numbers.
 
         Returns ``required`` (false means no verification is needed and
         submit_verification would fail), ``fields`` (values to collect),
@@ -2415,7 +2587,8 @@ def register_tools(
                     country_code=country_code,
                     number_type=number_type,
                     subject_type=subject_type,
-                    provider=provider,
+                    quote_id=quote_id,
+                    number_id=number_id,
                     purpose=purpose,
                 )
         except RuntimeError as exc:
@@ -2425,6 +2598,7 @@ def register_tools(
         name="submit_verification",
         title="Submit a verification",
         annotations=ToolAnnotations(
+            title="Submit a verification",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
@@ -2435,13 +2609,17 @@ def register_tools(
         ctx: Context,
         country_code: str,
         number_type: str,
-        fields: Any,
-        documents: Any,
-        files: Any,
+        fields: _JsonObject,
+        documents: _JsonObject,
+        files: _JsonObjectList,
         attest_authorized: StrictBool,
-        subject_type: str = "person",
-        address: Any = None,
-        provider: str | None = None,
+        # Required, but checked inside submit_verification: a missing
+        # required argument makes FastMCP echo every argument, personal data
+        # included, in its validation error.
+        subject_type: str | None = None,
+        address: _JsonObjectOrNone = None,
+        quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """Send the user's personal or company details and identity documents
@@ -2458,11 +2636,24 @@ def register_tools(
         registers the organization to text US numbers from a US number
         (country_code US, number_type local). The carrier fee is debited from
         credit at filing. Pass the same ``purpose`` to
-        get_verification_requirements.
+        get_verification_requirements. For ``purpose='number'``, pass the
+        same ``quote_id`` you passed to get_verification_requirements. For
+        ``purpose='sms'``, pass the same ``number_id`` if you passed one.
+
+        ``subject_type`` is required: ``person`` (the user) or ``business``
+        (the user's company), the same one passed to
+        get_verification_requirements. Never guess it: ask the user "you or
+        your company?".
+
+        The verification is named after the person or company in the form
+        (for example the business name, or the first and last name); it
+        comes back as ``subject_name``. The organization may hold several
+        verifications of one subject type (several people or companies).
 
         Steps: 1) call get_verification_requirements. 2) Ask the user for each
         field and file. 3) Call this once. Do not submit twice: a 409 means
-        one already exists (see list_verifications).
+        one with the same subject type and name already exists (see
+        list_verifications).
 
         Arguments, as listed by get_verification_requirements:
         ``fields`` is ``{field name: value}``. ``address`` is
@@ -2478,7 +2669,7 @@ def register_tools(
         most 20 files and 20 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
 
-        Returns the verification: ``id`` and ``state`` (no personal data).
+        Returns the verification: ``id``, ``state`` and ``subject_name``.
         Review takes business days and nothing notifies you: poll
         get_verification. If the carrier finds a problem you get
         ``{"error", "problems": [{"loc", "msg"}]}`` and nothing is stored:
@@ -2501,7 +2692,8 @@ def register_tools(
                     attest_authorized=attest_authorized,
                     subject_type=subject_type,
                     address=address,
-                    provider=provider,
+                    quote_id=quote_id,
+                    number_id=number_id,
                     purpose=purpose,
                 )
         except RuntimeError:
@@ -2512,6 +2704,7 @@ def register_tools(
         name="list_verifications",
         title="List verifications",
         annotations=ToolAnnotations(
+            title="List verifications",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2527,8 +2720,9 @@ def register_tools(
         Omit to see every registration. ``purpose='sms'`` lists the
         registrations to text US numbers from a US number.
 
-        Returns ``{"items": [{"id", "provider", "country_code", "number_type",
-        "subject_type", "purpose", "state", "rejection_reason", "created_at",
+        Returns ``{"items": [{"id", "country_code", "number_type",
+        "subject_type", "subject_name", "purpose", "state",
+        "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation"}]}``.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
@@ -2547,6 +2741,7 @@ def register_tools(
         name="get_verification",
         title="Get a verification",
         annotations=ToolAnnotations(
+            title="Get a verification",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2582,6 +2777,7 @@ def register_tools(
         name="cancel_verification",
         title="Cancel a verification",
         annotations=ToolAnnotations(
+            title="Cancel a verification",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
@@ -2598,9 +2794,9 @@ def register_tools(
         Works in state ``awaiting_review`` or ``rejected``, and for an
         ``approved`` US SMS registration (``purpose: "sms"``): its numbers
         leave the campaign, US-to-US texts from them fail again, and its
-        monthly fee stops after the current month. Telnyx bills at least 3
-        monthly fees from approval, so a Telnyx registration cancelled sooner
-        is still charged for 3 months. Ask the user first. A
+        monthly fee stops after the current month. Some registrations bill at
+        least 3 monthly fees from approval, so cancelling sooner can still
+        charge 3 months. Ask the user first. A
         ``submitting`` or ``submitted`` verification is under review and
         cannot be cancelled (409): wait for the result with get_verification.
 
@@ -2618,6 +2814,7 @@ def register_tools(
         name="confirm_verification",
         title="Confirm a verification with a code",
         annotations=ToolAnnotations(
+            title="Confirm a verification with a code",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -2650,6 +2847,7 @@ def register_tools(
         name="get_agent",
         title="Get an agent",
         annotations=ToolAnnotations(
+            title="Get an agent",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2677,6 +2875,7 @@ def register_tools(
         name="update_agent",
         title="Update an agent",
         annotations=ToolAnnotations(
+            title="Update an agent",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=True,
@@ -2761,6 +2960,7 @@ def register_tools(
         name="delete_agent",
         title="Delete an agent",
         annotations=ToolAnnotations(
+            title="Delete an agent",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,
@@ -2797,6 +2997,7 @@ def register_tools(
         name="list_contacts",
         title="List contacts",
         annotations=ToolAnnotations(
+            title="List contacts",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2829,6 +3030,7 @@ def register_tools(
         name="lookup_contact",
         title="Look up a contact",
         annotations=ToolAnnotations(
+            title="Look up a contact",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2855,6 +3057,7 @@ def register_tools(
         name="list_email_domains",
         title="List email domains",
         annotations=ToolAnnotations(
+            title="List email domains",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2897,6 +3100,7 @@ def register_tools(
         name="whoami",
         title="Who am I",
         annotations=ToolAnnotations(
+            title="Who am I",
             readOnlyHint=True,
             destructiveHint=False,
             idempotentHint=True,
@@ -2928,6 +3132,7 @@ def register_tools(
         name="create_contact",
         title="Create a contact",
         annotations=ToolAnnotations(
+            title="Create a contact",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,

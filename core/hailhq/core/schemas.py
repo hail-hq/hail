@@ -255,7 +255,7 @@ class CallCreate(ConsentAttestationMixin):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Request best-effort audio recording. Requires workspace recording enabled. Null inherits the agent/workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.",
+        description="Best-effort audio recording for this call. true records and false does not, whatever the workspace setting. Null inherits the agent, then the workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.",
     )
     ai_disclosure: bool = Field(
         default=True,
@@ -283,7 +283,7 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the call and echoed back on "
             "reads. Not interpreted by Hail. Keys starting with "
-            "'recording_' are reserved and rejected."
+            "'recording_' and the key 'failure_code' are reserved and rejected."
         ),
     )
 
@@ -296,7 +296,8 @@ class CallCreate(ConsentAttestationMixin):
         bad = sorted(
             k
             for k in v
-            if isinstance(k, str) and k.startswith(RESERVED_CALL_METADATA_PREFIX)
+            if isinstance(k, str)
+            and (k.startswith(RESERVED_CALL_METADATA_PREFIX) or k == "failure_code")
         )
         if bad:
             raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")
@@ -432,6 +433,10 @@ class CallResponse(BaseModel):
     ended_at: datetime | None = Field(
         description="When the call ended, ISO 8601 timestamp. Null while still in progress."
     )
+    failure_message: str | None = Field(
+        default=None,
+        description="Human-readable explanation for a failed call. Null for other statuses.",
+    )
 
 
 class CallListResponse(BaseModel):
@@ -458,8 +463,8 @@ class SmsCreate(ConsentAttestationMixin):
             "ID unchanged (about 110 countries: most of Europe, Africa, the Middle "
             "East, Asia-Pacific and the Caribbean; one table per carrier in "
             "core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or "
-            "the platform default 'HAIL' when none is set; Australia (+61) always "
-            "uses 'HAIL' when that carrier is Twilio. Every other destination, "
+            "the platform default 'HAIL' when none is set; Australia (+61) may "
+            "always use 'HAIL', depending on the carrier. Every other destination, "
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
             "exists the request fails with 422. SMS never uses the shared pool."
@@ -583,9 +588,10 @@ class NumberAcquireRequest(BaseModel):
     quote_id: UUID = Field(
         description="Unexpired organization-bound quote from POST /numbers/quotes. Required: without it the request is a 422; get a quote first.",
     )
-    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
-        default="auto",
-        description="Carrier restriction for the quote. Auto accepts the quoted carrier; twilio, telnyx, or didww must match it.",
+    provider: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated and ignored. Hail buys the quoted number from the carrier it picked.",
     )
 
     country_code: str = Field(
@@ -604,6 +610,26 @@ class NumberAcquireRequest(BaseModel):
             "The total the caller expects to pay now: the quoted monthly price "
             "plus the setup price, in cents. When set, the order is refused "
             "with 409 if the quoted total differs."
+        ),
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description=(
+            "Buy with an approved verification of this kind only: 'person' "
+            "(you) or 'business' (your company). With `verification_id` it "
+            "must match that verification. Ignored when the number needs no "
+            "verification."
+        ),
+    )
+    verification_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Hail id of the approved verification to buy with, from the "
+            "quote's `verifications`. Needed when you have more than one "
+            "approved verification for this number (422 without it); with one "
+            "it is used. 422 when it is not one of your approved "
+            "verifications for this number. Ignored when the number needs no "
+            "verification."
         ),
     )
 
@@ -649,9 +675,10 @@ class NumberQuoteRequest(BaseModel):
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
     )
-    provider: Literal["auto", "twilio", "telnyx", "didww"] = Field(
-        default="auto",
-        description="Carrier restriction; twilio, telnyx, or didww returns that carrier's offers only. auto compares all by readiness, remaining verification effort, and rental/setup costs; Twilio wins equivalent ties.",
+    provider: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated and ignored. Hail compares every carrier by readiness, remaining verification effort, and rental and setup costs.",
     )
     area_code: str | None = Field(
         default=None,
@@ -737,10 +764,6 @@ class NumberQuoteRequest(BaseModel):
 
 class PhoneNumberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    provider: str = Field(
-        default="twilio",
-        description="Carrier that owns and routes this number, such as twilio or telnyx.",
-    )
 
     id: UUID = Field(description="Unique identifier for this number.")
     e164: str = Field(description="The phone number, E.164 format.")
@@ -759,10 +782,6 @@ class PhoneNumberResponse(BaseModel):
     is_dedicated: bool = Field(
         description="True if this number is owned by the organization. False for shared-pool numbers."
     )
-    messaging_service_sid: str | None = Field(
-        default=None,
-        description="Provider messaging-service identifier once SMS has been enabled on this number. Null until then.",
-    )
     voice_agent_id: UUID | None = Field(
         default=None,
         description="Agent that answers calls to this number. Null: calls ring out.",
@@ -776,6 +795,28 @@ class PhoneNumberResponse(BaseModel):
         description=(
             "True while the number is attached for inbound calls at the carrier "
             "and on Hail's LiveKit inbound trunk. Set when voice_agent_id is set."
+        ),
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description=(
+            "Who the verification used to buy this number is for: 'person' "
+            "or 'business'. Null when no verification was used."
+        ),
+    )
+    verification_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Hail id of the verification used to buy this number. Null when "
+            "no verification was used."
+        ),
+    )
+    subject_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the person or company the verification used to buy this "
+            "number is for. Null when no verification was used or the name "
+            "is unknown."
         ),
     )
 
@@ -874,7 +915,7 @@ class AgentCreate(BaseModel):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+        description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
     )
     ai_disclosure: bool = Field(
         default=True,
@@ -964,7 +1005,7 @@ class AgentUpdate(BaseModel):
     )
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits workspace recording; false disables it for this agent.",
+        description="Null inherits workspace recording; true or false sets it for this agent's calls.",
     )
     ai_disclosure: bool | None = Field(
         default=None, description="Whether the AI line is spoken first."
@@ -1026,7 +1067,7 @@ class AgentResponse(BaseModel):
     first_message: str | None = Field(description="Opening line, or null to wait.")
     recording_enabled: bool | None = Field(
         default=None,
-        description="Null inherits the workspace recording choice; false disables recording for this agent. A workspace that disables recording cannot be overridden.",
+        description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
     )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
     ai_disclosure_line: str | None = Field(
@@ -2640,17 +2681,25 @@ class ProviderValidateResult(BaseModel):
 
 
 class VerificationResponse(BaseModel):
-    """A carrier verification. Holds state only; no personal data."""
+    """A carrier verification: its state and the name of the person or
+    company it is for. No other personal data."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(description="Unique identifier for this verification.")
-    provider: str = Field(description="The carrier this verification is with.")
     country_code: str = Field(description="ISO alpha-2 country code.")
     number_type: str = Field(
         description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
     )
     subject_type: str = Field(description="'person' or 'business'.")
+    subject_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the person or company this verification is for, taken "
+            "from the form (for example the business name, or the first and "
+            "last name). Null when unknown."
+        ),
+    )
     purpose: str = Field(
         description=(
             "'number': permission to buy a number in this country. "

@@ -29,6 +29,7 @@ from __future__ import annotations
 import uuid
 
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.call_failures import call_failure_message
 from hailhq.core.handover import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -129,6 +130,9 @@ async def sweep_stale_calls(
                 "to": to_e164,
                 "agent_id": str(agent_id) if agent_id else None,
                 "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
+                "failure_message": call_failure_message(
+                    "failed", {}, CallEndReason.SWEEPER_TIMEOUT.value
+                ),
             },
         )
         if agent_id is not None:

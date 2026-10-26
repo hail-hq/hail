@@ -2,13 +2,14 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import pytest
 from google.genai import types
-from hailhq.voicebot import amd, pickup
+from hailhq.voicebot import amd, classify, pickup
 from livekit import rtc
 from livekit.agents.llm import ChatChunk, ChoiceDelta, FunctionToolCall, LLMStream
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
@@ -277,8 +278,45 @@ async def test_caller_cancellation_propagates_and_closes_recheck():
     assert cancelled.is_set()
 
 
-async def test_shared_recheck_deadline_also_cancels_slow_llm(monkeypatch):
-    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.04)
+async def test_slow_recognize_and_slow_classify_end_at_one_total(monkeypatch):
+    """One cap covers transcription and classification together."""
+    monkeypatch.setattr(pickup, "RECHECK_TIMEOUT_SECONDS", 0.1)
+
+    async def slow_recognize(*args, **kwargs):
+        await asyncio.sleep(0.06)
+        return SimpleNamespace(alternatives=[SimpleNamespace(text="hello")])
+
+    class HangingStream(LLMStream):
+        async def _run(self):
+            await asyncio.Event().wait()
+
+    class HangingLLM(FakeLLM):
+        def chat(self, **kwargs):
+            return HangingStream(
+                self,
+                chat_ctx=kwargs["chat_ctx"],
+                tools=kwargs["tools"],
+                conn_options=kwargs["conn_options"],
+            )
+
+    original = prediction()
+    started = time.monotonic()
+    result = await pickup.recheck_greeting(
+        original,
+        frame(),
+        stt=SimpleNamespace(recognize=slow_recognize),
+        llm=HangingLLM(),
+        prompt="",
+    )
+    elapsed = time.monotonic() - started
+    assert result is original
+    # Not 0.06 + the classifier's own 5 s cap.
+    assert 0.09 <= elapsed < 0.5
+
+
+async def test_classifier_deadline_cancels_slow_llm(monkeypatch):
+    """The check's own total also stops a slow classifier."""
+    monkeypatch.setattr(classify, "CLASSIFY_TIMEOUT_SECONDS", 0.04)
     cancelled = asyncio.Event()
 
     class HangingStream(LLMStream):
@@ -396,7 +434,7 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     models = amd.AMDModels(
         amd.ClassifierFailover(primary, backup), object(), recheck_stt=batch
     )
-    models.aclose = AsyncMock()
+    models.aclose_transcription = AsyncMock()
     call_id = UUID(int=10)
     room = object()
     session = _session_with_layers()
@@ -405,12 +443,16 @@ async def test_run_amd_rechecks_before_owned_layers_close(monkeypatch, category)
     session._start_ivr_detection = AsyncMock()
     result = await amd.run_amd(session, call_id, models=models, room=room)
     assert result.category == AMDCategory(category)
-    assert result.reason == "greeting_recheck"
+    assert result.reason == (
+        "unavailable_recheck"
+        if category == "machine-unavailable"
+        else "greeting_recheck"
+    )
     assert primary.calls
     amd.PickupAudio.assert_called_once_with(room, f"caller-{call_id}", seconds=20)
     raw.stop.assert_awaited_once()
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose_transcription.assert_awaited_once()
     if category == "machine-ivr":
         session._start_ivr_detection.assert_awaited_once_with(
             transcript="A recorded greeting"
@@ -445,9 +487,33 @@ async def test_greeting_transcripts_during_recheck_keep_machine_verdict(
 
     monkeypatch.setattr(amd, "recheck_greeting", recheck)
     models = amd.AMDModels(FakeLLM(), object(), recheck_stt=transcriber())
-    models.aclose = AsyncMock()
+    models.aclose_transcription = AsyncMock()
     result = await amd.run_amd(session, UUID(int=10), models=models, room=object())
     assert result is not original
     assert result.category == AMDCategory.MACHINE_VM
     raw.aclose.assert_awaited_once()
-    models.aclose.assert_awaited_once()
+    models.aclose_transcription.assert_awaited_once()
+
+
+async def test_unavailable_from_audio_recheck_is_verified_before_hangup(monkeypatch):
+    _RecordingAMD.result = prediction()
+    monkeypatch.setattr(amd, "AMD", _RecordingAMD)
+    raw = SimpleNamespace(
+        start=Mock(),
+        stop=AsyncMock(),
+        frame=Mock(return_value=frame()),
+        aclose=AsyncMock(),
+    )
+    monkeypatch.setattr(amd, "PickupAudio", Mock(return_value=raw))
+    wrong = prediction("machine-unavailable", "greeting_recheck")
+    wrong.transcript = "Welcome to Delta Vacations. We're so glad you called."
+    monkeypatch.setattr(amd, "recheck_greeting", AsyncMock(return_value=wrong))
+    verifier = Classifier('{"label":"machine-ivr"}')
+    models = amd.AMDModels(verifier, object(), recheck_stt=transcriber())
+    models.aclose_transcription = AsyncMock()
+    session = _session_with_layers()
+    session._start_ivr_detection = AsyncMock()
+    result = await amd.run_amd(session, UUID(int=10), models=models, room=object())
+    assert result.category == AMDCategory.MACHINE_IVR
+    assert verifier.calls
+    session._start_ivr_detection.assert_awaited_once()

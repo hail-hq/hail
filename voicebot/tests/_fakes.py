@@ -139,6 +139,11 @@ class FakeAnnouncingSession:
         self.say_calls: list[tuple[str, bool]] = []
         self.generate_reply_calls: list[str | None] = []
         self.last_handle: FakeSpeechHandle | None = None
+        # Utterances already spoken or requested at each clear_user_turn().
+        self.cleared_after: list[int] = []
+
+    def clear_user_turn(self) -> None:
+        self.cleared_after.append(len(self.say_calls) + len(self.generate_reply_calls))
 
     def say(self, text: str, *, allow_interruptions: bool) -> FakeSpeechHandle:
         self.say_calls.append((text, allow_interruptions))
@@ -166,11 +171,13 @@ class FakeLocalParticipant:
 
 
 class FakeRoom:
-    """Minimal ``ctx.room``: the local participant plus a name."""
+    """Minimal ``ctx.room``: the local participant, a name, and the remote
+    participants by identity."""
 
     def __init__(self, name: str = "hail-test") -> None:
         self.name = name
         self.local_participant = FakeLocalParticipant()
+        self.remote_participants: dict[str, object] = {}
 
 
 class FakeSip:
@@ -180,11 +187,19 @@ class FakeSip:
         self.create_sip_participant = AsyncMock()
 
 
+class FakeRoomService:
+    """``ctx.api.room``: ``remove_participant`` is an ``AsyncMock``."""
+
+    def __init__(self) -> None:
+        self.remove_participant = AsyncMock()
+
+
 class FakeLKApi:
-    """``ctx.api`` (a ``LiveKitAPI``): only the SIP service is used."""
+    """``ctx.api`` (a ``LiveKitAPI``): the SIP and room services."""
 
     def __init__(self) -> None:
         self.sip = FakeSip()
+        self.room = FakeRoomService()
 
 
 class FakeAudioToggle:
@@ -235,6 +250,12 @@ class FakeJobContext:
         self.delete_room_error: Exception | None = None
         self.room = FakeRoom()
         self.api = FakeLKApi()
+        # An answered dial puts the contact's leg in the room.
+        self.api.sip.create_sip_participant.side_effect = self._join
+
+    def _join(self, req: object) -> None:
+        identity = req.participant_identity  # type: ignore[attr-defined]
+        self.room.remote_participants[identity] = object()
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)

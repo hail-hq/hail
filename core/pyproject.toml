@@ -19,7 +19,7 @@ dependencies = [
     "phonenumbers>=9.0.39",
     "regex>=2026.4.4",
     "didww>=3.1",
-    "logfire[aiohttp-client,httpx,requests,sqlalchemy]>=5.1.1",
+    "logfire[aiohttp-client,httpx,requests,sqlalchemy]>=5.3.0",
 ]
 
 [project.optional-dependencies]

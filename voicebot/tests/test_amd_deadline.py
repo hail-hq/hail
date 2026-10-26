@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from google.genai import errors, types
-from hailhq.voicebot import amd
+from hailhq.voicebot import amd, classify, ivr
 from livekit.agents.llm import (
     ChatChunk,
     ChatContext,
@@ -155,3 +155,16 @@ async def test_amd_cancellation_closes_primary_without_starting_backup():
         await task
     assert primary.cancelled
     assert not backup.attempts
+
+
+async def test_one_check_is_capped_at_its_total(monkeypatch):
+    """The first classifier gets its try, the next one gets the rest of the
+    check's total, then the check gives up."""
+    monkeypatch.setattr(amd, "CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(classify, "CLASSIFY_TIMEOUT_SECONDS", 0.1)
+    chain = amd.ClassifierFailover(Classifier("hang"), Classifier("hang"))
+    async with asyncio.timeout(2):
+        result = await ivr.try_classify_remote_speech(chain, "For sales, press one.")
+    assert result is None
+    assert chain.primary.cancelled and chain.backups[0].cancelled
+    assert len(chain.backups[0].attempts) == 1

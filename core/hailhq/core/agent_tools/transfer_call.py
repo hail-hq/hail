@@ -30,7 +30,6 @@ MAX_REASON_CHARS = 200
 _log = logging.getLogger("hailhq.core.agent_tools")
 
 _UNAVAILABLE = "I can't connect you to anyone right now."
-_CONNECTED = "Connected. They are talking now. Say nothing and do not end the call."
 _NO_ANSWER = "They could not pick up. Offer to take a message."
 # Waits between the 7 attempts of the "answered" result post (about a minute
 # in all). The stale-call and pool sweeps rely on that event to lift the time
@@ -82,7 +81,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
     by_label = {t["label"]: t["contact_id"] for t in targets}
     menu = "; ".join(f"{t['label']} ({t.get('note') or ''})" for t in targets)
 
-    async def execute(ctx: ToolContext, args: dict[str, Any]) -> str:
+    async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
             return _UNAVAILABLE
         label = str(args.get("contact", ""))
@@ -137,7 +136,9 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             _log.exception("handover bridge failed")
             outcome = BridgeOutcome("failed", None, 0)
         if outcome.outcome == "answered" and answer_reported:
-            return _CONNECTED
+            # None: the two people are talking, so the muted agent gets no
+            # reply turn (see spec.ToolSpec.execute).
+            return None
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
@@ -145,7 +146,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             )
         except Exception:
             _log.exception("handover result post failed")
-        return _CONNECTED if outcome.outcome == "answered" else _NO_ANSWER
+        return None if outcome.outcome == "answered" else _NO_ANSWER
 
     return dataclasses.replace(
         SPEC,
@@ -160,7 +161,11 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "contact": {"type": "string", "enum": list(by_label)},
                 "reason": {
                     "type": "string",
-                    "description": "One short phrase for the person, e.g. 'an invoice question'.",
+                    "description": (
+                        "What the caller needs, as a short phrase the person "
+                        "hears, e.g. 'an invoice question'. Empty when the "
+                        "caller only asked for a person."
+                    ),
                 },
             },
             "required": ["contact", "reason"],

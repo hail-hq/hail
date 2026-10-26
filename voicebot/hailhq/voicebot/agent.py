@@ -40,9 +40,10 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.directory import find_by_phone
+from hailhq.core.directory import DirectoryEntry, find_by_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
@@ -57,6 +58,7 @@ from hailhq.core.prompts import (
     build_voice_instructions,
     other_party_section,
 )
+from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.telemetry import (
@@ -65,10 +67,12 @@ from hailhq.core.telemetry import (
     telemetry_enabled,
 )
 from hailhq.core.telemetry_identity import (
+    bind_root,
     get_identity,
     identity_scope,
     resolve_identity,
     set_identity,
+    tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
@@ -76,17 +80,21 @@ from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
+    AMDModels,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
+from hailhq.voicebot.handover_screen import NOT_A_PERSON, screen_handover_pickup
+from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
+    stt_takes_keyterms,
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
@@ -94,14 +102,20 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLMError
+from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
-from livekit.api import CreateSIPParticipantRequest, SipCallError
+from livekit.agents.voice.amd import AMDCategory
+from livekit.api import (
+    CreateSIPParticipantRequest,
+    RoomParticipantIdentity,
+    SipCallError,
+)
 from livekit.plugins import silero
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-from sqlalchemy import select, update
+from sqlalchemy import cast, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 
 
@@ -203,6 +217,7 @@ class SpeechSanitizingAgent(Agent):
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
+        self.phone_menu: PhoneMenu | None = None
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -221,6 +236,11 @@ class SpeechSanitizingAgent(Agent):
         return heard or None
 
     async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
+        if new_message is not None and not (new_message.text_content or "").strip():
+            # An empty turn has nothing to answer. speak_greeting clears the
+            # pickup turn and cancels its end of turn. This is the backup if
+            # that cancel misses (LiveKit's "ignore empty turns" pattern).
+            raise StopResponse()
         if self._opening_pending:
             # AMD pauses playback, but still allows automatic replies to queue.
             # The explicit introduction owns the first turn, including when a
@@ -239,14 +259,39 @@ class SpeechSanitizingAgent(Agent):
                     ConversationItemAddedEvent(item=new_message),
                 )
             raise StopResponse()
+        if self.phone_menu is not None and self.phone_menu.active:
+            self.release_opening()
+            category = await self.phone_menu.observe(
+                (new_message.text_content or "") if new_message is not None else ""
+            )
+            # Discard a preemptive reply made before classification completed.
+            self.release_opening()
+            if category in (AMDCategory.MACHINE_VM, AMDCategory.MACHINE_UNAVAILABLE):
+                raise StopResponse()
+            if category == AMDCategory.HUMAN:
+                # The SDK copied turn_ctx before this hook, so it lacks the
+                # greeting just spoken. Add it, or the reply introduces us again.
+                known = {item.id for item in turn_ctx.items}
+                turn_ctx.items.extend(
+                    item for item in self.chat_ctx.copy().items if item.id not in known
+                )
 
     async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
         if self._opening_pending:
             # Preemptive generation can run before on_user_turn_completed.
             return None
+        if self.phone_menu is not None and self.phone_menu.active:
+            if self.phone_menu.checking or not self.phone_menu.can_navigate:
+                return None
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.add_message(
+                role="system", content=ivr_navigation_instructions(None)
+            )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
+        if self.phone_menu is not None and self.phone_menu.active:
+            return None
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
 
 
@@ -274,10 +319,10 @@ def build_instructions(
 _OTHER_PARTY_TIMEOUT_SECONDS = 1.0
 
 
-async def other_party_prompt(call_id: UUID) -> str | None:
-    """The prompt section naming the person on the line (the caller on an
+async def other_party(call_id: UUID) -> DirectoryEntry | None:
+    """The directory entry of the person on the line (the caller on an
     inbound call, the callee on an outbound one) when their number is in the
-    org's directory. A lookup failure or timeout only drops the section."""
+    org's directory. A lookup failure or timeout returns None."""
     try:
         async with (
             asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
@@ -303,10 +348,7 @@ async def other_party_prompt(call_id: UUID) -> str | None:
     except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None
-    if entry is None:
-        return None
-    # send_email reaches members only, so a contact's email is no use here.
-    return other_party_section(entry.name, can_email=entry.source == "member")
+    return entry
 
 
 def has_thread_tool(tools: list[Any]) -> bool:
@@ -449,7 +491,7 @@ def handover_intro(name: str, reason: str | None) -> str:
     """What the agent says to the contact once they answer.
 
     ``reason`` is LLM-written and a caller can steer it, so it is attributed
-    to the caller ("They say …") and kept short. ``name`` is the tool label;
+    to the caller ("Reason given: …") and kept short. ``name`` is the tool label;
     a dedupe suffix (``"Sam (2)"``) is dropped so the contact hears their name.
     """
     name = _DEDUPE_SUFFIX.sub("", name)
@@ -457,9 +499,28 @@ def handover_intro(name: str, reason: str | None) -> str:
     if said:
         return (
             f"Hi {name}, I have a caller on the line. "
-            f"They say it is about {said}. Connecting you now."
+            f"Reason given: {said}. Connecting you now."
         )
     return f"Hi {name}, I have a caller on the line. Connecting you now."
+
+
+async def _remove_handover_leg(ctx: JobContext, identity: str, call_id: UUID) -> bool:
+    """Hang up the contact's leg. Two tries; False when both failed.
+
+    A leg already gone counts as removed: a "mailbox full" message often
+    hangs up by itself while the check classifies it.
+    """
+    for _ in range(2):
+        if identity not in ctx.room.remote_participants:
+            return True
+        try:
+            await ctx.api.room.remove_participant(
+                RoomParticipantIdentity(room=ctx.room.name, identity=identity)
+            )
+            return True
+        except Exception:
+            logger.exception("call_id=%s could not drop the handover leg", call_id)
+    return False
 
 
 def _sip_outcome(code: int | None) -> str:
@@ -503,6 +564,7 @@ def make_agent_bridge(
     bridge_state: dict[str, Any],
     handover_seconds: int = 0,
     on_cap_fired: Callable[[], None] | None = None,
+    screen: Callable[[str], Awaitable[str | None]] | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
 
@@ -511,6 +573,11 @@ def make_agent_bridge(
     caller the person could not pick up); only bugs raise. On answer the
     agent introduces the caller, then stops listening and speaking so the
     two people talk directly.
+
+    ``screen`` checks who picked up before anything else happens. When it
+    reports voicemail or another machine (``NOT_A_PERSON``), the contact's
+    leg is removed and the outcome is ``no_answer``: no answer is reported,
+    the time limit stays, and the agent takes the caller back.
 
     ``bridge_state["human"]`` is set before dialing so
     :func:`handle_sip_disconnect` can tell the contact's leg from the
@@ -575,6 +642,32 @@ def make_agent_bridge(
             return BridgeOutcome("failed", None, _ring_ms())
 
         ring_ms = _ring_ms()
+        if screen is not None:
+            try:
+                picked_up_by = await screen(identity)
+            except Exception:
+                logger.exception("call_id=%s handover pickup check failed", call_id)
+                picked_up_by = None
+            if picked_up_by in NOT_A_PERSON:
+                logger.info(
+                    "call_id=%s handover reached %s, dropping the contact leg",
+                    call_id,
+                    picked_up_by,
+                )
+                if not await _remove_handover_leg(ctx, identity, call_id):
+                    # The mailbox would record the caller: end the call.
+                    bridge_state["ending"] = True
+                    await _drop_room(ctx, call_id)
+                    ctx.shutdown(reason="handover_leg_stuck")
+                    return BridgeOutcome("failed", None, ring_ms)
+                bridge_state["human"] = None
+                return BridgeOutcome("no_answer", None, ring_ms)
+        if identity not in ctx.room.remote_participants:
+            # The contact hung up during the check; the disconnect handler
+            # ignores a leg that never connected.
+            logger.info("call_id=%s handover contact left before connecting", call_id)
+            bridge_state["human"] = None
+            return BridgeOutcome("no_answer", None, ring_ms)
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
@@ -770,7 +863,8 @@ async def speak_greeting(
     greeting fires *because* a person just spoke: there the session's
     normal turn loop already answers that utterance, so an injected
     opening would race it and its "they have not said anything yet"
-    premise would be false.
+    premise would be false. A greeting after the bounded wait has no such
+    turn, so it keeps the generated opening.
     """
     disclosure = (
         disclosure_line(
@@ -783,15 +877,42 @@ async def speak_greeting(
         else None
     )
     first_message = metadata.get("first_message")
+    inbound = metadata.get("direction") == "inbound"
+    if generate_opening and not inbound:
+        # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
+        # "Hello?". If that turn ends after this opening starts, it cuts the
+        # opening off, so drop the unfinished turn. Its words reach the
+        # generated opening only through pickup_transcript (AMD's transcript
+        # at the verdict). A first_message opening does not answer them. Not
+        # when a person just spoke on the menu path (generate_opening=False):
+        # there the turn loop answers them.
+        try:
+            session.clear_user_turn()
+        except RuntimeError:
+            # The callee hung up and the session stopped.
+            pass
+        except Exception:
+            logger.exception("could not clear the pickup turn")
+        # clear_user_turn leaves the running end-of-turn wait alone. If that
+        # wait ends while no speech is current (before the scheduler picks up
+        # the opening), LiveKit interrupts the opening before
+        # on_user_turn_completed can drop the empty turn. Cancel the wait, as
+        # LiveKit does on new speech. Cancel even when the clear raised: it
+        # empties the transcript first. A turn whose end already fired is not
+        # stopped here. Private in livekit-agents 1.8.8; test_opening_order.py
+        # fails if it moves.
+        recognition = getattr(
+            getattr(session, "_activity", None), "_audio_recognition", None
+        )
+        eou_task = getattr(recognition, "_end_of_turn_task", None)
+        if eou_task is not None:
+            eou_task.cancel()
     try:
         if first_message:
             interruptible = True
             if not disclosure:
                 greeting = first_message
-            elif (
-                metadata.get("direction") == "inbound"
-                and not (metadata.get("ai_disclosure_line") or "").strip()
-            ):
+            elif inbound and not (metadata.get("ai_disclosure_line") or "").strip():
                 greeting = greeting_with_ai_line(
                     first_message,
                     after_greeting_text(
@@ -814,10 +935,11 @@ async def speak_greeting(
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
     # calling") and would tell the caller the agent called them.
-    if generate_opening and metadata.get("direction") != "inbound":
+    if generate_opening and not inbound:
         session.generate_reply(
             instructions=opening_instructions(
-                pickup_transcript or heard, already_introduced=bool(disclosure)
+                " ".join(filter(None, (pickup_transcript, heard))),
+                already_introduced=bool(disclosure),
             )
         )
 
@@ -831,86 +953,71 @@ def arm_deferred_greeting(
     call_id: UUID,
     tasks: set[asyncio.Task[None]],
     on_greeted: Callable[[], None] | None = None,
+    *,
+    agent: SpeechSanitizingAgent,
+    on_machine: Callable[[AMDCategory], Awaitable[None]],
+    classifier: LLM | None,
 ) -> None:
-    """Hold the greeting until the tree hands us to someone, then say it once.
+    """Release the greeting once completed speech is not a recorded menu.
 
-    Only used on the ``machine-ivr`` branch, in two stages:
+    ``classifier`` is AMD's classifier (``AMDModels.llm``, built once per
+    call by ``build_classifier``), never the call's chain. None skips the
+    menu check: speech stays uncertain and greets after the bounded wait.
 
-    1. **Arm** once ``send_dtmf`` has actually executed. Arming any earlier
-       would catch the tail of the menu prompt we are still listening to.
-    2. **Fire** on ``user_state_changed -> "speaking"``, i.e. on VAD.
-
-    VAD is the load-bearing choice. It is driven by audio energy, not by
-    transcripts, so it is **language-independent**: on call 9647b6c4 the
-    clerk answered in Catalan against an ``en-US`` Deepgram, produced no
-    final transcript at all, and the previous trigger, the first
-    ``conversation_item_added`` with ``role="user"``, never fired. The
-    agent sat mute while a person said "bona tarda" twice and hung up.
-    Waiting on a transcript makes the greeting hostage to STT language
-    coverage; waiting on VAD does not.
-
-    ``conversation_item_added`` is kept as a second trigger for the case
-    where a transcript lands without a VAD state transition. Whichever
-    arrives first wins; the latch makes the greeting exactly-once.
-
-    Registering extra listeners is fine, ``AgentSession`` inherits
-    ``rtc.EventEmitter``, which fans out to every registered handler, so
-    this does not disturb ``attach_event_handlers``.
+    A keypress and subsequent VAD/transcript used to be treated as a handoff.
+    A multi-stage menu satisfies both, so classification now runs in the
+    agent's completed-turn hook, before its normal reply can be generated.
+    Speech that stays unclassified greets after a bounded wait, and only an
+    explicit voicemail or unavailable verdict hangs up (see :class:`PhoneMenu`).
+    A greeting that fails is logged; it never sets a call status.
     """
-    state = {"armed": False, "spoken": False}
 
-    def _speak_once() -> None:
-        if state["spoken"] or not state["armed"]:
-            return
-        state["spoken"] = True
-
-        # Mark the machine→person handoff in the event stream at the
-        # handoff itself, before the greeting, so the row precedes the
-        # person's first transcript (STT finalizes while the greeting is
-        # still playing) and consumers (CLI tail, dashboards) stop
-        # attributing speech to the phone tree from this point on. Its own
-        # task, so the greeting never waits on (or dies with) a DB write;
-        # write_call_event logs and swallows its own errors.
-        marker = asyncio.ensure_future(write_call_event(call_id, "person_detected", {}))
+    async def greet(text: str) -> None:
+        agent._opening_pending = True
+        marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
+        try:
+            # Empty text means the wait ran out. The turn loop answered no
+            # speech then, so the opening answers it and anything said over
+            # the greeting.
+            await speak_greeting(
+                session,
+                metadata,
+                pickup_transcript=None if text else agent.phone_menu.unconfirmed,
+                generate_opening=not text,
+                on_opened=agent.release_opening,
+            )
+        except Exception:
+            # The session can close while the greeting plays.
+            logger.exception("call_id=%s deferred greeting failed after IVR", call_id)
+            return
+        if on_greeted is not None:
+            on_greeted()
 
-        async def _run() -> None:
-            try:
-                # No generated opening here: this fires because a person
-                # just spoke, and the normal turn loop answers them. The
-                # injected opening turn is for cold-open pickups only.
-                await speak_greeting(session, metadata, generate_opening=False)
-                if on_greeted is not None:
-                    on_greeted()
-            except Exception:
-                logger.exception(
-                    "call_id=%s deferred greeting failed after IVR", call_id
-                )
+    agent.phone_menu = PhoneMenu(
+        classifier,
+        on_human=greet,
+        on_machine=on_machine,
+    )
 
-        task = asyncio.ensure_future(_run())
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
+    @session.on("user_state_changed")
+    def _on_speech(ev: Any) -> None:
+        if getattr(ev, "new_state", None) == "speaking":
+            agent.phone_menu.heard_speech()
+        elif getattr(ev, "new_state", None) in ("listening", "away"):
+            agent.phone_menu.finished_speaking()
 
     @session.on("function_tools_executed")
     def _on_keypress(ev: Any) -> None:
-        if state["armed"]:
-            return
         if any(c.name == DTMF_TOOL_NAME for c in getattr(ev, "function_calls", [])):
-            logger.info(
-                "call_id=%s keys pressed, waiting for a voice to greet", call_id
-            )
-            state["armed"] = True
+            agent.phone_menu.pressed_keys()
 
-    @session.on("user_state_changed")
-    def _on_user_speaking(ev: Any) -> None:
-        if getattr(ev, "new_state", None) == "speaking":
-            _speak_once()
-
-    @session.on("conversation_item_added")
-    def _on_user_turn(ev: Any) -> None:
-        if getattr(ev.item, "role", None) == "user":
-            _speak_once()
+    @session.on("user_input_transcribed")
+    def _on_transcript(ev: Any) -> None:
+        agent.phone_menu.transcript_progress(getattr(ev, "transcript", ""))
+        if agent.phone_menu.checking and getattr(ev, "is_final", False):
+            agent.phone_menu.invalidate()
 
 
 # Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
@@ -1029,6 +1136,72 @@ def disconnect_reason_to_status(reason: int | None) -> tuple[str | None, str | N
     return (status, end_reason.value)
 
 
+async def reconcile_sip_rejection(
+    call_id: UUID, captured: dict[str, str | None]
+) -> None:
+    """Resolve an ambiguous LiveKit rejection before publishing its outcome.
+
+    LiveKit uses USER_REJECTED for SIP 403 (including Twilio geo-permission
+    blocks) as well as genuine busy/decline responses. Twilio's final call
+    status distinguishes these. Only query its exact Call SID supplied by
+    the SIP participant; the stored SCL_ id belongs to LiveKit, not Twilio.
+    A failed lookup must not prevent settlement or pool-number release.
+    """
+    sid = captured.get("twilio_call_sid")
+    if captured["status"] != "busy" or not sid:
+        return
+    try:
+        async with asyncio.timeout(4):
+            provider = TwilioVoiceProvider(timeout=3)
+            result = await provider.get_call_status(sid)
+    except Exception:
+        logger.warning(
+            "call_id=%s could not resolve carrier rejection", call_id, exc_info=True
+        )
+        return
+    error_code = None
+    if (
+        result.status == "failed"
+        and captured["status"] == "busy"
+        and captured["end_reason"] == CallEndReason.USER_REJECTED.value
+        and captured.get("twilio_call_sid") == sid
+    ):
+        captured["status"] = "failed"
+        captured["end_reason"] = CallEndReason.SIP_TRUNK_FAILURE.value
+        # Keep the confirmed failure even if diagnostic lookup times out.
+        try:
+            async with asyncio.timeout(2):
+                error_code = await provider.get_call_error_code(sid)
+        except Exception:
+            logger.warning(
+                "call_id=%s carrier failure details unavailable", call_id, exc_info=True
+            )
+        if (
+            error_code == "32205"
+            and captured["status"] == "failed"
+            and captured["end_reason"] == CallEndReason.SIP_TRUNK_FAILURE.value
+            and captured.get("twilio_call_sid") == sid
+        ):
+            captured["failure_code"] = DESTINATION_NOT_ALLOWED
+    logger.info(
+        "call_id=%s carrier rejection result=%s error_code=%s",
+        call_id,
+        result.status,
+        error_code,
+    )
+    message = call_failure_message(
+        captured["status"] or "", captured, captured["end_reason"]
+    )
+    await write_call_event(
+        call_id,
+        "connection_result",
+        {
+            "status": captured["status"],
+            **({"failure_message": message} if message else {}),
+        },
+    )
+
+
 async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
     try:
         await ctx.delete_room()
@@ -1098,8 +1271,15 @@ def handle_sip_disconnect(
     human = bridge_state.get("human")
     status, end_reason = disconnect_reason_to_status(participant.disconnect_reason)
     if status is not None:
+        # A later SIP outcome invalidates details derived from the previous leg.
+        captured.pop("failure_code", None)
+        captured.pop("twilio_call_sid", None)
         captured["status"] = status
         captured["end_reason"] = end_reason
+        if status == "busy":
+            sid = getattr(participant, "attributes", {}).get("sip.twilio.callSid")
+            if sid:
+                captured["twilio_call_sid"] = sid
         logger.info(
             "call_id=%s sip participant disconnected, status=%s reason=%s",
             call_id,
@@ -1508,6 +1688,8 @@ async def on_call_end(
     room_name: str,
     status_override: str | None = None,
     end_reason_override: str | None = None,
+    *,
+    failure_code: str | None = None,
 ) -> None:
     """Finalize the ``Call`` row when the session ends.
 
@@ -1601,6 +1783,19 @@ async def on_call_end(
         # force-closed this call (or a prior shutdown finalized it), this write
         # must lose cleanly rather than overwrite the recorded outcome. Whether
         # the row actually transitioned gates the event + the bill below.
+        failure_values = {}
+        if (
+            final_status == "failed"
+            and final_end_reason == CallEndReason.SIP_TRUNK_FAILURE.value
+            and failure_code == DESTINATION_NOT_ALLOWED
+        ):
+            failure_values["metadata_"] = Call.metadata_.op("||")(
+                cast({"failure_code": failure_code}, JSONB)
+            )
+            call_metadata = {**(call_metadata or {}), "failure_code": failure_code}
+        failure_message = call_failure_message(
+            final_status, call_metadata or {}, final_end_reason
+        )
         result = await session.execute(
             update(Call)
             .where(Call.id == call_id, Call.status.not_in(TERMINAL_CALL_STATUSES))
@@ -1609,6 +1804,7 @@ async def on_call_end(
                 end_reason=final_end_reason,
                 ended_at=now,
                 # Egress writes recording metadata independently.
+                **failure_values,
             )
         )
         transitioned = (result.rowcount or 0) > 0
@@ -1625,6 +1821,11 @@ async def on_call_end(
                         "from": prior_status,
                         "to": final_status,
                         "reason": final_end_reason,
+                        **(
+                            {"failure_message": failure_message}
+                            if failure_message
+                            else {}
+                        ),
                     },
                 )
             )
@@ -1643,6 +1844,11 @@ async def on_call_end(
                         "to": to_e164,
                         "agent_id": str(agent_id) if agent_id else None,
                         "end_reason": final_end_reason,
+                        **(
+                            {"failure_message": failure_message}
+                            if failure_message
+                            else {}
+                        ),
                     },
                 )
         # Idempotent and order-independent, free the pool number regardless of
@@ -1706,7 +1912,10 @@ _TURN_TIMINGS: dict[str, dict[str, str]] = {
 
 
 def attach_event_handlers(
-    session: AgentSession, call_id: UUID
+    session: AgentSession,
+    call_id: UUID,
+    *,
+    speech_allowed: Callable[[], bool] | None = None,
 ) -> set[asyncio.Task[None]]:
     """Wire AgentSession events to ``call_events`` row writes.
 
@@ -1750,7 +1959,9 @@ def attach_event_handlers(
             # (tool-syntax leakage, "..." placeholders) is not part of the
             # conversation and must not be recorded as one. Its timings
             # still go in a voice_metrics row.
-            text = speech_text(text)
+            text = (
+                speech_text(text) if speech_allowed is None or speech_allowed() else ""
+            )
             if not text:
                 if timings:
                     _spawn(
@@ -1811,6 +2022,8 @@ async def entrypoint(ctx: JobContext) -> None:
         await _run_call(ctx)
         return
     connect_livekit_tracing()
+    # LiveKit's job_entrypoint span is current here: tag_context() tags it too.
+    bind_root()
     try:
         raw = json.loads(ctx.job.metadata or "{}")
     except ValueError:
@@ -1819,22 +2032,33 @@ async def entrypoint(ctx: JobContext) -> None:
     parent = TraceContextTextMapPropagator().extract(
         carrier if isinstance(carrier, dict) else {}
     )
+    if not trace.get_current_span(parent).get_span_context().is_valid:
+        # Inbound: no API trace to join, so stay under job_entrypoint.
+        parent = None
     identity = raw.get("hail_actor_identity", {}) if isinstance(raw, dict) else {}
     identity = identity if isinstance(identity, dict) else {}
-    try:
-        # The dispatch carries ids only; look up the org name and email here.
-        org_id = UUID(str(identity["organization_id"]))
-        user_id = UUID(str(identity["user_id"])) if identity.get("user_id") else None
-        async with session_scope() as db:
-            identity = {
-                **identity,
-                **await resolve_identity(
-                    db, org_id, user_id, actor_kind=identity.get("actor_kind", "agent")
-                ),
-            }
-    except Exception:
-        logger.warning("actor telemetry lookup failed")
-    with identity_scope(identity if isinstance(identity, dict) else {}):
+    # Inbound dispatches carry no organization yet; _run_call sets it once
+    # the call is opened.
+    if identity.get("organization_id"):
+        try:
+            # The dispatch carries ids only; look up the org name and email here.
+            org_id = UUID(str(identity["organization_id"]))
+            user_id = (
+                UUID(str(identity["user_id"])) if identity.get("user_id") else None
+            )
+            async with session_scope() as db:
+                identity = {
+                    **identity,
+                    **await resolve_identity(
+                        db,
+                        org_id,
+                        user_id,
+                        actor_kind=identity.get("actor_kind", "agent"),
+                    ),
+                }
+        except Exception:
+            logger.warning("actor telemetry lookup failed")
+    with identity_scope(identity):
         await _run_traced_call(ctx, parent)
 
 
@@ -1903,6 +2127,14 @@ async def _run_call(
             "organization_id", str(metadata.get("organization_id", ""))
         )
         telemetry_span.set_attribute("agent_id", str(metadata.get("agent_id", "")))
+        tag_context(
+            channel="voice",
+            direction=metadata.get("direction") or "outbound",
+            agent_id=metadata.get("agent_id"),
+            call_id=call_id,
+            from_=metadata.get("from_e164"),
+            to=metadata.get("to_e164"),
+        )
 
     # Captured terminal status / end_reason set by the SIP-participant
     # disconnect handler below. Read by `_shutdown` to override the default
@@ -2061,7 +2293,6 @@ async def _run_call(
         )
         ctx.shutdown(reason="provider_key_error")
         return
-    event_tasks = attach_event_handlers(session, call_id)
 
     # AgentSession-level close events that aren't already covered by the SIP
     # participant_disconnected handler above: `error` (LLM/STT/TTS crash) and
@@ -2091,7 +2322,7 @@ async def _run_call(
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
-    other_party_task = asyncio.create_task(other_party_prompt(call_id))
+    other_party_task = asyncio.create_task(other_party(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2105,6 +2336,13 @@ async def _run_call(
             handover_seconds=metadata.get("handover_max_duration_seconds")
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
+            screen=lambda identity: screen_handover_pickup(
+                ctx.room,
+                identity,
+                session,
+                org_cfgs=org_cfgs,
+                llm_override=llm_cfg is not None,
+            ),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
     )
@@ -2115,6 +2353,12 @@ async def _run_call(
             [t.info.name for t in agent_tools],
         )
 
+    known = await other_party_task
+    if known is not None and stt_takes_keyterms(session.stt):
+        # The STT then spells the known name right. Keyterm detection stays
+        # off: a wrong detected term degrades recognition for the whole call.
+        session.update_options(keyterms=[known.name])
+
     thread_tool = has_thread_tool(agent_tools)
     logger.info("call_id=%s thread_history tool=%s", call_id, thread_tool)
     agent = SpeechSanitizingAgent(
@@ -2124,9 +2368,19 @@ async def _run_call(
             metadata.get("direction"),
             thread_tool=thread_tool,
             language=language,
-            other_party=await other_party_task,
+            # send_email reaches members only, so a contact's email is no use.
+            other_party=(
+                other_party_section(known.name, can_email=known.source == "member")
+                if known is not None
+                else None
+            ),
         ),
         tools=agent_tools,
+    )
+    event_tasks = attach_event_handlers(
+        session,
+        call_id,
+        speech_allowed=lambda: agent.phone_menu is None or not agent.phone_menu.active,
     )
     # Explicitly prevent LiveKit project observability from silently retaining
     # audio outside Hail's workspace choice and storage lifecycle.
@@ -2223,11 +2477,21 @@ async def _run_call(
         call_id=call_id,
     )
 
+    # AMD's clients. Its classifier also backs the phone menu check, so it
+    # closes only at shutdown, after AMD and the last check end.
+    amd_models: AMDModels | None = None
+
     async def _shutdown_body() -> None:
         nonlocal shutting_down
         shutting_down = True
         try:
             await recovery.aclose()
+            # Never close the classifier under a running check: let the
+            # menu finish its check first.
+            if agent.phone_menu is not None:
+                await agent.phone_menu.aclose()
+            if amd_models is not None:
+                await amd_models.aclose()
             # The bridge swaps in the handover cap once a contact answers.
             cap_task = bridge_state.get("soft_cap_task") or soft_cap_task
             if cap_task is not None and not cap_task.done():
@@ -2246,11 +2510,13 @@ async def _run_call(
                 await asyncio.gather(*list(answer_tasks), return_exceptions=True)
             if agent_api is not None:
                 await agent_api.aclose()
+            await reconcile_sip_rejection(call_id, captured)
             await on_call_end(
                 call_id,
                 room_name,
                 status_override=captured["status"],
                 end_reason_override=captured["end_reason"],
+                failure_code=captured.get("failure_code"),
             )
         finally:
             if telemetry_span is not None:
@@ -2308,7 +2574,7 @@ async def _run_call(
                     {VOICE_READY_ATTRIBUTE: "true"}
                 )
 
-        models = build_amd_models(
+        amd_models = models = build_amd_models(
             session,
             org_cfgs=org_cfgs,
             llm_override=llm_cfg is not None,
@@ -2333,24 +2599,26 @@ async def _run_call(
                 "delay": amd_result.delay if amd_result else None,
             },
         )
-    if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
+
+    async def hangup_no_answer(end_reason: str) -> None:
         # Voicemail or a dead mailbox, hang up without speaking. We never
         # leave a message: a partial line on someone's voicemail is worse
         # than silence. Mirrors `make_agent_hangup`: delete_room disconnects
         # the phone leg, ctx.shutdown releases the job and drives `_shutdown`.
-        end_reason = amd_end_reason(amd_result.category)
         captured["status"] = "no_answer"
         captured["end_reason"] = end_reason
-        logger.info(
-            "call_id=%s answered by a machine (%s), hanging up",
-            call_id,
-            amd_result.category.value,
-        )
         try:
             await ctx.delete_room()
         except Exception:
             logger.exception("delete_room failed after machine detection")
         ctx.shutdown(reason=end_reason)
+
+    async def hangup_machine(category: AMDCategory) -> None:
+        logger.info("call_id=%s answered by %s, hanging up", call_id, category.value)
+        await hangup_no_answer(amd_end_reason(category))
+
+    if amd_result is not None and amd_result.category in MACHINE_HANGUP_CATEGORIES:
+        await hangup_machine(amd_result.category)
         return
 
     if amd_result is not None and amd_result.category == MACHINE_IVR_CATEGORY:
@@ -2360,12 +2628,21 @@ async def _run_call(
         # reciting its disclosure into a "press one / press two" menu while
         # the tree timed out. `generate_reply` is a real LLM turn with
         # `send_dtmf` attached, which is what actually navigates the menu.
-        # The disclosure is deferred, not dropped: `_speak_deferred_greeting`
-        # fires it the moment a person is on the line.
+        # The disclosure is deferred, not dropped: `arm_deferred_greeting`
+        # speaks it once speech is classified as a person, or after a bounded
+        # wait when speech cannot be classified.
         logger.info("call_id=%s phone tree detected, navigating", call_id)
         agent.release_opening()
         arm_deferred_greeting(
-            session, metadata, call_id, event_tasks, on_greeted=recovery.start
+            session,
+            metadata,
+            call_id,
+            event_tasks,
+            on_greeted=recovery.start,
+            agent=agent,
+            on_machine=hangup_machine,
+            # AMD's classifier, built once per call (see build_amd_models).
+            classifier=models.llm,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)

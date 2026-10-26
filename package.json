@@ -17,11 +17,15 @@
     "docs:build": "pnpm --filter @hail-hq/docs-site build",
     "docs:urls": "node docs-site/scripts/urls.mjs",
     "docs:check-urls": "node docs-site/scripts/urls.mjs --check",
-    "test:site-audit": "node --test scripts/site-audit.test.mjs"
+    "test:site-audit": "node --test scripts/site-audit.test.mjs",
+    "postman:test": "node --test scripts/postman/*.test.mjs",
+    "postman:generate": "node scripts/postman/generate.mjs",
+    "postman:publish": "node scripts/postman/publish.mjs"
   },
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^16.1.0",
-    "prettier": "^3.3.0"
+    "prettier": "^3.3.0",
+    "yaml": "^2.9.1"
   }
 }

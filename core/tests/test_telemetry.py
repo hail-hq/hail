@@ -2,6 +2,7 @@
 
 import logging
 
+import pytest
 from hailhq.core import telemetry
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -30,7 +31,7 @@ def test_export_removes_content_but_preserves_trace_and_usage():
             "lk.function_tool.output": "PRIVATE OUTPUT",
             "lk.function_tools": "PRIVATE DEFINITIONS",
             "lk.pii.chat_ctx": "PRIVATE NEW SDK CHAT",
-            "gen_ai.input.messages": "PRIVATE GENAI CHAT",
+            "gen_ai.input.messages": '[{"role": "user"}]',
             "gen_ai.input_messages": "PRIVATE GENAI CHAT",
             "request": "PRIVATE MCP REQUEST",
             "response": "PRIVATE MCP RESPONSE",
@@ -65,6 +66,8 @@ def test_export_removes_content_but_preserves_trace_and_usage():
     assert exported.attributes["call_id"] == "call-123"
     assert exported.attributes["email_id"] == "email-123"
     assert exported.attributes["url.full"] == "https://example.org/test"
+    # LLM content is exported whole; other content keys stay out.
+    assert exported.attributes["gen_ai.input.messages"] == '[{"role": "user"}]'
     assert "PRIVATE" not in str(exported.attributes)
     assert "person@example.org" not in str(exported.attributes)
     assert "abcdef" not in str(exported.attributes)
@@ -127,8 +130,12 @@ spans = memory.get_finished_spans()
 assert any(s.name == "test.operation" for s in spans)
 assert any(s.attributes.get("logfire.msg") == "Setup INFO log" for s in spans)
 assert all(s.resource.attributes["service.name"] == "hail-api" for s in spans)
-assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in spans)
-assert all(s.attributes.get("organization_name") == "Session Team" for s in spans)
+# instrument_sqlalchemy refuses the locked SQLAlchemy; the warning logs before identity_scope.
+assert any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
+inside = [s for s in spans if s.name == "test.operation" or s.attributes.get("logfire.msg") == "Setup INFO log"]
+assert len(inside) == 2
+assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in inside)
+assert all(s.attributes.get("organization_name") == "Session Team" for s in inside)
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -179,6 +186,28 @@ def test_native_provider_keeps_its_exporter_and_mirrors_private_spans(monkeypatc
     provider.shutdown()
 
 
+def test_export_drops_livekit_tool_definitions():
+    context = SpanContext(111, 222, False, TraceFlags(1))
+    original = ReadableSpan(
+        "llm_request",
+        context=context,
+        attributes={
+            "gen_ai.tool.definitions": "PRIVATE TOOL DEFINITIONS",
+            "tool.definitions": "PRIVATE TOOL DEFINITIONS",
+            "gen_ai.tool.name": "lookup",
+            "gen_ai.tool.call.id": "call-1",
+        },
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert "PRIVATE" not in str(exported.attributes)
+    assert exported.attributes["gen_ai.tool.name"] == "lookup"
+    assert exported.attributes["gen_ai.tool.call.id"] == "call-1"
+
+
 def test_export_drops_mcp_tool_call_arguments_by_design():
     """The private exporter, not per-tool redaction, keeps tool arguments out."""
     sentinel = "SENTINEL-VERIFICATION-DETAILS"
@@ -210,3 +239,33 @@ def test_export_drops_mcp_tool_call_arguments_by_design():
     assert sentinel not in str(exported.attributes)
     assert sentinel not in str(exported.events[0].attributes)
     assert exported.attributes["mcp.tool.name"] == "submit_verification"
+
+
+def test_instrument_turns_off_tracing_instead_of_failing(caplog):
+    from hailhq.core.telemetry import instrument
+
+    def refuse():
+        raise RuntimeError("unsupported library version")
+
+    instrument("Example", refuse)
+    assert "Example tracing is off" in caplog.text
+
+
+def test_instrument_turns_off_tracing_when_a_module_is_missing(caplog):
+    from hailhq.core.telemetry import instrument
+
+    def missing():
+        raise ModuleNotFoundError("No module named 'mcp.shared.session'")
+
+    instrument("Missing", missing)
+    assert "Missing tracing is off" in caplog.text
+
+
+def test_instrument_raises_a_mistake_in_our_own_call():
+    from hailhq.core.telemetry import instrument
+
+    def setup(*, engine):
+        return engine
+
+    with pytest.raises(TypeError):
+        instrument("Example", setup, engin=None)

@@ -14,8 +14,9 @@ import asyncio
 import logging
 from uuid import UUID
 
-from hailhq.core.carrier_offer import CarrierOffer, cents, number_prefix
+from hailhq.core.carrier_offer import Approval, CarrierOffer, cents, number_prefix
 from hailhq.core.config import settings
+from hailhq.core.providers.verification.twilio import _TWILIO_TO_SUBJECT
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierRequestError,
@@ -41,6 +42,7 @@ class TwilioVoiceProvider(VoiceProvider):
         account_sid: str | None = None,
         auth_token: str | None = None,
         client: TwilioClient | None = None,
+        timeout: float | None = None,
     ) -> None:
         self.account_sid = account_sid or settings.twilio_account_sid
         token = auth_token or settings.twilio_auth_token
@@ -52,7 +54,15 @@ class TwilioVoiceProvider(VoiceProvider):
                     "twilio_auth_token (set them in settings or pass them "
                     "explicitly)."
                 )
-            client = TwilioClient(self.account_sid, token)
+            client = TwilioClient(
+                self.account_sid,
+                token,
+                http_client=(
+                    TwilioHttpClient(timeout=timeout, max_retries=0)
+                    if timeout is not None
+                    else None
+                ),
+            )
         self._client = client
 
     async def release_number(self, provider_resource_id: str) -> None:
@@ -96,6 +106,16 @@ class TwilioVoiceProvider(VoiceProvider):
             answered_at=answered_at,
             ended_at=ended_at,
             duration_seconds=duration_seconds,
+        )
+
+    async def get_call_error_code(self, provider_call_sid: str) -> str | None:
+        """Call errors live on Notifications, not the Call resource itself."""
+        notifications = await asyncio.to_thread(
+            self._client.calls(provider_call_sid).notifications.list, log=0, limit=20
+        )
+        codes = [str(n.error_code) for n in notifications if n.error_code]
+        return next(
+            (code for code in codes if code == "32205"), codes[0] if codes else None
         )
 
     async def hangup_call(self, provider_call_sid: str) -> None:
@@ -169,9 +189,14 @@ async def twilio_offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
+    """Live Twilio inventory. ``approvals`` are the org's approved Hail
+    verifications; one counts while its bundle is still approved at Twilio
+    and was made for this country, type and the approval's subject type."""
     if not settings.twilio_account_sid or not settings.twilio_auth_token:
         return []
+    approvals = approvals or []
 
     prefix = number_prefix(country, area_code) if area_code else None
 
@@ -225,38 +250,48 @@ async def twilio_offers(
         if monthly_cents <= 0:
             return []
         compliance = api.numbers.v2.regulatory_compliance
-        # Organizations are business end users. No hardcoded country exemptions.
+        # Every end-user type: a person and a business each have their own
+        # regulation. No hardcoded country exemptions.
         rules = compliance.regulations.list(
             iso_country=country,
             number_type=kind.replace("_", "-"),
-            end_user_type="business",
             limit=100,
         )
         # Some countries return a regulation resource with no required fields
         # (US local is one). Presence of a resource alone is not a bundle gate.
         if any(not isinstance(r.requirements, dict) for r in rules):
             raise ValueError("Twilio regulatory requirements unavailable")
-        rules = [r for r in rules if any(r.requirements.values())]
-        bundle = None
-        if rules:
+        rules = [
+            r
+            for r in rules
+            if any(r.requirements.values()) and r.end_user_type in _TWILIO_TO_SUBJECT
+        ]
+        # Regulation sid -> the subject type it is for.
+        subject_of = {r.sid: _TWILIO_TO_SUBJECT[r.end_user_type] for r in rules}
+        subject_types = sorted(set(subject_of.values()))
+        valid: list[Approval] = []
+        wanted = [a for a in approvals if a.subject_type in subject_types]
+        if wanted:
             bundles = compliance.bundles.list(
                 status="twilio-approved", friendly_name=f"hail-{org}", limit=100
             )
-            bundle = next(
-                (
-                    b
-                    for b in bundles
-                    if b.friendly_name == f"hail-{org}"
-                    and b.regulation_sid in {r.sid for r in rules}
-                ),
-                None,
-            )
+            approved = {
+                b.sid: subject_of.get(b.regulation_sid)
+                for b in bundles
+                if b.friendly_name == f"hail-{org}"
+            }
+            valid = [
+                a
+                for a in wanted
+                if a.verification_id
+                and approved.get(a.verification_id) == a.subject_type
+            ]
         result = []
         for n in inventory:
             address_required = n.address_requirements not in (None, "none")
             needs_documents = bool(
                 rules
-                and not bundle
+                and not valid
                 and any(r.requirements.get("supporting_document") for r in rules)
             )
             labels = (
@@ -264,10 +299,10 @@ async def twilio_offers(
                     (
                         "Supporting documents and regulatory bundle"
                         if needs_documents
-                        else "Business information verification"
+                        else "Identity or business information verification"
                     )
                 ]
-                if rules and not bundle
+                if rules and not valid
                 else []
             )
             if address_required:
@@ -292,7 +327,8 @@ async def twilio_offers(
                         else "documents" if needs_documents else "information"
                     ),
                     requirements=labels,
-                    verification_id=bundle.sid if bundle else None,
+                    subject_types=subject_types,
+                    approvals=valid,
                     locality=_place_name(n.locality),
                     # Twilio sometimes puts the country here ("US"), not a state.
                     region=n.region if n.region and n.region != country else None,
@@ -349,6 +385,7 @@ async def offers(
     area_code: str | None = None,
     city: str | None = None,
     region: str | None = None,
+    approvals: list[Approval] | None = None,
 ) -> list[CarrierOffer]:
     return await twilio_offers(
         org,
@@ -359,6 +396,7 @@ async def offers(
         area_code=area_code,
         city=city,
         region=region,
+        approvals=approvals,
     )
 
 

@@ -15,7 +15,24 @@ from hailhq.core.providers.verification.base import (
     Requirements,
 )
 
-__all__ = ["address_complete", "pick_option", "validate_input"]
+__all__ = [
+    "address_complete",
+    "display_name",
+    "pick_option",
+    "validate_input",
+]
+
+# A stored name longer than this is cut. Names are for telling
+# verifications apart, not a legal record.
+_NAME_MAX = 200
+
+
+def display_name(*parts: str | None) -> str | None:
+    """The words of the parts joined by single spaces, or None when all are
+    empty. "Ada  Lovelace" and "Ada Lovelace" give the same name, so the
+    duplicate check and the unique index see them as one."""
+    name = " ".join(" ".join(p for p in parts if p).split())
+    return name[:_NAME_MAX].rstrip() or None
 
 
 def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:

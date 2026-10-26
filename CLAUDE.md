@@ -21,7 +21,7 @@ web/        — Next.js workspace for the interactive costs surface (/costs, /co
 
 **PyPI posture for v1**: one external artifact — the Python SDK, published as `hail-sdk` (imports as `import hail`). The internal services `hailhq-api`, `hailhq-voicebot`, `hailhq-mcp` all carry `Private :: Do Not Upload`. `hailhq-core` is not marked private but is not released in v1 either — it's an internal workspace dep.
 
-**MCP distribution**: remote Streamable HTTP only. We deliberately do **not** ship a stdio PyPI package. Reasoning lives in [docs/public/mcp.md](docs/public/mcp.md) — read it before proposing a stdio server; the default answer is "no, use the remote HTTP endpoint".
+**MCP distribution**: remote Streamable HTTP is the main path. The MCP container also has a stdio entry point (`python -m hailhq.mcp.stdio`, `HAIL_API_KEY` mode only) for hosts that require stdio; see [docs/public/mcp.md](docs/public/mcp.md#stdio). We do **not** publish a stdio package on PyPI.
 
 Internal packages share the `hailhq.*` namespace (PEP 420 implicit — **no** `hailhq/__init__.py` at the namespace root). The import name `hail` is **reserved** for the external SDK (`hail-sdk` on PyPI); do not introduce top-level `hail` modules inside the monorepo.
 
@@ -87,7 +87,7 @@ Internal runbooks (not published) live in `docs/operations/`:
 
 - **Python**: ruff (lint, `--fix`) + black (format); ruff, black and pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
 - **Go**: `gofmt`, stdlib first. Cobra for subcommands if/when the CLI grows them.
-- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/opt/venv`; only that is copied to the runtime stage. Tighten to a pinned `uv.lock`-based cache flow once a lockfile lands.
+- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/app/.venv` with `uv sync --frozen`, so images install exactly `uv.lock`; only the venv is copied to the runtime stage. Newer releases arrive by upgrading `uv.lock` in a PR.
 - **Pre-commit**: husky + lint-staged run `ruff`/`black`/`gofmt`/`prettier` on staged files. Install with `pnpm install` at repo root; hooks activate automatically via the `prepare` script. pnpm is the Node package manager for this repo (pinned via `packageManager` in `package.json`).
 - **Commits**: Conventional Commits.
 

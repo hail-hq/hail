@@ -1633,7 +1633,7 @@ async def test_bridge_answered_mutes_agent() -> None:
     assert session.said == [
         (
             "Hi Sam, I have a caller on the line. "
-            "They say it is about an invoice. Connecting you now."
+            "Reason given: an invoice. Connecting you now."
         )
     ]
     assert session.input.enabled == [False] and session.output.enabled == [False]
@@ -2088,7 +2088,7 @@ def test_greeting_with_ai_line(message, spoken):
     assert greeting_with_ai_line(message, "AI line.") == spoken
 
 
-async def test_other_party_prompt_names_a_member_caller(monkeypatch):
+async def test_other_party_finds_the_caller(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.core.directory import DirectoryEntry
@@ -2116,12 +2116,12 @@ async def test_other_party_prompt_names_a_member_caller(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", scope)
     monkeypatch.setattr(agent_mod, "find_by_phone", find)
-    prompt = await agent_mod.other_party_prompt(UUID(int=1))
+    entry = await agent_mod.other_party(UUID(int=1))
     assert seen["number"] == "+46700000000"
-    assert '"Sam"' in prompt and "my email" in prompt
+    assert entry.name == "Sam" and entry.source == "member"
 
 
-async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
+async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.voicebot import agent as agent_mod
@@ -2132,7 +2132,7 @@ async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
         yield
 
     monkeypatch.setattr(agent_mod, "session_scope", refused)
-    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+    assert await agent_mod.other_party(UUID(int=1)) is None
 
     class Session:
         async def execute(self, _stmt):
@@ -2144,7 +2144,142 @@ async def test_other_party_prompt_drops_the_section_on_any_failure(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", stuck)
     monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
-    assert await agent_mod.other_party_prompt(UUID(int=1)) is None
+    assert await agent_mod.other_party(UUID(int=1)) is None
+
+
+async def test_known_name_reaches_the_stt_as_a_keyterm():
+    """update_options before session.start stores the term; the session
+    hands it to the Deepgram STT when the activity starts (livekit-agents
+    1.8.8 keyterm_detection.py, KeytermDetector.start)."""
+    from livekit.agents import AgentSession
+    from livekit.plugins import deepgram as deepgram_plugin
+
+    stt = deepgram_plugin.STT(model="nova-3", api_key="dg-test")
+    session = AgentSession(stt=stt)
+    session.update_options(keyterms=["Sam"])
+    assert session.keyterms == ["Sam"]
+    session._keyterm_detector.start(session, stt=stt)
+    assert stt._opts.keyterm == ["Sam"]
+
+
+# --- handover pickup check -------------------------------------------------
+
+
+def _screen(verdict):
+    seen: list[str] = []
+
+    async def screen(identity: str):
+        seen.append(identity)
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+
+    return screen, seen
+
+
+@pytest.mark.parametrize(
+    "verdict", ["machine-vm", "machine-unavailable", "machine-ivr"]
+)
+async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
+    """Call 83119e48: a French mobile's voicemail picked up after 24 s and
+    the agent introduced the caller to it. A machine pickup is now no_answer:
+    the leg is dropped, nothing is said, no answer is reported, and the
+    pending time limit stays."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    soft_cap = asyncio.create_task(asyncio.sleep(3600))
+    state: dict = {"human": None, "connected": False, "soft_cap_task": soft_cap}
+    answered: list[int] = []
+
+    async def _post(ring_ms: int) -> None:
+        answered.append(ring_ms)
+
+    screen, seen = _screen(verdict)
+    route = BridgeRoute("+33600000000", "+1", "ST", None, "Rym", "", on_answered=_post)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(route)
+    assert out.outcome == "no_answer" and out.sip_status is None
+    assert seen == [f"human-{CALL_ID}"]
+    req = ctx.api.room.remove_participant.await_args.args[0]
+    assert req.room == ctx.room.name and req.identity == f"human-{CALL_ID}"
+    assert session.said == [] and answered == []
+    assert session.input.enabled == [] and session.output.enabled == []
+    assert state["human"] is None and state["connected"] is False
+    assert state["soft_cap_task"] is soft_cap and not soft_cap.done()
+    soft_cap.cancel()
+    await asyncio.gather(soft_cap, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "verdict", ["human", "uncertain", None, RuntimeError("classifier down")]
+)
+async def test_bridge_person_or_unknown_pickup_connects(verdict) -> None:
+    """A person, an unsure verdict, or a failed check connects as before."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    screen, _ = _screen(verdict)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "answered"
+    assert len(session.said) == 1 and state["connected"] is True
+    ctx.api.room.remove_participant.assert_not_awaited()
+
+
+async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
+    """The contact hung up while the check listened: the agent keeps the
+    caller instead of going silent on an empty leg."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+
+    async def screen(identity: str):
+        ctx.room.remote_participants.pop(identity)
+        return "human"
+
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "no_answer"
+    assert session.said == [] and state == {"human": None, "connected": False}
+
+
+async def test_bridge_mailbox_that_hung_up_itself_is_no_answer() -> None:
+    """A "mailbox full" message often hangs up by itself during the check.
+    The leg is gone, so nothing is removed and the call goes on."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+
+    async def screen(identity: str):
+        ctx.room.remote_participants.pop(identity)
+        return "machine-unavailable"
+
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "no_answer"
+    ctx.api.room.remove_participant.assert_not_awaited()
+    assert ctx.shutdown_calls == [] and "ending" not in state
+
+
+async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
+    """If the mailbox leg cannot be removed it would record the caller, so
+    the room is deleted instead."""
+    ctx = FakeJobContext()
+    ctx.api.room.remove_participant.side_effect = RuntimeError("livekit down")
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    screen, _ = _screen("machine-vm")
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert out.outcome == "failed"
+    assert ctx.api.room.remove_participant.await_count == 2
+    assert ctx.delete_room_calls == 1 and ctx.shutdown_calls == ["handover_leg_stuck"]
+    assert state["ending"] is True and session.said == []
 
 
 async def test_speak_greeting_speaks_built_in_line_in_call_language():

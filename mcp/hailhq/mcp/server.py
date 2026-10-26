@@ -33,13 +33,14 @@ from hailhq.core.config import settings
 from hailhq.core.telemetry import (
     configure_telemetry,
     flush_telemetry,
+    instrument,
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import register_tools
+from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -51,7 +52,7 @@ from mcp.server.fastmcp import FastMCP
 
 _telemetry = configure_telemetry("hail-mcp")
 if _telemetry:
-    logfire.instrument_mcp()
+    instrument("MCP", logfire.instrument_mcp)
 
 
 def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
@@ -67,7 +68,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             resource_server_url=settings.mcp_resource_url,
             required_scopes=None,  # scope enforcement deferred to Phase 2
         )
-        mcp_app: FastMCP = FastMCP(
+        mcp_app: FastMCP = TaggedFastMCP(
             name="hail",
             streamable_http_path="/",
             host="0.0.0.0",
@@ -79,7 +80,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         singleton: HailClient | None = None
     else:
         # static-key: pre-1c shape.
-        mcp_app = FastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
+        mcp_app = TaggedFastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
@@ -127,7 +128,12 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     )
     if _telemetry:
         app.add_middleware(IdentityMiddleware)
-        logfire.instrument_starlette(app, server_request_hook=request_span_attributes)
+        instrument(
+            "Starlette",
+            logfire.instrument_starlette,
+            app,
+            server_request_hook=request_span_attributes,
+        )
     return mcp_app, singleton, app
 
 

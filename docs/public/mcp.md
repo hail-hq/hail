@@ -92,15 +92,18 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 
 Some numbers, for example a UK mobile, need a carrier check of the organization first. `quote_numbers` marks those offers `readiness: "verification_required"`. The whole flow works over MCP:
 
-1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`.
-2. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
-3. Ask the user for every field and file. The agent must not invent or guess any value.
-4. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
+1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`, its `quote_id`, and `subject_types`: who may verify for it (`person`, `business`, or both).
+2. Ask the user: "you or your company?". That is `subject_type` (`person` or `business`). It is required; never guess it.
+3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
+4. Ask the user for every field and file. The agent must not invent or guess any value.
+5. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
 
    ```json
    {
      "country_code": "GB",
      "number_type": "mobile",
+     "quote_id": "<quote_id>",
+     "subject_type": "person",
      "fields": { "first_name": "Ada", "last_name": "Lovelace" },
      "address": {
        "customer_name": "Ada Lovelace",
@@ -124,9 +127,9 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
    The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again.
 
-5. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-6. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above.
-7. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+6. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+7. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
+8. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 
@@ -145,7 +148,7 @@ To register the organization to text US numbers from a US number, pass `purpose:
 }
 ```
 
-Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country and number type returns 409 while one exists.
+Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country, number type, `subject_type` and name returns 409 while one exists.
 
 > **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
 
@@ -185,13 +188,14 @@ curl -H "Authorization: Bearer ${HAIL_API_KEY}" http://localhost:8081/
 
 The MCP service selects its auth mode from env at boot. For the full env-var contract, refer to the [MCP modes table in the operations runbook](./self-host/operations.md#mcp-modes) (`HAIL_AUTH_URL` for cloud, `HAIL_API_KEY` for self-host, mutually exclusive).
 
-## Why remote-only (no stdio / no PyPI install)
+## Stdio
 
-We release one MCP distribution: a remote HTTP endpoint. It is bundled with every Hail deploy. We deliberately do **not** publish a stdio MCP server on PyPI. The reasons:
+For hosts that require stdio, run the entry point in the self-hosted MCP container. From your Hail checkout:
 
-1. **Web UIs cannot run stdio servers.** Claude.ai's MCP Connectors and ChatGPT's Custom Connectors accept only remote URLs. They cannot start local processes from a browser.
-2. **Every terminal client also accepts a remote URL.** Claude Code, Claude Desktop, Cursor, and Zed all connect to a URL. The URL flow works for all clients. Stdio works only for a subset.
-3. **Stdio fragments distribution.** Two artifacts (PyPI stdio wrapper + HTTP service) cause two versions to keep in sync, two install paths, and two failure modes.
-4. **Installation friction.** Stdio requires Python + pip/uv on the user's dev machine. Remote HTTP requires nothing. You only paste a URL.
+```sh
+docker compose run --rm -T mcp python -u -m hailhq.mcp.stdio
+```
 
-If a restricted client ever needs stdio, we will release a thin stdio-to-HTTP proxy on PyPI (approximately 50 LOC).
+The container reads `HAIL_API_KEY` from `.env` and calls the API at `http://api:8080`.
+`HAIL_AUTH_URL` must be empty in `.env`, not only in your shell: stdio reads `.env` and refuses to start when it is set.
+Stdio uses the same tools as the HTTP service.

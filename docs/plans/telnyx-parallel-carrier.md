@@ -32,7 +32,7 @@ Schemas: [`openapi/openapi.yaml`](../../openapi/openapi.yaml). Code: [`number_of
 
 ## Purchase
 
-1. `POST /numbers` takes a `quote_id`. Quotes are per organization and expire in 10 minutes. Unused quotes are deleted 1 hour after expiry.
+1. `POST /numbers` takes a `quote_id`. Quotes are per organization and expire in 10 minutes. Unused quotes are deleted 24 hours after expiry.
 2. The server rechecks price and readiness at the carrier. This runs without the org lock or a transaction. If the carrier lookup fails, the answer is 503 (not cached, retry with the same `Idempotency-Key`).
 3. Under the org lock it reserves setup plus first month in credits. It then commits the pending number and consumes the quote.
 4. Only then does it call the carrier. An unclear result is never retried and never moved to another carrier.

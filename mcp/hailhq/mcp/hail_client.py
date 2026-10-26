@@ -30,7 +30,7 @@ from urllib.parse import quote
 import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
-from hailhq.core.providers.verification import Requirements
+from hailhq.core.providers.verification import VerificationRequirements
 from hailhq.core.regions import NumberRegionsResponse
 from hailhq.core.schemas import (
     AgentCreate,
@@ -556,8 +556,9 @@ class HailClient:
         *,
         country_code: str,
         number_type: str,
-        subject_type: str = "person",
-        provider: str | None = None,
+        subject_type: str,
+        quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -566,10 +567,14 @@ class HailClient:
             "subject_type": subject_type,
             "purpose": purpose,
         }
-        if provider is not None:
-            params["provider"] = provider
+        if quote_id is not None:
+            params["quote_id"] = quote_id
+        if number_id is not None:
+            params["number_id"] = number_id
         resp = await self._client.get("/verifications/requirements", params=params)
-        return Requirements.model_validate(_decode(resp)).model_dump(mode="json")
+        return VerificationRequirements.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
 
     async def list_verifications(self, *, purpose: str | None = None) -> dict[str, Any]:
         params = {"purpose": purpose} if purpose is not None else None
@@ -610,9 +615,10 @@ class HailClient:
         fields: dict[str, str],
         documents: dict[str, Any],
         files: list[tuple[str, str, bytes]],
-        subject_type: str = "person",
+        subject_type: str,
         address: dict[str, str] | None = None,
-        provider: str | None = None,
+        quote_id: str | None = None,
+        number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
         """POST /verifications — multipart/form-data, personal data in transit.
@@ -635,8 +641,10 @@ class HailClient:
             "fields": json.dumps(fields),
             "documents": json.dumps(documents),
         }
-        if provider is not None:
-            data["provider"] = provider
+        if quote_id is not None:
+            data["quote_id"] = quote_id
+        if number_id is not None:
+            data["number_id"] = number_id
         if address is not None:
             data["address"] = json.dumps(address)
         parts = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import parse_qs, urlsplit
 
 from hailhq.core.db import to_async_url, to_sync_url
@@ -58,3 +59,23 @@ def test_to_sync_url_keeps_sslmode():
     rewritten = to_sync_url("postgres://u:p@h/db?sslmode=require")
     assert rewritten.startswith("postgresql+psycopg://")
     assert "sslmode=require" in rewritten
+
+
+def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
+    from hailhq.core import db
+
+    calls = []
+
+    def refuse(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("could not instrument SQLAlchemy")
+
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(db, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(db.logfire, "instrument_sqlalchemy", refuse)
+    try:
+        assert db._ensure_initialized() is not None
+        assert calls == [{"engine": db._engine}]
+    finally:
+        asyncio.run(db._engine.dispose())

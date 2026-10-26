@@ -257,3 +257,15 @@ def test_speech_tracker_ignores_short_words():
     speech.on_state("speaking", 15.0)
     speech.on_state("listening", 15.3)  # a short "ok" after the long one
     assert speech.talked_since(9.0, 16.0)
+
+
+async def test_connected_handover_asks_for_no_reply():
+    """Once the two people talk, the muted agent must not write another
+    reply: the tool returns None and the wrapper passes it to LiveKit,
+    which then generates none."""
+
+    async def connected(_ctx, _args):
+        return None
+
+    spec = _spec(name="transfer_call", tier="session_control", execute=connected)
+    assert await _make_handler(spec, _tctx())({}, FakeRunContext()) is None

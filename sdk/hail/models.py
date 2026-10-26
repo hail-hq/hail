@@ -152,6 +152,7 @@ class CallResponse(BaseModel):
     started_at: datetime | None = None
     answered_at: datetime | None = None
     ended_at: datetime | None = None
+    failure_message: str | None = None
 
 
 class CallListResponse(BaseModel):
@@ -230,11 +231,22 @@ class SuppressionListResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
-class NumberOffer(BaseModel):
-    """One live carrier offer. Mirrors ``CarrierOffer`` in openapi/openapi.yaml."""
+class OfferVerification(BaseModel):
+    """Your organization's Hail verification that applies to an offer."""
 
-    provider: Literal["twilio", "telnyx", "didww"]
-    e164: str
+    id: UUID
+    state: str
+    # "person" or "business". Default for an API that predates the field.
+    subject_type: Literal["person", "business"] | None = None
+    # Name of the person or company, from the verification form.
+    subject_name: str | None = None
+
+
+class NumberOffer(BaseModel):
+    """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml.
+    ``by_request`` offers have no ``e164`` and cannot be bought: ask support."""
+
+    e164: str | None
     country_code: str
     number_type: NumberType
     capabilities: list[str]
@@ -246,11 +258,19 @@ class NumberOffer(BaseModel):
         "unknown"
     )
     requirements: list[str] = Field(default_factory=list)
-    verification_id: str | None = None
-    address_id: str | None = None
     locality: str | None = None
     region: str | None = None
     quote_id: UUID | None = None
+    # Who may verify for this number: "person", "business", or both. Empty
+    # when no verification is needed.
+    subject_types: list[Literal["person", "business"]] = Field(default_factory=list)
+    # All your live verifications for this offer: approved first, then
+    # newest. Pass one's ``id`` as ``verification_id`` to ``acquire``.
+    verifications: list[OfferVerification] = Field(default_factory=list)
+    # Deprecated: read ``verifications``. The one a purchase without
+    # verification_id would use.
+    verification: OfferVerification | None = None
+    by_request: bool = False
 
 
 class NumberRegion(BaseModel):
@@ -266,7 +286,8 @@ class NumberRegionsResponse(BaseModel):
 class NumberQuotesResponse(BaseModel):
     offers: list[NumberOffer]
     recommended_quote_id: UUID | None
-    unavailable_providers: list[str]
+    # Default for an API that predates the field.
+    incomplete: bool = False
     expires_at: datetime
 
 
@@ -287,12 +308,15 @@ class PhoneNumberResponse(BaseModel):
     capabilities: list[str]
     provisioning_state: str
     is_dedicated: bool
-    messaging_service_sid: str | None = None
-    provider: str = "twilio"
     # Who answers. None: calls ring out / texts reach webhooks only.
     voice_agent_id: UUID | None = None
     sms_agent_id: UUID | None = None
     inbound_registered: bool = False
+    # Who the verification used to buy it is for. None when none was used.
+    subject_type: Literal["person", "business"] | None = None
+    # Hail id of that verification, and the person's or company's name.
+    verification_id: UUID | None = None
+    subject_name: str | None = None
 
 
 class PhoneNumberListResponse(BaseModel):
@@ -871,6 +895,7 @@ __all__ = [
     "NumberRegionsResponse",
     "NumberType",
     "ObservedDnsRecord",
+    "OfferVerification",
     "PhoneNumberListResponse",
     "PhoneNumberResponse",
     "ProviderConfigEntry",

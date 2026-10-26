@@ -14,6 +14,8 @@ from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -21,10 +23,12 @@ from hailhq.core.providers.verification.base import (
     SmsRegistrationProvider,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
     sms_requirements,
+    sms_subject_name,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
@@ -323,7 +327,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     # -- lifecycle -----------------------------------------------------------
 
-    async def check(self, refs) -> list[Problem]:
+    async def check(self, refs, subject_type) -> list[Problem]:
         return []
 
     async def submit(self, refs) -> None:
@@ -341,7 +345,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             refs["brand_sid"]
         ).fetch()
         if brand.status in ("FAILED", "SUSPENDED"):
-            return ProviderStatus(state="rejected", reason=_brand_reason(brand))
+            return ProviderStatus(
+                state="rejected",
+                reason=BRAND_REJECTED,
+                raw_reason=_brand_reason(brand),
+            )
         if brand.status != "APPROVED":
             return ProviderStatus(state="pending")
         if refs.get("subject_type") == "person":
@@ -369,13 +377,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return ProviderStatus(state="approved")
         if campaign.campaign_status == "FAILED":
             errors = campaign.errors or []
-            reason = (
-                "; ".join(
-                    e.get("description", "") for e in errors if isinstance(e, dict)
-                )
-                or "the carrier rejected the campaign"
+            raw = "; ".join(
+                e.get("description", "") for e in errors if isinstance(e, dict)
             )
-            return ProviderStatus(state="rejected", reason=reason)
+            return ProviderStatus(
+                state="rejected", reason=CAMPAIGN_REJECTED, raw_reason=raw or None
+            )
         return ProviderStatus(state="pending")
 
     def confirmation(self, refs) -> str | None:
@@ -406,6 +413,42 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def purchase_handle(self, refs) -> dict:
         return {}
+
+    def subject_name(self, requirements, fields, address, documents) -> str | None:
+        """``legal_name`` for a business, ``first_name`` and ``last_name``
+        for a person, else the address's ``customer_name``."""
+        return sms_subject_name(fields, address, requirements.subject_type)
+
+    async def fetch_subject_name(self, refs, subject_type) -> str | None:
+        """The customer profile's end user: the business information's
+        ``business_name``, or the person's ``first_name`` and ``last_name``."""
+        if not refs.get("profile_sid"):
+            return None
+        wanted = (
+            "customer_profile_business_information"
+            if subject_type == "business"
+            else "starter_customer_profile_information"
+        )
+
+        def run() -> str | None:
+            th = self._client.trusthub.v1
+            profile = th.customer_profiles(refs["profile_sid"])
+            for item in profile.customer_profiles_entity_assignments.list():
+                if not (item.object_sid or "").startswith("IT"):
+                    continue  # documents and the primary profile
+                end_user = th.end_users(item.object_sid).fetch()
+                if end_user.type != wanted:
+                    continue
+                attrs = end_user.attributes or {}
+                if subject_type == "business":
+                    return display_name(attrs.get("business_name"))
+                return display_name(attrs.get("first_name"), attrs.get("last_name"))
+            return None
+
+        try:
+            return await asyncio.to_thread(run)
+        except TwilioException as exc:
+            raise VerificationProviderError("Twilio request failed") from exc
 
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
         """Put the number in the campaign's messaging service (moved from
@@ -527,9 +570,11 @@ def _evaluation_message(ev) -> str:
     return "the carrier refused a detail"
 
 
-def _brand_reason(brand) -> str:
+def _brand_reason(brand) -> str | None:
+    """The carrier's feedback on a refused brand. Kept in the audit log
+    only (see ``ProviderStatus.raw_reason``)."""
     fb = getattr(brand, "brand_feedback", None) or []
-    return "; ".join(str(f) for f in fb) or "the carrier refused the brand"
+    return "; ".join(str(f) for f in fb) or None
 
 
 def _safe_message(msg) -> str:

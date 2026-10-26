@@ -64,8 +64,8 @@ Column meanings:
   the org has a BYO STT row configured, which always wins). "speechmatics"
   requires `SPEECHMATICS_API_KEY` (or a BYO Speechmatics key); without
   one, the call falls back to Deepgram with VAD turn detection.
-- **Turn detection** — `semantic` = LiveKit's transcript-based turn
-  model; `STT-adaptive` = Speechmatics' built-in end-of-utterance
+- **Turn detection** — `semantic` = LiveKit's audio turn detector
+  (`inference.TurnDetector`); `STT-adaptive` = Speechmatics' built-in end-of-utterance
   detection; `VAD` = silence-gap only.
 - **TTS fallback** — "no" means only Cartesia speaks this language, so
   no ElevenLabs failover is attached (and a BYO ElevenLabs TTS config is

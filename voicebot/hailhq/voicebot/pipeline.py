@@ -6,9 +6,9 @@ clean up). Three LLM modes are supported:
 
 * **Mode A, Hail fallback chain** (``llm`` is ``None`` and no org BYO llm
   config): assemble a :class:`livekit.agents.llm.FallbackAdapter` over
-  Anthropic (on Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set) → OpenAI
-  → Google fast-tier models so a single provider outage doesn't take the
-  call down.
+  Anthropic (on Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set), its
+  backup model, OpenAI, then Gemini, so a single provider outage doesn't
+  take the call down.
 * **Mode B, caller-provided endpoint** (dispatch metadata's ``llm`` is a
   dict with ``base_url``/``api_key``/``model``, possibly decrypted from
   ``api_key_enc``): a single :class:`livekit.plugins.openai.LLM` pointed at
@@ -58,6 +58,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import re
 from typing import Any
 from uuid import UUID
 
@@ -113,8 +114,11 @@ __all__ = [
     "build_stt",
     "build_tts",
     "decrypt_llm_metadata",
+    "house_llm",
+    "org_llm",
     "resolve_org_configs",
     "startup_capability_warnings",
+    "stt_takes_keyterms",
 ]
 
 
@@ -144,7 +148,7 @@ async def resolve_org_configs(
 
     For the ``llm`` layer on ``openai-compatible``, also re-runs the
     resolving SSRF guard here (off the event loop via ``asyncio.to_thread``)
-    rather than at LLM-build time in ``_org_llm``: a stored base_url could
+    rather than at LLM-build time in ``org_llm``: a stored base_url could
     have been written before the guard existed, or DNS could have
     re-pointed since. Raising ``ProviderKeyError`` here means this always
     runs inside the caller's guarded try/except (see ``agent.py``), which
@@ -205,10 +209,49 @@ def decrypt_llm_metadata(llm_cfg: dict[str, Any] | None) -> dict[str, Any] | Non
     return llm_cfg
 
 
+# How each model turns thinking off. Sonnet 5.5 rejects ``disabled`` and
+# takes ``between_tools``; Opus 5.5 cannot turn it off (None leaves it on).
+# Keys are first-party ids; ``_base_model_id`` maps a Bedrock id onto them.
+_THINKING_OFF: dict[str, dict[str, str] | None] = {
+    "claude-sonnet-5-5": {"type": "between_tools"},
+    "claude-haiku-5-5": {"type": "disabled"},
+    "claude-opus-5-5": None,
+}
+
+
+def _base_model_id(model: str) -> str:
+    """``eu.anthropic.claude-sonnet-5-5-v1:0`` -> ``claude-sonnet-5-5``: drop
+    the region prefix, ``anthropic.``, a date (``-20260101``) and the
+    version suffix."""
+    base = model.rsplit("anthropic.", 1)[-1]
+    return re.sub(r"(-\d{8})?(-v\d+)?(:\d+)?$", "", base)
+
+
+_warned_models: set[str] = set()
+
+
+def _thinking_off(model: str) -> dict[str, str] | None:
+    """The model's thinking-off setting. An id missing from the table gets
+    ``disabled`` and one warning: a check must never stop the voicebot."""
+    base = _base_model_id(model)
+    if base in _THINKING_OFF:
+        return _THINKING_OFF[base]
+    if base not in _warned_models:
+        _warned_models.add(base)
+        logger.warning(
+            "model %r has no entry in _THINKING_OFF "
+            "(voicebot/hailhq/voicebot/pipeline.py); using thinking disabled",
+            model,
+        )
+    return {"type": "disabled"}
+
+
 class _FastAnthropicLLM(anthropic_plugin.LLM):
-    """Thinking off and low effort on every request: a voice turn needs the
-    first word fast, and the call's turns are short. Thinking off also means
-    no thinking blocks the plugin would have to send back unchanged."""
+    """Thinking off where the model allows it, and low effort on every
+    request: a voice turn needs the first word fast, and the call's turns
+    are short. Sonnet 5.5 still thinks between tool calls; the plugin drops
+    those thinking blocks from the history, which Anthropic accepts
+    (docs/operations/voice-llm.md)."""
 
     async def _prewarm_impl(self) -> None:
         # The plugin prewarms with models.list, which the Bedrock client
@@ -219,43 +262,81 @@ class _FastAnthropicLLM(anthropic_plugin.LLM):
 
     def chat(self, *, extra_kwargs: Any = NOT_GIVEN, **kwargs: Any) -> Any:
         extra = dict(extra_kwargs) if is_given(extra_kwargs) else {}
-        extra.setdefault("thinking", {"type": "disabled"})
+        thinking = _thinking_off(self.model)
+        if thinking is not None:
+            extra.setdefault("thinking", thinking)
         extra.setdefault("output_config", {"effort": "low"})
         return super().chat(extra_kwargs=extra, **kwargs)
 
 
-def _house_anthropic() -> agents_llm.LLM:
+def house_anthropic_ready() -> bool:
+    """Bedrock signs with the AWS keys; otherwise Anthropic's API key."""
+    return bool(settings.anthropic_bedrock_region or settings.anthropic_api_key)
+
+
+def house_anthropic(model: str) -> agents_llm.LLM:
     if not settings.anthropic_bedrock_region:
-        return _FastAnthropicLLM(model=settings.anthropic_model)
+        return _FastAnthropicLLM(model=model)
     # The plugin insists on a key even when handed a client; Bedrock signs
     # with the AWS credential chain instead.
     return _FastAnthropicLLM(
-        model=settings.anthropic_model,
+        model=model,
         client=bedrock_client(settings.anthropic_bedrock_region),
         api_key="bedrock",
     )
 
 
+def house_llm(provider: str, model: str, **kwargs: Any) -> agents_llm.LLM | None:
+    """One house LLM client on Hail's key, or None when its model id or key
+    is missing, so a self-host with only some keys still gets a chain.
+    ``provider`` is ``anthropic``, ``openai`` or ``google``; ``kwargs`` go to
+    the Google client."""
+    if not model:
+        return None
+    if provider == "anthropic":
+        return house_anthropic(model) if house_anthropic_ready() else None
+    if provider == "openai":
+        if not settings.openai_api_key:
+            return None
+        return openai_plugin.LLM(model=model, api_key=settings.openai_api_key)
+    if not settings.google_api_key:
+        return None
+    return google_plugin.LLM(model=model, api_key=settings.google_api_key, **kwargs)
+
+
 def _house_llms() -> list[agents_llm.LLM]:
-    return [
-        _house_anthropic(),
-        openai_plugin.LLM(model=settings.openai_model),
-        google_plugin.LLM(
-            model=settings.google_model, thinking_config={"thinking_level": "minimal"}
+    """Sonnet 5.5, then Haiku 5.5, then OpenAI: the order that passed the
+    replayed hard turns in docs/operations/voice-llm.md. Gemini is the last
+    backup."""
+    llms = [
+        house_llm("anthropic", settings.anthropic_model),
+        house_llm("anthropic", settings.anthropic_backup_model),
+        house_llm("openai", settings.openai_model),
+        house_llm(
+            "google",
+            settings.google_model,
+            thinking_config={"thinking_level": "minimal"},
         ),
     ]
+    return [llm for llm in llms if llm is not None]
 
 
-def _house_llm() -> agents_llm.LLM:
+def _fallback_chain(llms: list[agents_llm.LLM]) -> agents_llm.LLM:
+    # One try per model, no retry: a failed model hands over to the next at
+    # once (docs/operations/voice-llm.md).
     return agents_llm.FallbackAdapter(
-        llm=_house_llms(),
-        attempt_timeout=10.0,
-        max_retry_per_llm=1,
-        retry_interval=5.0,
+        llm=llms, attempt_timeout=10.0, max_retry_per_llm=0
     )
 
 
-def _org_llm(org: ResolvedLayer) -> agents_llm.LLM:
+def _house_llm() -> agents_llm.LLM:
+    llms = _house_llms()
+    if not llms:
+        raise ProviderKeyError("no house LLM has a model and a key")
+    return _fallback_chain(llms)
+
+
+def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
     model = org.params.get("model", "")
     if org.provider == "openai-compatible":
         # openai-compatible has no house equivalent, base_url is inherently
@@ -299,14 +380,9 @@ def build_llm(
             model=llm_cfg["model"],
         )
     if org is not None:
-        byo = _org_llm(org)
+        byo = org_llm(org)
         if org.fallback_enabled:
-            return agents_llm.FallbackAdapter(
-                llm=[byo, *_house_llms()],
-                attempt_timeout=10.0,
-                max_retry_per_llm=1,
-                retry_interval=5.0,
-            )
+            return _fallback_chain([byo, *_house_llms()])
         return byo
     return _house_llm()
 
@@ -454,7 +530,7 @@ def build_stt(
     mode instead of EXTERNAL.
 
     An org row on a provider outside ``("deepgram", "speechmatics")`` fails
-    fast with ``ProviderKeyError`` (matching ``_org_llm``/``_org_tts``)
+    fast with ``ProviderKeyError`` (matching ``org_llm``/``_org_tts``)
     rather than silently billing Hail's key for a BYO org.
 
     Deepgram fallback semantics are unchanged: BYO + fallback_enabled
@@ -512,6 +588,25 @@ def build_stt(
             )
         return byo
     return deepgram_plugin.STT(**house_kwargs)
+
+
+def stt_takes_keyterms(stt: agents_stt.STT | None) -> bool:
+    """Whether the call's STT can be given keyterms (a known name).
+
+    Deepgram takes them on Nova-3 only; an older model answers HTTP 400, and
+    the session path skips the plugin's own model check. Speechmatics Agent
+    STT ignores them. ``_stt_instances`` is the FallbackAdapter's wrapped
+    list in livekit-agents 1.8.8; the adapter forwards session keyterms to
+    each of them (``FallbackAdapter._update_session_keyterms``).
+    """
+    if stt is None or not stt.capabilities.keyterms:
+        return False
+    instances = getattr(stt, "_stt_instances", [stt])
+    return all(
+        s._opts.model.startswith("nova-3")
+        for s in instances
+        if isinstance(s, deepgram_plugin.STT)
+    )
 
 
 def startup_capability_warnings() -> list[str]:

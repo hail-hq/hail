@@ -18,6 +18,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 __all__ = [
+    "BRAND_REJECTED",
+    "CAMPAIGN_REJECTED",
+    "DETAILS_REJECTED",
+    "NOT_ACCEPTED",
+    "VALUE_NOT_ACCEPTED",
     "Address",
     "DocumentInput",
     "DocumentOption",
@@ -33,6 +38,7 @@ __all__ = [
     "UploadedFile",
     "VerificationProvider",
     "VerificationProviderError",
+    "VerificationRequirements",
 ]
 
 SubjectType = Literal["person", "business"]
@@ -140,12 +146,12 @@ class DocumentSlot(BaseModel):
         )
 
 
-class Requirements(BaseModel):
-    """What a carrier needs for one (country, number type, subject type)."""
+class VerificationRequirements(BaseModel):
+    """What the carrier needs for one (country, number type, subject type),
+    as the public API shows it: without the carrier's name."""
 
     model_config = ConfigDict(frozen=True)
 
-    provider: str = Field(description="The carrier these requirements come from.")
     country_code: str = Field(description="ISO alpha-2 country code.")
     number_type: str = Field(
         description="'local', 'mobile', 'toll_free', or 'national'."
@@ -169,10 +175,18 @@ class Requirements(BaseModel):
         description="Subject types the carrier accepts here, so you can offer the choice.",
     )
 
+
+class Requirements(VerificationRequirements):
+    """Internal requirements: the public form plus the carrier it is for."""
+
+    provider: str = Field(description="The carrier these requirements come from.")
+
     @property
     def version(self) -> str:
         """Stable hash of the form definition, stored with a verification so a
-        later change to the carrier's rules is visible."""
+        later change to the carrier's rules is visible. Hashes the internal
+        model (with ``provider``) and sorts keys, so the value is the same
+        as before the public model was split off."""
         body = self.model_dump(mode="json", exclude={"subject_types"})
         raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -206,12 +220,35 @@ class Address(BaseModel):
     country_code: str
 
 
+# Hail's own wording for a carrier refusal. The carrier's text goes in
+# ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator.
+NOT_ACCEPTED = (
+    "The carrier did not accept the details. Check your entries and try again."
+)
+VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
+DETAILS_REJECTED = "The carrier rejected the details. Start again."
+BRAND_REJECTED = (
+    "The carrier rejected the brand registration. Check the business or "
+    "person details and start again."
+)
+CAMPAIGN_REJECTED = (
+    "The carrier rejected the campaign. Check the use case, description, "
+    "sample messages and links, and start again."
+)
+
+
 class Problem(BaseModel):
     """A per-field problem the customer can fix. ``field`` is a neutral name
-    (a field name, a slot name, or ``address``), or ``""`` for a general one."""
+    (a field name, a slot name, or ``address``), or ``""`` for a general one.
+
+    ``message`` is Hail's own wording and is shown to the customer. ``raw`` is
+    the carrier's own text, if any. It is never logged and never sent to the
+    customer: a background refusal keeps it in the audit row, a superadmin
+    approve shows it to the superadmin, and a refusal at creation drops it."""
 
     field: str
     message: str
+    raw: str | None = None
 
 
 class DraftResult(BaseModel):
@@ -227,7 +264,11 @@ class ProviderStatus(BaseModel):
     ``pending``: submitted and under review."""
 
     state: Literal["draft", "pending", "approved", "rejected"]
+    # Shown to the customer: Hail's own wording.
     reason: str | None = None
+    # The carrier's own text for a rejection. Kept in the audit log only;
+    # never logged, never shown to the customer.
+    raw_reason: str | None = None
 
 
 class VerificationProvider(ABC):
@@ -260,7 +301,7 @@ class VerificationProvider(ABC):
         details go only in ``fields``."""
 
     @abstractmethod
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         """Re-check a draft. Empty list when ready to submit."""
 
     @abstractmethod
@@ -273,11 +314,33 @@ class VerificationProvider(ABC):
 
     @abstractmethod
     async def purchase_handle(self, refs: dict) -> dict:
-        """Opaque values the carrier's purchase call needs for this record."""
+        """The carrier ids the purchase call needs for this record:
+        ``{"verification_id": str, "address_id": str | None}``."""
 
     @abstractmethod
     async def discard(self, refs: dict) -> None:
         """Delete a draft. Best effort; never raises."""
+
+    def subject_name(
+        self,
+        requirements: Requirements,
+        fields: dict[str, str],
+        address: Address | None,
+        documents: dict[str, DocumentInput],
+    ) -> str | None:
+        """The name of the person or company this verification is for, taken
+        from what the customer typed in the form. No carrier call. None when
+        the form holds no name. Hail stores it and shows it to the customer;
+        it is never logged."""
+        return None
+
+    async def fetch_subject_name(
+        self, refs: dict, subject_type: SubjectType
+    ) -> str | None:
+        """The same name, read back from the carrier's record (``refs``).
+        Used once, by the operator backfill for rows made before Hail kept
+        the name. None when the carrier record holds no name."""
+        return None
 
 
 class SmsRegistrationProvider(VerificationProvider):

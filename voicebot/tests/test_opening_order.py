@@ -116,3 +116,77 @@ def test_release_drops_the_empty_early_reply():
     agent._activity = Mock()
     agent.release_opening()
     agent._activity._cancel_preemptive_generation.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "metadata, generate_opening, cleared_after",
+    [
+        # Outbound: drop the unfinished pickup turn before anything is spoken,
+        # so its late end of turn cannot cut the opening off.
+        ({"direction": "outbound"}, True, [0]),
+        ({"direction": "outbound", "first_message": "About your order."}, True, [0]),
+        # Deferred menu greeting: the person just spoke; the turn loop answers.
+        ({"direction": "outbound"}, False, []),
+        # Inbound is unchanged.
+        ({"direction": "inbound"}, True, []),
+        ({"direction": "inbound", "first_message": "Hi, Acme here."}, True, []),
+    ],
+)
+async def test_outbound_opening_clears_the_pickup_turn_first(
+    metadata, generate_opening, cleared_after
+):
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, metadata, generate_opening=generate_opening)
+    assert session.cleared_after == cleared_after
+
+
+async def test_clearing_the_pickup_turn_after_hangup_is_safe():
+    class Session(FakeAnnouncingSession):
+        def clear_user_turn(self):
+            raise RuntimeError("AgentSession isn't running")
+
+    session = Session()
+    await speak_greeting(session, {"direction": "outbound"})
+    assert len(session.say_calls) == 1
+
+
+async def test_cleared_turn_with_no_words_gets_no_reply():
+    # The cleared turn's end of turn can still fire, with an empty transcript.
+    agent = SpeechSanitizingAgent(instructions="test")
+    with pytest.raises(StopResponse):
+        await agent.on_user_turn_completed(
+            ChatContext(), ChatMessage(role="user", content=[""])
+        )
+
+
+@pytest.mark.parametrize(
+    "metadata, generate_opening, cancelled",
+    [
+        ({"direction": "outbound"}, True, True),
+        ({"direction": "outbound"}, False, False),
+        ({"direction": "inbound"}, True, False),
+    ],
+)
+async def test_outbound_opening_cancels_the_pending_end_of_turn(
+    metadata, generate_opening, cancelled
+):
+    # The cleared turn's end-of-turn wait must not fire while no speech is
+    # current: LiveKit would interrupt the opening before the hook runs.
+    import inspect
+
+    from livekit.agents.voice.agent_activity import AgentActivity
+    from livekit.agents.voice.audio_recognition import AudioRecognition
+
+    assert "self._activity" in inspect.getsource(AgentSession.__init__)
+    assert "self._audio_recognition" in inspect.getsource(AgentActivity.__init__)
+    assert "self._end_of_turn_task" in inspect.getsource(AudioRecognition.__init__)
+    session = FakeAnnouncingSession()
+    session._activity = Mock()
+    task = session._activity._audio_recognition._end_of_turn_task
+    # Utterances already spoken or requested at each cancel().
+    task.cancel.side_effect = lambda: cancelled_after.append(
+        len(session.say_calls) + len(session.generate_reply_calls)
+    )
+    cancelled_after: list[int] = []
+    await speak_greeting(session, metadata, generate_opening=generate_opening)
+    assert cancelled_after == ([0] if cancelled else [])

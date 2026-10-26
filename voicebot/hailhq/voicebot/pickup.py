@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 
+from hailhq.voicebot.classify import classify_speech
 from livekit import rtc
 from livekit.agents import APIConnectOptions
-from livekit.agents.llm import LLM, ChatContext, function_tool
+from livekit.agents.llm import LLM
 from livekit.agents.stt import STT
 from livekit.agents.utils.participant import wait_for_track_publication
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
 
 logger = logging.getLogger("hailhq.voicebot")
 
+# Cap on the whole recheck: transcription and classification together.
 RECHECK_TIMEOUT_SECONDS = 5.0
 MIN_SPEECH_SECONDS = 1.0
 SAMPLE_RATE = 16000
@@ -105,6 +106,25 @@ def needs_recheck(result: AMDPredictionEvent) -> bool:
     )
 
 
+async def transcribe_and_classify(
+    audio: rtc.AudioFrame, *, stt: STT, llm: LLM, prompt: str
+) -> tuple[str, AMDCategory | None]:
+    """Transcribe a finished greeting once, then classify it.
+
+    Returns ("", None) when nothing was heard. Capped at
+    ``RECHECK_TIMEOUT_SECONDS``; provider errors and timeouts raise.
+    Shared by the outbound recheck and the handover pickup check.
+    """
+    async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
+        event = await stt.recognize(
+            audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
+        )
+        transcript = event.alternatives[0].text.strip() if event.alternatives else ""
+        if not transcript:
+            return "", None
+        return transcript, await classify_speech(llm, prompt + RECHECK_NOTE, transcript)
+
+
 async def recheck_greeting(
     result: AMDPredictionEvent,
     audio: rtc.AudioFrame | None,
@@ -121,46 +141,22 @@ async def recheck_greeting(
     ):
         return result
 
-    @function_tool
-    async def save_prediction(label: AMDCategory) -> None:
-        """Save the greeting category."""
-
     started = time.monotonic()
     try:
-        async with asyncio.timeout(RECHECK_TIMEOUT_SECONDS):
-            event = await stt.recognize(
-                audio, conn_options=APIConnectOptions(max_retry=0, timeout=3.0)
-            )
-            transcript = (
-                event.alternatives[0].text.strip() if event.alternatives else ""
-            )
-            if not transcript:
-                return result
-            ctx = ChatContext()
-            ctx.add_message(role="system", content=prompt + RECHECK_NOTE)
-            ctx.add_message(role="user", content=transcript)
-            async with llm.chat(
-                chat_ctx=ctx,
-                tools=[save_prediction],
-                tool_choice="required",
-                # Google BYO also requires a >=10s provider deadline. The
-                # outer five-second local budget still bounds the recheck.
-                conn_options=APIConnectOptions(max_retry=0, timeout=10.0),
-            ) as stream:
-                response = await stream.collect()
-            for call in response.tool_calls:
-                if call.name != "save_prediction":
-                    continue
-                category = AMDCategory(json.loads(call.arguments)["label"])
-                if category == AMDCategory.UNCERTAIN:
-                    return result
-                return AMDPredictionEvent(
-                    category=category,
-                    reason="greeting_recheck",
-                    transcript=transcript,
-                    speech_duration=result.speech_duration,
-                    delay=result.delay + time.monotonic() - started,
-                )
+        transcript, category = await transcribe_and_classify(
+            audio, stt=stt, llm=llm, prompt=prompt
+        )
+        if not transcript:
+            return result
+        if category is None or category == AMDCategory.UNCERTAIN:
+            return result
+        return AMDPredictionEvent(
+            category=category,
+            reason="greeting_recheck",
+            transcript=transcript,
+            speech_duration=result.speech_duration,
+            delay=result.delay + time.monotonic() - started,
+        )
     except Exception as exc:
         # Provider error bodies can contain audio or transcripts.
         logger.warning("pickup recheck unavailable (%s)", type(exc).__name__)
