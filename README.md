@@ -1,6 +1,7 @@
-<p align="center">
-  <img src="docs/assets/hail-messenger.svg" width="120" alt="The Hail mascot: a blue bird holding an envelope">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://hail.so/assets/brand/social/readme-banner-dark.png">
+  <img src="https://hail.so/assets/brand/social/readme-banner.png" width="100%" alt="hail.so: Give your AI assistant a phone number and an email inbox.">
+</picture>
 
 # Hail
 
