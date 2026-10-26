@@ -93,7 +93,6 @@ from livekit.agents.llm.fallback_adapter import (
 )
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
-from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import (
     anthropic as anthropic_plugin,
 )
@@ -365,10 +364,17 @@ class _CallLLMStream(FallbackLLMStream):
       LiveKit does without ``retry_on_chunk_sent``. The tool already runs,
       so the next model must not send it again.
     * After text was sent, the next model restarts the reply. Its repeat of
-      the words already sent is dropped, so they are said once."""
+      the words already sent is dropped, so they are said once.
+    * When every model failed, the session reruns the chain (its
+      ``max_retry``) only if nothing was sent yet. The adapter's
+      ``retry_on_chunk_sent`` still lets one model hand over to the next."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        # Read by LLMStream._main_task (llm/llm.py): an error after output
+        # was sent is not retried. FallbackLLMStream copies the adapter's
+        # True here; the hand-over reads the adapter's own flag.
+        self._retry_on_chunk_sent = False
         self._said = ""
         self._tool_call_sent = False
         self._failure: BaseException | None = None
@@ -894,21 +900,11 @@ def build_session(
         provider = "deepgram"
     mode = turn_mode_for(language, provider)
     turn_detection: Any = inference.TurnDetector() if mode == "semantic" else mode
-    llm = build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True)
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
-        llm=llm,
-        # The session's default LLM options (max_retry=3) rerun the whole
-        # chain after every model failed, and with retry_on_chunk_sent each
-        # rerun repeats the words already sent. The chain already gives each
-        # model its one try, so it runs once per turn.
-        conn_options=(
-            SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=0))
-            if isinstance(llm, agents_llm.FallbackAdapter)
-            else NOT_GIVEN
-        ),
+        llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
             # Only the setting that differs from the SDK defaults: a transcribed

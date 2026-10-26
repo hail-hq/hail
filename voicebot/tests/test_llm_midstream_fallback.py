@@ -86,8 +86,8 @@ async def _reply(
     parts = [] if parts is None else parts
     async with adapter.chat(
         chat_ctx=ChatContext.empty(),
-        # build_session's options for a call chain: one run per turn.
-        conn_options=APIConnectOptions(max_retry=0),
+        # The session's default options (max_retry=3), without the wait.
+        conn_options=APIConnectOptions(retry_interval=0),
     ) as stream:
         async for chunk in stream:
             if chunk.delta and chunk.delta.content:
@@ -197,9 +197,36 @@ async def test_without_the_setting_the_reply_is_lost() -> None:
         await adapter.aclose()
 
 
+class _SilentOnceLLM(LLM):
+    """Fails its first request before any output, then replies."""
+
+    def __init__(self, reply: str) -> None:
+        super().__init__()
+        self.reply = reply
+        self.calls = 0
+
+    def chat(self, **kwargs: Any) -> LLMStream:
+        self.calls += 1
+        chunks: list[_Item] = [] if self.calls == 1 else [self.reply]
+        fail = _overloaded() if self.calls == 1 else None
+        return _ScriptedLLM(chunks, fail).chat(**kwargs)
+
+
+async def test_every_model_failing_silent_reruns_the_chain() -> None:
+    """Nothing was sent, so the session's retry (max_retry=3) runs the chain
+    again and the person still gets a reply."""
+    first = _SilentOnceLLM("Hello.")
+    second = _ScriptedLLM([], fail=_overloaded())
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    try:
+        assert await _reply(adapter) == "Hello."
+    finally:
+        await adapter.aclose()
+
+
 async def test_every_model_failing_mid_reply_runs_the_chain_once() -> None:
-    """With the call session's options (``build_session``), a turn where
-    every model fails after text runs the chain once."""
+    """Text was sent, so the session does not rerun the chain, even with
+    max_retry=3: a rerun would say the words again."""
     first = _ScriptedLLM(["Aw"], fail=_overloaded())
     second = _ScriptedLLM(["Su"], fail=_overloaded())
     adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)

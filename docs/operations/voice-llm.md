@@ -8,7 +8,7 @@ key is skipped (Anthropic needs `ANTHROPIC_BEDROCK_REGION` or
 effort `low`, so the first word comes fast. Calls and texts use the same
 chain.
 
-Each model in the chain gets one try, with no retry (`max_retry_per_llm=0`
+Each model in the chain gets one try per run, with no retry (`max_retry_per_llm=0`
 in `_fallback_chain`, used by `_house_llm` and by `build_llm` for an org LLM
 with fallback). The
 setting is one value for the whole LiveKit `FallbackAdapter`, not per model
@@ -41,10 +41,15 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
   again and run it twice (two texts or emails, digits pressed twice, two
   transfers). The reply ends with the error, as without
   `retry_on_chunk_sent`.
-- `build_session` sets the session's LLM `max_retry=0` when the LLM is a
-  chain. LiveKit's default (3) reruns the whole chain after every model
-  failed. The chain already gives each model its one try, so it runs once
-  per turn.
+- When every model failed, the session reruns the whole chain, up to 3
+  more times (LiveKit's default `max_retry=3`: the first rerun after 0.1 s,
+  then every 2 s). It does so only when nothing was sent yet, so a turn
+  where every model failed before its first word still gets a reply. Once
+  text or a tool call was sent, there is no rerun, so no word is said twice
+  and no tool runs twice. The call stream sets its own
+  `_retry_on_chunk_sent = False` for this (`llm/llm.py`, `_main_task`); the
+  hand-over between models reads the adapter's `retry_on_chunk_sent=True`.
+  So on a call, a model can get more than one try in a turn, one per rerun.
 - Texts keep the default (`build_llm` without `retry_on_chunk_sent`). A
   model that fails after text fails the reply, and the text is retried
   whole later, so an SMS never carries the failed model's first words.
