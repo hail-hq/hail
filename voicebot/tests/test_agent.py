@@ -1709,6 +1709,16 @@ async def test_caller_hangup_ends_call_at_once() -> None:
     assert captured == {"status": None, "end_reason": "normal_hangup"}
 
 
+def test_busy_ends_call_at_once() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": None, "connected": False}
+    p = FakeParticipant(identity="caller-x", reason=rtc.DisconnectReason.USER_REJECTED)
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    assert ctx.shutdown_calls == ["busy"]
+    assert captured == {"status": "busy", "end_reason": "user_rejected"}
+
+
 def test_room_deleted_disconnect_does_not_end_call_again() -> None:
     ctx = FakeJobContext()
     captured = {"status": None, "end_reason": None}

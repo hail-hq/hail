@@ -403,8 +403,7 @@ def make_agent_hangup(
     agent while the SIP participant keeps hearing silence until they hang
     up themselves (docs.livekit.io/telephony/making-calls/outbound-calls,
     "Hang up"). ``delete_room`` disconnects the phone leg; the resulting
-    ``ROOM_DELETED`` disconnect is in ``_SDK_AUTO_CLOSE_REASONS`` and is
-    not mapped to a status override, so the stamped ``normal_hangup`` /
+    ``ROOM_DELETED`` disconnect is not mapped to a status override, so the stamped ``normal_hangup`` /
     default ``completed`` outcome is preserved. ``ctx.shutdown()`` still
     runs afterwards as a belt-and-braces job release, and as the only
     path to ``on_call_end`` if the delete fails (the room then dies via
@@ -1037,20 +1036,6 @@ BYO_LLM_FAILURE_ANNOUNCEMENT = (
 # on. Value matches the call_end_reason ENUM, like SOFT_CAP_END_REASON.
 BYO_LLM_FAILURE_END_REASON: str = CallEndReason.LLM_ENDPOINT_FAILED.value
 
-# Reasons the LiveKit Agents SDK closes the session on automatically. Mirror
-# of livekit-agents 1.5.x `room_io.types.DEFAULT_CLOSE_ON_DISCONNECT_REASONS`.
-# Encoded locally because that module is not part of the public surface.
-# For any other reason that we map to a Call.status, we have to call
-# ctx.shutdown() ourselves or the session sits idle until the worker timeout.
-_SDK_AUTO_CLOSE_REASONS: frozenset[int] = frozenset(
-    {
-        rtc.DisconnectReason.CLIENT_INITIATED,
-        rtc.DisconnectReason.ROOM_DELETED,
-        rtc.DisconnectReason.USER_REJECTED,
-    }
-)
-
-
 _DISCONNECT_REASON_MAP: dict[int, tuple[str, CallEndReason]] = {
     rtc.DisconnectReason.USER_UNAVAILABLE: (
         "no_answer",
@@ -1289,12 +1274,10 @@ def handle_sip_disconnect(
         # ROOM_DELETED (our own hangup) or an unmapped reason: leave captured
         # as-is so `_shutdown` falls back to "completed".
         return
-    # For reasons the agent SDK does not auto-close on (notably
-    # USER_UNAVAILABLE for no-answer), the session would otherwise sit
-    # idle until the worker times out. Force a graceful shutdown so
-    # `_shutdown` → `on_call_end` runs promptly.
-    if participant.disconnect_reason not in _SDK_AUTO_CLOSE_REASONS:
-        ctx.shutdown(reason=status)
+    # Even when the SDK closes the session itself (USER_REJECTED), the job
+    # lingers until LiveKit drops the room. Shut down so `_shutdown` →
+    # `on_call_end` runs promptly.
+    ctx.shutdown(reason=status)
 
 
 logger = logging.getLogger("hailhq.voicebot")
