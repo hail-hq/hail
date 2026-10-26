@@ -174,6 +174,8 @@ async def test_uk_person_draft_and_later_checks_need_no_company_website() -> Non
                 200,
                 json={
                     "data": {
+                        "country_code": "GB",
+                        "phone_number_type": "mobile",
                         "regulatory_requirements": [
                             {
                                 "requirement_id": r["id"],
@@ -182,7 +184,7 @@ async def test_uk_person_draft_and_later_checks_need_no_company_website() -> Non
                                 "status": "unapproved",
                             }
                             for r in rules
-                        ]
+                        ],
                     }
                 },
             )
@@ -221,20 +223,90 @@ async def test_uk_person_draft_and_later_checks_need_no_company_website() -> Non
     assert result.problems == []
     assert result.refs["group_id"] == GROUP
     assert website not in stored
-    # The operator's later check gets only persisted refs, not the form.
+    # The operator's later check gets the persisted refs and the row's subject.
     refs = json.loads(json.dumps(result.refs))
-    assert await provider(fake).check(refs) == []
+    assert await provider(fake).check(refs, "person") == []
     # The exemption must not hide other missing fields.
     stored.pop("2708e569-696a-4fc7-9305-5fdb3eb9c7dd")
-    assert [p.field for p in await provider(fake).check(refs)] == [
+    assert [p.field for p in await provider(fake).check(refs, "person")] == [
         "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
     ]
-    # Business and legacy refs must still require the website.
-    for other_refs in (
-        {"group_id": GROUP},
-        {"group_id": GROUP, "subject_type": "business"},
-    ):
-        assert website in {p.field for p in await provider(fake).check(other_refs)}
+    # A business must still give the website.
+    assert website in {p.field for p in await provider(fake).check(refs, "business")}
+
+
+def _tagged_rules() -> dict:
+    """Brazil-style rules: one shared, one per kind of end user."""
+    rules = [
+        ("shared", "Contact Information (Name, Business Name, Phone Number)"),
+        ("biz", "Brazilian CNPJ Tax Number (Business Use Only)"),
+        (
+            "ita",
+            "Italian VAT Number (For Legal Entities and Sole Proprietorships Only)",
+        ),
+        ("per", "Brazilian CPF Tax Number (Personal Use Only)"),
+    ]
+    return {
+        "data": [
+            {
+                "country_code": "BR",
+                "phone_number_type": "local",
+                "action": "ordering",
+                "regulatory_requirements": [
+                    {"id": rid, "name": name, "field_type": "textual"}
+                    for rid, name in rules
+                ],
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("subject", "expected"),
+    [("person", ["shared", "ita", "per"]), ("business", ["shared", "biz", "ita"])],
+)
+async def test_rules_tagged_for_the_other_subject_are_left_out(
+    subject, expected
+) -> None:
+    fake = Telnyx(lambda request: httpx.Response(200, json=_tagged_rules()))
+    req = await provider(fake).requirements("BR", "local", subject)
+    assert [f.name for f in req.fields] == expected
+
+
+async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
+    payload = _tagged_rules()
+    rules = payload["data"][0]["regulatory_requirements"]
+    payload["data"][0]["regulatory_requirements"] = [
+        r for r in rules if r["id"] == "biz"
+    ]
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    req = await provider(fake).requirements("BR", "local", "person")
+    # The carrier still wants a group, so the number is not open to buy.
+    assert req.required is True and req.fields == ()
+
+
+async def test_check_skips_rules_tagged_for_the_other_subject() -> None:
+    payload = _tagged_rules()
+    group = {
+        "id": GROUP,
+        "country_code": "BR",
+        "phone_number_type": "local",
+        "regulatory_requirements": [
+            {"requirement_id": r["id"], "field_type": "textual", "field_value": ""}
+            for r in payload["data"][0]["regulatory_requirements"]
+        ],
+    }
+
+    def answers(request):
+        if request.url.path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=payload)
+        return httpx.Response(200, json={"data": group})
+
+    p = provider(Telnyx(answers))
+    person = {pr.field for pr in await p.check({"group_id": GROUP}, "person")}
+    business = {pr.field for pr in await p.check({"group_id": GROUP}, "business")}
+    assert person == {"shared", "ita", "per"}
+    assert business == {"shared", "biz", "ita"}
 
 
 async def test_requirements_none_needed_when_telnyx_answers_empty() -> None:
@@ -335,7 +407,6 @@ async def test_create_draft_happy_path() -> None:
         "group_id": GROUP,
         "address_id": "addr-1",
         "document_ids": ["doc-1", "doc-2"],
-        "subject_type": "person",
     }
 
     (group,) = fake.bodies("POST", "/requirement_groups")
@@ -523,8 +594,13 @@ async def test_check_reports_missing_and_declined_values() -> None:
     for req in group["regulatory_requirements"]:
         if req["requirement_id"] == textual[0]:
             req["status"] = "declined"
-    fake = Telnyx(lambda request: httpx.Response(200, json={"data": group}))
-    problems = await provider(fake).check({"group_id": GROUP})
+
+    def answers(request):
+        if request.url.path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=_rules("mobile"))
+        return httpx.Response(200, json={"data": group})
+
+    problems = await provider(Telnyx(answers)).check({"group_id": GROUP}, "person")
     assert {p.field for p in problems} == {
         r["requirement_id"] for r in group["regulatory_requirements"]
     }

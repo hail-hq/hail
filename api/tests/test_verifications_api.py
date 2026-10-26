@@ -88,7 +88,7 @@ class FakeCarrier(VerificationProvider):
             return DraftResult(refs={}, problems=self.problems)
         return DraftResult(refs={"bundle_sid": f"B{len(self.drafts)}"})
 
-    async def check(self, refs):
+    async def check(self, refs, subject_type):
         return self.check_problems
 
     async def submit(self, refs):
@@ -166,7 +166,7 @@ class FakeSmsCarrier(SmsRegistrationProvider):
             }
         )
 
-    async def check(self, refs):
+    async def check(self, refs, subject_type):
         return []
 
     async def submit(self, refs):

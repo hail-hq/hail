@@ -301,7 +301,7 @@ class VerificationProvider(ABC):
         details go only in ``fields``."""
 
     @abstractmethod
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         """Re-check a draft. Empty list when ready to submit."""
 
     @abstractmethod

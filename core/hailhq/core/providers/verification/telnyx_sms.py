@@ -231,7 +231,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from None
         return []
 
-    async def check(self, refs) -> list[Problem]:
+    async def check(self, refs, subject_type) -> list[Problem]:
         return []
 
     async def submit(self, refs) -> None:

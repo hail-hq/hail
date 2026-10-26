@@ -454,7 +454,7 @@ class TwilioVerificationProvider(VerificationProvider):
                 )
         return problems or [Problem(field="", message=NOT_ACCEPTED)]
 
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         return await asyncio.to_thread(self._evaluate, refs)
 
     async def submit(self, refs: dict) -> None:

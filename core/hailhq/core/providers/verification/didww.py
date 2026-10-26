@@ -494,7 +494,7 @@ class DidwwVerificationProvider(VerificationProvider):
 
     # -- lifecycle -------------------------------------------------------
 
-    async def check(self, refs: dict) -> list[Problem]:
+    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
         try:
             return await asyncio.to_thread(self._validate, refs)
         except DidwwApiError as exc:
