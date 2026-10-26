@@ -16,6 +16,7 @@ import pytest
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
+    SubmitRefused,
     UploadedFile,
     VerificationProviderError,
     get_verification_provider,
@@ -613,6 +614,24 @@ async def test_submit_posts_for_approval() -> None:
     (call,) = fake.calls
     assert call.method == "POST"
     assert call.url.path == f"/v2/requirement_groups/{GROUP}/submit_for_approval"
+
+
+async def test_submit_refused_by_telnyx_is_final() -> None:
+    errors = {"errors": [{"title": "Invalid", "detail": "Group is not fulfilled"}]}
+    fake = Telnyx(lambda request: httpx.Response(422, json=errors))
+    with pytest.raises(SubmitRefused) as refused:
+        await provider(fake).submit({"group_id": GROUP})
+    assert [(p.message, p.raw) for p in refused.value.problems] == [
+        (NOT_ACCEPTED, "Group is not fulfilled")
+    ]
+
+
+@pytest.mark.parametrize("code", [401, 429, 503])
+async def test_submit_other_errors_stay_retryable(code) -> None:
+    fake = Telnyx(lambda request: httpx.Response(code, json={"errors": []}))
+    with pytest.raises(VerificationProviderError) as failed:
+        await provider(fake).submit({"group_id": GROUP})
+    assert not isinstance(failed.value, SubmitRefused)
 
 
 @pytest.mark.parametrize(

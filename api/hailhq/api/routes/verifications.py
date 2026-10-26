@@ -56,6 +56,7 @@ from hailhq.core.providers.verification import (
     Requirements,
     SmsRegistrationProvider,
     SubjectType,
+    SubmitRefused,
     UnsupportedSubjectType,
     UploadedFile,
     VerificationProvider,
@@ -1105,7 +1106,8 @@ async def _submit_row(
 ) -> bool:
     """Send an 'awaiting_review' draft the carrier has already evaluated
     (create_draft or check). True when it is now 'submitted'; False when the
-    carrier was unreachable (the row stays 'awaiting_review' for the next try).
+    carrier was unreachable (the row stays 'awaiting_review' for the next try)
+    or refused the draft (the row is 'rejected').
     Never raises for carrier trouble: creation must still answer 201 and the
     sweeper must keep going.
 
@@ -1120,6 +1122,12 @@ async def _submit_row(
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
+    except SubmitRefused as exc:
+        # The same draft would be refused on every retry: reject it so the
+        # customer sees why and can start again.
+        await _refuse_row(db, row, provider, exc.problems)
+        await db.refresh(row)
+        return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
@@ -1186,19 +1194,29 @@ async def _retry_submit(
         await db.rollback()
         return False
     if problems:
-        _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
-        await _reject_row(
-            db,
-            row,
-            provider,
-            "; ".join(
-                f"{p.field}: {p.message}" if p.field else p.message for p in problems
-            ),
-            carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
-        )
+        await _refuse_row(db, row, provider, problems)
         return False
     return await _submit_row(
         db, row, provider, actor=(None, "system"), action="verification.submit"
+    )
+
+
+async def _refuse_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    problems: list[Problem],
+) -> None:
+    """Reject a draft the carrier refused, with its per-field reasons."""
+    _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
+    await _reject_row(
+        db,
+        row,
+        provider,
+        "; ".join(
+            f"{p.field}: {p.message}" if p.field else p.message for p in problems
+        ),
+        carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
     )
 
 
@@ -1686,6 +1704,11 @@ async def admin_approve(
     if not await _submit_row(
         db, row, provider, actor=actor_of(admin), action="verification.approve"
     ):
+        if row.state == "rejected":
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"the carrier refused the submission: {row.rejection_reason}",
+            )
         raise _carrier_unavailable()
     return _out(row, registry, AdminVerification)
 

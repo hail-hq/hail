@@ -32,6 +32,7 @@ from hailhq.core.providers.verification.base import (
     ProviderStatus,
     Requirements,
     SubjectType,
+    SubmitRefused,
     VerificationProvider,
     VerificationProviderError,
 )
@@ -409,6 +410,19 @@ class TelnyxVerificationProvider(VerificationProvider):
                 "POST",
                 f"/requirement_groups/{path_id(refs['group_id'])}/submit_for_approval",
             )
+        except httpx.HTTPStatusError as exc:
+            # 422: Telnyx will not take this group for review as it is.
+            if exc.response.status_code == 422:
+                raise SubmitRefused(
+                    [
+                        Problem(
+                            field="",
+                            message=NOT_ACCEPTED,
+                            raw=_rejection(exc.response),
+                        )
+                    ]
+                ) from exc
+            raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 
