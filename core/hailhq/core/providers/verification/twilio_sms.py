@@ -327,7 +327,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     # -- lifecycle -----------------------------------------------------------
 
-    async def check(self, refs, subject_type) -> list[Problem]:
+    async def check(self, refs) -> list[Problem]:
         return []
 
     async def submit(self, refs) -> None:

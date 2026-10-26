@@ -726,8 +726,7 @@ async def test_check_reruns_validation(provider):
         },
     )
     problems = await provider.check(
-        {"identity_id": "id-1", "address_id": "addr-1", "requirement_id": REQ_ID},
-        "person",
+        {"identity_id": "id-1", "address_id": "addr-1", "requirement_id": REQ_ID}
     )
     assert [p.message for p in problems] == [NOT_ACCEPTED]
     assert [p.raw for p in problems] == ["Identity id number missing"]

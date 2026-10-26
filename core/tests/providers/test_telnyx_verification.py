@@ -149,7 +149,7 @@ async def test_uk_website_is_only_collected_for_businesses(subject) -> None:
     }
 
 
-async def test_uk_person_draft_and_later_checks_need_no_company_website() -> None:
+async def test_uk_person_draft_sends_na_for_the_company_website() -> None:
     payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
     rules = payload["data"][0]["regulatory_requirements"]
     stored: dict[str, str] = {}
@@ -222,17 +222,15 @@ async def test_uk_person_draft_and_later_checks_need_no_company_website() -> Non
     )
     assert result.problems == []
     assert result.refs["group_id"] == GROUP
-    assert website not in stored
-    # The operator's later check gets the persisted refs and the row's subject.
+    # Telnyx refuses to submit a group with an empty value, even one tagged
+    # "Business Use Only" (seen live on 2026-10-26), so Hail fills it in.
+    assert stored[website] == "N/A"
     refs = json.loads(json.dumps(result.refs))
-    assert await provider(fake).check(refs, "person") == []
-    # The exemption must not hide other missing fields.
+    assert await provider(fake).check(refs) == []
     stored.pop("2708e569-696a-4fc7-9305-5fdb3eb9c7dd")
-    assert [p.field for p in await provider(fake).check(refs, "person")] == [
+    assert [p.field for p in await provider(fake).check(refs)] == [
         "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
     ]
-    # A business must still give the website.
-    assert website in {p.field for p in await provider(fake).check(refs, "business")}
 
 
 def _tagged_rules() -> dict:
@@ -273,6 +271,21 @@ async def test_rules_tagged_for_the_other_subject_are_left_out(
     assert [f.name for f in req.fields] == expected
 
 
+async def test_tagged_document_is_asked_of_everyone() -> None:
+    # A file cannot be filled in for the customer, so Telnyx's tag is ignored.
+    payload = _tagged_rules()
+    payload["data"][0]["regulatory_requirements"].append(
+        {
+            "id": "biz-doc",
+            "name": "Company Registration (Business Use Only)",
+            "field_type": "document",
+        }
+    )
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    req = await provider(fake).requirements("BR", "local", "person")
+    assert [d.name for d in req.documents] == ["biz-doc"]
+
+
 async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
     payload = _tagged_rules()
     rules = payload["data"][0]["regulatory_requirements"]
@@ -283,30 +296,6 @@ async def test_requirements_needed_when_only_other_subject_rules_exist() -> None
     req = await provider(fake).requirements("BR", "local", "person")
     # The carrier still wants a group, so the number is not open to buy.
     assert req.required is True and req.fields == ()
-
-
-async def test_check_skips_rules_tagged_for_the_other_subject() -> None:
-    payload = _tagged_rules()
-    group = {
-        "id": GROUP,
-        "country_code": "BR",
-        "phone_number_type": "local",
-        "regulatory_requirements": [
-            {"requirement_id": r["id"], "field_type": "textual", "field_value": ""}
-            for r in payload["data"][0]["regulatory_requirements"]
-        ],
-    }
-
-    def answers(request):
-        if request.url.path.endswith("/regulatory_requirements"):
-            return httpx.Response(200, json=payload)
-        return httpx.Response(200, json={"data": group})
-
-    p = provider(Telnyx(answers))
-    person = {pr.field for pr in await p.check({"group_id": GROUP}, "person")}
-    business = {pr.field for pr in await p.check({"group_id": GROUP}, "business")}
-    assert person == {"shared", "ita", "per"}
-    assert business == {"shared", "biz", "ita"}
 
 
 async def test_requirements_none_needed_when_telnyx_answers_empty() -> None:
@@ -594,13 +583,8 @@ async def test_check_reports_missing_and_declined_values() -> None:
     for req in group["regulatory_requirements"]:
         if req["requirement_id"] == textual[0]:
             req["status"] = "declined"
-
-    def answers(request):
-        if request.url.path.endswith("/regulatory_requirements"):
-            return httpx.Response(200, json=_rules("mobile"))
-        return httpx.Response(200, json={"data": group})
-
-    problems = await provider(Telnyx(answers)).check({"group_id": GROUP}, "person")
+    fake = Telnyx(lambda request: httpx.Response(200, json={"data": group}))
+    problems = await provider(fake).check({"group_id": GROUP})
     assert {p.field for p in problems} == {
         r["requirement_id"] for r in group["regulatory_requirements"]
     }

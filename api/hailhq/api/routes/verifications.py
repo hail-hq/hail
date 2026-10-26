@@ -1178,9 +1178,7 @@ async def _retry_submit(
         await db.rollback()
         return False
     try:
-        problems = await provider.check(
-            row.provider_refs, row.subject_type  # type: ignore[arg-type]
-        )
+        problems = await provider.check(row.provider_refs)
     except Exception:
         logger.exception("verification check failed for %s", row.id)
         await db.rollback()
@@ -1670,9 +1668,7 @@ async def admin_approve(
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
     try:
-        problems = await provider.check(
-            row.provider_refs, row.subject_type  # type: ignore[arg-type]
-        )
+        problems = await provider.check(row.provider_refs)
     except Exception as exc:
         logger.exception("verification check failed")
         raise _carrier_unavailable() from exc
