@@ -59,6 +59,7 @@ import asyncio
 import dataclasses
 import logging
 import re
+from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
@@ -85,7 +86,11 @@ from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
 from livekit.agents import vad as agents_vad
-from livekit.agents.types import NOT_GIVEN
+from livekit.agents.llm.fallback_adapter import (
+    DEFAULT_FALLBACK_API_CONNECT_OPTIONS,
+    FallbackLLMStream,
+)
+from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import (
@@ -327,14 +332,133 @@ def _house_llms() -> list[agents_llm.LLM]:
     return [llm for llm in llms if llm is not None]
 
 
+def _after_repeat(sent: str, new: str) -> int | None:
+    """Index in ``new`` just past its repeat of ``sent``, ignoring case and
+    whitespace. -1 when ``new`` does not repeat ``sent``; None when ``new``
+    is still too short to tell."""
+    i = 0
+    for ch in sent:
+        if ch.isspace():
+            continue
+        while i < len(new) and new[i].isspace():
+            i += 1
+        if i == len(new):
+            return None
+        if new[i].lower() != ch.lower():
+            return -1
+        i += 1
+    return i
+
+
+class _ToolCallSent(BaseException):
+    """Stops the chain after a tool call was sent and its model failed.
+    A BaseException, so ``FallbackLLMStream._run`` lets it through without
+    marking the next model as failed."""
+
+    def __init__(self, error: BaseException) -> None:
+        super().__init__()
+        self.error = error
+
+
+class _CallLLMStream(FallbackLLMStream):
+    """One call reply over the chain (docs/operations/voice-llm.md):
+
+    * After a tool call was sent, a model that fails ends the reply, as
+      LiveKit does without ``retry_on_chunk_sent``. The tool already runs,
+      so the next model must not send it again.
+    * After text was sent, the next model restarts the reply. Its repeat of
+      the words already sent is dropped, so they are said once."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._said = ""
+        self._tool_call_sent = False
+        self._failure: BaseException | None = None
+
+    async def _run(self) -> None:
+        try:
+            await super()._run()
+        except _ToolCallSent as stop:
+            raise stop.error from None
+
+    async def _try_generate(
+        self, *, llm: agents_llm.LLM, check_recovery: bool = False
+    ) -> AsyncIterable[agents_llm.ChatChunk]:
+        if check_recovery:
+            async for chunk in super()._try_generate(llm=llm, check_recovery=True):
+                yield chunk
+            return
+        if self._failure is not None:
+            raise _ToolCallSent(self._failure)
+        pending = "" if self._said else None
+        try:
+            async for chunk in super()._try_generate(llm=llm):
+                delta = chunk.delta
+                if delta and delta.content and pending is not None:
+                    pending += delta.content
+                    end = _after_repeat(self._said, pending)
+                    if end is None:
+                        continue
+                    if end == -1:
+                        # Not a repeat: keep it, apart from the words said.
+                        gap = self._said[-1:].isspace() or pending[:1].isspace()
+                        rest = pending if gap else " " + pending
+                    else:
+                        rest = pending[end:]
+                        if self._said[-1:].isspace():
+                            rest = rest.lstrip()
+                    pending = None
+                    delta = delta.model_copy(update={"content": rest})
+                    chunk = chunk.model_copy(update={"delta": delta})
+                elif delta and delta.tool_calls and pending:
+                    # A tool call before the repeat was clear: send the text.
+                    text = pending + (delta.content or "")
+                    delta = delta.model_copy(update={"content": text})
+                    chunk = chunk.model_copy(update={"delta": delta})
+                    pending = None
+                if delta and delta.content:
+                    self._said += delta.content
+                if delta and delta.tool_calls:
+                    self._tool_call_sent = True
+                yield chunk
+        except Exception as e:
+            if self._tool_call_sent:
+                self._failure = e
+            raise
+
+
+class _CallFallbackAdapter(agents_llm.FallbackAdapter):
+    def chat(
+        self,
+        *,
+        chat_ctx: agents_llm.ChatContext,
+        tools: list[agents_llm.Tool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_FALLBACK_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[agents_llm.ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+    ) -> agents_llm.LLMStream:
+        return _CallLLMStream(
+            llm=self,
+            conn_options=conn_options,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            parallel_tool_calls=parallel_tool_calls,
+            tool_choice=tool_choice,
+            extra_kwargs=extra_kwargs,
+        )
+
+
 def _fallback_chain(
     llms: list[agents_llm.LLM], *, retry_on_chunk_sent: bool
 ) -> agents_llm.LLM:
     # One try per model, no retry: a failed model hands over to the next at
-    # once. ``retry_on_chunk_sent`` lets a call hand over even after the
-    # failed model sent text; the next model restarts the reply
-    # (docs/operations/voice-llm.md).
-    return agents_llm.FallbackAdapter(
+    # once. ``retry_on_chunk_sent`` is for calls: a model that fails after it
+    # sent text hands over too (docs/operations/voice-llm.md).
+    adapter = (
+        _CallFallbackAdapter if retry_on_chunk_sent else agents_llm.FallbackAdapter
+    )
+    return adapter(
         llm=llms,
         attempt_timeout=10.0,
         max_retry_per_llm=0,
