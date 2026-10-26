@@ -34,6 +34,7 @@ __all__ = [
     "Requirements",
     "SmsRegistrationProvider",
     "SubjectType",
+    "SubmitRefused",
     "UnsupportedSubjectType",
     "UploadedFile",
     "VerificationProvider",
@@ -47,6 +48,15 @@ FieldKind = Literal["text", "email", "phone", "url"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+class SubmitRefused(VerificationProviderError):
+    """The carrier refused to take the draft for review. Retrying the same
+    draft cannot help, so the customer must start again."""
+
+    def __init__(self, problems: list[Problem]) -> None:
+        super().__init__("the carrier refused the submission")
+        self.problems = problems
 
 
 class UnsupportedSubjectType(ValueError):

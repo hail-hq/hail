@@ -17,6 +17,7 @@ from hailhq.core.providers.telnyx import subject_types_for
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
+    SubmitRefused,
     UnsupportedSubjectType,
     UploadedFile,
     VerificationProviderError,
@@ -629,6 +630,40 @@ async def test_submit_posts_for_approval() -> None:
     (call,) = fake.calls
     assert call.method == "POST"
     assert call.url.path == f"/v2/requirement_groups/{GROUP}/submit_for_approval"
+
+
+def _submit_422(group_status: str):
+    errors = {"errors": [{"title": "Invalid", "detail": "Group is not fulfilled"}]}
+
+    def answers(request):
+        if request.method == "POST":
+            return httpx.Response(422, json=errors)
+        return httpx.Response(200, json={"data": _group("mobile", group_status)})
+
+    return Telnyx(answers)
+
+
+@pytest.mark.parametrize("group_status", ["pending-approval", "approved"])
+async def test_submit_of_a_group_already_sent_succeeds(group_status) -> None:
+    # Telnyx answers 422 when a group is sent again; it is already in review.
+    await provider(_submit_422(group_status)).submit({"group_id": GROUP})
+
+
+async def test_submit_refused_by_telnyx_is_final() -> None:
+    fake = _submit_422("unapproved")
+    with pytest.raises(SubmitRefused) as refused:
+        await provider(fake).submit({"group_id": GROUP})
+    assert [(p.message, p.raw) for p in refused.value.problems] == [
+        (NOT_ACCEPTED, "Group is not fulfilled")
+    ]
+
+
+@pytest.mark.parametrize("code", [401, 429, 503])
+async def test_submit_other_errors_stay_retryable(code) -> None:
+    fake = Telnyx(lambda request: httpx.Response(code, json={"errors": []}))
+    with pytest.raises(VerificationProviderError) as failed:
+        await provider(fake).submit({"group_id": GROUP})
+    assert not isinstance(failed.value, SubmitRefused)
 
 
 @pytest.mark.parametrize(

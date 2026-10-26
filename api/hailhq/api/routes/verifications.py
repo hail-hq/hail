@@ -56,6 +56,7 @@ from hailhq.core.providers.verification import (
     Requirements,
     SmsRegistrationProvider,
     SubjectType,
+    SubmitRefused,
     UnsupportedSubjectType,
     UploadedFile,
     VerificationProvider,
@@ -1102,12 +1103,15 @@ async def _submit_row(
     actor: tuple[UUID | None, str],
     action: str,
     extra: dict | None = None,
+    raise_refused: bool = False,
 ) -> bool:
     """Send an 'awaiting_review' draft the carrier has already evaluated
     (create_draft or check). True when it is now 'submitted'; False when the
-    carrier was unreachable (the row stays 'awaiting_review' for the next try).
+    carrier was unreachable (the row stays 'awaiting_review' for the next try)
+    or refused the draft (the row is 'rejected').
     Never raises for carrier trouble: creation must still answer 201 and the
-    sweeper must keep going.
+    sweeper must keep going. With ``raise_refused`` a refusal re-raises
+    SubmitRefused after the row is rejected, so a superadmin sees why.
 
     The row is saved as 'submitting' before the carrier call so a crash in
     between cannot submit twice; _refresh settles a stuck 'submitting' row.
@@ -1120,6 +1124,19 @@ async def _submit_row(
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
+    except SubmitRefused as exc:
+        # The same draft would be refused on every retry: reject it so the
+        # customer sees why and can start again.
+        await _refuse_row(db, row, provider, exc.problems)
+        await db.refresh(row)
+        if row.state != "rejected":
+            # The discard failed: wait for the next try, as when it is down.
+            row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+            row.approved_by = None
+            await db.commit()
+        elif raise_refused:
+            raise
+        return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
@@ -1184,19 +1201,29 @@ async def _retry_submit(
         await db.rollback()
         return False
     if problems:
-        _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
-        await _reject_row(
-            db,
-            row,
-            provider,
-            "; ".join(
-                f"{p.field}: {p.message}" if p.field else p.message for p in problems
-            ),
-            carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
-        )
+        await _refuse_row(db, row, provider, problems)
         return False
     return await _submit_row(
         db, row, provider, actor=(None, "system"), action="verification.submit"
+    )
+
+
+async def _refuse_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    problems: list[Problem],
+) -> None:
+    """Reject a draft the carrier refused, with its per-field reasons."""
+    _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
+    await _reject_row(
+        db,
+        row,
+        provider,
+        "; ".join(
+            f"{p.field}: {p.message}" if p.field else p.message for p in problems
+        ),
+        carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
     )
 
 
@@ -1220,6 +1247,7 @@ async def _reject_row(
         await db.rollback()
         return
     row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await write_audit_log(
@@ -1679,9 +1707,23 @@ async def admin_approve(
             detail="the carrier no longer accepts this draft: "
             + "; ".join(p.raw or p.message for p in problems),
         )
-    if not await _submit_row(
-        db, row, provider, actor=actor_of(admin), action="verification.approve"
-    ):
+    try:
+        submitted = await _submit_row(
+            db,
+            row,
+            provider,
+            actor=actor_of(admin),
+            action="verification.approve",
+            raise_refused=True,
+        )
+    except SubmitRefused as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            # Superadmin only: the carrier's own words help the review.
+            detail="the carrier refused the submission: "
+            + "; ".join(p.raw or p.message for p in exc.problems),
+        ) from exc
+    if not submitted:
         raise _carrier_unavailable()
     return _out(row, registry, AdminVerification)
 

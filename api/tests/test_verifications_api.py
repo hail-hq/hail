@@ -36,11 +36,13 @@ from hailhq.core.providers.verification import (
     ProviderStatus,
     Requirements,
     SmsRegistrationProvider,
+    SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
 )
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
+    NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
 )
 from hailhq.core.providers.verification.forms import display_name
@@ -1771,7 +1773,7 @@ async def test_quote_from_an_unconfigured_carrier_is_404(
     assert resp.status_code == 404
 
 
-async def test_create_keeps_waiting_when_the_carrier_refuses_the_submit(
+async def test_create_keeps_waiting_when_the_carrier_is_down(
     client, org_and_key, carrier
 ) -> None:
     _, _, key = org_and_key
@@ -1784,6 +1786,75 @@ async def test_create_keeps_waiting_when_the_carrier_refuses_the_submit(
     assert resp.status_code == 201, resp.text
     assert resp.json()["state"] == "awaiting_review"
     assert resp.json()["submitted_at"] is None
+
+
+async def test_create_rejects_when_the_carrier_refuses_the_submit(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused(
+            [Problem(field="", message=NOT_ACCEPTED, raw="Group is not fulfilled")]
+        )
+
+    carrier.submit = refuse
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    # Not left waiting: every retry would be refused the same way.
+    assert resp.json()["state"] == "rejected"
+    assert resp.json()["rejection_reason"] == NOT_ACCEPTED
+    assert carrier.discarded == [{"bundle_sid": "B1"}]
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one()
+    assert audit.payload["carrier_reason"] == "Group is not fulfilled"
+
+
+async def test_create_keeps_waiting_when_a_refused_draft_cannot_be_discarded(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.submit, carrier.discard = refuse, boom
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    # Not stuck in 'submitting': the sweeper tries again.
+    assert resp.json()["state"] == "awaiting_review"
+
+
+async def test_superadmin_approve_reports_a_refused_submit(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+
+    async def refuse(refs):
+        raise SubmitRefused(
+            [Problem(field="", message=NOT_ACCEPTED, raw="Group is not fulfilled")]
+        )
+
+    carrier.submit = refuse
+    resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    assert resp.status_code == 409
+    assert "Group is not fulfilled" in resp.json()["detail"]
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "rejected"
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    # A rejected row never names an approving admin.
+    assert row.approved_by is None
 
 
 async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
