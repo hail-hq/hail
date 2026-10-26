@@ -433,3 +433,24 @@ async def test_mode_c_call_does_not_arm_the_giveup(
 
     assert BYO_LLM_FAILURE_ANNOUNCEMENT not in [t for t, _ in session.say_calls]
     assert ctx.shutdown_calls == []
+
+
+async def test_goodbye_is_spoken_in_call_language() -> None:
+    from hailhq.voicebot.spoken_lines import SPOKEN_LINES
+
+    ctx = FakeJobContext()
+    session = _EmittingSession()
+    tasks: set[asyncio.Task[None]] = set()
+    arm_byo_llm_giveup(
+        ctx,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+        UUID("22222222-3333-4444-5555-666666666666"),
+        tasks,
+        language="de",
+    )
+
+    for _ in range(MAX_CONSECUTIVE_LLM_ERRORS):
+        session.emit("error", _llm_error())
+    await _drain(tasks)
+
+    assert session.say_calls == [(SPOKEN_LINES["de"].llm_failure, False)]
