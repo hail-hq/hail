@@ -1695,6 +1695,30 @@ async def test_caller_leaves_while_ringing_deletes_room() -> None:
     assert captured["end_reason"] == CallEndReason.NORMAL_HANGUP.value
 
 
+async def test_caller_hangup_ends_call_at_once() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": None, "connected": False}
+    p = FakeParticipant(
+        identity="caller-x", reason=rtc.DisconnectReason.CLIENT_INITIATED
+    )
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    await asyncio.sleep(0)
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == ["caller_left"]
+    assert captured == {"status": None, "end_reason": "normal_hangup"}
+
+
+def test_room_deleted_disconnect_does_not_end_call_again() -> None:
+    ctx = FakeJobContext()
+    captured = {"status": None, "end_reason": None}
+    state = {"human": None, "connected": False}
+    p = FakeParticipant(identity="caller-x", reason=rtc.DisconnectReason.ROOM_DELETED)
+    handle_sip_disconnect(ctx, p, captured, state, CALL_ID)  # type: ignore[arg-type]
+    assert ctx.shutdown_calls == []
+    assert captured == {"status": None, "end_reason": None}
+
+
 async def test_person_hangs_up_after_connect_ends_call() -> None:
     ctx = FakeJobContext()
     captured = {"status": None, "end_reason": None}

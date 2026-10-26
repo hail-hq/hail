@@ -1222,7 +1222,8 @@ def handle_sip_disconnect(
     """The room's ``participant_disconnected`` handler.
 
     Without a handover this maps the SIP leg's disconnect reason onto the
-    call's terminal status (see :func:`disconnect_reason_to_status`).
+    call's terminal status (see :func:`disconnect_reason_to_status`). A
+    normal hangup deletes the room and shuts down at once.
 
     With a handover there are two SIP legs. The contact's leg is identified
     only by ``human-{call_id}`` (an inbound caller's identity is assigned by
@@ -1272,8 +1273,12 @@ def handle_sip_disconnect(
             status,
             end_reason,
         )
-    if human is not None:
-        logger.info("call_id=%s caller left during handover, ending call", call_id)
+    hung_up = participant.disconnect_reason == rtc.DisconnectReason.CLIENT_INITIATED
+    if human is not None or hung_up:
+        # The SDK closes the session on a hangup but leaves the job running
+        # until LiveKit drops the empty room, about 20s later, and the call
+        # (and its billed duration) ends only then. End it now.
+        logger.info("call_id=%s caller left, ending call", call_id)
         if captured["end_reason"] is None:
             captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
         bridge_state["ending"] = True
@@ -1281,8 +1286,8 @@ def handle_sip_disconnect(
         ctx.shutdown(reason="caller_left")
         return
     if status is None:
-        # CLIENT_INITIATED, normal hangup after a real conversation.
-        # Leave captured as-is so `_shutdown` falls back to "completed".
+        # ROOM_DELETED (our own hangup) or an unmapped reason: leave captured
+        # as-is so `_shutdown` falls back to "completed".
         return
     # For reasons the agent SDK does not auto-close on (notably
     # USER_UNAVAILABLE for no-answer), the session would otherwise sit
