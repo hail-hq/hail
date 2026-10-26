@@ -387,7 +387,9 @@ class _CallLLMStream(FallbackLLMStream):
             # last one, so the chain ended with "all LLMs failed".
             if self._failure is None:
                 raise
-            raise self._failure from None
+            # Keep the model error's own cause: APIConnectionError names
+            # the root failure from it.
+            raise self._failure from self._failure.__cause__
 
     async def _try_generate(
         self, *, llm: agents_llm.LLM, check_recovery: bool = False
@@ -399,28 +401,40 @@ class _CallLLMStream(FallbackLLMStream):
         if self._failure is not None:
             raise _ToolCallSent()
         pending = "" if self._said else None
+        # The words said end with a space: drop the spaces before this
+        # model's first new word, also when they come in a later chunk.
+        trim = self._said[-1:].isspace()
         try:
             async for chunk in super()._try_generate(llm=llm):
                 delta = chunk.delta
-                if delta and pending is not None and (delta.content or pending):
-                    pending += delta.content or ""
-                    end = _after_repeat(self._said, pending)
-                    if end is None:
-                        # So far only a repeat of the words said: hold it.
-                        # The chunk still goes out, for its usage, extra or
-                        # tool call. A tool call ends the text, so the held
-                        # repeat is dropped.
-                        rest = ""
-                    elif end == -1:
-                        # Not a repeat: keep it, apart from the words said.
-                        gap = self._said[-1:].isspace() or pending[:1].isspace()
-                        rest = pending if gap else " " + pending
-                    else:
-                        rest = pending[end:]
-                        if self._said[-1:].isspace():
-                            rest = rest.lstrip()
-                    if end is not None or delta.tool_calls:
-                        pending = None
+                if (
+                    delta
+                    and (delta.content or pending)
+                    and (pending is not None or trim)
+                ):
+                    rest = delta.content or ""
+                    if pending is not None:
+                        pending += rest
+                        end = _after_repeat(self._said, pending)
+                        if end is None:
+                            # So far only a repeat of the words said: hold
+                            # it. The chunk still goes out, for its usage,
+                            # extra or tool call. A tool call drops the held
+                            # repeat; the text after it is matched again.
+                            rest = ""
+                            if delta.tool_calls:
+                                pending = ""
+                        elif end == -1:
+                            # Not a repeat: keep it, apart from the words said.
+                            gap = self._said[-1:].isspace() or pending[:1].isspace()
+                            rest = pending if gap else " " + pending
+                            pending = None
+                        else:
+                            rest = pending[end:]
+                            pending = None
+                    if trim and pending is None:
+                        rest = rest.lstrip()
+                        trim = not rest
                     delta = delta.model_copy(update={"content": rest or None})
                     chunk = chunk.model_copy(update={"delta": delta})
                 if delta and delta.content:

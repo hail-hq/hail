@@ -33,7 +33,10 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
   "Aw", then "Aw, that is great." gives "Aw, that is great." in the speech,
   the chat history and the stored transcript. When the next model starts
   differently, its text is kept, after one space ("Aw Oh, that is
-  great."). Without the hand-over, the adapter re-raises, the reply is
+  great."). Known limit: a next model that starts with some of the words
+  said, then says something else, keeps all of its text, so those words
+  are said twice ("Let me check that Let me check the order."). Without
+  the hand-over, the adapter re-raises, the reply is
   lost, and the agent is silent until the person speaks again. Anthropic's
   `overloaded_error` comes inside a 200 stream after text, so it needs this.
 - A model that fails after it sent a tool call does not hand over. LiveKit

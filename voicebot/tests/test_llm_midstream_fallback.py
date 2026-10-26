@@ -184,6 +184,62 @@ async def test_tool_call_on_the_last_model_raises_its_error() -> None:
         await adapter.aclose()
 
 
+async def test_tool_call_only_then_failure_does_not_hand_over_or_rerun() -> None:
+    """A tool call alone is output: no hand-over and no session rerun (a
+    rerun would end with "after 4 attempts", not the model's error)."""
+    first = _ScriptedLLM([_SMS], fail=_overloaded())
+    second = _ScriptedLLM([_SMS])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        with pytest.raises(APIStatusError):
+            await _reply(adapter, tools=tools)
+        assert tools == ["send_sms"]
+        assert second.calls == 0
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_error_keeps_its_cause() -> None:
+    try:
+        try:
+            raise OSError("connection reset")
+        except OSError as e:
+            raise APIConnectionError() from e
+    except APIConnectionError as e:
+        error = e
+    first = _ScriptedLLM([_SMS], fail=error)
+    adapter = _fallback_chain([first, _ScriptedLLM(["x"])], retry_on_chunk_sent=True)
+    try:
+        with pytest.raises(APIConnectionError) as raised:
+            await _reply(adapter)
+        assert isinstance(raised.value.__cause__, OSError)
+    finally:
+        await adapter.aclose()
+
+
+async def test_space_after_the_repeat_in_a_later_chunk_is_dropped() -> None:
+    first = _ScriptedLLM(["Oh no, "], fail=_overloaded())
+    second = _ScriptedLLM(["Oh no,", " I am sorry."])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    try:
+        assert await _reply(adapter) == "Oh no, I am sorry."
+    finally:
+        await adapter.aclose()
+
+
+async def test_text_after_a_held_repeat_and_a_tool_call_is_spaced() -> None:
+    first = _ScriptedLLM(["Let me check that"], fail=_overloaded())
+    second = _ScriptedLLM(["Let me check", _SMS, "Sending now."])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        assert await _reply(adapter, tools=tools) == "Let me check that Sending now."
+        assert tools == ["send_sms"]
+    finally:
+        await adapter.aclose()
+
+
 async def test_without_the_setting_the_reply_is_lost() -> None:
     """Control: texts keep LiveKit's default and raise."""
     first = _ScriptedLLM(["Aw"], fail=_overloaded())
