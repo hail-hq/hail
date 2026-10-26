@@ -47,6 +47,14 @@ logger = logging.getLogger(__name__)
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 _UPLOAD_TIMEOUT_SECONDS = 60
 _SUBJECT_TYPES: tuple[SubjectType, ...] = ("person", "business")
+# Telnyx returns a shared list for both kinds of end user. This stable
+# requirement ID is explicitly "Business Use Only" in the carrier's rules.
+_BUSINESS_ONLY_REQUIREMENTS = {"1ce58926-d0d9-41c7-be1b-23b7bbbc572d"}
+
+
+def _applies_to_subject(requirement_id: str, subject_type: SubjectType | None) -> bool:
+    # Old refs without a subject type keep the stricter check.
+    return subject_type != "person" or requirement_id not in _BUSINESS_ONLY_REQUIREMENTS
 
 
 def _customer_reference(organization_id: str) -> str:
@@ -175,9 +183,13 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
-        rules = _rules_for(payload, country_code, number_type)
-        # Telnyx does not distinguish a person from a business here; the same
-        # form applies to both, so no subject type is ever refused.
+        rules = [
+            r
+            for r in _rules_for(payload, country_code, number_type)
+            if _applies_to_subject(r["id"], subject_type)
+        ]
+        # The carrier accepts both subjects, but its shared requirement list
+        # includes fields that apply only to businesses.
         base = {
             "provider": self.name,
             "country_code": country_code,
@@ -220,7 +232,8 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
         if problems:
             return DraftResult(refs={}, problems=problems)
-        refs: dict = {"document_ids": []}
+        # Persist the subject for operator checks, which receive only refs.
+        refs: dict = {"document_ids": [], "subject_type": requirements.subject_type}
         reference = _customer_reference(organization_id)
         try:
             group = (
@@ -244,6 +257,8 @@ class TelnyxVerificationProvider(VerificationProvider):
             address_id: str | None = None
             for req in group.get("regulatory_requirements") or []:
                 req_id, kind = req["requirement_id"], req.get("field_type")
+                if not _applies_to_subject(req_id, requirements.subject_type):
+                    continue
                 if kind == "textual":
                     value = (fields.get(req_id) or "").strip()
                     if value:
@@ -347,11 +362,13 @@ class TelnyxVerificationProvider(VerificationProvider):
 
     async def _problems(self, refs: dict) -> list[Problem]:
         """Telnyx has no evaluation call. A draft is complete when every
-        requirement holds a value and no document was denied."""
+        applicable requirement holds a value and no document was denied."""
         group = await self._group(refs)
         problems: list[Problem] = []
         for req in group.get("regulatory_requirements") or []:
             req_id = req["requirement_id"]
+            if not _applies_to_subject(req_id, refs.get("subject_type")):
+                continue
             if not req.get("field_value"):
                 problems.append(
                     Problem(field=req_id, message="This requirement is missing.")

@@ -1,0 +1,113 @@
+{
+  "data": [
+    {
+      "phone_number_type": "mobile",
+      "regulatory_requirements": [
+        {
+          "id": "1ce58926-d0d9-41c7-be1b-23b7bbbc572d",
+          "field_type": "textual",
+          "description": "A valid URL pointing to the active public-facing website of the business associated with the phone number. Required for business end users only. The URL must use http:// or https:// scheme and must resolve to a live website that clearly identifies the business by its registered or trading name. Social media profiles (Facebook, Instagram, LinkedIn pages) are generally not acceptable as a substitute for a primary business website unless the business has no other web presence and this is approved at the country level. Parked domains, 'coming soon' pages, and 404 pages are not acceptable.",
+          "name": "Company Website URL (Business Use Only)",
+          "example": "https://telnyx.com/ or https://www.example-florist.com. The URL must resolve to a live, working website that visibly represents the business named on the order.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "id": "1cfde0b1-f85e-4444-9c1a-413cfa3f079f",
+          "field_type": "document",
+          "description": "Identity documentation, with the required document depending on whether the number will be registered to a company or to a person. For NUMBERS REGISTERED TO A COMPANY: a company registration certificate is required. For NUMBERS REGISTERED TO A PERSON: a passport, ID, or driver's license copy is required. The submitted document must be a legible copy with text and security features readable; the company certificate must show legal name, registration number, and registered address; the passport, ID, or driver's license must show full name, photograph, document number, and a valid (unexpired) expiration date.",
+          "name": "Passport/ID Copy OR Business Registration Certificate (Depending on Use Case)",
+          "example": "Company use case: a Companies House Certificate. Personal use case: a legible scan or photo of the individual's passport biographical page, national ID card, or driver's license. Color is preferred but grayscale is acceptable provided all required fields and security features are clearly readable.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "id": "2708e569-696a-4fc7-9305-5fdb3eb9c7dd",
+          "field_type": "textual",
+          "description": "Contact information for the business or end user, including: (1) the name of the contact person (full given name and family name), (2) the business name when the end user is a business (registered   legal name where applicable; may be omitted or stated as 'N/A' for individual end users), and (3) one or more contact phone numbers where the business or end user can be reached. Contact person name and at least one phone number are mandatory; business name is required only when the end user is a business entity. Phone numbers should be in international E.164 format where possible.",
+          "name": "Contact Information (Name, Business Name, Phone Number)",
+          "example": "Contact: Maria Garc\u00eda L\u00f3pez | Business: Bloom & Petal Florist Ltd. | Phone: +34 612 345 678. For individual end users: Contact: John Smith | Business: N/A | Phone: +1 (555) 123-4567.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "id": "b0197fa1-c2fd-4500-9875-2c658b2396eb",
+          "field_type": "document",
+          "description": "A document evidencing the customer's physical address. Acceptable documents include government-issued identification, official government documents, utility bills, telecommunications provider invoices, bank statements, insurance documents, and other recognized proof-of-address documents. Government-issued documents are not subject to the 3-month issue-date restriction. Acceptable government documents include national identity cards (ID cards), passports, driver's licenses, residence permits, government-issued residency cards, government-issued address certificates, tax notices, official government correspondence, and other government-issued documents confirming the customer's residential or registered business address. Government-issued identification documents with an expiration date must be valid and unexpired at the time of submission. Government correspondence and other official government documents without an expiration date may be accepted regardless of their issue date. Non-government documents must have been issued within the past 3 months (90 days) relative to submission. Acceptable non-government documents include utility bills (electricity, water, gas, internet, landline telephone), invoices from the customer's current telecommunications provider, bank statements, insurance policy documents, invoices from recognized service providers, and other official statements confirming the customer's physical address. All submitted documents must clearly display the full name of the individual or registered business name matching the order, the complete physical address (street, postal code, city, country), and the issuing authority or organization. Non-government documents must also display a verifiable issue date. Government-issued identification documents must display an expiration date where applicable. Documents that do not display a complete physical address cannot be accepted as proof of address, even if they are valid government-issued identification. Handwritten documents, expired government-issued identification, and non-government documents older than 3 months are not acceptable.",
+          "name": "Proof of Address (Recent Bill or Invoice)",
+          "example": "A clear color scan or PDF of a valid national ID card, driver's license, passport, or residence permit showing the customer's full name and complete physical address. Government-issued identification does not need to have been issued within the past 3 months, provided it remains valid and unexpired.  Alternatively, a PDF of the latest invoice from the customer's current telecommunications provider, addressed to the end user at their registered physical address, with an issue date within the past 90 days.  An electricity, water, gas, internet, or landline telephone bill, bank statement, or insurance policy document displaying the customer's full name, complete physical address, and an issue date within the past 90 days is also acceptable.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "id": "c34075fd-dde8-4e5d-b2d1-73155062e77a",
+          "field_type": "textual",
+          "description": "A free-text description, in English, explaining how the phone number will be used in the customer's business operations. The description must (1) name the business or end customer, (2) describe the specific calling activity (e.g., inbound customer support, outbound sales, two-factor authentication, IVR, conferencing), and (3) explicitly state whether the number will be sub-allocated to a third party. Sub-allocation means re-assigning or sub-licensing the number to another business or end user. If sub-allocation applies, the customer must name the sub-allocated party and describe their use case as well. Vague responses such as 'business use' or 'voice services' on their own are not acceptable.",
+          "name": "Business Use Case Description (with Sub-Allocation Disclosure)",
+          "example": "Example A (no sub-allocation): 'This number will be used as the main inbound customer service line for Bloom & Petal Florist, a retail flower shop in Madrid, and will not be sub-allocated to any third party.' Example B (with sub-allocation): 'This number will be sub-allocated to Acme Healthcare Ltd. for use as their appointment reminder outbound dialing line.'",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "id": "c5709e7c-5d7a-4dd7-aabb-79448f9304d9",
+          "field_type": "address",
+          "description": "A valid, real-world physical address located anywhere in the world. Must include street name and number, postal code (where applicable), city, region or province (where applicable), and country. The address provided must correspond to a validated physical address (e.g., as enriched via address validation in the Telnyx system). P.O. boxes, virtual office addresses, and mailbox-only services may not be acceptable depending on the order's downstream country requirements; a deliverable physical location is preferred.",
+          "name": "Worldwide Physical Address",
+          "example": "123 Main St, Brooklyn, NY 11217, US. Or: 60 Holborn Viaduct, London EC1A 2FD, United Kingdom. The address can be in any country in the world but must be a real, deliverable physical location.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        }
+      ],
+      "action": "ordering",
+      "country_code": "GB"
+    }
+  ]
+}

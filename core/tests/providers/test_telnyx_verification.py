@@ -128,6 +128,115 @@ async def test_requirements_sweden_local_email_field() -> None:
     assert req.address_required is True
 
 
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_uk_website_is_only_collected_for_businesses(subject) -> None:
+    # Captured from the carrier on 2026-10-26: the website explicitly says
+    # "Business Use Only"; contact, identity and address apply to both kinds.
+    payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    req = await provider(fake).requirements("GB", "mobile", subject)
+    fields = {f.name: f for f in req.fields}
+    website = "1ce58926-d0d9-41c7-be1b-23b7bbbc572d"
+    if subject == "business":
+        assert fields[website].required
+    else:
+        assert website not in fields
+    assert fields["2708e569-696a-4fc7-9305-5fdb3eb9c7dd"].required
+    assert req.address_required
+    assert {s.name for s in req.documents} == {
+        "1cfde0b1-f85e-4444-9c1a-413cfa3f079f",
+        "b0197fa1-c2fd-4500-9875-2c658b2396eb",
+    }
+
+
+async def test_uk_person_draft_and_later_checks_need_no_company_website() -> None:
+    payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
+    rules = payload["data"][0]["regulatory_requirements"]
+    stored: dict[str, str] = {}
+    website = "1ce58926-d0d9-41c7-be1b-23b7bbbc572d"
+
+    def answers(request):
+        path = request.url.path
+        if path.endswith("/regulatory_requirements"):
+            return httpx.Response(200, json=payload)
+        if request.method == "POST" and path.endswith("/requirement_groups"):
+            return httpx.Response(200, json={"data": {"id": GROUP}})
+        if request.method == "POST" and path.endswith("/addresses"):
+            return httpx.Response(200, json={"data": {"id": "addr-person"}})
+        if request.method == "POST" and path.endswith("/documents"):
+            return httpx.Response(200, json={"data": {"id": "doc-person"}})
+        if request.method == "PATCH":
+            for item in json.loads(request.content)["regulatory_requirements"]:
+                stored[item["requirement_id"]] = item["field_value"]
+            return httpx.Response(200, json={"data": {}})
+        if request.method == "GET" and GROUP in path:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "regulatory_requirements": [
+                            {
+                                "requirement_id": r["id"],
+                                "field_type": r["field_type"],
+                                "field_value": stored.get(r["id"], ""),
+                                "status": "unapproved",
+                            }
+                            for r in rules
+                        ]
+                    }
+                },
+            )
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected {request.method} {path}")
+
+    fake = Telnyx(answers)
+    p = provider(fake)
+    req = await p.requirements("GB", "mobile", "person")
+    _, address, _ = _inputs("mobile")
+    fields = {
+        "2708e569-696a-4fc7-9305-5fdb3eb9c7dd": "Contact: Ada Lovelace | Business: N/A | Phone: +447700900123",
+        "c34075fd-dde8-4e5d-b2d1-73155062e77a": "Personal calls. No sub-allocation.",
+    }
+    docs = {
+        r["id"]: DocumentInput(
+            option="file",
+            file=UploadedFile(
+                filename="proof.pdf",
+                content_type="application/pdf",
+                data=b"%PDF-1.4 test",
+            ),
+        )
+        for r in rules
+        if r["field_type"] == "document"
+    }
+    result = await p.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=docs,
+    )
+    assert result.problems == []
+    assert result.refs["group_id"] == GROUP
+    assert website not in stored
+    # The operator's later check gets only persisted refs, not the form.
+    refs = json.loads(json.dumps(result.refs))
+    assert await provider(fake).check(refs) == []
+    # The exemption must not hide other missing fields.
+    stored.pop("2708e569-696a-4fc7-9305-5fdb3eb9c7dd")
+    assert [p.field for p in await provider(fake).check(refs)] == [
+        "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
+    ]
+    # Business and legacy refs must still require the website.
+    for other_refs in (
+        {"group_id": GROUP},
+        {"group_id": GROUP, "subject_type": "business"},
+    ):
+        assert website in {p.field for p in await provider(fake).check(other_refs)}
+
+
 async def test_requirements_none_needed_when_telnyx_answers_empty() -> None:
     fake = Telnyx(lambda request: httpx.Response(200, json={"data": []}))
     req = await provider(fake).requirements("US", "local", "person")
@@ -226,6 +335,7 @@ async def test_create_draft_happy_path() -> None:
         "group_id": GROUP,
         "address_id": "addr-1",
         "document_ids": ["doc-1", "doc-2"],
+        "subject_type": "person",
     }
 
     (group,) = fake.bodies("POST", "/requirement_groups")
