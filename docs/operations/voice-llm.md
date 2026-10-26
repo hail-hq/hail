@@ -28,15 +28,21 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
 - On a call, a model that fails after it sent text hands over too
   (`retry_on_chunk_sent=True`, set by `build_session`). The next model
   restarts the reply from the start, with the same chat. The words the
-  failed model already sent stay: the person can hear them, then the full
-  new reply (for example "Aw", then "Aw, that is great."). Without it, the
+  failed model already sent stay, joined to the new reply with no break:
+  "Aw" then "Aw, that is great." becomes "AwAw, that is great." in the
+  speech, the chat history and the stored transcript. Without it, the
   adapter re-raises, the reply is lost, and the agent is silent until the
   person speaks again. Anthropic's `overloaded_error` comes inside a 200
   stream after text, so it needs this setting.
+- `build_session` sets the session's LLM `max_retry=0` when the LLM is a
+  chain. LiveKit's default (3) reruns the whole chain after every model
+  failed, and with `retry_on_chunk_sent` each rerun repeats the words
+  already sent.
 - A tool call already sent runs at once (LiveKit runs tool calls as they
   stream). If the model then fails, the next model can send the same call,
-  and the tool runs twice. This needs a full tool call followed by an error
-  in the same response, which is rare.
+  and the tool runs twice: two texts or emails sent, digits pressed twice,
+  two transfers. This needs a full tool call followed by an error in the
+  same response, which is rare.
 - Texts keep the default (`build_llm` without `retry_on_chunk_sent`). A
   model that fails after text fails the reply, and the text is retried
   whole later, so an SMS never carries the failed model's first words.

@@ -75,13 +75,19 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from livekit.agents import AgentSession, TurnHandlingOptions, inference
+from livekit.agents import (
+    AgentSession,
+    APIConnectOptions,
+    TurnHandlingOptions,
+    inference,
+)
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
 from livekit.agents import vad as agents_vad
 from livekit.agents.types import NOT_GIVEN
 from livekit.agents.utils import is_given
+from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import (
     anthropic as anthropic_plugin,
 )
@@ -763,11 +769,21 @@ def build_session(
         provider = "deepgram"
     mode = turn_mode_for(language, provider)
     turn_detection: Any = inference.TurnDetector() if mode == "semantic" else mode
+    llm = build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True)
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
-        llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
+        llm=llm,
+        # The session's default LLM options (max_retry=3) rerun the whole
+        # chain after every model failed, and with retry_on_chunk_sent each
+        # rerun repeats the words already sent. The chain already gives each
+        # model its one try, so it runs once per turn.
+        conn_options=(
+            SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=0))
+            if isinstance(llm, agents_llm.FallbackAdapter)
+            else NOT_GIVEN
+        ),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
             # Only the setting that differs from the SDK defaults: a transcribed

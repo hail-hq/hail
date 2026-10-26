@@ -122,6 +122,18 @@ def test_build_session_hands_over_after_text_was_sent() -> None:
     session = build_session(None, MagicMock())
     assert isinstance(session.llm, FallbackAdapter)
     assert session.llm._retry_on_chunk_sent is True
+    # The chain runs once per turn: no session retry that reruns every model.
+    assert session.conn_options.llm_conn_options.max_retry == 0
+
+
+def test_build_session_keeps_retries_for_a_single_llm() -> None:
+    """A per-call LLM has no chain, so the session's own retries stay."""
+    from unittest.mock import MagicMock
+
+    cfg = {"base_url": "https://llm.example.com/v1", "api_key": "k", "model": "m"}
+    session = build_session(cfg, MagicMock())
+    assert not isinstance(session.llm, FallbackAdapter)
+    assert session.conn_options.llm_conn_options.max_retry == 3
 
 
 def test_org_chain_with_fallback_gives_each_model_one_try(monkeypatch) -> None:

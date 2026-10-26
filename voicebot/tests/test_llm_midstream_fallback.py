@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from hailhq.voicebot.pipeline import _fallback_chain
-from livekit.agents import APIStatusError
+from livekit.agents import APIConnectionError, APIConnectOptions, APIStatusError
 from livekit.agents.llm import (
     LLM,
     ChatChunk,
@@ -93,5 +93,27 @@ async def test_without_the_setting_the_reply_is_lost() -> None:
     try:
         with pytest.raises(APIStatusError):
             await _reply(adapter)
+    finally:
+        await adapter.aclose()
+
+
+async def test_every_model_failing_mid_reply_sends_each_one_once() -> None:
+    """With the call session's options (``build_session``), a turn where
+    every model fails after text runs the chain once. LiveKit's default
+    (max_retry=3) would rerun it and repeat the words: "AwSuAwSuAwSuAwSu"."""
+    first = _ScriptedLLM(["Aw"], fail=_overloaded())
+    second = _ScriptedLLM(["Su"], fail=_overloaded())
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    parts: list[str] = []
+    try:
+        with pytest.raises(APIConnectionError):
+            async with adapter.chat(
+                chat_ctx=ChatContext.empty(),
+                conn_options=APIConnectOptions(max_retry=0),
+            ) as stream:
+                async for chunk in stream:
+                    if chunk.delta and chunk.delta.content:
+                        parts.append(chunk.delta.content)
+        assert "".join(parts) == "AwSu"
     finally:
         await adapter.aclose()
