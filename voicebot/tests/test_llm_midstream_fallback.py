@@ -29,12 +29,14 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, NOT_GIVEN
 _SMS = FunctionToolCall(name="send_sms", arguments="{}", call_id="c1")
 
 
-class _ScriptedLLM(LLM):
-    """Sends ``chunks`` (text, or a tool call), then raises ``fail`` if given."""
+_Item = str | FunctionToolCall | tuple[str, FunctionToolCall]
 
-    def __init__(
-        self, chunks: list[str | FunctionToolCall], fail: Exception | None = None
-    ) -> None:
+
+class _ScriptedLLM(LLM):
+    """Sends ``chunks`` (text, a tool call, or both in one chunk), then raises
+    ``fail`` if given."""
+
+    def __init__(self, chunks: list[_Item], fail: Exception | None = None) -> None:
         super().__init__()
         self.chunks = chunks
         self.fail = fail
@@ -62,6 +64,10 @@ class _ScriptedStream(LLMStream):
         for item in llm.chunks:
             if isinstance(item, str):
                 delta = ChoiceDelta(role="assistant", content=item)
+            elif isinstance(item, tuple):
+                delta = ChoiceDelta(
+                    role="assistant", content=item[0], tool_calls=[item[1]]
+                )
             else:
                 delta = ChoiceDelta(role="assistant", tool_calls=[item])
             self._event_ch.send_nowait(ChatChunk(id=str(id(self)), delta=delta))
@@ -135,6 +141,45 @@ async def test_tool_call_then_failure_does_not_hand_over() -> None:
         assert second.calls == 0
         # The failed model is marked down; the unused one is not.
         assert [s.available for s in adapter._status] == [False, True]
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_after_a_partial_repeat_drops_the_repeat() -> None:
+    """The held text only repeats the words said, so it is not said again."""
+    first = _ScriptedLLM(["Let me check that"], fail=_overloaded())
+    second = _ScriptedLLM(["Let me check", _SMS])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        assert await _reply(adapter, tools=tools) == "Let me check that"
+        assert tools == ["send_sms"]
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_in_a_held_chunk_is_sent() -> None:
+    """OpenAI-style streams send text and a tool call in one chunk."""
+    first = _ScriptedLLM(["Aw"], fail=_overloaded())
+    second = _ScriptedLLM([("A", _SMS)])
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        assert await _reply(adapter, tools=tools) == "Aw"
+        assert tools == ["send_sms"]
+    finally:
+        await adapter.aclose()
+
+
+async def test_tool_call_on_the_last_model_raises_its_error() -> None:
+    first = _ScriptedLLM(["Aw"], fail=_overloaded())
+    second = _ScriptedLLM(["Aw, one moment.", _SMS], fail=_overloaded())
+    adapter = _fallback_chain([first, second], retry_on_chunk_sent=True)
+    tools: list[str] = []
+    try:
+        with pytest.raises(APIStatusError):
+            await _reply(adapter, tools=tools)
+        assert tools == ["send_sms"]
     finally:
         await adapter.aclose()
 

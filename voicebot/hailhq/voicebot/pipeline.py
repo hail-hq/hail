@@ -78,6 +78,7 @@ from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import (
     AgentSession,
+    APIConnectionError,
     APIConnectOptions,
     TurnHandlingOptions,
     inference,
@@ -353,11 +354,8 @@ def _after_repeat(sent: str, new: str) -> int | None:
 class _ToolCallSent(BaseException):
     """Stops the chain after a tool call was sent and its model failed.
     A BaseException, so ``FallbackLLMStream._run`` lets it through without
-    marking the next model as failed."""
-
-    def __init__(self, error: BaseException) -> None:
-        super().__init__()
-        self.error = error
+    marking the next model as failed. ``_CallLLMStream._run`` turns it back
+    into the model's error."""
 
 
 class _CallLLMStream(FallbackLLMStream):
@@ -378,8 +376,12 @@ class _CallLLMStream(FallbackLLMStream):
     async def _run(self) -> None:
         try:
             await super()._run()
-        except _ToolCallSent as stop:
-            raise stop.error from None
+        except (_ToolCallSent, APIConnectionError):
+            # APIConnectionError: the model that sent the tool call was the
+            # last one, so the chain ended with "all LLMs failed".
+            if self._failure is None:
+                raise
+            raise self._failure from None
 
     async def _try_generate(
         self, *, llm: agents_llm.LLM, check_recovery: bool = False
@@ -389,17 +391,21 @@ class _CallLLMStream(FallbackLLMStream):
                 yield chunk
             return
         if self._failure is not None:
-            raise _ToolCallSent(self._failure)
+            raise _ToolCallSent()
         pending = "" if self._said else None
         try:
             async for chunk in super()._try_generate(llm=llm):
                 delta = chunk.delta
-                if delta and delta.content and pending is not None:
-                    pending += delta.content
+                if delta and pending is not None and (delta.content or pending):
+                    pending += delta.content or ""
                     end = _after_repeat(self._said, pending)
                     if end is None:
-                        continue
-                    if end == -1:
+                        # So far only a repeat of the words said: hold it.
+                        # The chunk still goes out, for its usage, extra or
+                        # tool call. A tool call ends the text, so the held
+                        # repeat is dropped.
+                        rest = ""
+                    elif end == -1:
                         # Not a repeat: keep it, apart from the words said.
                         gap = self._said[-1:].isspace() or pending[:1].isspace()
                         rest = pending if gap else " " + pending
@@ -407,15 +413,10 @@ class _CallLLMStream(FallbackLLMStream):
                         rest = pending[end:]
                         if self._said[-1:].isspace():
                             rest = rest.lstrip()
-                    pending = None
-                    delta = delta.model_copy(update={"content": rest})
+                    if end is not None or delta.tool_calls:
+                        pending = None
+                    delta = delta.model_copy(update={"content": rest or None})
                     chunk = chunk.model_copy(update={"delta": delta})
-                elif delta and delta.tool_calls and pending:
-                    # A tool call before the repeat was clear: send the text.
-                    text = pending + (delta.content or "")
-                    delta = delta.model_copy(update={"content": text})
-                    chunk = chunk.model_copy(update={"delta": delta})
-                    pending = None
                 if delta and delta.content:
                     self._said += delta.content
                 if delta and delta.tool_calls:
