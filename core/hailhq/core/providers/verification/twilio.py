@@ -29,6 +29,7 @@ from hailhq.core.providers.verification.base import (
     ProviderStatus,
     Requirements,
     SubjectType,
+    SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
@@ -454,13 +455,24 @@ class TwilioVerificationProvider(VerificationProvider):
                 )
         return problems or [Problem(field="", message=NOT_ACCEPTED)]
 
-    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
+    async def check(self, refs: dict) -> list[Problem]:
         return await asyncio.to_thread(self._evaluate, refs)
 
     async def submit(self, refs: dict) -> None:
-        await asyncio.to_thread(
-            self._rc.bundles(refs["bundle_sid"]).update, status="pending-review"
-        )
+        bundle = self._rc.bundles(refs["bundle_sid"])
+        try:
+            await asyncio.to_thread(bundle.update, status="pending-review")
+        except TwilioRestException as exc:
+            # 400: Twilio will not take this bundle for review as it is. A
+            # bundle already sent is a success, not a refusal.
+            if exc.status != 400:
+                raise
+            sent = await asyncio.to_thread(bundle.fetch)
+            if sent.status in ("pending-review", "in-review", "twilio-approved"):
+                return
+            raise SubmitRefused(
+                [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]
+            ) from exc
 
     async def status(self, refs: dict) -> ProviderStatus:
         bundle = await asyncio.to_thread(self._rc.bundles(refs["bundle_sid"]).fetch)

@@ -8,7 +8,7 @@ key is skipped (Anthropic needs `ANTHROPIC_BEDROCK_REGION` or
 effort `low`, so the first word comes fast. Calls and texts use the same
 chain.
 
-Each model in the chain gets one try, with no retry (`max_retry_per_llm=0`
+Each model in the chain gets one try per run, with no retry (`max_retry_per_llm=0`
 in `_fallback_chain`, used by `_house_llm` and by `build_llm` for an org LLM
 with fallback). The
 setting is one value for the whole LiveKit `FallbackAdapter`, not per model
@@ -25,6 +25,16 @@ setting is one value for the whole LiveKit `FallbackAdapter`, not per model
   that just failed, right away. Models after the one that answers get none.
   A model never has two such requests at once. The model is back in the
   chain once such a request succeeds.
+- Calls only ([`_CallLLMStream`](../../voicebot/hailhq/voicebot/pipeline.py)):
+  - A model that fails mid-reply hands over. The next one restarts the
+    reply, and its repeat of the words already said is dropped.
+  - After a tool call, there is no hand-over, so a tool never runs twice.
+  - When every model fails before any output, the session reruns the chain,
+    up to 3 more times. After any output, there is no rerun.
+  - Known limits: a next model that repeats only part of the words said, or
+    two mid-reply failures in one turn, can say some words twice.
+- Texts keep LiveKit's default: a failure after text fails the reply, which
+  is retried whole later.
 
 The classifier (`build_classifier` in `amd.py`) is `ANTHROPIC_BACKUP_MODEL`,
 then `OPENAI_MODEL`, then `GOOGLE_AMD_MODEL`, with the same skip rule. Every
