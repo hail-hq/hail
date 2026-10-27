@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Geist, Geist_Mono, JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import { siteUrl } from "@/lib/url";
 import {
   COSTS_HERO_COPY,
@@ -8,33 +8,39 @@ import {
 } from "@/lib/site-copy";
 import "./global.css";
 
-const fontSans = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// Every font loads from npm package files, so the build downloads nothing. A Google Fonts
+// download that failed broke a hail.so production build.
+const fontSans = localFont({
+  src: "../node_modules/@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2",
+  weight: "300 700",
   variable: "--font-grotesk",
   display: "swap",
 });
 
 // The shared hail.so header and footer (components/hail-header, hail-footer) read --font-ui and --font-code.
-const fontUi = Geist({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const fontUi = localFont({
+  src: "../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
+  weight: "100 900",
   variable: "--font-ui",
   display: "swap",
 });
 
-const fontCode = Geist_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const fontCode = localFont({
+  src: "../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+  weight: "100 900",
   variable: "--font-code",
   display: "swap",
+  adjustFontFallback: false,
+  fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
 });
 
-const fontMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
+const fontMono = localFont({
+  src: "../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2",
+  weight: "300 700",
   variable: "--font-mono",
   display: "swap",
+  adjustFontFallback: false,
+  fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
 });
 
 // Icons/OG match hail.so's own app/layout.tsx (same bird icon, same palette,
