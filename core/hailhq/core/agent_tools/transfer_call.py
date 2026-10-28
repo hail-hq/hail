@@ -226,12 +226,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                     "type": "string",
                     "description": (
                         "What the caller needs, as a short phrase the person "
-                        "hears, e.g. 'an invoice question'. Empty when the "
-                        "caller only asked for a person."
+                        "hears, e.g. 'an invoice question'. Leave it out when "
+                        "the caller only asked for a person."
                     ),
                 },
             },
-            "required": ["contact", "reason"],
+            "required": ["contact"],
         },
         execute=execute,
         bind=None,
