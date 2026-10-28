@@ -58,6 +58,7 @@ def _policy_links(text: dict) -> dict:
 
 class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     name = "twilio"
+    campaign_ref = "campaign_sid"
 
     def __init__(
         self,
@@ -387,9 +388,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     def confirmation(self, refs) -> str | None:
         # The person answers the carrier's text; there is no code to enter.
+        # Twilio texts only once the brand is approved (otp_sent_at).
         if (
             refs.get("subject_type") == "person"
             and refs.get("identity_verified") is not True
+            and refs.get("otp_sent_at")
         ):
             return "reply"
         return None

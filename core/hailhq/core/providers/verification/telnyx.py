@@ -83,6 +83,11 @@ def _pattern(criteria: dict) -> str | None:
     return regex
 
 
+def _max_length(criteria: dict) -> int | None:
+    value = criteria.get("max_length")
+    return value if isinstance(value, int) and value > 0 else None
+
+
 def _options(criteria: dict) -> tuple[FieldOption, ...] | None:
     values = criteria.get("acceptable_values") or []
     if not values:
@@ -107,6 +112,7 @@ def _field_spec(req: dict) -> FieldSpec:
         pattern=_pattern(criteria),
         options=options,
         required=True,
+        max_length=_max_length(criteria),
     )
 
 

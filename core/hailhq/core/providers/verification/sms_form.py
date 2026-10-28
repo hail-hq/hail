@@ -49,6 +49,12 @@ _VERTICALS = (
     ("COMMUNICATION", "Communication"),
 )
 _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"))
+# Carrier maximums, in characters: campaign description and each sample.
+_DESCRIPTION_MAX = 4096
+_SAMPLE_MAX = 1024
+# The opt-in text shares the carrier's 2048 (_FLOW_MAX) with the fixed
+# consent lines and links (at most 1187, see _URL_MAX), so 861 are left.
+_OPT_IN_MAX = 861
 
 _BUSINESS_FIELDS = (
     FieldSpec(name="legal_name", label="Legal company name"),
@@ -75,6 +81,43 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_phone", label="Contact person phone", kind="phone"),
     FieldSpec(name="rep_title", label="Contact person job title"),
 )
+# What the texts are about, as the carriers' sub use cases. A person (sole
+# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. Twilio files
+# no sub use cases; its plug-in ignores the answer.
+_TEXT_TYPES = (
+    FieldOption(key="CUSTOMER_CARE", label="Customer care and appointments"),
+    FieldOption(key="ACCOUNT_NOTIFICATION", label="Account notices and reminders"),
+    FieldOption(key="DELIVERY_NOTIFICATION", label="Delivery and shipping updates"),
+    FieldOption(key="2FA", label="Login and verification codes"),
+    FieldOption(key="SECURITY_ALERT", label="Security alerts"),
+    FieldOption(key="FRAUD_ALERT", label="Fraud alerts"),
+    FieldOption(key="MARKETING", label="Marketing and promotions"),
+    FieldOption(key="POLLING_VOTING", label="Polls and surveys"),
+    FieldOption(key="HIGHER_EDUCATION", label="School and college updates"),
+    FieldOption(
+        key="PUBLIC_SERVICE_ANNOUNCEMENT", label="Public service announcements"
+    ),
+)
+_TEXT_TYPES_MIN = {"person": 1, "business": 2}
+_TEXT_TYPES_MAX = 5
+
+
+def _text_types_field(subject_type: SubjectType) -> FieldSpec:
+    least = _TEXT_TYPES_MIN[subject_type]
+    return FieldSpec(
+        name="text_types",
+        label="What kinds of texts do you send?",
+        kind="choices",
+        options=_TEXT_TYPES,
+        min_choices=least,
+        max_choices=_TEXT_TYPES_MAX,
+        help=(
+            f"Pick {least} to {_TEXT_TYPES_MAX}. Reviewers check them against "
+            "your sample messages."
+        ),
+    )
+
+
 _PERSON_FIELDS = (
     FieldSpec(name="first_name", label="First name"),
     FieldSpec(name="last_name", label="Last name"),
@@ -96,9 +139,10 @@ _CAMPAIGN_FIELDS = (
         name="campaign_description",
         label="What you send",
         help="One or two sentences. Example: appointment reminders and replies to customer questions.",
+        max_length=_DESCRIPTION_MAX,
     ),
-    FieldSpec(name="sample_1", label="Sample message 1"),
-    FieldSpec(name="sample_2", label="Sample message 2"),
+    FieldSpec(name="sample_1", label="Sample message 1", max_length=_SAMPLE_MAX),
+    FieldSpec(name="sample_2", label="Sample message 2", max_length=_SAMPLE_MAX),
     FieldSpec(
         name="opt_in_description",
         label="How people agree to receive texts",
@@ -108,6 +152,7 @@ _CAMPAIGN_FIELDS = (
             "Reviewers open your site and check that the box is separate from the "
             "terms box and that frequency, rates, STOP and HELP appear next to it."
         ),
+        max_length=_OPT_IN_MAX,
     ),
     FieldSpec(
         name="privacy_policy_url",
@@ -130,7 +175,12 @@ _CAMPAIGN_FIELDS = (
 
 def _fields_for(subject_type: SubjectType) -> tuple[FieldSpec, ...]:
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
-    return subject + _CAMPAIGN_FIELDS
+    return (
+        subject
+        + _CAMPAIGN_FIELDS[:1]
+        + (_text_types_field(subject_type),)
+        + _CAMPAIGN_FIELDS[1:]
+    )
 
 
 def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
@@ -170,6 +220,17 @@ def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Pr
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
+        elif spec.max_length and len(value) > spec.max_length:
+            problems.append(
+                Problem(
+                    field=spec.name,
+                    message=f"Use at most {spec.max_length} characters.",
+                )
+            )
+        elif spec.kind == "choices":
+            problem = _choices_problem(spec, value)
+            if problem:
+                problems.append(Problem(field=spec.name, message=problem))
         elif spec.kind == "url" and len(value) > _URL_MAX:
             problems.append(Problem(field=spec.name, message="Use a shorter link."))
         elif spec.kind == "url" and not _is_http_url(value):
@@ -180,6 +241,24 @@ def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Pr
                 )
             )
     return problems
+
+
+def picked(value: str | None) -> list[str]:
+    """The option keys of a 'choices' value, in order, without repeats."""
+    keys = [k.strip() for k in (value or "").split(",")]
+    return list(dict.fromkeys(k for k in keys if k))
+
+
+def _choices_problem(spec: FieldSpec, value: str) -> str | None:
+    keys = picked(value)
+    allowed = {o.key for o in spec.options or ()}
+    if any(k not in allowed for k in keys):
+        return "Pick from the list."
+    if spec.min_choices and len(keys) < spec.min_choices:
+        return f"Pick at least {spec.min_choices}."
+    if spec.max_choices and len(keys) > spec.max_choices:
+        return f"Pick at most {spec.max_choices}."
+    return None
 
 
 def _is_http_url(value: str) -> bool:
@@ -196,6 +275,7 @@ class CampaignText:
     has_links: bool
     privacy_policy_url: str
     terms_url: str
+    text_types: list[str]
 
 
 _OPT_OUT = " Reply STOP to opt out, HELP for help."
@@ -243,4 +323,5 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
         has_links=fields["has_links"].upper() == "YES",
         privacy_policy_url=privacy_policy_url,
         terms_url=terms_url,
+        text_types=picked(fields.get("text_types")),
     )

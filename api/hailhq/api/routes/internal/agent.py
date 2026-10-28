@@ -38,6 +38,7 @@ from hailhq.core.agent_tools.send_email import (
     MAX_SUBJECT_CHARS,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
+from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
@@ -53,8 +54,10 @@ from hailhq.core.email_sender import from_address_for
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
+    ON_CALL_LINE,
     HandoverPerson,
     country_of,
+    handover_sms_text,
     has_answered_handover,
     load_handover,
 )
@@ -78,6 +81,7 @@ from hailhq.core.text_agent import (
     replies_in_thread,
     thread_lock_key,
 )
+from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
@@ -166,6 +170,11 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
         from_=call.from_e164,
         to=call.to_e164,
     )
+
+
+def _other_party(call: Call) -> str | None:
+    """The person on the line: the caller on inbound, the callee on outbound."""
+    return call.from_e164 if call.direction == "inbound" else call.to_e164
 
 
 async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
@@ -287,8 +296,7 @@ async def agent_send_sms(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
-    # The person on the line: the callee on outbound, the caller on inbound.
-    counterpart = call.from_e164 if call.direction == "inbound" else call.to_e164
+    counterpart = _other_party(call)
 
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -706,7 +714,6 @@ async def agent_send_email(
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
 
-
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
 # ``handover_targets``).
 HandoverWireId = Annotated[str, AfterValidator(normalize_contact_id)]
@@ -735,6 +742,23 @@ class AgentHandoverResultRequest(BaseModel):
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
+    # The voicebot's pickup check verdict (handover_screen), for debugging.
+    picked_up_by: str | None = Field(default=None, max_length=32)
+    # What became of the text to the contact (``/handover-sms``'s ``sms``).
+    sms: str | None = Field(default=None, max_length=48)
+
+
+class AgentHandoverSmsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_invocation_id: UUID
+    call_id: UUID
+    contact_id: HandoverWireId
+    reason: str = Field(default="", max_length=MAX_REASON_CHARS)
+
+
+class AgentHandoverSmsResponse(BaseModel):
+    # sent | failed | blocked:<why> | skipped:<why>
+    sms: str
 
 
 async def _handover_result_recorded(
@@ -809,6 +833,15 @@ async def agent_handover(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
+    if contact.phone_e164 == _other_party(call):
+        # Dialing it rings the phone already on the call: it declines or goes
+        # to voicemail, and the agent introduces the caller to the mailbox.
+        return await _deny_handover(
+            call,
+            body,
+            "contact_is_on_call",
+            spoken=ON_CALL_LINE.format(name=contact.name),
+        )
     # Any carrier, as on save: the second leg dials a person, not a number
     # the call's carrier sells.
     country = country_of(contact.phone_e164)
@@ -838,7 +871,10 @@ async def agent_handover(
 
 
 async def _deny_handover(
-    call: Call, body: AgentHandoverRequest, reason: str
+    call: Call,
+    body: AgentHandoverRequest,
+    reason: str,
+    spoken: str = _SPOKEN_HANDOVER_UNAVAILABLE,
 ) -> AgentHandoverResponse:
     await write_audit_log(
         organization_id=call.organization_id,
@@ -849,7 +885,133 @@ async def _deny_handover(
         payload={"contact_id": body.contact_id, "reason": reason},
         actor_kind="system",
     )
-    return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
+    return AgentHandoverResponse(ok=False, spoken=spoken)
+
+
+@router.post("/handover-sms", response_model=AgentHandoverSmsResponse)
+async def agent_handover_sms(
+    body: AgentHandoverSmsRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentHandoverSmsResponse:
+    """Text the handover contact while the voicebot dials them, from the Hail
+    number on the call. Never blocks the dial: the voicebot posts this in
+    parallel and records ``sms`` on the handover event."""
+    call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
+    if call is None:
+        return AgentHandoverSmsResponse(sms="skipped:no_call")
+    org = call.organization_id
+    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
+    if prior is not None:
+        failed = prior.status in ("failed", "undelivered")
+        return AgentHandoverSmsResponse(sms="failed" if failed else "sent")
+    if call.status != "in_progress":
+        return AgentHandoverSmsResponse(sms="skipped:call_ended")
+    contact = await _linked_person(db, call, body.contact_id)
+    if contact is None or not contact.phone_e164:
+        return AgentHandoverSmsResponse(sms="skipped:no_contact")
+    to = contact.phone_e164
+    caller = _other_party(call)
+    if to == caller:
+        return AgentHandoverSmsResponse(sms="skipped:contact_is_on_call")
+    if await has_answered_handover(db, call.id):
+        return AgentHandoverSmsResponse(sms="skipped:already_connected")
+    # One text per contact per call: a second dial to the same person does
+    # not text them again.
+    texted = (
+        await db.execute(
+            select(Sms.id)
+            .where(
+                Sms.organization_id == org,
+                Sms.metadata_["call_id"].astext == str(call.id),
+                Sms.metadata_["handover_contact_id"].astext == body.contact_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    if texted is not None:
+        return AgentHandoverSmsResponse(sms="skipped:already_texted")
+    number_id = (
+        call.to_number_id if call.direction == "inbound" else call.from_number_id
+    )
+    from_number = await db.get(PhoneNumber, number_id) if number_id else None
+    if from_number is None or "sms" not in from_number.capabilities:
+        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
+
+    async def _blocked(reason: str, **extra: Any) -> AgentHandoverSmsResponse:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.sms_blocked",
+            resource_type="call",
+            resource_id=call.id,
+            payload={"contact_id": body.contact_id, "reason": reason, **extra},
+            actor_kind="system",
+        )
+        return AgentHandoverSmsResponse(sms=f"blocked:{reason}")
+
+    denial = await _shared_denial(db, call)
+    if denial is not None:
+        return await _blocked(denial[1])
+    gate = await check_sms_allowed(db, org, to)
+    if not gate.allowed:
+        return await _blocked("compliance", detail=gate.reason, checks=gate.checks)
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [to])
+    if cap_denial is not None:
+        return await _blocked("agent_caps", detail=cap_denial.reason)
+    if await us_registration_block(db, org, from_number, to) is not None:
+        return await _blocked("us_registration")
+
+    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
+    sms = Sms(
+        organization_id=org,
+        provider=from_number.provider,
+        from_number_id=from_number.id,
+        from_e164=from_number.e164,
+        to_e164=to,
+        agent_id=call.agent_id,
+        direction="outbound",
+        status="queued",
+        body=handover_sms_text(
+            agent.name if agent else "Your agent",
+            caller if is_e164(caller) else None,
+            body.reason,
+        )[:SMS_MAX_BODY_CHARS],
+        metadata_={
+            "call_id": str(call.id),
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "handover_contact_id": body.contact_id,
+        },
+    )
+    db.add(sms)
+    await db.commit()
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.handover.sms",
+        resource_type="sms",
+        resource_id=sms.id,
+        payload={
+            "call_id": str(call.id),
+            "contact_id": body.contact_id,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+    err = await deliver_sms(db, sms)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.sms_failed",
+            resource_type="sms",
+            resource_id=sms.id,
+            payload={"call_id": str(call.id), "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentHandoverSmsResponse(sms="failed")
+    return AgentHandoverSmsResponse(sms="sent")
 
 
 @router.post("/handover-result")
@@ -882,6 +1044,8 @@ async def agent_handover_result(
                 "outcome": body.outcome,
                 "sip_status": body.sip_status,
                 "ring_ms": body.ring_ms,
+                "picked_up_by": body.picked_up_by,
+                "sms": body.sms,
             },
         )
     )

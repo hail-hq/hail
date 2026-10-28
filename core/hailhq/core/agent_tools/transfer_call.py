@@ -4,7 +4,9 @@ session_control tier: the agent finishes its sentence first. The LLM only
 sees names and notes (dispatch metadata ``handover_targets``); the API
 resolves and re-checks the number (``/internal/agent/handover``), the
 voicebot's ``bridge`` handle dials it into the room, and the API records
-the outcome (``/internal/agent/handover-result``).
+the outcome (``/internal/agent/handover-result``). While it dials, the API
+texts the person the caller's number and the reason
+(``/internal/agent/handover-sms``).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from hailhq.core.agent_tools.spec import (
     ToolContext,
     ToolSpec,
 )
+from hailhq.core.handover import ON_CALL_LINE
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_REASON_CHARS = 200
@@ -57,6 +60,27 @@ SPEC = ToolSpec(
 )
 
 
+# Text tasks still running when the tool returns: held so they are not
+# garbage collected before the text is sent.
+_texting: set[asyncio.Task] = set()
+
+
+async def _text_contact(ctx: ToolContext, body: dict[str, Any]) -> str:
+    """Ask the API to text the contact; what became of it, never raises."""
+    try:
+        reply = await ctx.api.post("/internal/agent/handover-sms", body)
+    except Exception:
+        _log.exception("handover text post failed")
+        return "failed"
+    return str(reply.get("sms") or "failed")
+
+
+def _sms_state(task: asyncio.Task[str]) -> str:
+    if not task.done():
+        return "pending"
+    return "failed" if task.cancelled() else task.result()
+
+
 async def _post_answered(ctx: ToolContext, body: dict[str, Any]) -> None:
     """Post the "answered" result; retried, never raises."""
     for attempt in range(len(_ANSWERED_BACKOFF) + 1):
@@ -79,7 +103,17 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
     if not targets:
         return None
     by_label = {t["label"]: t["contact_id"] for t in targets}
-    menu = "; ".join(f"{t['label']} ({t.get('note') or ''})" for t in targets)
+    # The other party on this call: listed so the agent can explain, never
+    # dialed (it would ring the phone already in use).
+    on_call = {t["label"] for t in targets if t.get("on_call")}
+
+    def _entry(t: dict) -> str:
+        if t["label"] in on_call:
+            line = ON_CALL_LINE.format(name=t["label"])
+            return f"{t['label']} (already on this call, do not connect; say: {line})"
+        return f"{t['label']} ({t.get('note') or ''})"
+
+    menu = "; ".join(_entry(t) for t in targets)
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
@@ -88,13 +122,22 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         contact_id = by_label.get(label)
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
+        if label in on_call:
+            return ON_CALL_LINE.format(name=label)
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
 
         # One id per attempt: the route stores one event per id, so a retried
         # post (timeout, dropped connection) is not recorded twice.
         invocation_id = str(uuid.uuid4())
 
-        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
+        sms: asyncio.Task[str] | None = None
+
+        def _result(
+            outcome: str,
+            sip_status: int | None,
+            ring_ms: int,
+            picked_up_by: str | None = None,
+        ) -> dict:
             return {
                 "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
@@ -102,17 +145,19 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "outcome": outcome,
                 "sip_status": sip_status,
                 "ring_ms": ring_ms,
+                "picked_up_by": picked_up_by,
+                "sms": _sms_state(sms) if sms is not None else None,
             }
 
         answer_reported = False
 
-        def on_answered(ring_ms: int) -> Awaitable[None]:
-            # Called the moment the contact picks up, before the intro; the
-            # bridge runs the returned post in the background. The flag is
+        def on_answered(ring_ms: int, picked_up_by: str | None) -> Awaitable[None]:
+            # Called once the contact replied after the intro; the bridge
+            # runs the returned post in the background. The flag is
             # set here, synchronously, so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
-            return _post_answered(ctx, _result("answered", None, ring_ms))
+            return _post_answered(ctx, _result("answered", None, ring_ms, picked_up_by))
 
         route = await ctx.api.post(
             "/internal/agent/handover",
@@ -120,6 +165,19 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         )
         if not route.get("ok"):
             return str(route.get("spoken") or SPOKEN_FALLBACK)
+        sms = asyncio.create_task(
+            _text_contact(
+                ctx,
+                {
+                    "tool_invocation_id": invocation_id,
+                    "call_id": str(ctx.call_id),
+                    "contact_id": contact_id,
+                    "reason": reason,
+                },
+            )
+        )
+        _texting.add(sms)
+        sms.add_done_callback(_texting.discard)
         try:
             outcome = await ctx.bridge(
                 BridgeRoute(
@@ -142,7 +200,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
-                _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
+                _result(
+                    outcome.outcome,
+                    outcome.sip_status,
+                    outcome.ring_ms,
+                    outcome.picked_up_by,
+                ),
             )
         except Exception:
             _log.exception("handover result post failed")

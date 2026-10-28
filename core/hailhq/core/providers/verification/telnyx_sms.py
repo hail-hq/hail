@@ -8,6 +8,7 @@ stored or logged."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
+    VALUE_NOT_ACCEPTED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -37,6 +39,11 @@ logger = logging.getLogger(__name__)
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
+# The STOP confirmation declared in the campaign filing. Hail's own STOP
+# reply (settings.hail_sms_stop_reply) is separate and off by default.
+_OPT_OUT_MESSAGE = (
+    "You are unsubscribed and will get no more messages from this number."
+)
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
@@ -44,7 +51,12 @@ _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
 _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
+_REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
+# Sub use cases for a campaign filed before the form asked for them
+# (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
+# (GET /10dlc/enum/usecase); without them Telnyx refuses with 400.
+_SUB_USECASES = ("CUSTOMER_CARE", "ACCOUNT_NOTIFICATION")
 # A campaign is approved once the mobile carriers accept it; TCR_ACCEPTED
 # alone is pending (the carriers have not reviewed it yet).
 _APPROVED = {"MNO_ACCEPTED", "MNO_PROVISIONED", "ACTIVE"}
@@ -56,6 +68,61 @@ _REJECTED = {
     "REJECTED",
     "FAILED",
 }
+# Telnyx registers a new brand in the background: for about 2 seconds the
+# brand id is unknown to smsOtp, vetting and DELETE (404 or 400). Wait this
+# many reads, this far apart, for it to settle.
+_BRAND_READS = 10
+_BRAND_READ_GAP = 1.0
+# Telnyx brand fields, as the names of Hail's form fields.
+_ADDRESS_FIELDS = {
+    "street": "address.street",
+    "city": "address.city",
+    "state": "address.region",
+    "postalCode": "address.postal_code",
+    "country": "address.country_code",
+}
+_FORM_FIELDS = {
+    "person": {
+        "firstName": "first_name",
+        "lastName": "last_name",
+        "email": "email",
+        "phone": "mobile_phone_number",
+        "mobilePhone": "mobile_phone_number",
+        **_ADDRESS_FIELDS,
+    },
+    "business": {
+        "companyName": "legal_name",
+        "displayName": "legal_name",
+        "entityType": "business_type",
+        "ein": "ein",
+        "vertical": "industry",
+        "website": "website",
+        "email": "rep_email",
+        "phone": "rep_phone",
+        **_ADDRESS_FIELDS,
+    },
+}
+_DUPLICATE = {
+    "mobile_phone_number": "This mobile number is on too many registrations. Use another one.",
+    "email": "This email is on too many registrations. Use another one.",
+    "rep_phone": "This phone number is on too many registrations. Use another one.",
+    "rep_email": "This email is on too many registrations. Use another one.",
+}
+
+
+def _campaign_replies(brand: dict) -> dict:
+    """The HELP, opt-in and STOP replies filed with a campaign, each opening
+    with the brand's name: carrier reviewers want the sender named."""
+    name = display_name(brand.get("displayName")) or display_name(
+        brand.get("firstName"), brand.get("lastName")
+    )
+    prefix = f"{name}: " if name else ""
+    return {
+        "helpMessage": f"{prefix}Reply STOP to opt out. For help contact hi@hail.so.",
+        "optinMessage": f"{prefix}You are opted in. Reply STOP to opt out, HELP for help.",
+        # Required when subscriberOptout is true (Telnyx 10015).
+        "optoutMessage": f"{prefix}{_OPT_OUT_MESSAGE}",
+    }
 
 
 def _policy_links(text: dict) -> dict:
@@ -71,6 +138,7 @@ def _policy_links(text: dict) -> dict:
 
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
+    campaign_ref = "campaign_id"
 
     def __init__(self, api_key=None, client=None) -> None:
         self._api = TelnyxClient(api_key, client)
@@ -124,23 +192,38 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             "messaging_profile_id": messaging_service_sid,
         }
         try:
-            await self._build(refs, fields, address, subject_type)
+            problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
+            # Telnyx bills a brand once it registered it, whatever fails next.
+            billed = _billed(refs)
             await self.discard(refs)
             if isinstance(exc, httpx.HTTPStatusError):
                 code = exc.response.status_code
-                logger.warning("10DLC draft failed: status=%s", code)
+                logger.warning(
+                    "10DLC draft failed: status=%s errors=%s",
+                    code,
+                    _error_log(exc.response),
+                )
                 if 400 <= code < 500:
                     return DraftResult(
                         refs={},
-                        problems=[
-                            Problem(field="", message=_safe_message(exc.response))
-                        ],
+                        problems=_response_problems(exc.response, subject_type),
+                        billed_refs=billed,
                     )
-            raise VerificationProviderError("Telnyx request failed") from exc
+            raise VerificationProviderError(
+                "Telnyx request failed", billed_refs=billed
+            ) from exc
+        if problems:
+            billed = _billed(refs)
+            await self.discard(refs)
+            return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
 
-    async def _build(self, refs, fields, address, subject_type) -> None:
+    async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
+        """File the brand, wait for Telnyx to register it, then send the
+        person's PIN or ask for the company's vetting. Returns the problems
+        of a refused brand. A brand still registering after the wait is
+        kept; the background pass sends the PIN or asks for vetting."""
         if subject_type == "person":
             mobile = fields["mobile_phone_number"].strip()
             display = f"{fields['first_name'].strip()} {fields['last_name'].strip()}"
@@ -174,15 +257,55 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         )
         brand = await self._api.request("POST", "/10dlc/brand", json=body)
         refs["brand_id"] = brand["brandId"]
+        brand = await self._settled_brand(refs["brand_id"])
+        if brand is None:
+            logger.warning("10DLC brand still registering after the wait")
+            if subject_type != "person":
+                # False, not unset: rows filed before this flag existed
+                # already asked for vetting and must not ask again.
+                refs["vetting_requested"] = False
+            return []
+        if brand.get("failureReasons") or brand.get("status") != "OK":
+            return _reason_problems(brand.get("failureReasons"), subject_type)
         if subject_type == "person":
             # No vetting for a sole proprietor; the PIN confirms the person.
             await self._send_pin(refs)
-            return
+        else:
+            await self._request_vetting(refs)
+        return []
+
+    async def _settled_brand(self, brand_id) -> dict | None:
+        """The brand once Telnyx has registered (status OK) or refused it;
+        None if it is still registering after ``_BRAND_READS`` reads."""
+        for _ in range(_BRAND_READS):
+            await asyncio.sleep(_BRAND_READ_GAP)
+            try:
+                brand = await self._api.request(
+                    "GET", f"/10dlc/brand/{path_id(brand_id)}"
+                )
+            except httpx.HTTPStatusError as exc:
+                # 404: not registered yet. 429 and 5xx: try the next read
+                # rather than delete a brand that may be fine.
+                code = exc.response.status_code
+                if code not in (404, 429) and code < 500:
+                    raise
+                continue
+            except httpx.TransportError:
+                continue
+            if brand.get("failureReasons") or brand.get("status") in (
+                "OK",
+                "REGISTRATION_FAILED",
+            ):
+                return brand
+        return None
+
+    async def _request_vetting(self, refs) -> None:
         await self._api.request(
             "POST",
             f"/10dlc/brand/{refs['brand_id']}/vetting",
             json={"vettingProvider": "AEGIS", "vettingClass": "STANDARD"},
         )
+        refs["vetting_requested"] = True
 
     async def _send_pin(self, refs) -> None:
         """Ask Telnyx to text the person a PIN. The caller saves refs."""
@@ -206,9 +329,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         await self._send_pin(refs)
 
     def confirmation(self, refs) -> str | None:
+        # Only once the PIN text was sent (a brand still registering when
+        # filed gets its PIN from the background pass).
         if (
             refs.get("subject_type") == "person"
             and refs.get("identity_verified") is not True
+            and refs.get("otp_sent_at")
         ):
             return "code"
         return None
@@ -231,6 +357,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from None
         return []
 
+    def in_review(self, refs) -> bool:
+        # A company's brand vetting is a review too.
+        return super().in_review(refs) or bool(refs.get("vetting_requested"))
+
     async def check(self, refs) -> list[Problem]:
         return []
 
@@ -241,12 +371,18 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def status(self, refs) -> ProviderStatus:
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{refs['brand_id']}")
-            if brand.get("failureReasons"):
+            if (
+                brand.get("failureReasons")
+                or brand.get("status") == "REGISTRATION_FAILED"
+            ):
                 return ProviderStatus(
                     state="rejected",
                     reason=BRAND_REJECTED,
-                    raw_reason=str(brand["failureReasons"]),
+                    raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
+            if brand.get("status") == "REGISTRATION_PENDING":
+                # No PIN or vetting until Telnyx has registered the brand.
+                return ProviderStatus(state="pending")
             person = refs.get("subject_type") == "person"
             verified = brand.get("identityStatus") in _VERIFIED
             if person and verified:
@@ -255,8 +391,24 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if not verified and not refs.get("identity_verified"):
                 if person:
                     await self._resend_pin_if_old(refs)
+                elif refs.get("vetting_requested") is False:
+                    # The brand was still registering when it was filed.
+                    await self._request_vetting(refs)
                 return ProviderStatus(state="pending")
             if "campaign_id" not in refs:
+                # A campaign filed by an earlier call whose answer was lost
+                # (a timeout): take it. Each campaign sent for review is paid.
+                found = await self._api.request(
+                    "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
+                )
+                existing = [
+                    r.get("campaignId")
+                    for r in found.get("records") or []
+                    if isinstance(r, dict) and r.get("campaignId")
+                ]
+                if existing:
+                    refs["campaign_id"] = existing[0]
+                    return ProviderStatus(state="pending")
                 text = refs["campaign"]
                 campaign = await self._api.request(
                     "POST",
@@ -264,6 +416,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     json={
                         "brandId": refs["brand_id"],
                         "usecase": text["use_case"],
+                        "subUsecases": list(text.get("text_types") or _SUB_USECASES),
                         "description": text["description"],
                         "messageFlow": text["message_flow"],
                         "sample1": text["samples"][0],
@@ -278,8 +431,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,
                         "helpKeywords": _HELP,
-                        "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
-                        "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
+                        **_campaign_replies(brand),
+                        "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },
                 )
@@ -291,7 +444,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 logger.warning(
-                    "10DLC status failed: status=%s", exc.response.status_code
+                    "10DLC status failed: status=%s errors=%s",
+                    exc.response.status_code,
+                    _error_log(exc.response),
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         status = (campaign.get("campaignStatus") or "").upper()
@@ -385,15 +540,86 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning("10DLC discard failed: step=%s", key)
 
 
-def _safe_message(response: httpx.Response) -> str:
-    """A short neutral sentence; never the carrier's own text."""
+def _billed(refs: dict) -> dict:
+    """What Telnyx bills of a draft that failed: the brand, once made."""
+    if not refs.get("brand_id"):
+        return {}
+    return {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
+
+
+def _errors(response: httpx.Response) -> list[dict]:
     try:
         errors = response.json().get("errors") or []
-        low = " ".join(
-            f"{e.get('title', '')} {e.get('detail', '')}" for e in errors
-        ).lower()
-    except (ValueError, AttributeError, TypeError):
-        low = ""
+    except (ValueError, AttributeError):
+        return []
+    if not isinstance(errors, list):
+        return []
+    return [e for e in errors if isinstance(e, dict)]
+
+
+def _error_log(response: httpx.Response) -> list:
+    """Telnyx's errors, for the log: code, field and text. The text can quote
+    the customer's details; logged anyway (owner decision 2026-10-28), since
+    the code alone does not say which field Telnyx refused."""
+    return [
+        {
+            "code": e.get("code"),
+            "field": (
+                e["source"].get("pointer")
+                if isinstance(e.get("source"), dict)
+                else None
+            ),
+            "detail": e.get("detail") or e.get("title"),
+        }
+        for e in _errors(response)
+    ]
+
+
+def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
+    """One problem per form field Telnyx points at (``source.pointer``),
+    else one neutral problem."""
+    names = _FORM_FIELDS[subject_type]
+    problems: list[Problem] = []
+    for e in _errors(response):
+        source = e.get("source")
+        pointer = str(source.get("pointer") or "") if isinstance(source, dict) else ""
+        field = names.get(pointer.rsplit("/", 1)[-1])
+        if field and all(p.field != field for p in problems):
+            problems.append(
+                Problem(
+                    field=field,
+                    message=VALUE_NOT_ACCEPTED,
+                    raw=e.get("detail") or e.get("title"),
+                )
+            )
+    return problems or [Problem(field="", message=_safe_message(response))]
+
+
+def _reason_problems(reasons, subject_type) -> list[Problem]:
+    """A refused brand's ``failureReasons`` as problems on the form fields
+    they name. A reused phone or email gets its own sentence."""
+    names = _FORM_FIELDS[subject_type]
+    problems: list[Problem] = []
+    for reason in reasons or []:
+        if not isinstance(reason, dict):
+            continue
+        text = str(reason.get("description") or "")
+        for name in reason.get("fields") or []:
+            field = names.get(name)
+            if not field or any(p.field == field for p in problems):
+                continue
+            message = VALUE_NOT_ACCEPTED
+            if "duplicate" in text.lower():
+                message = _DUPLICATE.get(field, message)
+            problems.append(Problem(field=field, message=message, raw=text or None))
+    return problems or [Problem(field="", message=_REFUSED)]
+
+
+def _safe_message(response: httpx.Response) -> str:
+    """A short neutral sentence; never the carrier's own text."""
+    low = " ".join(
+        f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
+    ).lower()
     for words, text in (
         (("ein", "tax id", "registration number"), "Check the tax ID (EIN)."),
         (("website", "url"), "Check the website address."),
@@ -402,4 +628,4 @@ def _safe_message(response: httpx.Response) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return "The carrier refused a detail. Check your entries and try again."
+    return _REFUSED
