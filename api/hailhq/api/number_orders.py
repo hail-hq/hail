@@ -202,9 +202,10 @@ async def rejected_registration(
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
     verification rejected. Returns the reason shown to the buyer (Hail's own
-    wording) and the id of the verification it rejected, if any. The carrier's text is kept in the DB only (the audit row's
-    ``carrier_reason`` and the number's
-    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
+    wording) and the id of the verification it rejected, if any. The
+    carrier's text is kept in the DB only (the audit row's ``carrier_reason``
+    and the number's ``provisioning_metadata['carrier_reason']``): never
+    logged, never shown.
     The log line names the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run

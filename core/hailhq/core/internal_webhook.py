@@ -164,34 +164,30 @@ async def _lookup_organization_name(organization_id: str) -> str | None:
     return None
 
 
+def _fire(path: str, payload: dict[str, Any]) -> None:
+    """Schedule ``_post`` as a background task so callers don't pay HTTP RTT
+    on their own commit path."""
+    # Hold a reference so Python's GC doesn't drop the pending task —
+    # ``asyncio.create_task`` only keeps a weak reference internally.
+    task = asyncio.create_task(_post(path, payload))
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)
+
+
 def notify_usage_event_recorded(usage_event_id: str) -> None:
     """Fire-and-forget kick to the website's rater.
 
-    Schedules a background task so callers don't pay HTTP RTT on their
-    own commit path. The rater is batch-aware on the receiving end; the
-    ``usage_event_id`` field is informational (for logs / debugging).
+    The rater is batch-aware on the receiving end; the ``usage_event_id``
+    field is informational (for logs / debugging).
     """
-    # Hold a reference so Python's GC doesn't drop the pending task —
-    # ``asyncio.create_task`` only keeps a weak reference internally.
-    task = asyncio.create_task(
-        _post("/api/internal/usage-events/rate", {"usage_event_id": usage_event_id})
-    )
-    _pending_tasks.add(task)
-    task.add_done_callback(_pending_tasks.discard)
+    _fire("/api/internal/usage-events/rate", {"usage_event_id": usage_event_id})
 
 
 def notify_sms_registration_changed(verification_id: str) -> None:
     """Fire-and-forget kick to the website's US texting fee rater. Call it
     after the commit that made the change (a filing saved, a campaign sent
     for review). The rater is idempotent and also sweeps on its own."""
-    task = asyncio.create_task(
-        _post(
-            "/api/internal/sms-registrations/rate",
-            {"verification_id": verification_id},
-        )
-    )
-    _pending_tasks.add(task)
-    task.add_done_callback(_pending_tasks.discard)
+    _fire("/api/internal/sms-registrations/rate", {"verification_id": verification_id})
 
 
 def notify_verification_decided(verification_id: str) -> None:
@@ -199,11 +195,4 @@ def notify_verification_decided(verification_id: str) -> None:
     that a verification was approved or rejected. Call it after the commit
     that made the change. The website reads the row and skips one that is
     not approved or rejected."""
-    task = asyncio.create_task(
-        _post(
-            "/api/internal/verifications/decided",
-            {"verification_id": verification_id},
-        )
-    )
-    _pending_tasks.add(task)
-    task.add_done_callback(_pending_tasks.discard)
+    _fire("/api/internal/verifications/decided", {"verification_id": verification_id})
