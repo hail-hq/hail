@@ -168,6 +168,24 @@ async def test_classify_skips_empty_or_tiny_audio(monkeypatch) -> None:
     )
 
 
+async def test_silent_pickup_verdict_is_silent(monkeypatch) -> None:
+    """Nobody spoke: the verdict says so, and the call still connects."""
+    monkeypatch.setattr(handover_screen, "_build_stt", lambda _cfgs: _stt("x"))
+    llm = AsyncMock(spec=handover_screen.LLM)
+    monkeypatch.setattr(
+        handover_screen, "build_classifier", lambda *_a, **_k: (llm, [])
+    )
+    monkeypatch.setattr(
+        handover_screen, "listen_for_greeting", AsyncMock(return_value=b"")
+    )
+    monkeypatch.setattr(handover_screen, "_close_all", AsyncMock())
+    session = SimpleNamespace(vad=object())
+    verdict = await handover_screen.screen_handover_pickup(
+        object(), "human-x", session  # type: ignore[arg-type]
+    )
+    assert verdict == "silent" and verdict not in handover_screen.NOT_A_PERSON
+
+
 def test_person_verdicts_connect() -> None:
     assert "human" not in handover_screen.NOT_A_PERSON
     assert "uncertain" not in handover_screen.NOT_A_PERSON

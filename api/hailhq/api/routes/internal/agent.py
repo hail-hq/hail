@@ -705,6 +705,10 @@ async def agent_send_email(
 
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
+_SPOKEN_HANDOVER_SELF = (
+    "It seems this call is already on {name}'s number. Handing it over to the "
+    "same number is not technically possible."
+)
 
 
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
@@ -735,6 +739,8 @@ class AgentHandoverResultRequest(BaseModel):
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
+    # The voicebot's pickup check verdict (handover_screen), for debugging.
+    picked_up_by: str | None = Field(default=None, max_length=32)
 
 
 async def _handover_result_recorded(
@@ -809,6 +815,15 @@ async def agent_handover(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
+    # The other party on this call: inbound came from it, outbound dialed it.
+    other_party = call.from_e164 if call.direction == "inbound" else call.to_e164
+    if contact.phone_e164 == other_party:
+        # Dialing it rings the phone already on the call: it declines or goes
+        # to voicemail, and the agent introduces the caller to the mailbox.
+        await _deny_handover(call, body, "contact_is_on_call")
+        return AgentHandoverResponse(
+            ok=False, spoken=_SPOKEN_HANDOVER_SELF.format(name=contact.name)
+        )
     # Any carrier, as on save: the second leg dials a person, not a number
     # the call's carrier sells.
     country = country_of(contact.phone_e164)
@@ -882,6 +897,7 @@ async def agent_handover_result(
                 "outcome": body.outcome,
                 "sip_status": body.sip_status,
                 "ring_ms": body.ring_ms,
+                "picked_up_by": body.picked_up_by,
             },
         )
     )

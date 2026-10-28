@@ -94,7 +94,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         # post (timeout, dropped connection) is not recorded twice.
         invocation_id = str(uuid.uuid4())
 
-        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
+        def _result(
+            outcome: str,
+            sip_status: int | None,
+            ring_ms: int,
+            picked_up_by: str | None = None,
+        ) -> dict:
             return {
                 "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
@@ -102,17 +107,18 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "outcome": outcome,
                 "sip_status": sip_status,
                 "ring_ms": ring_ms,
+                "picked_up_by": picked_up_by,
             }
 
         answer_reported = False
 
-        def on_answered(ring_ms: int) -> Awaitable[None]:
+        def on_answered(ring_ms: int, picked_up_by: str | None) -> Awaitable[None]:
             # Called the moment the contact picks up, before the intro; the
             # bridge runs the returned post in the background. The flag is
             # set here, synchronously, so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
-            return _post_answered(ctx, _result("answered", None, ring_ms))
+            return _post_answered(ctx, _result("answered", None, ring_ms, picked_up_by))
 
         route = await ctx.api.post(
             "/internal/agent/handover",
@@ -142,7 +148,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
-                _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
+                _result(
+                    outcome.outcome,
+                    outcome.sip_status,
+                    outcome.ring_ms,
+                    outcome.picked_up_by,
+                ),
             )
         except Exception:
             _log.exception("handover result post failed")

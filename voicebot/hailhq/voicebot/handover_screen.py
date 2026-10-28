@@ -164,9 +164,10 @@ async def screen_handover_pickup(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     llm_override: bool = False,
 ) -> str | None:
-    """Who answered the contact's leg: an AMD category, or None when the
-    check could not run. A None or ``human``/``uncertain`` verdict connects
-    the call, as before this check existed."""
+    """Who answered the contact's leg: an AMD category, ``"silent"`` when
+    nobody spoke within ``NO_SPEECH_SECONDS``, or None when the check could
+    not run. Any verdict outside ``NOT_A_PERSON`` connects the call, as
+    before this check existed."""
     if session.vad is None:
         logger.warning("handover pickup check unavailable (no VAD)")
         return None
@@ -185,6 +186,8 @@ async def screen_handover_pickup(
             logger.warning("handover pickup check has no classifier; skipping")
             return None
         pcm = await listen_for_greeting(room, identity, session.vad)
+        if not pcm:
+            return "silent"
         return await classify_greeting(pcm, stt=stt, llm=llm)
     except Exception as exc:
         # Provider error bodies can contain audio or transcripts.

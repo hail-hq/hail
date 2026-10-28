@@ -142,9 +142,9 @@ def _answering_bridge(order: list[str], ring_ms: int = 9000):
     plays the intro, like the voicebot's."""
 
     async def bridge(route):
-        await route.on_answered(ring_ms)
+        await route.on_answered(ring_ms, "human")
         order.append("intro")
-        return BridgeOutcome("answered", None, ring_ms)
+        return BridgeOutcome("answered", None, ring_ms, "human")
 
     return bridge
 
@@ -165,6 +165,7 @@ async def test_answered_posted_before_intro_and_once() -> None:
     assert order == ["route", "answered", "intro"]
     result = api.post.await_args_list[1].args[1]
     assert result["ring_ms"] == 9000 and result["contact_id"] == CID
+    assert result["picked_up_by"] == "human"
 
 
 async def test_answered_post_retries(monkeypatch) -> None:
