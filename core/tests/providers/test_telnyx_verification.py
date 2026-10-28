@@ -127,6 +127,8 @@ async def test_requirements_sweden_local_email_field() -> None:
     req = await provider(fake).requirements("SE", "local", "business")
     email = next(f for f in req.fields if "Email" in f.label)
     assert email.kind == "email"
+    # Telnyx's own limit reaches the form.
+    assert email.max_length == 150
     assert len(req.fields) == 4 and len(req.documents) == 3
     assert req.address_required is True
 

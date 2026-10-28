@@ -49,6 +49,12 @@ _VERTICALS = (
     ("COMMUNICATION", "Communication"),
 )
 _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"))
+# Carrier maximums, in characters: campaign description and each sample.
+_DESCRIPTION_MAX = 4096
+_SAMPLE_MAX = 1024
+# The opt-in text shares the carrier's 2048 (_FLOW_MAX) with the fixed
+# consent lines and links (at most 1187, see _URL_MAX), so 861 are left.
+_OPT_IN_MAX = 861
 
 _BUSINESS_FIELDS = (
     FieldSpec(name="legal_name", label="Legal company name"),
@@ -133,9 +139,10 @@ _CAMPAIGN_FIELDS = (
         name="campaign_description",
         label="What you send",
         help="One or two sentences. Example: appointment reminders and replies to customer questions.",
+        max_length=_DESCRIPTION_MAX,
     ),
-    FieldSpec(name="sample_1", label="Sample message 1"),
-    FieldSpec(name="sample_2", label="Sample message 2"),
+    FieldSpec(name="sample_1", label="Sample message 1", max_length=_SAMPLE_MAX),
+    FieldSpec(name="sample_2", label="Sample message 2", max_length=_SAMPLE_MAX),
     FieldSpec(
         name="opt_in_description",
         label="How people agree to receive texts",
@@ -145,6 +152,7 @@ _CAMPAIGN_FIELDS = (
             "Reviewers open your site and check that the box is separate from the "
             "terms box and that frequency, rates, STOP and HELP appear next to it."
         ),
+        max_length=_OPT_IN_MAX,
     ),
     FieldSpec(
         name="privacy_policy_url",
@@ -212,6 +220,13 @@ def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Pr
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
+        elif spec.max_length and len(value) > spec.max_length:
+            problems.append(
+                Problem(
+                    field=spec.name,
+                    message=f"Use at most {spec.max_length} characters.",
+                )
+            )
         elif spec.kind == "choices":
             problem = _choices_problem(spec, value)
             if problem:
