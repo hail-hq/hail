@@ -120,6 +120,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.attached: list[tuple[dict, str, str]] = []
         self.attach_error: Exception | None = None
         self.problems: list[Problem] = []
+        # With problems: what the carrier made and bills anyway.
+        self.billed_refs: dict = {}
         # Set to "campaign_sid" (Twilio) or "campaign_id" (Telnyx): status()
         # then creates the campaign once, writes its id into refs in place
         # and reports pending, like the real plug-ins.
@@ -160,7 +162,9 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         if self.draft_delay:
             await asyncio.sleep(self.draft_delay)
         if self.problems:
-            return DraftResult(refs={}, problems=self.problems)
+            return DraftResult(
+                refs={}, problems=self.problems, billed_refs=self.billed_refs
+            )
         return DraftResult(
             refs={
                 "brand_sid": f"BN{len(self.drafts)}",
@@ -2058,25 +2062,76 @@ async def test_sms_registration_requires_purpose_sms_provider(
 
 
 @pytest.mark.usefixtures("us_number")
-async def test_sms_registration_debits_filing_fee(
-    client, org_and_key, sms_carrier, async_session
+async def test_sms_registration_takes_no_money_and_pings_the_rater(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
 ) -> None:
+    pinged: list[str] = []
+    monkeypatch.setattr(
+        verifications_routes, "notify_sms_registration_changed", pinged.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
     resp = await _post_sms(client, key)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["purpose"] == "sms"
-    assert body["state"] == "submitted"
-    assert await _balance(async_session, org_id) == 10_000 - 6100
-    debit = (
+    assert body["purpose"] == "sms" and body["state"] == "submitted"
+    # Prices live in the website: the API writes no ledger row.
+    assert await _balance(async_session, org_id) == 10_000
+    assert pinged == [body["id"]]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_brand_billed_then_refused_is_kept_as_rejected(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    pinged: list[str] = []
+    monkeypatch.setattr(
+        verifications_routes, "notify_sms_registration_changed", pinged.append
+    )
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "subject_type": "business"}
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    row = (
         await async_session.execute(
-            select(AccountCredit).where(
-                AccountCredit.ref == f"sms_registration:{body['id']}"
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
             )
         )
     ).scalar_one()
-    assert debit.channel == "sms" and int(debit.amount_cents) == -6100
+    assert row.state == "rejected" and row.provider_refs["brand_id"] == "B7"
+    assert row.provider_refs["refused_at_filing"] is True
+    assert row.rejection_reason == "Use another one."
+    assert pinged == [str(row.id)]
+    # A rejected row never blocks a new filing.
+    sms_carrier.problems = []
+    sms_carrier.billed_refs = {}
+    assert (await _post_sms(client, key)).status_code == 201
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refusal_before_any_brand_keeps_nothing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="ein", message="Check the tax ID (EIN).")]
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    rows = (
+        (
+            await async_session.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.organization_id == org_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2092,7 +2147,7 @@ async def test_sms_registration_402_when_balance_too_low(
 
 
 @pytest.mark.usefixtures("us_number")
-async def test_sms_registration_rejected_brand_keeps_fee(
+async def test_sms_registration_rejected_brand_is_audited(
     client, org_and_key, sms_carrier, async_session, caplog
 ) -> None:
     org_id, _, key = org_and_key
@@ -2121,7 +2176,8 @@ async def test_sms_registration_rejected_brand_keeps_fee(
         )
     ).scalar_one()
     assert audit.payload["carrier_reason"] == "EIN does not match"
-    assert await _balance(async_session, org_id) == 10_000 - 6100
+    # The API takes no money; the website rater charges per step.
+    assert await _balance(async_session, org_id) == 10_000
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2154,88 +2210,6 @@ async def test_sms_requirements_endpoint(client, org_and_key, sms_carrier) -> No
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["address_required"] is True
-
-
-_FAKE_FEES = {
-    "person": {"filing_cents": 1950, "monthly_cents": 200, "minimum_months": 1},
-    "business": {"filing_cents": 6100, "monthly_cents": 1000, "minimum_months": 1},
-}
-
-
-async def test_sms_fees_endpoint(client, org_and_key, sms_carrier) -> None:
-    # No US number yet: the fees of the default carrier.
-    _, _, key = org_and_key
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_endpoint_shows_a_carrier_minimum(
-    client, org_and_key, sms_carrier, monkeypatch
-) -> None:
-    # The file's minimum_months reaches the API; "fake" stands in.
-    row = sms_registration_fees._load()["fake"]
-    monkeypatch.setitem(row["person"], "minimum_months", 3)
-    _, _, key = org_and_key
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.json()["person"]["minimum_months"] == 3
-
-
-async def test_sms_fees_follow_the_carrier_of_the_us_numbers(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    # The default carrier has no fees: only the org's number can pick "fake".
-    app.dependency_overrides[get_default_sms_provider_name] = lambda: "none"
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 404, resp.text
-    mine = await _us_number(async_session, org_id)
-    for params in ({}, {"number_id": str(mine.id)}):
-        resp = await client.get(
-            "/verifications/sms-fees", params=params, headers=_auth(key)
-        )
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_with_numbers_on_two_carriers_need_number_id(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    mine = await _us_number(async_session, org_id, "+15125550100", resource="PN1")
-    await _us_number(
-        async_session, org_id, "+15125550101", provider="telnyx", resource="PN2"
-    )
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"][0]["loc"] == ["query", "number_id"]
-    resp = await client.get(
-        "/verifications/sms-fees",
-        params={"number_id": str(mine.id)},
-        headers=_auth(key),
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_for_a_number_that_is_not_yours_is_404(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    other_org, _, _ = await insert_org_and_key(async_session)
-    theirs = await _us_number(async_session, other_org, e164="+15125550199")
-    voice_only = await _us_number(
-        async_session, org_id, e164="+15125550198", resource="PN2"
-    )
-    voice_only.capabilities = ["voice"]
-    await async_session.commit()
-    for number_id in (theirs.id, voice_only.id, uuid.uuid4()):
-        resp = await client.get(
-            "/verifications/sms-fees",
-            params={"number_id": str(number_id)},
-            headers=_auth(key),
-        )
-        assert resp.status_code == 404, resp.text
 
 
 async def test_sms_registration_rejects_non_us(

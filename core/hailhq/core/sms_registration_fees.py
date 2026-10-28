@@ -1,5 +1,7 @@
-"""Carrier fees for US A2P 10DLC registration, read from
-``costs/sms-registration.json`` and passed through to the customer at cost."""
+"""Carrier costs for US A2P 10DLC registration, read from
+``costs/sms-registration.json``. Hail's prices are not here: Hail Cloud's
+website prices and charges each step. The API uses the filing cost only as
+the balance a customer needs before filing."""
 
 from __future__ import annotations
 
@@ -28,18 +30,7 @@ def providers() -> list[str]:
 
 
 def filing_fee_cents(provider: str, subject_type: str) -> int:
-    """One-time fee charged when the registration is filed: brand plus
-    campaign vetting. Raises KeyError for a carrier with no SMS registration."""
+    """The carrier's one-time cost of a filing: brand plus campaign vetting.
+    Raises KeyError for a carrier with no SMS registration."""
     row = _load()[provider][subject_type]
     return _cents(row["brand_usd"]) + _cents(row["campaign_vetting_usd"])
-
-
-def monthly_fee_cents(provider: str, subject_type: str) -> int:
-    row = _load()[provider][subject_type]
-    return _cents(row["campaign_monthly_usd"])
-
-
-def minimum_months(provider: str, subject_type: str) -> int:
-    """Monthly fees charged at least, from approval, even when the
-    registration is cancelled sooner. A row without the field means 1."""
-    return int(_load()[provider][subject_type].get("minimum_months", 1))
