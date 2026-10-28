@@ -23,6 +23,7 @@ from hailhq.core.agent_tools.spec import (
     ToolContext,
     ToolSpec,
 )
+from hailhq.core.handover import ON_CALL_LINE
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_REASON_CHARS = 200
@@ -79,7 +80,17 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
     if not targets:
         return None
     by_label = {t["label"]: t["contact_id"] for t in targets}
-    menu = "; ".join(f"{t['label']} ({t.get('note') or ''})" for t in targets)
+    # The other party on this call: listed so the agent can explain, never
+    # dialed (it would ring the phone already in use).
+    on_call = {t["label"] for t in targets if t.get("on_call")}
+
+    def _entry(t: dict) -> str:
+        if t["label"] in on_call:
+            line = ON_CALL_LINE.format(name=t["label"])
+            return f"{t['label']} (already on this call, do not connect; say: {line})"
+        return f"{t['label']} ({t.get('note') or ''})"
+
+    menu = "; ".join(_entry(t) for t in targets)
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
@@ -88,6 +99,8 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         contact_id = by_label.get(label)
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
+        if label in on_call:
+            return ON_CALL_LINE.format(name=label)
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
 
         # One id per attempt: the route stores one event per id, so a retried

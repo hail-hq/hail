@@ -53,6 +53,7 @@ from hailhq.core.email_sender import from_address_for
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
+    ON_CALL_LINE,
     HandoverPerson,
     country_of,
     has_answered_handover,
@@ -709,11 +710,6 @@ async def agent_send_email(
 
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
-_SPOKEN_HANDOVER_SELF = (
-    "It seems this call is already on {name}'s number. Handing it over to the "
-    "same number is not technically possible."
-)
-
 
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
 # ``handover_targets``).
@@ -826,7 +822,7 @@ async def agent_handover(
             call,
             body,
             "contact_is_on_call",
-            spoken=_SPOKEN_HANDOVER_SELF.format(name=contact.name),
+            spoken=ON_CALL_LINE.format(name=contact.name),
         )
     # Any carrier, as on save: the second leg dials a person, not a number
     # the call's carrier sells.

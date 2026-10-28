@@ -64,6 +64,37 @@ async def test_answered() -> None:
     assert result["outcome"] == "answered" and result["ring_ms"] == 9000
 
 
+async def test_person_on_the_call_is_listed_but_never_dialed() -> None:
+    """The caller is calling from the handover person's own phone: the agent
+    is told so up front, and a call to the tool explains instead of
+    dialing."""
+    meta = {
+        "handover_targets": [
+            {"contact_id": CID, "label": "Sam", "note": "Billing", "on_call": True}
+        ]
+    }
+    spec = transfer_call.bind(meta)
+    line = (
+        "It seems this call is already on Sam's number. Handing it over to the "
+        "same number is not technically possible."
+    )
+    assert "already on this call" in spec.description and line in spec.description
+    ctx, api, bridge = _ctx(ROUTE)
+    assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == line
+    api.post.assert_not_awaited()
+    bridge.assert_not_awaited()
+
+
+async def test_no_answer_posts_the_pickup_verdict() -> None:
+    """A voicemail the check caught: the verdict reaches the result post."""
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("no_answer", None, 24000, "machine-vm"))
+    await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    result = api.post.await_args_list[1].args[1]
+    assert result["outcome"] == "no_answer"
+    assert result["picked_up_by"] == "machine-vm"
+
+
 async def test_no_answer_comes_back() -> None:
     spec = transfer_call.bind(META)
     ctx, _, _ = _ctx(ROUTE, BridgeOutcome("no_answer", 480, 30000))
