@@ -10,9 +10,16 @@ from hailhq.core.providers.verification.base import (
     Problem,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_brand_wait(monkeypatch):
+    monkeypatch.setattr(telnyx_sms, "_BRAND_READ_GAP", 0)
+
 
 FIELDS = {
     "legal_name": "Acme Inc",
@@ -71,6 +78,8 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
             return httpx.Response(
                 200, json={"brandId": "B1", "identityStatus": "SELF_DECLARED"}
             )
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
         if req.url.path.endswith("/vetting"):
             return httpx.Response(200, json={})
         return httpx.Response(404)
@@ -87,8 +96,10 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
     assert body["entityType"] == "PRIVATE_PROFIT" and body["ein"] == "123456789"
     assert body["country"] == "US" and body["state"] == "TX"
     assert body["website"] == "https://acme.example"
-    assert calls[1][:2] == ("POST", "/v2/10dlc/brand/B1/vetting")
-    assert calls[1][2] == {"vettingProvider": "AEGIS", "vettingClass": "STANDARD"}
+    assert calls[1][:2] == ("GET", "/v2/10dlc/brand/B1")
+    assert calls[2][:2] == ("POST", "/v2/10dlc/brand/B1/vetting")
+    assert calls[2][2] == {"vettingProvider": "AEGIS", "vettingClass": "STANDARD"}
+    assert draft.refs["vetting_requested"] is True
 
 
 async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
@@ -193,7 +204,12 @@ async def test_status_waits_while_identity_not_verified() -> None:
         return httpx.Response(200, json={"identityStatus": "UNVERIFIED"})
 
     p = _provider(handler)
-    refs = {"brand_id": "B1", "subject_type": "business", "campaign": {}}
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "vetting_requested": True,
+    }
     assert (await p.status(refs)).state == "pending"
     assert posted == [] and "campaign_id" not in refs
 
@@ -254,6 +270,8 @@ async def test_4xx_gives_neutral_problem_and_cleans_up() -> None:
         calls.append((req.method, req.url.path))
         if req.url.path.endswith("/10dlc/brand") and req.method == "POST":
             return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
         if req.url.path.endswith("/vetting"):
             return httpx.Response(
                 422,
@@ -276,6 +294,8 @@ async def test_5xx_raises_and_cleans_up() -> None:
         calls.append((req.method, req.url.path))
         if req.url.path.endswith("/10dlc/brand") and req.method == "POST":
             return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
         if req.url.path.endswith("/vetting"):
             return httpx.Response(500)
         return httpx.Response(200, json={})
@@ -438,6 +458,8 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
         calls.append((req.method, req.url.path, json.loads(req.content or b"{}")))
         if req.url.path.endswith("/10dlc/brand"):
             return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
         if req.url.path.endswith("/smsOtp"):
             return httpx.Response(200, json={"brandId": "B1", "referenceId": "R1"})
         return httpx.Response(404)
@@ -446,6 +468,7 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert draft.problems == []
     assert [c[:2] for c in calls] == [
         ("POST", "/v2/10dlc/brand"),
+        ("GET", "/v2/10dlc/brand/B1"),
         ("POST", "/v2/10dlc/brand/B1/smsOtp"),
     ]
     body = calls[0][2]
@@ -455,7 +478,7 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert body["displayName"] == "Ada Lovelace" == body["companyName"]
     assert body["email"] == "ada@example.com" and body["vertical"] == "COMMUNICATION"
     assert "ein" not in body and "website" not in body
-    otp = calls[1][2]
+    otp = calls[2][2]
     assert "@OTP_PIN@" in otp["pinSms"] and otp["pinSms"].startswith("Hail:")
     assert otp["successSms"] == "Hail: your number is confirmed. Reply STOP to opt out."
     refs = draft.refs
@@ -628,3 +651,121 @@ async def test_a_new_pin_resets_the_confirm_attempts() -> None:
     )
     await _provider(_unverified_handler([])).status(fresh)
     assert fresh["confirm_attempts"] == 3
+
+
+async def test_pin_waits_for_the_brand_to_register() -> None:
+    """Telnyx answers 404 for a brand it is still registering."""
+    calls = []
+    reads = iter([404, 404, 200])
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(next(reads), json={"status": "OK"})
+        if req.url.path.endswith("/smsOtp"):
+            return httpx.Response(200, json={"referenceId": "R1"})
+        return httpx.Response(404)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems == [] and draft.refs["otp_reference_id"] == "R1"
+    assert calls.count(("GET", "/v2/10dlc/brand/B1")) == 3
+    assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/smsOtp")
+
+
+async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
+    calls = []
+    reasons = [
+        {"fields": ["phone"], "description": "Phone duplicate threshold reached"},
+        {"fields": ["email"], "description": "Email duplicate threshold reached"},
+        {"fields": ["state"], "description": "Invalid state"},
+    ]
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(
+                200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+            )
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.refs == {}
+    by_field = {p.field: p for p in draft.problems}
+    assert set(by_field) == {"mobile_phone_number", "email", "address.region"}
+    assert "too many registrations" in by_field["mobile_phone_number"].message
+    assert "too many registrations" in by_field["email"].message
+    assert (
+        by_field["address.region"].message == "The carrier did not accept this value."
+    )
+    assert by_field["email"].raw == "Email duplicate threshold reached"
+    assert not any(p.endswith("/smsOtp") for _, p in calls)
+    assert ("DELETE", "/v2/10dlc/brand/B1") in calls
+
+
+async def test_brand_still_registering_is_kept_and_status_sends_the_pin() -> None:
+    calls = []
+    registered = False
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            if not registered:
+                return httpx.Response(404)
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/smsOtp"):
+            return httpx.Response(200, json={"referenceId": "R1"})
+        return httpx.Response(400)
+
+    p = _provider(handler)
+    draft = await _draft(p, subject="person", fields=PERSON_FIELDS)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "otp_sent_at" not in draft.refs
+    assert not any(m == "DELETE" for m, _ in calls)
+    registered = True
+    assert (await p.status(draft.refs)).state == "pending"
+    assert draft.refs["otp_reference_id"] == "R1"
+
+
+async def test_status_asks_for_vetting_once_if_the_draft_could_not() -> None:
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(req.url.path)
+        return httpx.Response(200, json={"identityStatus": "SELF_DECLARED"})
+
+    p = _provider(handler)
+    refs = {"brand_id": "B1", "subject_type": "business", "campaign": {}}
+    assert (await p.status(refs)).state == "pending"
+    assert (await p.status(refs)).state == "pending"
+    assert posted == ["/v2/10dlc/brand/B1/vetting"]
+    assert refs["vetting_requested"] is True
+
+
+async def test_4xx_pointing_at_a_field_names_that_field() -> None:
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(
+                400,
+                json={
+                    "errors": [
+                        {
+                            "code": "10015",
+                            "detail": "Invalid email ada@example.com",
+                            "source": {"pointer": "/email"},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [(p.field, p.message) for p in draft.problems] == [
+        ("email", "The carrier did not accept this value.")
+    ]
