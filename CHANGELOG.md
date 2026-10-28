@@ -13,6 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
+- **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types`: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 
 ### Fixed

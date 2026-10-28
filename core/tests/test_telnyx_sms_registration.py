@@ -326,24 +326,6 @@ async def test_4xx_gives_neutral_problem_and_cleans_up() -> None:
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
 
 
-async def test_5xx_raises_and_cleans_up() -> None:
-    calls = []
-
-    def handler(req):
-        calls.append((req.method, req.url.path))
-        if req.url.path.endswith("/10dlc/brand") and req.method == "POST":
-            return httpx.Response(200, json={"brandId": "B1"})
-        if req.method == "GET":
-            return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
-            return httpx.Response(500)
-        return httpx.Response(200, json={})
-
-    with pytest.raises(VerificationProviderError):
-        await _draft(_provider(handler))
-    assert ("DELETE", "/v2/10dlc/brand/B1") in calls
-
-
 async def test_unexpected_error_cleans_up() -> None:
     calls = []
 
@@ -1026,19 +1008,87 @@ async def test_a_failure_after_the_brand_reports_it_billed() -> None:
     assert draft.problems and draft.billed_refs["brand_id"] == "B1"
 
 
-async def test_an_outage_after_the_brand_reports_it_billed() -> None:
-    def handler(req):
+def _outage_after_the_brand(step: str, failure, calls: list):
+    """Telnyx registers the brand, then ``step`` (``/vetting`` or
+    ``/smsOtp``) fails with ``failure`` (a status code or an exception)
+    until the test clears it."""
+    state = {"failure": failure}
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
+            )
+        if req.url.path.endswith(step):
+            if isinstance(state["failure"], Exception):
+                raise state["failure"]
+            if state["failure"]:
+                return httpx.Response(state["failure"])
+            return httpx.Response(200, json={"referenceId": "R1"})
+        return httpx.Response(204)
+
+    return _provider(handler), state
+
+
+@pytest.mark.parametrize("failure", [502, 429, httpx.ConnectError("down")])
+async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> None:
+    """A retry would file and bill a new brand: keep this one, and the
+    background pass asks for vetting."""
+    calls: list = []
+    p, state = _outage_after_the_brand("/vetting", failure, calls)
+    draft = await _draft(p)
+    assert draft.problems == [] and draft.billed_refs == {}
+    assert draft.refs["brand_id"] == "B1"
+    assert draft.refs["vetting_requested"] is False
+    assert draft.refs["messaging_profile_id"] == "MP1" and draft.refs["campaign"]
+    assert not any(m == "DELETE" for m, _ in calls)
+    state["failure"] = None
+    assert (await p.status(draft.refs)).state == "pending"
+    assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/vetting")
+    assert draft.refs["vetting_requested"] is True
+
+
+@pytest.mark.parametrize("failure", [503, httpx.ReadTimeout("slow")])
+async def test_an_outage_after_the_brand_keeps_the_person_filing(failure) -> None:
+    calls: list = []
+    p, state = _outage_after_the_brand("/smsOtp", failure, calls)
+    draft = await _draft(p, subject="person", fields=PERSON_FIELDS)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "otp_sent_at" not in draft.refs
+    assert p.confirmation(draft.refs) is None
+    assert not any(m == "DELETE" for m, _ in calls)
+    state["failure"] = None
+    assert (await p.status(draft.refs)).state == "pending"
+    assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/smsOtp")
+    assert draft.refs["otp_reference_id"] == "R1" and draft.refs["otp_sent_at"]
+    assert p.confirmation(draft.refs) == "code"
+
+
+async def test_a_brand_read_that_is_not_json_is_read_again() -> None:
+    reads = iter([httpx.Response(200, content=b"<html>"), None])
+
+    def handler(req: httpx.Request):
         if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET":
-            return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
+            return next(reads) or httpx.Response(200, json={"status": "OK"})
+        return httpx.Response(200, json={})
+
+    draft = await _draft(_provider(handler))
+    assert draft.problems == [] and draft.refs["vetting_requested"] is True
+
+
+async def test_an_outage_on_the_brand_call_keeps_nothing() -> None:
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand"):
             return httpx.Response(502)
         return httpx.Response(204)
 
-    with pytest.raises(VerificationProviderError) as err:
+    with pytest.raises(VerificationProviderError):
         await _draft(_provider(handler))
-    assert err.value.billed_refs["brand_id"] == "B1"
 
 
 async def test_a_4xx_on_the_brand_call_bills_nothing() -> None:

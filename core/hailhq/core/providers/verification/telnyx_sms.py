@@ -210,9 +210,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         problems=_response_problems(exc.response, subject_type),
                         billed_refs=billed,
                     )
-            raise VerificationProviderError(
-                "Telnyx request failed", billed_refs=billed
-            ) from exc
+            raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             billed = _billed(refs)
             await self.discard(refs)
@@ -222,8 +220,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
         """File the brand, wait for Telnyx to register it, then send the
         person's PIN or ask for the company's vetting. Returns the problems
-        of a refused brand. A brand still registering after the wait is
-        kept; the background pass sends the PIN or asks for vetting."""
+        of a refused brand. A brand still registering after the wait, or
+        registered when the PIN or vetting call hits an outage (5xx, 429,
+        no answer), is kept: Telnyx bills it anyway, and the background pass
+        sends the PIN or asks for vetting."""
         if subject_type == "person":
             mobile = fields["mobile_phone_number"].strip()
             display = f"{fields['first_name'].strip()} {fields['last_name'].strip()}"
@@ -267,11 +267,25 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             return []
         if brand.get("failureReasons") or brand.get("status") != "OK":
             return _reason_problems(brand.get("failureReasons"), subject_type)
-        if subject_type == "person":
-            # No vetting for a sole proprietor; the PIN confirms the person.
-            await self._send_pin(refs)
-        else:
-            await self._request_vetting(refs)
+        try:
+            if subject_type == "person":
+                # No vetting for a sole proprietor; the PIN confirms the person.
+                await self._send_pin(refs)
+            else:
+                await self._request_vetting(refs)
+        except httpx.HTTPError as exc:
+            code = (
+                exc.response.status_code
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            )
+            if code is not None and 400 <= code < 500 and code != 429:
+                raise  # Telnyx refused a value: a refusal, not an outage.
+            # Keep the brand: a retry would file and bill a new one.
+            # ``otp_sent_at`` stays unset for a person.
+            logger.warning("10DLC step after the brand failed: status=%s", code)
+            if subject_type != "person":
+                refs["vetting_requested"] = False
         return []
 
     async def _settled_brand(self, brand_id) -> dict | None:
@@ -290,7 +304,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if code not in (404, 429) and code < 500:
                     raise
                 continue
-            except httpx.TransportError:
+            except (httpx.RequestError, ValueError):
+                # No answer, or a body that is not JSON: read again.
                 continue
             if brand.get("failureReasons") or brand.get("status") in (
                 "OK",
