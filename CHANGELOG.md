@@ -13,11 +13,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types`: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
+- **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 
 ### Fixed
 
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
+- US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 - Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
 - Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.
