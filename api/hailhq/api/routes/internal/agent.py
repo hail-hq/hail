@@ -81,6 +81,7 @@ from hailhq.core.text_agent import (
     replies_in_thread,
     thread_lock_key,
 )
+from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
@@ -930,8 +931,9 @@ async def agent_handover_sms(
     ).first()
     if texted is not None:
         return AgentHandoverSmsResponse(sms="skipped:already_texted")
-    number_id = call.to_number_id if call.direction == "inbound" else None
-    number_id = number_id or call.from_number_id
+    number_id = (
+        call.to_number_id if call.direction == "inbound" else call.from_number_id
+    )
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
     if from_number is None or "sms" not in from_number.capabilities:
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
@@ -971,7 +973,9 @@ async def agent_handover_sms(
         direction="outbound",
         status="queued",
         body=handover_sms_text(
-            agent.name if agent else "Your agent", caller, body.reason
+            agent.name if agent else "Your agent",
+            caller if is_e164(caller) else None,
+            body.reason,
         )[:SMS_MAX_BODY_CHARS],
         metadata_={
             "call_id": str(call.id),

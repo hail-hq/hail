@@ -319,3 +319,10 @@ async def test_no_text_when_the_api_refuses_the_handover() -> None:
     await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     await _texts_done()
     assert _posted(api, SMS_PATH) == []
+
+
+async def test_cancelled_text_is_reported_failed() -> None:
+    task = asyncio.ensure_future(asyncio.sleep(10))
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert transfer_call._sms_state(task) == "failed"

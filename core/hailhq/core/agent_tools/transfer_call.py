@@ -76,7 +76,9 @@ async def _text_contact(ctx: ToolContext, body: dict[str, Any]) -> str:
 
 
 def _sms_state(task: asyncio.Task[str]) -> str:
-    return task.result() if task.done() else "pending"
+    if not task.done():
+        return "pending"
+    return "failed" if task.cancelled() else task.result()
 
 
 async def _post_answered(ctx: ToolContext, body: dict[str, Any]) -> None:
@@ -150,8 +152,8 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         answer_reported = False
 
         def on_answered(ring_ms: int, picked_up_by: str | None) -> Awaitable[None]:
-            # Called the moment the contact picks up, before the intro; the
-            # bridge runs the returned post in the background. The flag is
+            # Called once the contact replied after the intro; the bridge
+            # runs the returned post in the background. The flag is
             # set here, synchronously, so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
