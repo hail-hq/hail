@@ -17,11 +17,15 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     Contact,
+    PhoneNumber,
+    Sms,
     UsageEvent,
     WebhookDelivery,
     WebhookSubscription,
 )
 from sqlalchemy import select
+
+from .conftest import approve_us_sms
 
 SECRET = "test-internal-secret"
 
@@ -195,6 +199,7 @@ async def test_result_answered_writes_event_and_webhook(
             "sip_status": None,
             "ring_ms": 12000,
             "picked_up_by": "silent",
+            "sms": "blocked:us_registration",
         },
     )
     assert r.json() == {"ok": True}
@@ -213,6 +218,7 @@ async def test_result_answered_writes_event_and_webhook(
         "sip_status": None,
         "ring_ms": 12000,
         "picked_up_by": "silent",
+        "sms": "blocked:us_registration",
     }
     deliveries = (
         (
@@ -571,3 +577,76 @@ async def test_handover_denied_when_agent_org_differs_from_call(
         {"call_id": str(call.id), "contact_id": str(contact.id)},
     )
     assert r.json()["ok"] is False
+
+
+# --- text to the contact while the agent dials ----------------------------
+
+
+def _sms_payload(call, contact, invocation=None, reason="a leak"):
+    return {
+        "tool_invocation_id": str(invocation or uuid.uuid4()),
+        "call_id": str(call.id),
+        "contact_id": str(contact.id),
+        "reason": reason,
+    }
+
+
+async def test_handover_sms_sent_from_the_call_number(
+    client, async_session, add_phone_number, sms_mock
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    await approve_us_sms(async_session, call.organization_id)
+    await async_session.commit()
+    payload = _sms_payload(call, contact)
+    r = await _post(client, "/internal/agent/handover-sms", payload)
+    assert r.json() == {"sms": "sent"}
+    # A retried post learns the outcome and sends nothing more.
+    r = await _post(client, "/internal/agent/handover-sms", payload)
+    assert r.json() == {"sms": "sent"}
+    [row] = (await async_session.execute(select(Sms))).scalars().all()
+    assert row.to_e164 == "+14155550120" and row.from_e164 == call.from_e164
+    assert row.body == (
+        "Desk (AI agent) is calling you now to connect a caller "
+        "(+14155550199). Reason given: a leak."
+    )
+    assert row.metadata_["tool_invocation_id"] == payload["tool_invocation_id"]
+    assert sms_mock.send_sms.await_count == 1
+    # A second dial to the same person on this call texts nothing more.
+    r = await _post(client, "/internal/agent/handover-sms", _sms_payload(call, contact))
+    assert r.json() == {"sms": "skipped:already_texted"}
+    assert sms_mock.send_sms.await_count == 1
+
+
+async def test_handover_sms_blocked_without_us_registration(
+    client, async_session, add_phone_number, sms_mock
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    r = await _post(client, "/internal/agent/handover-sms", _sms_payload(call, contact))
+    assert r.json() == {"sms": "blocked:us_registration"}
+    assert (await async_session.execute(select(Sms))).scalars().all() == []
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "agent.handover.sms_blocked")
+        )
+    ).scalar_one()
+    assert audit.payload["reason"] == "us_registration"
+    sms_mock.send_sms.assert_not_awaited()
+
+
+@pytest.mark.parametrize("case", ["voice_only", "ended"])
+async def test_handover_sms_skipped(
+    client, async_session, add_phone_number, sms_mock, case
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    await approve_us_sms(async_session, call.organization_id)
+    if case == "voice_only":
+        number = await async_session.get(PhoneNumber, call.from_number_id)
+        number.capabilities = ["voice"]
+    else:
+        call.status = "completed"
+        call.end_reason = "normal_hangup"
+    await async_session.commit()
+    r = await _post(client, "/internal/agent/handover-sms", _sms_payload(call, contact))
+    expected = "number_cannot_text" if case == "voice_only" else "call_ended"
+    assert r.json() == {"sms": f"skipped:{expected}"}
+    sms_mock.send_sms.assert_not_awaited()

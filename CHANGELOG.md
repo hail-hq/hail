@@ -9,6 +9,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
+- Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
 
 ### Changed
 
@@ -18,6 +19,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 - Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
+- Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.
 - Handover: the agent's intro to the contact now reads "Reason given: …", and the agent writes no extra reply after the two people are connected.
 
 ## [0.31.0] (2026-10-23)
