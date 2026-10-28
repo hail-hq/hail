@@ -3011,24 +3011,6 @@ type SmsCreate struct {
 // SmsCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 type SmsCreateMessageType string
 
-// SmsFee defines model for SmsFee.
-type SmsFee struct {
-	// FilingCents Charged once when the registration is filed.
-	FilingCents int `json:"filing_cents"`
-
-	// MinimumMonths Monthly fees charged at least, counted from approval, even when the registration is cancelled sooner.
-	MinimumMonths int `json:"minimum_months"`
-
-	// MonthlyCents Charged each month while approved.
-	MonthlyCents int `json:"monthly_cents"`
-}
-
-// SmsFees defines model for SmsFees.
-type SmsFees struct {
-	Business SmsFee `json:"business"`
-	Person   SmsFee `json:"person"`
-}
-
 // SmsListResponse defines model for SmsListResponse.
 type SmsListResponse struct {
 	// Items Messages in this page, newest first.
@@ -3787,13 +3769,6 @@ type GetVerificationRequirementsParams struct {
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParamsSubjectType string
 
-// GetSmsRegistrationFeesParams defines parameters for GetSmsRegistrationFees.
-type GetSmsRegistrationFeesParams struct {
-	// NumberId One of your active US local numbers that can text. Needed when your US numbers are with more than one carrier.
-	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
-	Authorization *string             `json:"authorization,omitempty"`
-}
-
 // CancelVerificationParams defines parameters for CancelVerification.
 type CancelVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4500,9 +4475,6 @@ type ClientInterface interface {
 
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetSmsRegistrationFees request
-	GetSmsRegistrationFees(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CancelVerification request
 	CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5464,18 +5436,6 @@ func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificat
 
 func (c *Client) GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVerificationRequirementsRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) GetSmsRegistrationFees(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSmsRegistrationFeesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9356,70 +9316,6 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 	return req, nil
 }
 
-// NewGetSmsRegistrationFeesRequest generates requests for GetSmsRegistrationFees
-func NewGetSmsRegistrationFeesRequest(server string, params *GetSmsRegistrationFeesParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/verifications/sms-fees")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		queryValues := queryURL.Query()
-
-		if params.NumberId != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "number_id", *params.NumberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		queryURL.RawQuery = queryValues.Encode()
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-
-		if params.Authorization != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("authorization", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
 // NewCancelVerificationRequest generates requests for CancelVerification
 func NewCancelVerificationRequest(server string, verificationId openapi_types.UUID, params *CancelVerificationParams) (*http.Request, error) {
 	var err error
@@ -10392,9 +10288,6 @@ type ClientWithResponsesInterface interface {
 
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
-
-	// GetSmsRegistrationFeesWithResponse request
-	GetSmsRegistrationFeesWithResponse(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*GetSmsRegistrationFeesResponse, error)
 
 	// CancelVerificationWithResponse request
 	CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error)
@@ -11810,28 +11703,6 @@ func (r GetVerificationRequirementsResponse) StatusCode() int {
 	return 0
 }
 
-type GetSmsRegistrationFeesResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *SmsFees
-}
-
-// Status returns HTTPResponse.Status
-func (r GetSmsRegistrationFeesResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetSmsRegistrationFeesResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 type CancelVerificationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12803,15 +12674,6 @@ func (c *ClientWithResponses) GetVerificationRequirementsWithResponse(ctx contex
 		return nil, err
 	}
 	return ParseGetVerificationRequirementsResponse(rsp)
-}
-
-// GetSmsRegistrationFeesWithResponse request returning *GetSmsRegistrationFeesResponse
-func (c *ClientWithResponses) GetSmsRegistrationFeesWithResponse(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*GetSmsRegistrationFeesResponse, error) {
-	rsp, err := c.GetSmsRegistrationFees(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetSmsRegistrationFeesResponse(rsp)
 }
 
 // CancelVerificationWithResponse request returning *CancelVerificationResponse
@@ -14845,32 +14707,6 @@ func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificat
 			return nil, err
 		}
 		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetSmsRegistrationFeesResponse parses an HTTP response from a GetSmsRegistrationFeesWithResponse call
-func ParseGetSmsRegistrationFeesResponse(rsp *http.Response) (*GetSmsRegistrationFeesResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetSmsRegistrationFeesResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SmsFees
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
 
 	}
 

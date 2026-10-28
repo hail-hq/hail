@@ -178,3 +178,17 @@ def notify_usage_event_recorded(usage_event_id: str) -> None:
     )
     _pending_tasks.add(task)
     task.add_done_callback(_pending_tasks.discard)
+
+
+def notify_sms_registration_changed(verification_id: str) -> None:
+    """Fire-and-forget kick to the website's US texting fee rater. Call it
+    after the commit that made the change (a filing saved, a campaign sent
+    for review). The rater is idempotent and also sweeps on its own."""
+    task = asyncio.create_task(
+        _post(
+            "/api/internal/sms-registrations/rate",
+            {"verification_id": verification_id},
+        )
+    )
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)

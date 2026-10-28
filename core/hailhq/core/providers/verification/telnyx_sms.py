@@ -194,6 +194,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         try:
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
+            # Telnyx bills a brand once it registered it, whatever fails next.
+            billed = _billed(refs)
             await self.discard(refs)
             if isinstance(exc, httpx.HTTPStatusError):
                 code = exc.response.status_code
@@ -206,11 +208,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     return DraftResult(
                         refs={},
                         problems=_response_problems(exc.response, subject_type),
+                        billed_refs=billed,
                     )
-            raise VerificationProviderError("Telnyx request failed") from exc
+            raise VerificationProviderError(
+                "Telnyx request failed", billed_refs=billed
+            ) from exc
         if problems:
+            billed = _billed(refs)
             await self.discard(refs)
-            return DraftResult(refs={}, problems=problems)
+            return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
 
     async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
@@ -532,6 +538,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     )
             except Exception:
                 logger.warning("10DLC discard failed: step=%s", key)
+
+
+def _billed(refs: dict) -> dict:
+    """What Telnyx bills of a draft that failed: the brand, once made."""
+    if not refs.get("brand_id"):
+        return {}
+    return {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
 
 
 def _errors(response: httpx.Response) -> list[dict]:
