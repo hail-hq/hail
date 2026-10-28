@@ -741,11 +741,98 @@ async def test_status_asks_for_vetting_once_if_the_draft_could_not() -> None:
         return httpx.Response(200, json={"identityStatus": "SELF_DECLARED"})
 
     p = _provider(handler)
-    refs = {"brand_id": "B1", "subject_type": "business", "campaign": {}}
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "vetting_requested": False,
+    }
     assert (await p.status(refs)).state == "pending"
     assert (await p.status(refs)).state == "pending"
     assert posted == ["/v2/10dlc/brand/B1/vetting"]
     assert refs["vetting_requested"] is True
+
+
+async def test_status_never_asks_again_for_a_row_filed_before_the_flag() -> None:
+    """Rows filed before ``vetting_requested`` existed already asked."""
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(req.url.path)
+        return httpx.Response(200, json={"identityStatus": "SELF_DECLARED"})
+
+    refs = {"brand_id": "B1", "subject_type": "business", "campaign": {}}
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert posted == [] and "vetting_requested" not in refs
+
+
+async def test_business_brand_still_registering_marks_vetting_as_owed() -> None:
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(400)
+
+    draft = await _draft(_provider(handler))
+    assert draft.problems == [] and draft.refs["vetting_requested"] is False
+
+
+async def test_status_waits_while_the_brand_is_registering() -> None:
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(req.url.path)
+        return httpx.Response(
+            200,
+            json={"status": "REGISTRATION_PENDING", "identityStatus": "UNVERIFIED"},
+        )
+
+    refs = {"brand_id": "B1", "subject_type": "person", "campaign": {}}
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert posted == [] and "otp_sent_at" not in refs
+
+
+async def test_status_rejects_a_failed_brand_without_reasons() -> None:
+    def handler(req):
+        return httpx.Response(200, json={"status": "REGISTRATION_FAILED"})
+
+    refs = {"brand_id": "B1", "subject_type": "person", "campaign": {}}
+    assert (await _provider(handler).status(refs)).state == "rejected"
+
+
+async def test_a_failed_read_keeps_waiting_instead_of_deleting_the_brand() -> None:
+    calls = []
+    reads = iter([503, 200])
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(next(reads), json={"status": "OK"})
+        if req.url.path.endswith("/smsOtp"):
+            return httpx.Response(200, json={"referenceId": "R1"})
+        return httpx.Response(404)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems == [] and draft.refs["otp_reference_id"] == "R1"
+    assert not any(m == "DELETE" for m, _ in calls)
+
+
+async def test_odd_error_bodies_give_a_neutral_problem() -> None:
+    bodies = iter([{"errors": 5}, {"errors": [{"source": "/email"}]}])
+
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(400, json=next(bodies))
+        return httpx.Response(204)
+
+    for _ in range(2):
+        draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+        assert [p.field for p in draft.problems] == [""]
 
 
 async def test_4xx_pointing_at_a_field_names_that_field() -> None:

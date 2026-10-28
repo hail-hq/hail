@@ -229,6 +229,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         brand = await self._settled_brand(refs["brand_id"])
         if brand is None:
             logger.warning("10DLC brand still registering after the wait")
+            if subject_type != "person":
+                # False, not unset: rows filed before this flag existed
+                # already asked for vetting and must not ask again.
+                refs["vetting_requested"] = False
             return []
         if brand.get("failureReasons") or brand.get("status") != "OK":
             return _reason_problems(brand.get("failureReasons"), subject_type)
@@ -249,8 +253,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "GET", f"/10dlc/brand/{path_id(brand_id)}"
                 )
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != 404:
+                # 404: not registered yet. 429 and 5xx: try the next read
+                # rather than delete a brand that may be fine.
+                code = exc.response.status_code
+                if code not in (404, 429) and code < 500:
                     raise
+                continue
+            except httpx.TransportError:
                 continue
             if brand.get("failureReasons") or brand.get("status") in (
                 "OK",
@@ -324,12 +333,18 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def status(self, refs) -> ProviderStatus:
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{refs['brand_id']}")
-            if brand.get("failureReasons"):
+            if (
+                brand.get("failureReasons")
+                or brand.get("status") == "REGISTRATION_FAILED"
+            ):
                 return ProviderStatus(
                     state="rejected",
                     reason=BRAND_REJECTED,
-                    raw_reason=str(brand["failureReasons"]),
+                    raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
+            if brand.get("status") == "REGISTRATION_PENDING":
+                # No PIN or vetting until Telnyx has registered the brand.
+                return ProviderStatus(state="pending")
             person = refs.get("subject_type") == "person"
             verified = brand.get("identityStatus") in _VERIFIED
             if person and verified:
@@ -338,7 +353,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if not verified and not refs.get("identity_verified"):
                 if person:
                     await self._resend_pin_if_old(refs)
-                elif not refs.get("vetting_requested"):
+                elif refs.get("vetting_requested") is False:
                     # The brand was still registering when it was filed.
                     await self._request_vetting(refs)
                 return ProviderStatus(state="pending")
@@ -476,6 +491,8 @@ def _errors(response: httpx.Response) -> list[dict]:
         errors = response.json().get("errors") or []
     except (ValueError, AttributeError):
         return []
+    if not isinstance(errors, list):
+        return []
     return [e for e in errors if isinstance(e, dict)]
 
 
@@ -491,7 +508,8 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
     for e in _errors(response):
-        pointer = str((e.get("source") or {}).get("pointer") or "")
+        source = e.get("source")
+        pointer = str(source.get("pointer") or "") if isinstance(source, dict) else ""
         field = names.get(pointer.rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
@@ -526,13 +544,9 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
 
 def _safe_message(response: httpx.Response) -> str:
     """A short neutral sentence; never the carrier's own text."""
-    try:
-        errors = response.json().get("errors") or []
-        low = " ".join(
-            f"{e.get('title', '')} {e.get('detail', '')}" for e in errors
-        ).lower()
-    except (ValueError, AttributeError, TypeError):
-        low = ""
+    low = " ".join(
+        f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
+    ).lower()
     for words, text in (
         (("ein", "tax id", "registration number"), "Check the tax ID (EIN)."),
         (("website", "url"), "Check the website address."),
