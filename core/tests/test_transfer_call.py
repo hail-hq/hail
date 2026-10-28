@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from unittest.mock import AsyncMock
 
@@ -8,9 +9,39 @@ CID = str(uuid.uuid4())
 META = {"handover_targets": [{"contact_id": CID, "label": "Sam", "note": "Billing"}]}
 
 
+RESULT_PATH = "/internal/agent/handover-result"
+SMS_PATH = "/internal/agent/handover-sms"
+
+
+def _post_by_path(route_reply, result_replies=None, sms_reply=None):
+    """``api.post`` by path: the route reply, the text reply, then
+    ``result_replies`` in order for the result posts (then ``{"ok": True}``)."""
+    results = list(result_replies or [])
+
+    async def post(path, body):
+        if path == "/internal/agent/handover":
+            return route_reply
+        reply = sms_reply if path == SMS_PATH else None
+        if path == RESULT_PATH:
+            reply = results.pop(0) if results else None
+        if isinstance(reply, Exception):
+            raise reply
+        return reply if reply is not None else {"ok": True, "sms": "sent"}
+
+    return post
+
+
+def _posted(api, path):
+    return [c.args[1] for c in api.post.await_args_list if c.args[0] == path]
+
+
+async def _texts_done() -> None:
+    await asyncio.gather(*transfer_call._texting)
+
+
 def _ctx(api_reply, outcome=None):
     api = AsyncMock()
-    api.post.side_effect = [api_reply, {"ok": True}]
+    api.post.side_effect = _post_by_path(api_reply)
     bridge = AsyncMock(return_value=outcome)
     return (
         ToolContext(
@@ -60,7 +91,7 @@ async def test_answered() -> None:
         "/internal/agent/handover",
         {"call_id": str(ctx.call_id), "contact_id": CID},
     )
-    result = api.post.await_args_list[1].args[1]
+    result = _posted(api, RESULT_PATH)[0]
     assert result["outcome"] == "answered" and result["ring_ms"] == 9000
 
 
@@ -90,7 +121,7 @@ async def test_no_answer_posts_the_pickup_verdict() -> None:
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE, BridgeOutcome("no_answer", None, 24000, "machine-vm"))
     await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
-    result = api.post.await_args_list[1].args[1]
+    result = _posted(api, RESULT_PATH)[0]
     assert result["outcome"] == "no_answer"
     assert result["picked_up_by"] == "machine-vm"
 
@@ -133,7 +164,7 @@ async def test_no_bridge_handle() -> None:
 async def test_result_post_failure_still_connected() -> None:
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
-    api.post.side_effect = [ROUTE, RuntimeError("boom")]
+    api.post.side_effect = _post_by_path(ROUTE, [RuntimeError("boom")])
     assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) is None
 
 
@@ -143,7 +174,7 @@ async def test_bridge_raises_posts_failed() -> None:
     bridge.side_effect = RuntimeError("boom")
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert "could not pick up" in said
-    result = api.post.await_args_list[1].args[1]
+    result = _posted(api, RESULT_PATH)[0]
     assert result["outcome"] == "failed"
     assert result["sip_status"] is None and result["ring_ms"] == 0
 
@@ -186,6 +217,8 @@ async def test_answered_posted_before_intro_and_once() -> None:
     ctx, api, _ = _ctx(ROUTE)
 
     async def post(path, body):
+        if path == SMS_PATH:
+            return {"sms": "sent"}
         order.append(body.get("outcome") or "route")
         return ROUTE if path.endswith("/handover") else {"ok": True}
 
@@ -194,7 +227,7 @@ async def test_answered_posted_before_intro_and_once() -> None:
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said is None
     assert order == ["route", "answered", "intro"]
-    result = api.post.await_args_list[1].args[1]
+    result = _posted(api, RESULT_PATH)[0]
     assert result["ring_ms"] == 9000 and result["contact_id"] == CID
     assert result["picked_up_by"] == "human"
 
@@ -204,19 +237,85 @@ async def test_answered_post_retries(monkeypatch) -> None:
     spec = transfer_call.bind(META)
     order: list[str] = []
     ctx, api, _ = _ctx(ROUTE)
-    api.post.side_effect = [ROUTE, RuntimeError("a"), RuntimeError("b"), {"ok": True}]
+    api.post.side_effect = _post_by_path(
+        ROUTE, [RuntimeError("a"), RuntimeError("b"), {"ok": True}]
+    )
     ctx.bridge = _answering_bridge(order)
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said is None
-    assert api.post.await_count == 4
+    assert len(_posted(api, RESULT_PATH)) == 3
 
 
 async def test_answered_post_gives_up_after_the_last_attempt(monkeypatch) -> None:
     monkeypatch.setattr(transfer_call, "_ANSWERED_BACKOFF", (0, 0))
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE)
-    api.post.side_effect = [ROUTE] + [RuntimeError("x")] * 5
+    api.post.side_effect = _post_by_path(ROUTE, [RuntimeError("x")] * 5)
     ctx.bridge = _answering_bridge([])
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said is None
-    assert api.post.await_count == 4
+    assert len(_posted(api, RESULT_PATH)) == 3
+
+
+def _slow_bridge(outcome):
+    """A dial that takes a moment, like a real one: the text goes out first."""
+
+    async def bridge(_route):
+        await asyncio.sleep(0.01)
+        return outcome
+
+    return bridge
+
+
+async def test_texts_the_contact_while_dialing() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 30000))
+    await spec.execute(ctx, {"contact": "Sam", "reason": " a  leak "})
+    [text] = _posted(api, SMS_PATH)
+    [result] = _posted(api, RESULT_PATH)
+    assert text == {
+        "tool_invocation_id": result["tool_invocation_id"],
+        "call_id": str(ctx.call_id),
+        "contact_id": CID,
+        "reason": "a leak",
+    }
+    assert result["sms"] == "sent"
+
+
+async def test_blocked_text_is_recorded_and_the_dial_goes_on() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    api.post.side_effect = _post_by_path(
+        ROUTE, sms_reply={"sms": "blocked:us_registration"}
+    )
+    ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 30000))
+    await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert _posted(api, RESULT_PATH)[0]["sms"] == "blocked:us_registration"
+
+
+async def test_text_failure_never_stops_the_dial() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    api.post.side_effect = _post_by_path(ROUTE, sms_reply=RuntimeError("api down"))
+    ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 30000))
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert "could not pick up" in said
+    assert _posted(api, RESULT_PATH)[0]["sms"] == "failed"
+
+
+async def test_text_still_running_is_pending_and_finishes() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("no_answer", 480, 1))
+    await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert _posted(api, RESULT_PATH)[0]["sms"] == "pending"
+    await _texts_done()
+    assert len(_posted(api, SMS_PATH)) == 1 and not transfer_call._texting
+
+
+async def test_no_text_when_the_api_refuses_the_handover() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx({"ok": False, "spoken": "no"})
+    await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    await _texts_done()
+    assert _posted(api, SMS_PATH) == []

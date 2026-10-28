@@ -40,6 +40,21 @@ ON_CALL_LINE = (
     "same number is not technically possible."
 )
 
+
+def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -> str:
+    """The text a handover contact gets while the agent dials them: who is
+    calling, the caller's number to call back, and the reason. The reason is
+    LLM-written and a caller can steer it, so it is attributed ("Reason
+    given: ...") as in the spoken intro."""
+    who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
+    text = f"{agent_name} (AI agent) is calling you now to connect {who}."
+    said = " ".join((reason or "").split())
+    if said:
+        end = "" if said.endswith((".", "!", "?")) else "."
+        text += f" Reason given: {said}{end}"
+    return text
+
+
 # How long a call may run after a handover contact answers, counted from the
 # answer, when the agent sets no ``handover_max_duration_seconds``.
 HANDOVER_DEFAULT_MAX_SECONDS = 30 * 60

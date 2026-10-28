@@ -87,7 +87,11 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
-from hailhq.voicebot.handover_screen import NOT_A_PERSON, screen_handover_pickup
+from hailhq.voicebot.handover_screen import (
+    NOT_A_PERSON,
+    contact_speaks,
+    screen_handover_pickup,
+)
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -458,6 +462,12 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
 
 # How long the handover contact's phone rings before the dial gives up.
 HANDOVER_RING_SECONDS = 30
+# How long the contact may stay silent after the intro before the agent takes
+# the caller back. A person answers the caller's first "Hello?"; a mailbox
+# that got past the pickup check records in silence.
+HANDOVER_REPLY_SECONDS = 8.0
+# picked_up_by when the contact said nothing after the intro.
+NO_REPLY = "no_reply"
 
 # SIP final responses that mean the person is there but declined / busy, and
 # the ones that mean nobody picked up. Anything else is a failed dial.
@@ -555,6 +565,7 @@ def make_agent_bridge(
     handover_seconds: int = 0,
     on_cap_fired: Callable[[], None] | None = None,
     screen: Callable[[str], Awaitable[str | None]] | None = None,
+    watch: Callable[[str], Awaitable[bool]] | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
 
@@ -569,10 +580,18 @@ def make_agent_bridge(
     leg is removed and the outcome is ``no_answer``: no answer is reported,
     the time limit stays, and the agent takes the caller back.
 
+    ``watch`` runs after the intro, with the agent muted: it reports whether
+    the contact spoke within ``HANDOVER_REPLY_SECONDS``. When they did not,
+    the leg is removed, the agent is unmuted and the outcome is
+    ``no_answer`` (``picked_up_by`` ``"no_reply"``). Only after a reply does
+    the handover count as answered: ``connected`` flips, the answer is
+    posted and the handover time limit starts.
+
     ``bridge_state["human"]`` is set before dialing so
     :func:`handle_sip_disconnect` can tell the contact's leg from the
     caller's while it rings; ``bridge_state["connected"]`` flips on answer.
-    On answer the pending soft cap task (``bridge_state["soft_cap_task"]``)
+    Until then a contact who hangs up is reported by this handle, not by the
+    disconnect handler. On answer the pending soft cap task (``bridge_state["soft_cap_task"]``)
     is cancelled and, when ``handover_seconds`` is above 0, replaced by a new
     one that counts from the answer: the handover call limit
     (``handover_max_duration_seconds``) takes over from ``max_duration_seconds``.
@@ -655,6 +674,42 @@ def make_agent_bridge(
             logger.info("call_id=%s handover contact left before connecting", call_id)
             bridge_state["human"] = None
             return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
+        try:
+            handle = session.say(
+                handover_intro(route.name, route.reason), allow_interruptions=False
+            )
+            await handle.wait_for_playout()
+        except Exception:
+            # The contact is on the line either way; never leave the agent
+            # talking over the two people.
+            logger.exception("call_id=%s handover intro failed", call_id)
+        finally:
+            session.input.set_audio_enabled(False)
+            session.output.set_audio_enabled(False)
+        if identity not in ctx.room.remote_participants:
+            logger.info("call_id=%s handover contact left after the intro", call_id)
+            bridge_state["human"] = None
+            session.input.set_audio_enabled(True)
+            session.output.set_audio_enabled(True)
+            return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
+        if watch is not None:
+            replied = True
+            try:
+                replied = await watch(identity)
+            except Exception:
+                logger.exception("call_id=%s handover reply check failed", call_id)
+            if not replied:
+                logger.info("call_id=%s handover contact silent after intro", call_id)
+                picked_up_by = NO_REPLY
+                if not await _remove_handover_leg(ctx, identity, call_id):
+                    bridge_state["ending"] = True
+                    await _drop_room(ctx, call_id)
+                    ctx.shutdown(reason="handover_leg_stuck")
+                    return BridgeOutcome("failed", None, ring_ms, picked_up_by)
+                bridge_state["human"] = None
+                session.input.set_audio_enabled(True)
+                session.output.set_audio_enabled(True)
+                return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
@@ -680,11 +735,10 @@ def make_agent_bridge(
                     )
                 )
         if route.on_answered is not None:
-            # Record the answer before the intro: the sweepers lift the time
-            # limit only once the "answered" event exists. Runs in the
-            # background (the post retries for about a minute, see transfer_call._post_answered);
-            # the task is held in bridge_state and awaited briefly at job
-            # shutdown.
+            # The sweepers lift the time limit only once the "answered" event
+            # exists. Runs in the background (the post retries for about a
+            # minute, see transfer_call._post_answered); the task is held in
+            # bridge_state and awaited briefly at job shutdown.
             try:
                 post = route.on_answered(ring_ms, picked_up_by)
             except Exception:
@@ -693,21 +747,18 @@ def make_agent_bridge(
                 bridge_state["answer_task"] = asyncio.create_task(
                     _report_answer(post, call_id)
                 )
-        try:
-            handle = session.say(
-                handover_intro(route.name, route.reason), allow_interruptions=False
-            )
-            await handle.wait_for_playout()
-        except Exception:
-            # The contact is on the line either way; never leave the agent
-            # talking over the two people.
-            logger.exception("call_id=%s handover intro failed", call_id)
-        finally:
-            session.input.set_audio_enabled(False)
-            session.output.set_audio_enabled(False)
         return BridgeOutcome("answered", None, ring_ms, picked_up_by)
 
     return _bridge
+
+
+async def _contact_replies(
+    ctx: JobContext, session: AgentSession, identity: str
+) -> bool:
+    """The bridge's reply check; True (connect, as before) without a VAD."""
+    if session.vad is None:
+        return True
+    return await contact_speaks(ctx.room, identity, session.vad, HANDOVER_REPLY_SECONDS)
 
 
 async def build_tools_safely(
@@ -2324,6 +2375,7 @@ async def _run_call(
                 org_cfgs=org_cfgs,
                 llm_override=llm_cfg is not None,
             ),
+            watch=lambda identity: _contact_replies(ctx, session, identity),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
     )

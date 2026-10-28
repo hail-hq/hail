@@ -38,6 +38,7 @@ from hailhq.core.agent_tools.send_email import (
     MAX_SUBJECT_CHARS,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
+from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
@@ -56,6 +57,7 @@ from hailhq.core.handover import (
     ON_CALL_LINE,
     HandoverPerson,
     country_of,
+    handover_sms_text,
     has_answered_handover,
     load_handover,
 )
@@ -741,6 +743,21 @@ class AgentHandoverResultRequest(BaseModel):
     ring_ms: int = Field(ge=0)
     # The voicebot's pickup check verdict (handover_screen), for debugging.
     picked_up_by: str | None = Field(default=None, max_length=32)
+    # What became of the text to the contact (``/handover-sms``'s ``sms``).
+    sms: str | None = Field(default=None, max_length=48)
+
+
+class AgentHandoverSmsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_invocation_id: UUID
+    call_id: UUID
+    contact_id: HandoverWireId
+    reason: str = Field(default="", max_length=MAX_REASON_CHARS)
+
+
+class AgentHandoverSmsResponse(BaseModel):
+    # sent | failed | blocked:<why> | skipped:<why>
+    sms: str
 
 
 async def _handover_result_recorded(
@@ -870,6 +887,111 @@ async def _deny_handover(
     return AgentHandoverResponse(ok=False, spoken=spoken)
 
 
+@router.post("/handover-sms", response_model=AgentHandoverSmsResponse)
+async def agent_handover_sms(
+    body: AgentHandoverSmsRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentHandoverSmsResponse:
+    """Text the handover contact while the voicebot dials them, from the Hail
+    number on the call. Never blocks the dial: the voicebot posts this in
+    parallel and records ``sms`` on the handover event."""
+    call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
+    if call is None:
+        return AgentHandoverSmsResponse(sms="skipped:no_call")
+    org = call.organization_id
+    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
+    if prior is not None:
+        failed = prior.status in ("failed", "undelivered")
+        return AgentHandoverSmsResponse(sms="failed" if failed else "sent")
+    if call.status != "in_progress":
+        return AgentHandoverSmsResponse(sms="skipped:call_ended")
+    contact = await _linked_person(db, call, body.contact_id)
+    if contact is None or not contact.phone_e164:
+        return AgentHandoverSmsResponse(sms="skipped:no_contact")
+    to = contact.phone_e164
+    caller = _other_party(call)
+    if to == caller:
+        return AgentHandoverSmsResponse(sms="skipped:contact_is_on_call")
+    number_id = call.to_number_id if call.direction == "inbound" else None
+    number_id = number_id or call.from_number_id
+    from_number = await db.get(PhoneNumber, number_id) if number_id else None
+    if from_number is None or "sms" not in from_number.capabilities:
+        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
+
+    async def _blocked(reason: str, **extra: Any) -> AgentHandoverSmsResponse:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.sms_blocked",
+            resource_type="call",
+            resource_id=call.id,
+            payload={"contact_id": body.contact_id, "reason": reason, **extra},
+            actor_kind="system",
+        )
+        return AgentHandoverSmsResponse(sms=f"blocked:{reason}")
+
+    if call.metadata_.get(CALL_META_BILLED) and not await has_funds(db, org):
+        return await _blocked("insufficient_funds")
+    gate = await check_sms_allowed(db, org, to)
+    if not gate.allowed:
+        return await _blocked("compliance", detail=gate.reason, checks=gate.checks)
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [to])
+    if cap_denial is not None:
+        return await _blocked("agent_caps", detail=cap_denial.reason)
+    if await us_registration_block(db, org, from_number, to) is not None:
+        return await _blocked("us_registration")
+
+    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
+    sms = Sms(
+        organization_id=org,
+        provider=from_number.provider,
+        from_number_id=from_number.id,
+        from_e164=from_number.e164,
+        to_e164=to,
+        agent_id=call.agent_id,
+        direction="outbound",
+        status="queued",
+        body=handover_sms_text(
+            agent.name if agent else "Your agent", caller, body.reason
+        )[:SMS_MAX_BODY_CHARS],
+        metadata_={
+            "call_id": str(call.id),
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "handover_contact_id": body.contact_id,
+        },
+    )
+    db.add(sms)
+    await db.commit()
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.handover.sms",
+        resource_type="sms",
+        resource_id=sms.id,
+        payload={
+            "call_id": str(call.id),
+            "contact_id": body.contact_id,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+    err = await deliver_sms(db, sms)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.sms_failed",
+            resource_type="sms",
+            resource_id=sms.id,
+            payload={"call_id": str(call.id), "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentHandoverSmsResponse(sms="failed")
+    return AgentHandoverSmsResponse(sms="sent")
+
+
 @router.post("/handover-result")
 async def agent_handover_result(
     body: AgentHandoverResultRequest,
@@ -901,6 +1023,7 @@ async def agent_handover_result(
                 "sip_status": body.sip_status,
                 "ring_ms": body.ring_ms,
                 "picked_up_by": body.picked_up_by,
+                "sms": body.sms,
             },
         )
     )

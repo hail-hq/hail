@@ -69,18 +69,25 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - The contact sees your Hail number as caller ID.
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message.
+- While the phone rings, the contact gets a text from your Hail number with
+  the caller's number and the reason. A text from a US number to a US number
+  needs an approved US SMS registration; without one the call still rings,
+  with no text.
 - When the phone picks up, the agent first listens. If voicemail, a phone
-  menu or a carrier message answers, it hangs up that line and comes back
-  the same way. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
+  menu or a carrier message answers, or nobody speaks within 5 seconds, it
+  hangs up that line and comes back the same way. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
 - On answer, the agent says who is calling and why, then goes silent. If
-  either side hangs up, the call ends.
+  the contact says nothing within 8 seconds after that, the agent hangs up
+  their line and comes back to the caller. Once connected, if either side
+  hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
   can hang up sooner.
 - Billed as one call at the normal voice rate.
-- Sends a [`call.transferred`](webhooks.md) webhook when the contact answers.
+- Sends a [`call.transferred`](webhooks.md) webhook when the contact answers
+  and speaks.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call

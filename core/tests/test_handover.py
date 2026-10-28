@@ -370,3 +370,20 @@ async def test_missing_member_tables_warn_once(async_session, monkeypatch, caplo
         await handover_targets(async_session, agent.id)
     levels = [r.levelno for r in caplog.records if r.name == "hailhq.core.handover"]
     assert levels == [logging.WARNING, logging.DEBUG]
+
+
+def test_handover_sms_text() -> None:
+    from hailhq.core.handover import handover_sms_text
+
+    assert handover_sms_text(
+        "Front Desk", "+13105550100", " an urgent  plumbing issue "
+    ) == (
+        "Front Desk (AI agent) is calling you now to connect a caller "
+        "(+13105550100). Reason given: an urgent plumbing issue."
+    )
+    assert handover_sms_text("Front Desk", "anonymous", "") == (
+        "Front Desk (AI agent) is calling you now to connect a caller."
+    )
+    assert handover_sms_text("Sam", None, "Is it open?").endswith(
+        "Reason given: Is it open?"
+    )

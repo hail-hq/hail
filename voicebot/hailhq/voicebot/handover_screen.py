@@ -36,13 +36,15 @@ from livekit.agents.voice import AgentSession
 logger = logging.getLogger("hailhq.voicebot")
 
 # Verdicts that mean no person took the call: voicemail, a full or missing
-# mailbox, a carrier announcement, or call screening.
+# mailbox, a carrier announcement, call screening, or a pickup with no sound
+# at all (some mailboxes record without a greeting).
 NOT_A_PERSON: frozenset[str] = frozenset(
-    {"machine-vm", "machine-unavailable", "machine-ivr"}
+    {"machine-vm", "machine-unavailable", "machine-ivr", "silent"}
 )
 
-# A person who picks up and waits in silence hears the intro after this.
-NO_SPEECH_SECONDS = 3.0
+# A person says "Hello?" within a second or two. No speech by then: nobody
+# is there.
+NO_SPEECH_SECONDS = 5.0
 # Silence after speech that ends the greeting. Longer than a pause inside a
 # recorded greeting ("Bonjour, ... vous êtes sur la messagerie de").
 END_SILENCE_SECONDS = 0.8
@@ -52,9 +54,8 @@ MAX_LISTEN_SECONDS = 8.0
 TRACK_WAIT_SECONDS = 5.0
 
 
-async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
-    """The contact's first speech as 16 kHz mono PCM, or b"" when they
-    stayed silent for ``NO_SPEECH_SECONDS``."""
+async def _contact_audio(room: rtc.Room, identity: str) -> rtc.AudioStream | None:
+    """The contact's audio as 16 kHz mono, or None when they publish none."""
     publication = await asyncio.wait_for(
         wait_for_track_publication(
             room=room,
@@ -65,14 +66,22 @@ async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
         timeout=TRACK_WAIT_SECONDS,
     )
     if publication.track is None:
-        return b""
-    stream = rtc.AudioStream.from_track(
+        return None
+    return rtc.AudioStream.from_track(
         track=publication.track,
         sample_rate=SAMPLE_RATE,
         num_channels=1,
         frame_size_ms=20,
         capacity=50,
     )
+
+
+async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
+    """The contact's first speech as 16 kHz mono PCM, or b"" when they
+    stayed silent for ``NO_SPEECH_SECONDS``."""
+    stream = await _contact_audio(room, identity)
+    if stream is None:
+        return b""
     vad_stream = vad.stream()
     limit = int(MAX_LISTEN_SECONDS * SAMPLE_RATE) * 2
     pcm = bytearray()
@@ -112,6 +121,38 @@ async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
         await stream.aclose()
         await vad_stream.aclose()
     return bytes(pcm) if heard else b""
+
+
+async def contact_speaks(
+    room: rtc.Room, identity: str, vad: VAD, seconds: float
+) -> bool:
+    """True when the contact starts speaking within ``seconds``."""
+    stream = await _contact_audio(room, identity)
+    if stream is None:
+        return False
+    vad_stream = vad.stream()
+
+    async def _feed() -> None:
+        try:
+            async for event in stream:
+                vad_stream.push_frame(event.frame)
+        finally:
+            vad_stream.end_input()
+
+    feeder = asyncio.create_task(_feed(), name="handover_reply_feed")
+    try:
+        async with asyncio.timeout(seconds):
+            async for event in vad_stream:
+                if event.type == VADEventType.START_OF_SPEECH:
+                    return True
+    except TimeoutError:
+        pass
+    finally:
+        feeder.cancel()
+        await asyncio.gather(feeder, return_exceptions=True)
+        await stream.aclose()
+        await vad_stream.aclose()
+    return False
 
 
 async def classify_greeting(pcm: bytes, *, stt: STT, llm: LLM) -> str | None:
@@ -200,6 +241,7 @@ async def screen_handover_pickup(
 __all__ = [
     "NOT_A_PERSON",
     "classify_greeting",
+    "contact_speaks",
     "listen_for_greeting",
     "screen_handover_pickup",
 ]

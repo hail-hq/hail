@@ -4,7 +4,9 @@ session_control tier: the agent finishes its sentence first. The LLM only
 sees names and notes (dispatch metadata ``handover_targets``); the API
 resolves and re-checks the number (``/internal/agent/handover``), the
 voicebot's ``bridge`` handle dials it into the room, and the API records
-the outcome (``/internal/agent/handover-result``).
+the outcome (``/internal/agent/handover-result``). While it dials, the API
+texts the person the caller's number and the reason
+(``/internal/agent/handover-sms``).
 """
 
 from __future__ import annotations
@@ -58,6 +60,25 @@ SPEC = ToolSpec(
 )
 
 
+# Text tasks still running when the tool returns: held so they are not
+# garbage collected before the text is sent.
+_texting: set[asyncio.Task] = set()
+
+
+async def _text_contact(ctx: ToolContext, body: dict[str, Any]) -> str:
+    """Ask the API to text the contact; what became of it, never raises."""
+    try:
+        reply = await ctx.api.post("/internal/agent/handover-sms", body)
+    except Exception:
+        _log.exception("handover text post failed")
+        return "failed"
+    return str(reply.get("sms") or "failed")
+
+
+def _sms_state(task: asyncio.Task[str]) -> str:
+    return task.result() if task.done() else "pending"
+
+
 async def _post_answered(ctx: ToolContext, body: dict[str, Any]) -> None:
     """Post the "answered" result; retried, never raises."""
     for attempt in range(len(_ANSWERED_BACKOFF) + 1):
@@ -107,6 +128,8 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         # post (timeout, dropped connection) is not recorded twice.
         invocation_id = str(uuid.uuid4())
 
+        sms: asyncio.Task[str] | None = None
+
         def _result(
             outcome: str,
             sip_status: int | None,
@@ -121,6 +144,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "sip_status": sip_status,
                 "ring_ms": ring_ms,
                 "picked_up_by": picked_up_by,
+                "sms": _sms_state(sms) if sms is not None else None,
             }
 
         answer_reported = False
@@ -139,6 +163,19 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         )
         if not route.get("ok"):
             return str(route.get("spoken") or SPOKEN_FALLBACK)
+        sms = asyncio.create_task(
+            _text_contact(
+                ctx,
+                {
+                    "tool_invocation_id": invocation_id,
+                    "call_id": str(ctx.call_id),
+                    "contact_id": contact_id,
+                    "reason": reason,
+                },
+            )
+        )
+        _texting.add(sms)
+        sms.add_done_callback(_texting.discard)
         try:
             outcome = await ctx.bridge(
                 BridgeRoute(
