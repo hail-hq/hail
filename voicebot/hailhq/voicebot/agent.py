@@ -565,7 +565,7 @@ def make_agent_bridge(
     handover_seconds: int = 0,
     on_cap_fired: Callable[[], None] | None = None,
     screen: Callable[[str], Awaitable[str | None]] | None = None,
-    watch: Callable[[str], Awaitable[bool]] | None = None,
+    watch: Callable[[str, asyncio.Event], Awaitable[bool]] | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
 
@@ -580,8 +580,9 @@ def make_agent_bridge(
     leg is removed and the outcome is ``no_answer``: no answer is reported,
     the time limit stays, and the agent takes the caller back.
 
-    ``watch`` runs after the intro, with the agent muted: it reports whether
-    the contact spoke within ``HANDOVER_REPLY_SECONDS``. When they did not,
+    ``watch`` starts listening to the contact when the intro starts and
+    reports whether they spoke before ``HANDOVER_REPLY_SECONDS`` after the
+    intro ended (the event it gets is set then). When they did not,
     the leg is removed, the agent is unmuted and the outcome is
     ``no_answer`` (``picked_up_by`` ``"no_reply"``). Only after a reply does
     the handover count as answered: ``connected`` flips, the answer is
@@ -674,6 +675,13 @@ def make_agent_bridge(
             logger.info("call_id=%s handover contact left before connecting", call_id)
             bridge_state["human"] = None
             return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
+        intro_done = asyncio.Event()
+        # A person often says "Hi" or "OK" during the intro: that counts.
+        reply = (
+            asyncio.create_task(watch(identity, intro_done), name="handover_reply")
+            if watch is not None
+            else None
+        )
         try:
             handle = session.say(
                 handover_intro(route.name, route.reason), allow_interruptions=False
@@ -686,30 +694,33 @@ def make_agent_bridge(
         finally:
             session.input.set_audio_enabled(False)
             session.output.set_audio_enabled(False)
+            intro_done.set()
+        replied = True
+        if reply is not None:
+            try:
+                replied = await reply
+            except Exception:
+                logger.exception("call_id=%s handover reply check failed", call_id)
         if identity not in ctx.room.remote_participants:
+            # Gone during the intro or the check. The disconnect handler
+            # ignores a leg that never connected, so report it here.
             logger.info("call_id=%s handover contact left after the intro", call_id)
             bridge_state["human"] = None
             session.input.set_audio_enabled(True)
             session.output.set_audio_enabled(True)
             return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
-        if watch is not None:
-            replied = True
-            try:
-                replied = await watch(identity)
-            except Exception:
-                logger.exception("call_id=%s handover reply check failed", call_id)
-            if not replied:
-                logger.info("call_id=%s handover contact silent after intro", call_id)
-                picked_up_by = NO_REPLY
-                if not await _remove_handover_leg(ctx, identity, call_id):
-                    bridge_state["ending"] = True
-                    await _drop_room(ctx, call_id)
-                    ctx.shutdown(reason="handover_leg_stuck")
-                    return BridgeOutcome("failed", None, ring_ms, picked_up_by)
-                bridge_state["human"] = None
-                session.input.set_audio_enabled(True)
-                session.output.set_audio_enabled(True)
-                return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
+        if reply is not None and not replied:
+            logger.info("call_id=%s handover contact silent after intro", call_id)
+            picked_up_by = NO_REPLY
+            if not await _remove_handover_leg(ctx, identity, call_id):
+                bridge_state["ending"] = True
+                await _drop_room(ctx, call_id)
+                ctx.shutdown(reason="handover_leg_stuck")
+                return BridgeOutcome("failed", None, ring_ms, picked_up_by)
+            bridge_state["human"] = None
+            session.input.set_audio_enabled(True)
+            session.output.set_audio_enabled(True)
+            return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
@@ -753,12 +764,14 @@ def make_agent_bridge(
 
 
 async def _contact_replies(
-    ctx: JobContext, session: AgentSession, identity: str
+    ctx: JobContext, session: AgentSession, identity: str, intro_done: asyncio.Event
 ) -> bool:
     """The bridge's reply check; True (connect, as before) without a VAD."""
     if session.vad is None:
         return True
-    return await contact_speaks(ctx.room, identity, session.vad, HANDOVER_REPLY_SECONDS)
+    return await contact_speaks(
+        ctx.room, identity, session.vad, HANDOVER_REPLY_SECONDS, after=intro_done
+    )
 
 
 async def build_tools_safely(
@@ -1484,8 +1497,9 @@ async def soft_cap_announce_and_hangup(
     The cap stops applying once a handover contact answers: the bridge
     handle cancels this task (it sets ``bridge_state["soft_cap_fired"]``
     once the wait is over, so a cap already announcing is not cut short).
-    With a connected handover the agent's output audio is off, so it is
-    turned back on for the announcement (both people hear it). With a
+    With a contact leg in the room (connected, or still in the intro and
+    reply check) the agent's output audio may be off, so it is turned back
+    on for the announcement (both people hear it). With a
     contact leg ringing or connected the room is deleted before shutdown,
     so no leg outlives the job.
     """
@@ -1501,7 +1515,9 @@ async def soft_cap_announce_and_hangup(
         call_id,
         delay_seconds,
     )
-    if bridge_state is not None and bridge_state.get("connected"):
+    if bridge_state is not None and (
+        bridge_state.get("connected") or bridge_state.get("human")
+    ):
         session.output.set_audio_enabled(True)
     try:
         handle = session.say(SOFT_CAP_ANNOUNCEMENT, allow_interruptions=False)
@@ -2375,7 +2391,9 @@ async def _run_call(
                 org_cfgs=org_cfgs,
                 llm_override=llm_cfg is not None,
             ),
-            watch=lambda identity: _contact_replies(ctx, session, identity),
+            watch=lambda identity, intro_done: _contact_replies(
+                ctx, session, identity, intro_done
+            ),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
     )

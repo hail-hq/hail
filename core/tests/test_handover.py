@@ -398,6 +398,16 @@ def test_handover_sms_text_drops_links() -> None:
         "verify at https://evil.example/x or www.evil.example or evil.co/pay now",
     )
     assert text.endswith("Reason given: verify at or or now.")
+    for reason, said in [
+        ("call +1 900 555 0100 to verify", "call to verify."),
+        ("pay at evil[.]com or evil dot com or evil\u3002com", "pay at or or."),
+        ("email bob@evil.com", "email."),
+        ("question about invoice.pdf", "question about invoice.pdf."),
+        ("a leak in apt 305", "a leak in apt 305."),
+    ]:
+        assert handover_sms_text("Desk", None, reason).endswith(
+            f"Reason given: {said}"
+        ), reason
     assert "evil" not in text
     long = handover_sms_text("Desk", None, "x" * 500)
     assert long.count("x") == 120

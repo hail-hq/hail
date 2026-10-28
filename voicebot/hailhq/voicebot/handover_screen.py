@@ -124,9 +124,16 @@ async def listen_for_greeting(room: rtc.Room, identity: str, vad: VAD) -> bytes:
 
 
 async def contact_speaks(
-    room: rtc.Room, identity: str, vad: VAD, seconds: float
+    room: rtc.Room,
+    identity: str,
+    vad: VAD,
+    seconds: float,
+    *,
+    after: asyncio.Event | None = None,
 ) -> bool:
-    """True when the contact starts speaking within ``seconds``."""
+    """True when the contact starts speaking within ``seconds``, counted from
+    when ``after`` is set (from now without one). Speech before that counts
+    too."""
     stream = await _contact_audio(room, identity)
     if stream is None:
         return False
@@ -139,20 +146,29 @@ async def contact_speaks(
         finally:
             vad_stream.end_input()
 
+    async def _speech() -> bool:
+        async for event in vad_stream:
+            if event.type == VADEventType.START_OF_SPEECH:
+                return True
+        return False  # the contact's audio ended: they left
+
+    async def _deadline() -> None:
+        if after is not None:
+            await after.wait()
+        await asyncio.sleep(seconds)
+
     feeder = asyncio.create_task(_feed(), name="handover_reply_feed")
+    speech = asyncio.create_task(_speech(), name="handover_reply_vad")
+    deadline = asyncio.create_task(_deadline(), name="handover_reply_deadline")
     try:
-        async with asyncio.timeout(seconds):
-            async for event in vad_stream:
-                if event.type == VADEventType.START_OF_SPEECH:
-                    return True
-    except TimeoutError:
-        pass
+        await asyncio.wait({speech, deadline}, return_when=asyncio.FIRST_COMPLETED)
+        return speech.done() and speech.result()
     finally:
-        feeder.cancel()
-        await asyncio.gather(feeder, return_exceptions=True)
+        for task in (feeder, speech, deadline):
+            task.cancel()
+        await asyncio.gather(feeder, speech, deadline, return_exceptions=True)
         await stream.aclose()
         await vad_stream.aclose()
-    return False
 
 
 async def classify_greeting(pcm: bytes, *, stt: STT, llm: LLM) -> str | None:
@@ -214,6 +230,10 @@ async def screen_handover_pickup(
         return None
     owned: list = []
     try:
+        # The silence check needs only the VAD, so it runs for every org.
+        pcm = await listen_for_greeting(room, identity, session.vad)
+        if not pcm:
+            return "silent"
         stt = _build_stt(org_cfgs or {})
         if stt is None:
             logger.warning("handover pickup check has no transcriber; skipping")
@@ -226,9 +246,6 @@ async def screen_handover_pickup(
         if not isinstance(llm, LLM):
             logger.warning("handover pickup check has no classifier; skipping")
             return None
-        pcm = await listen_for_greeting(room, identity, session.vad)
-        if not pcm:
-            return "silent"
         return await classify_greeting(pcm, stt=stt, llm=llm)
     except Exception as exc:
         # Provider error bodies can contain audio or transcripts.

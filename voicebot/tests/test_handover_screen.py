@@ -168,6 +168,20 @@ async def test_classify_skips_empty_or_tiny_audio(monkeypatch) -> None:
     )
 
 
+async def test_silent_pickup_without_transcriber_is_silent(monkeypatch) -> None:
+    """The 5 s silence rule needs only the VAD: it applies to every org."""
+    monkeypatch.setattr(handover_screen, "_build_stt", lambda _cfgs: None)
+    monkeypatch.setattr(
+        handover_screen, "listen_for_greeting", AsyncMock(return_value=b"")
+    )
+    monkeypatch.setattr(handover_screen, "_close_all", AsyncMock())
+    session = SimpleNamespace(vad=object())
+    verdict = await handover_screen.screen_handover_pickup(
+        object(), "human-x", session  # type: ignore[arg-type]
+    )
+    assert verdict == "silent"
+
+
 async def test_silent_pickup_verdict_is_silent(monkeypatch) -> None:
     """Nobody spoke: a mailbox that records with no greeting (calls 65c95d12
     and b4dd5af6). The call is not connected."""
@@ -197,6 +211,32 @@ async def test_contact_speaks_after_intro(leg) -> None:
     )
     assert await handover_screen.contact_speaks(object(), "human-x", vad, 2.0)
     assert leg.closed and stream.closed
+
+
+async def test_contact_speaking_during_intro_counts(leg) -> None:
+    """Speech before ``after`` is set (during the intro) is a reply."""
+    vad, _ = _vad([VADEventType.START_OF_SPEECH])
+    after = asyncio.Event()
+    assert await handover_screen.contact_speaks(
+        object(), "human-x", vad, 0.05, after=after
+    )
+
+
+async def test_reply_window_counts_from_after(leg) -> None:
+    """The window starts when ``after`` is set, not when listening starts."""
+    vad, _ = _vad([VADEventType.INFERENCE_DONE] * 40 + [VADEventType.START_OF_SPEECH])
+    after = asyncio.Event()
+
+    async def _intro():
+        await asyncio.sleep(0.2)
+        after.set()
+
+    intro = asyncio.create_task(_intro())
+    # 0.05 s alone would end before the speech (about 40 frames in).
+    assert await handover_screen.contact_speaks(
+        object(), "human-x", vad, 0.05, after=after
+    )
+    await intro
 
 
 async def test_contact_silent_after_intro(leg) -> None:

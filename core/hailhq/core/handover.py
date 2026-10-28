@@ -44,21 +44,39 @@ ON_CALL_LINE = (
 
 # Cap on the caller-steered reason in the handover text.
 HANDOVER_SMS_REASON_CHARS = 120
-# Links and bare domains: a caller could steer the reason into a phishing link.
+# What a caller could steer the reason into to phish the contact: links, bare
+# or spelled-out domains, emails and phone numbers. File names stay.
+_FULLWIDTH_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+_FILE_EXTENSIONS = frozenset(
+    {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "jpg", "jpeg", "png", "heic"}
+)
 _LINK = re.compile(
-    r"(?:https?://|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:/\S*)?",
+    r"\S+@\S+"  # email
+    r"|(?:https?://|www\.)\S+"  # link
+    r"|\b[\w-]+(?:\s*(?:\[\.\]|\(\.\)|\[dot\]|\(dot\)|\bdot\b)\s*[a-z]{2,})+\b"
+    r"|\b[\w-]+(?:\.[\w-]+)*\.([a-z]{2,})\b(?:/\S*)?"  # bare domain
+    r"|\+?\d[\d\s().-]{5,}\d",  # phone number
     re.IGNORECASE,
 )
+
+
+def _strip_links(text: str) -> str:
+    def _drop(match: re.Match[str]) -> str:
+        ext = match.group(1)
+        return match.group(0) if ext and ext.lower() in _FILE_EXTENSIONS else ""
+
+    return _LINK.sub(_drop, text.translate(_FULLWIDTH_DOTS))
 
 
 def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -> str:
     """The text a handover contact gets while the agent dials them: who is
     calling, the caller's number to call back, and the reason. The reason is
     LLM-written and a caller can steer it, so it is attributed ("Reason
-    given: ...") as in the spoken intro, kept short, and links are removed."""
+    given: ...") as in the spoken intro, kept short, and links, emails and
+    phone numbers are removed."""
     who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
     text = f"{agent_name} (AI agent) is calling you now to connect {who}."
-    said = " ".join(_LINK.sub("", reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
+    said = " ".join(_strip_links(reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
     if said:
         end = "" if said.endswith((".", "!", "?")) else "."
         text += f" Reason given: {said}{end}"
