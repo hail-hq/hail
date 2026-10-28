@@ -178,6 +178,30 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     # MIXED needs 2 or more sub use cases; Telnyx refuses with 400 without.
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
     assert posted[0]["termsAndConditions"] is True
+    # Telnyx 10015 "optoutMessage is required if subscriberOptout is true."
+    assert posted[0]["subscriberOptout"] is True
+    # No name on the brand read: the replies are filed without one.
+    assert posted[0]["optoutMessage"] == (
+        "You are unsubscribed and will get no more messages from this number."
+    )
+
+
+def test_campaign_replies_open_with_the_brand_name() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    replies = _campaign_replies({"displayName": "Acme Dental"})
+    assert replies == {
+        "helpMessage": "Acme Dental: Reply STOP to opt out. For help contact hi@hail.so.",
+        "optinMessage": (
+            "Acme Dental: You are opted in. Reply STOP to opt out, HELP for help."
+        ),
+        "optoutMessage": (
+            "Acme Dental: You are unsubscribed and will get no more messages "
+            "from this number."
+        ),
+    }
+    person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"})
+    assert person["optoutMessage"].startswith("Jo Doe: You are unsubscribed")
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
@@ -958,6 +982,32 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
     await _provider(handler).status(refs)
     assert posted[0]["termsAndConditions"] is False
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
+
+
+def test_error_log_names_the_field_and_reason() -> None:
+    import httpx
+    from hailhq.core.providers.verification.telnyx_sms import _error_log
+
+    response = httpx.Response(
+        400,
+        json={
+            "errors": [
+                {
+                    "code": "10015",
+                    "title": "Bad Request",
+                    "detail": "optoutMessage is required if subscriberOptout is true.",
+                    "source": {"pointer": "/body/optoutMessage"},
+                }
+            ]
+        },
+    )
+    assert _error_log(response) == [
+        {
+            "code": "10015",
+            "field": "/body/optoutMessage",
+            "detail": "optoutMessage is required if subscriberOptout is true.",
+        }
+    ]
 
 
 async def test_a_failure_after_the_brand_reports_it_billed() -> None:

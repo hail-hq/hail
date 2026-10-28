@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
+# The STOP confirmation declared in the campaign filing. Hail's own STOP
+# reply (settings.hail_sms_stop_reply) is separate and off by default.
+_OPT_OUT_MESSAGE = (
+    "You are unsubscribed and will get no more messages from this number."
+)
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
@@ -103,6 +108,21 @@ _DUPLICATE = {
     "rep_phone": "This phone number is on too many registrations. Use another one.",
     "rep_email": "This email is on too many registrations. Use another one.",
 }
+
+
+def _campaign_replies(brand: dict) -> dict:
+    """The HELP, opt-in and STOP replies filed with a campaign, each opening
+    with the brand's name: carrier reviewers want the sender named."""
+    name = display_name(brand.get("displayName")) or display_name(
+        brand.get("firstName"), brand.get("lastName")
+    )
+    prefix = f"{name}: " if name else ""
+    return {
+        "helpMessage": f"{prefix}Reply STOP to opt out. For help contact hi@hail.so.",
+        "optinMessage": f"{prefix}You are opted in. Reply STOP to opt out, HELP for help.",
+        # Required when subscriberOptout is true (Telnyx 10015).
+        "optoutMessage": f"{prefix}{_OPT_OUT_MESSAGE}",
+    }
 
 
 def _policy_links(text: dict) -> dict:
@@ -180,9 +200,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if isinstance(exc, httpx.HTTPStatusError):
                 code = exc.response.status_code
                 logger.warning(
-                    "10DLC draft failed: status=%s codes=%s",
+                    "10DLC draft failed: status=%s errors=%s",
                     code,
-                    _error_codes(exc.response),
+                    _error_log(exc.response),
                 )
                 if 400 <= code < 500:
                     return DraftResult(
@@ -411,8 +431,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,
                         "helpKeywords": _HELP,
-                        "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
-                        "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
+                        **_campaign_replies(brand),
                         "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },
@@ -425,9 +444,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 logger.warning(
-                    "10DLC status failed: status=%s codes=%s",
+                    "10DLC status failed: status=%s errors=%s",
                     exc.response.status_code,
-                    _error_codes(exc.response),
+                    _error_log(exc.response),
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         status = (campaign.get("campaignStatus") or "").upper()
@@ -538,10 +557,22 @@ def _errors(response: httpx.Response) -> list[dict]:
     return [e for e in errors if isinstance(e, dict)]
 
 
-def _error_codes(response: httpx.Response) -> list:
-    """Telnyx's error codes, for the log. Never its text: it can quote the
-    customer's details."""
-    return [e.get("code") for e in _errors(response)]
+def _error_log(response: httpx.Response) -> list:
+    """Telnyx's errors, for the log: code, field and text. The text can quote
+    the customer's details; logged anyway (owner decision 2026-10-28), since
+    the code alone does not say which field Telnyx refused."""
+    return [
+        {
+            "code": e.get("code"),
+            "field": (
+                e["source"].get("pointer")
+                if isinstance(e.get("source"), dict)
+                else None
+            ),
+            "detail": e.get("detail") or e.get("title"),
+        }
+        for e in _errors(response)
+    ]
 
 
 def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
