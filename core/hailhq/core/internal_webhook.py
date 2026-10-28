@@ -192,3 +192,18 @@ def notify_sms_registration_changed(verification_id: str) -> None:
     )
     _pending_tasks.add(task)
     task.add_done_callback(_pending_tasks.discard)
+
+
+def notify_verification_decided(verification_id: str) -> None:
+    """Fire-and-forget kick to the website, which emails the org's owners
+    that a verification was approved or rejected. Call it after the commit
+    that made the change. The website reads the row and skips one that is
+    not approved or rejected."""
+    task = asyncio.create_task(
+        _post(
+            "/api/internal/verifications/decided",
+            {"verification_id": verification_id},
+        )
+    )
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)

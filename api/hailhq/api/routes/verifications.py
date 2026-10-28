@@ -42,7 +42,10 @@ from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
-from hailhq.core.internal_webhook import notify_sms_registration_changed
+from hailhq.core.internal_webhook import (
+    notify_sms_registration_changed,
+    notify_verification_decided,
+)
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -323,6 +326,7 @@ async def _record_billed_refusal(
         actor_kind="system",
     )
     notify_sms_registration_changed(str(row.id))
+    notify_verification_decided(str(row.id))
 
 
 def _problems_422(
@@ -491,12 +495,17 @@ async def _poll_and_apply(
     return changed
 
 
-def _notify_billing(rows: list[CarrierVerification]) -> None:
-    """Tell the website's fee rater about US texting rows that changed and
-    are committed (a campaign sent for review is a billed step)."""
+def _notify_changed(rows: list[CarrierVerification]) -> None:
+    """Tell the website about polled rows that changed and are committed:
+    the fee rater about US texting rows (a campaign sent for review is a
+    billed step), and the owners' email about rows the carrier approved or
+    rejected. Only submitted rows are polled, so a polled row that is now
+    approved or rejected was just decided."""
     for row in rows:
         if row.purpose == "sms":
             notify_sms_registration_changed(str(row.id))
+        if row.state in ("approved", "rejected"):
+            notify_verification_decided(str(row.id))
 
 
 async def _audit_carrier_rejection(
@@ -569,7 +578,7 @@ async def _refresh(
     await db.commit()  # also ends the row lock
     if not changed:
         return
-    _notify_billing([row])
+    _notify_changed([row])
     if was_submitting and row.state in ("submitted", "approved", "rejected"):
         # approved_by is set only by a superadmin's approve; an automatic
         # submit (creation or the sweeper) that was cut off has none.
@@ -708,7 +717,7 @@ async def refresh_number_verifications(
         if await _poll_and_apply(db, r, st, registry, b)
     ]
     await db.commit()
-    _notify_billing(changed)
+    _notify_changed(changed)
 
 
 # -- customer routes ------------------------------------------------------
@@ -1371,6 +1380,7 @@ async def _reject_row(
         actor_user_id=None,
         actor_kind="system",
     )
+    notify_verification_decided(str(row.id))
 
 
 async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str, int]:
@@ -1466,7 +1476,7 @@ async def list_verifications(
     ]
     if asked:
         await db.commit()  # saves changes and ends the row locks
-    _notify_billing(changed)
+    _notify_changed(changed)
     return [_out(r, registry) for r in rows]
 
 
@@ -1798,4 +1808,5 @@ async def admin_reject(
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
+    notify_verification_decided(str(row.id))
     return _out(row, registry, AdminVerification)

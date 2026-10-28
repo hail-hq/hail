@@ -128,6 +128,8 @@ Same flow as above with `purpose=sms`: each organization registers its own US A2
 
 - **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. Without it the Twilio SMS registration plug-in is off: `purpose=sms` with Twilio returns 404.
 
+- **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
+
 ## Cancel rules
 
 `DELETE /verifications/{id}`:

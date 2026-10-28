@@ -283,11 +283,17 @@ async def test_didww_registration_rejected_revokes_approval(
     )
     revoke = AsyncMock(return_value="Document is blurry")
     monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
+    decided: list[str] = []
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.notify_verification_decided", decided.append
+    )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)
     with caplog.at_level("WARNING", logger="hailhq.api.number_orders"):
         await reconcile_order(async_session, number, force=True)
     revoke.assert_awaited_once_with("addr-1", org, "PT", "national")
+    # The owners are emailed once the rejection is committed.
+    assert decided == [str(verification.id)]
     # The buyer reads Hail's wording; the carrier's text stays server-side.
     assert number.provisioning_metadata["failure_reason"] == NEUTRAL_REJECTION
     assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
