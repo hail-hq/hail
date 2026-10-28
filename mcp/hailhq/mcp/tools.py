@@ -2579,6 +2579,8 @@ def register_tools(
         their keys joined by commas (for example
         ``"CUSTOMER_CARE,DELIVERY_NOTIFICATION"``), between ``min_choices``
         and ``max_choices`` of them.
+        A field with ``max_length`` takes at most that many characters;
+        a longer value is refused (422).
         Skip any document slot whose ``needs_input`` is false: do not send it.
 
         Ask the USER for every value and every file. Never invent, guess or

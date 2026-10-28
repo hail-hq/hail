@@ -195,7 +195,7 @@ def test_message_flow_keeps_own_text_with_links_at_the_cap() -> None:
             "campaign_description": "x",
             "sample_1": "x",
             "sample_2": "x",
-            "opt_in_description": "own text " * 300,
+            "opt_in_description": "own text " * 95,
             "has_links": "NO",
             "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
             "privacy_policy_url": link,
@@ -258,17 +258,17 @@ def test_long_fields_carry_their_carrier_limits() -> None:
 def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
     # The longest links and the consent lines still fit in the carrier's 2048.
     long = "https://acme.example/" + "a" * (512 - len("https://acme.example/"))
-    text = campaign_text(
-        {
-            **GOOD,
-            "opt_in_description": "x" * 861,
-            "privacy_policy_url": long,
-            "terms_url": long,
-        },
-        "person",
-    )
+    data = {
+        **GOOD,
+        "opt_in_description": "x" * 861,
+        "privacy_policy_url": long,
+        "terms_url": long,
+    }
+    assert field_problems("telnyx", data, "person") == []
+    text = campaign_text(data, "person")
+    # Nothing is cut: the opt-in text and both links fill the 2048 exactly.
     assert text.message_flow.startswith("x" * 861)
-    assert len(text.message_flow) <= 2048
+    assert len(text.message_flow) == 2048
 
 
 def test_field_problems_refuses_text_over_the_limit() -> None:
@@ -297,3 +297,17 @@ def test_campaign_text_keeps_the_contact_email() -> None:
     assert person.contact_email == "ada@example.com"
     company = campaign_text({**GOOD, "rep_email": "ops@acme.example"}, "business")
     assert company.contact_email == "ops@acme.example"
+
+
+def test_field_problems_counts_characters_as_the_carrier_does() -> None:
+    # An emoji is 2 UTF-16 code units, as the carrier and the browser count.
+    problems = field_problems(
+        "telnyx", {**GOOD, "sample_1": "s" * 1022 + "\U0001f600"}, "person"
+    )
+    assert problems == []
+    problems = field_problems(
+        "telnyx", {**GOOD, "sample_1": "s" * 1023 + "\U0001f600"}, "person"
+    )
+    assert [(p.field, p.message) for p in problems] == [
+        ("sample_1", "Use at most 1024 characters.")
+    ]

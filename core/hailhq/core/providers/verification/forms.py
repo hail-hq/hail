@@ -18,7 +18,9 @@ from hailhq.core.providers.verification.base import (
 __all__ = [
     "address_complete",
     "display_name",
+    "length_problem",
     "pick_option",
+    "text_length",
     "validate_input",
 ]
 
@@ -33,6 +35,20 @@ def display_name(*parts: str | None) -> str | None:
     duplicate check and the unique index see them as one."""
     name = " ".join(" ".join(p for p in parts if p).split())
     return name[:_NAME_MAX].rstrip() or None
+
+
+def text_length(value: str) -> int:
+    """Length in UTF-16 code units, as the carriers and the browser's
+    ``maxLength`` count it: a character outside the BMP (most emoji) counts
+    as 2, so a value the form accepts is never too long for the carrier."""
+    return len(value.encode("utf-16-le")) // 2
+
+
+def length_problem(spec: FieldSpec, value: str) -> str | None:
+    """The message for a value over the field's ``max_length``, else None."""
+    if spec.max_length and text_length(value) > spec.max_length:
+        return f"Use at most {spec.max_length} characters."
+    return None
 
 
 def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:
@@ -74,7 +90,10 @@ def validate_input(
                     Problem(field=where, message=f"{spec.label} is required.")
                 )
             return
-        if spec.pattern and not re.search(spec.pattern, value):
+        too_long = length_problem(spec, value)
+        if too_long:
+            problems.append(Problem(field=where, message=too_long))
+        elif spec.pattern and not re.search(spec.pattern, value):
             problems.append(Problem(field=where, message=f"{spec.label} is not valid."))
 
     for spec in requirements.fields:

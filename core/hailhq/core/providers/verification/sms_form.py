@@ -15,7 +15,11 @@ from hailhq.core.providers.verification.base import (
     Requirements,
     SubjectType,
 )
-from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.forms import (
+    display_name,
+    length_problem,
+    text_length,
+)
 
 _BUSINESS_TYPES = (
     FieldOption(key="PRIVATE_PROFIT", label="Private company"),
@@ -52,9 +56,24 @@ _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"
 # Carrier maximums, in characters: campaign description and each sample.
 _DESCRIPTION_MAX = 4096
 _SAMPLE_MAX = 1024
-# The opt-in text shares the carrier's 2048 (_FLOW_MAX) with the fixed
-# consent lines and links (at most 1187, see _URL_MAX), so 861 are left.
-_OPT_IN_MAX = 861
+_FLOW_MAX = 2048  # carrier maximum for the opt-in description
+_URL_MAX = 512  # per link
+_DISCLOSURES = (
+    "Consent is not a condition of purchase. Message frequency varies. "
+    "Message and data rates may apply. Reply STOP to opt out, HELP for help."
+)
+
+
+def _fixed_flow(privacy_policy_url: str, terms_url: str) -> str:
+    """What campaign_text puts after the customer's opt-in text. No
+    punctuation right after a link: a reviewer who copies it must not get a
+    trailing dot."""
+    return f" {_DISCLOSURES} Privacy policy: {privacy_policy_url} Terms: {terms_url}"
+
+
+# The opt-in text shares the carrier's 2048 with the fixed text at its
+# longest (both links at _URL_MAX), so it always fits whole.
+_OPT_IN_MAX = _FLOW_MAX - len(_fixed_flow("x" * _URL_MAX, "x" * _URL_MAX))
 
 _BUSINESS_FIELDS = (
     FieldSpec(name="legal_name", label="Legal company name"),
@@ -218,18 +237,13 @@ def field_problems(
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
-        elif spec.max_length and len(value) > spec.max_length:
-            problems.append(
-                Problem(
-                    field=spec.name,
-                    message=f"Use at most {spec.max_length} characters.",
-                )
-            )
+        elif too_long := length_problem(spec, value):
+            problems.append(Problem(field=spec.name, message=too_long))
         elif spec.kind == "choices":
             problem = _choices_problem(spec, value)
             if problem:
                 problems.append(Problem(field=spec.name, message=problem))
-        elif spec.kind == "url" and len(value) > _URL_MAX:
+        elif spec.kind == "url" and text_length(value) > _URL_MAX:
             problems.append(Problem(field=spec.name, message="Use a shorter link."))
         elif spec.kind == "url" and not _is_http_url(value):
             problems.append(
@@ -280,15 +294,6 @@ class CampaignText:
 
 
 _OPT_OUT = " Reply STOP to opt out, HELP for help."
-_FLOW_MAX = 2048  # carrier maximum for the opt-in description
-# Per link. The fixed part of the flow is at most 1 + 137 (disclosures) + 17
-# + _URL_MAX + 8 + _URL_MAX = 1187 characters, so the customer's own text
-# always keeps at least 861 of the 2048.
-_URL_MAX = 512
-_DISCLOSURES = (
-    "Consent is not a condition of purchase. Message frequency varies. "
-    "Message and data rates may apply. Reply STOP to opt out, HELP for help."
-)
 
 
 def _at_least(text: str, n: int, pad: str) -> str:
@@ -307,9 +312,10 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     terms_url = fields["terms_url"].strip()
     # Reviewers reject a filing that lacks the consent disclosures and the
     # policy links, so they go on every filing after the customer's own text.
-    # No punctuation right after a link: a reviewer who copies it must not get
-    # a trailing dot.
-    fixed = f" {_DISCLOSURES} Privacy policy: {privacy_policy_url} Terms: {terms_url}"
+    # field_problems caps the opt-in text at _OPT_IN_MAX and each link at
+    # _URL_MAX, so a checked form is never cut here (tested); the cut only
+    # guards a caller that skipped the check.
+    fixed = _fixed_flow(privacy_policy_url, terms_url)
     own = fields["opt_in_description"].strip()[: _FLOW_MAX - len(fixed)]
     flow = (own + fixed).strip()
     samples = [
