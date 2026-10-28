@@ -1025,6 +1025,8 @@ def _outage_after_the_brand(step: str, failure, calls: list):
         if req.url.path.endswith(step):
             if isinstance(state["failure"], Exception):
                 raise state["failure"]
+            if state["failure"] == "html":
+                return httpx.Response(200, content=b"<html>")
             if state["failure"]:
                 return httpx.Response(state["failure"])
             return httpx.Response(200, json={"referenceId": "R1"})
@@ -1033,7 +1035,7 @@ def _outage_after_the_brand(step: str, failure, calls: list):
     return _provider(handler), state
 
 
-@pytest.mark.parametrize("failure", [502, 429, httpx.ConnectError("down")])
+@pytest.mark.parametrize("failure", [502, 429, httpx.ConnectError("down"), "html"])
 async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> None:
     """A retry would file and bill a new brand: keep this one, and the
     background pass asks for vetting."""
@@ -1051,7 +1053,7 @@ async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> N
     assert draft.refs["vetting_requested"] is True
 
 
-@pytest.mark.parametrize("failure", [503, httpx.ReadTimeout("slow")])
+@pytest.mark.parametrize("failure", [503, httpx.ReadTimeout("slow"), "html"])
 async def test_an_outage_after_the_brand_keeps_the_person_filing(failure) -> None:
     calls: list = []
     p, state = _outage_after_the_brand("/smsOtp", failure, calls)

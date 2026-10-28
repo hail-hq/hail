@@ -273,7 +273,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 await self._send_pin(refs)
             else:
                 await self._request_vetting(refs)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
+            # ValueError: an answer whose body is not JSON.
             code = (
                 exc.response.status_code
                 if isinstance(exc, httpx.HTTPStatusError)
