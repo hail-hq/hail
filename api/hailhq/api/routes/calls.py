@@ -596,7 +596,7 @@ async def create_call(
                 "ai_disclosure_line": ai_disclosure_line,
                 "tools": body.tools,
                 "handover_targets": await handover_targets(
-                    db, agent.id if agent else None
+                    db, agent.id if agent else None, call.to_e164
                 ),
                 "handover_max_duration_seconds": (
                     agent.handover_max_duration_seconds if agent else None

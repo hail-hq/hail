@@ -33,6 +33,13 @@ _log = logging.getLogger("hailhq.core.handover")
 
 MAX_HANDOVER_CONTACTS = 10
 
+# Said when the person to hand over to is the other party on the call:
+# dialing them would ring the phone already in use.
+ON_CALL_LINE = (
+    "It seems this call is already on {name}'s number. Handing it over to the "
+    "same number is not technically possible."
+)
+
 # How long a call may run after a handover contact answers, counted from the
 # answer, when the agent sets no ``handover_max_duration_seconds``.
 HANDOVER_DEFAULT_MAX_SECONDS = 30 * 60
@@ -346,9 +353,12 @@ async def load_handover(
     return out
 
 
-async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict]:
+async def handover_targets(
+    db: AsyncSession, agent_id: UUID | None, on_call_e164: str | None = None
+) -> list[dict]:
     """Dispatch-metadata shape. No numbers. Labels unique per call, across
-    contacts and members."""
+    contacts and members. A person whose number is ``on_call_e164`` (the
+    other party on the call) is flagged ``on_call``."""
     if agent_id is None:
         return []
     rows = (await load_handover(db, [agent_id])).get(agent_id, [])
@@ -360,7 +370,8 @@ async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict
         name = row["name"]
         seen[name] = seen.get(name, 0) + 1
         label = name if seen[name] == 1 else f"{name} ({seen[name]})"
-        targets.append(
-            {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
-        )
+        target = {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
+        if on_call_e164 and row["phone_e164"] == on_call_e164:
+            target["on_call"] = True
+        targets.append(target)
     return targets

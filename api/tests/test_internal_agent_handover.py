@@ -138,6 +138,39 @@ async def test_handover_denied(client, async_session, add_phone_number, case):
     assert "to_e164" not in data or data["to_e164"] is None
 
 
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+async def test_handover_denied_when_contact_is_on_the_call(
+    client, async_session, add_phone_number, direction
+):
+    # The person to hand over to is the other party: dialing them rings the
+    # phone already on this call.
+    call, contact = await _seed(async_session, add_phone_number)
+    call.direction = direction
+    if direction == "inbound":
+        call.to_number_id, call.from_number_id = call.from_number_id, None
+        call.to_e164, call.from_e164 = call.from_e164, contact.phone_e164
+    else:
+        call.to_e164 = contact.phone_e164
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+    data = r.json()
+    assert data["ok"] is False
+    assert data["spoken"] == (
+        "It seems this call is already on Sam's number. Handing it over to the "
+        "same number is not technically possible."
+    )
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.resource_id == call.id)
+        )
+    ).scalar_one()
+    assert audit.payload["reason"] == "contact_is_on_call"
+
+
 async def test_result_answered_writes_event_and_webhook(
     client, async_session, add_phone_number
 ):
@@ -161,6 +194,7 @@ async def test_result_answered_writes_event_and_webhook(
             "outcome": "answered",
             "sip_status": None,
             "ring_ms": 12000,
+            "picked_up_by": "silent",
         },
     )
     assert r.json() == {"ok": True}
@@ -178,6 +212,7 @@ async def test_result_answered_writes_event_and_webhook(
         "outcome": "answered",
         "sip_status": None,
         "ring_ms": 12000,
+        "picked_up_by": "silent",
     }
     deliveries = (
         (

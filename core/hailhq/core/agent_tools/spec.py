@@ -37,10 +37,11 @@ class BridgeRoute:
     headers: dict[str, str] | None
     name: str
     reason: str
-    # Called with ring_ms the moment the contact picks up, before the intro
-    # plays. Returns the post that records the answer; the bridge runs it in
-    # the background so a slow API never delays the intro.
-    on_answered: Callable[[int], Awaitable[None]] | None = None
+    # Called with ring_ms and the pickup check's verdict the moment the
+    # contact picks up, before the intro plays. Returns the post that records
+    # the answer; the bridge runs it in the background so a slow API never
+    # delays the intro.
+    on_answered: Callable[[int, str | None], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,9 @@ class BridgeOutcome:
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None
     ring_ms: int
+    # Who the pickup check heard on the contact's leg (an AMD category or
+    # "silent"); None when no check ran.
+    picked_up_by: str | None = None
 
 
 @dataclass

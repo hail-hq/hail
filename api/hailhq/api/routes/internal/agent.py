@@ -53,6 +53,7 @@ from hailhq.core.email_sender import from_address_for
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
+    ON_CALL_LINE,
     HandoverPerson,
     country_of,
     has_answered_handover,
@@ -166,6 +167,11 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
         from_=call.from_e164,
         to=call.to_e164,
     )
+
+
+def _other_party(call: Call) -> str | None:
+    """The person on the line: the caller on inbound, the callee on outbound."""
+    return call.from_e164 if call.direction == "inbound" else call.to_e164
 
 
 async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
@@ -287,8 +293,7 @@ async def agent_send_sms(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
-    # The person on the line: the callee on outbound, the caller on inbound.
-    counterpart = call.from_e164 if call.direction == "inbound" else call.to_e164
+    counterpart = _other_party(call)
 
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -706,7 +711,6 @@ async def agent_send_email(
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
 
-
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
 # ``handover_targets``).
 HandoverWireId = Annotated[str, AfterValidator(normalize_contact_id)]
@@ -735,6 +739,8 @@ class AgentHandoverResultRequest(BaseModel):
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
+    # The voicebot's pickup check verdict (handover_screen), for debugging.
+    picked_up_by: str | None = Field(default=None, max_length=32)
 
 
 async def _handover_result_recorded(
@@ -809,6 +815,15 @@ async def agent_handover(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
+    if contact.phone_e164 == _other_party(call):
+        # Dialing it rings the phone already on the call: it declines or goes
+        # to voicemail, and the agent introduces the caller to the mailbox.
+        return await _deny_handover(
+            call,
+            body,
+            "contact_is_on_call",
+            spoken=ON_CALL_LINE.format(name=contact.name),
+        )
     # Any carrier, as on save: the second leg dials a person, not a number
     # the call's carrier sells.
     country = country_of(contact.phone_e164)
@@ -838,7 +853,10 @@ async def agent_handover(
 
 
 async def _deny_handover(
-    call: Call, body: AgentHandoverRequest, reason: str
+    call: Call,
+    body: AgentHandoverRequest,
+    reason: str,
+    spoken: str = _SPOKEN_HANDOVER_UNAVAILABLE,
 ) -> AgentHandoverResponse:
     await write_audit_log(
         organization_id=call.organization_id,
@@ -849,7 +867,7 @@ async def _deny_handover(
         payload={"contact_id": body.contact_id, "reason": reason},
         actor_kind="system",
     )
-    return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
+    return AgentHandoverResponse(ok=False, spoken=spoken)
 
 
 @router.post("/handover-result")
@@ -882,6 +900,7 @@ async def agent_handover_result(
                 "outcome": body.outcome,
                 "sip_status": body.sip_status,
                 "ring_ms": body.ring_ms,
+                "picked_up_by": body.picked_up_by,
             },
         )
     )

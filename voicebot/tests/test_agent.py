@@ -2003,7 +2003,7 @@ async def test_bridge_reports_answer_before_intro() -> None:
     async def _post(ring_ms: int) -> None:
         posted.append(ring_ms)
 
-    def on_answered(ring_ms: int):
+    def on_answered(ring_ms: int, _picked_up_by: str | None):
         seen.append((ring_ms, len(session.said)))
         return _post(ring_ms)
 
@@ -2024,7 +2024,7 @@ async def test_slow_answer_post_does_not_delay_intro_or_mute() -> None:
     state: dict = {"human": None, "connected": False}
     never = asyncio.Event()
 
-    async def on_answered(_ring_ms: int) -> None:
+    async def on_answered(_ring_ms: int, _picked_up_by: str | None) -> None:
         await never.wait()
 
     route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
@@ -2191,7 +2191,7 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
     state: dict = {"human": None, "connected": False, "soft_cap_task": soft_cap}
     answered: list[int] = []
 
-    async def _post(ring_ms: int) -> None:
+    async def _post(ring_ms: int, _picked_up_by: str | None) -> None:
         answered.append(ring_ms)
 
     screen, seen = _screen(verdict)
@@ -2200,6 +2200,7 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
         ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
     )(route)
     assert out.outcome == "no_answer" and out.sip_status is None
+    assert out.picked_up_by == verdict
     assert seen == [f"human-{CALL_ID}"]
     req = ctx.api.room.remove_participant.await_args.args[0]
     assert req.room == ctx.room.name and req.identity == f"human-{CALL_ID}"
@@ -2212,18 +2213,27 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
 
 
 @pytest.mark.parametrize(
-    "verdict", ["human", "uncertain", None, RuntimeError("classifier down")]
+    "verdict", ["human", "uncertain", "silent", None, RuntimeError("classifier down")]
 )
 async def test_bridge_person_or_unknown_pickup_connects(verdict) -> None:
-    """A person, an unsure verdict, or a failed check connects as before."""
+    """A person, an unsure verdict, silence, or a failed check connects as
+    before. The verdict reaches the answer post and the outcome."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
     screen, _ = _screen(verdict)
+    reported: list[str | None] = []
+
+    async def _post(_ring_ms: int, picked_up_by: str | None) -> None:
+        reported.append(picked_up_by)
+
     out = await make_agent_bridge(
         ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
-    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
-    assert out.outcome == "answered"
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=_post))
+    await state["answer_task"]
+    expected = None if isinstance(verdict, Exception) else verdict
+    assert out.outcome == "answered" and out.picked_up_by == expected
+    assert reported == [expected]
     assert len(session.said) == 1 and state["connected"] is True
     ctx.api.room.remove_participant.assert_not_awaited()
 
@@ -2276,7 +2286,7 @@ async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
     out = await make_agent_bridge(
         ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
-    assert out.outcome == "failed"
+    assert out.outcome == "failed" and out.picked_up_by == "machine-vm"
     assert ctx.api.room.remove_participant.await_count == 2
     assert ctx.delete_room_calls == 1 and ctx.shutdown_calls == ["handover_leg_stuck"]
     assert state["ending"] is True and session.said == []

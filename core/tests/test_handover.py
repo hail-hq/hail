@@ -109,6 +109,20 @@ async def test_targets_have_no_numbers(async_session) -> None:
     assert "+1415" not in repr(targets)
 
 
+async def test_targets_flag_the_person_on_the_call(async_session) -> None:
+    _, agent, (a, b) = await _agent_and_contacts(
+        async_session, "+14155550107", "+14155550108"
+    )
+    await replace_handover(
+        async_session,
+        agent.id,
+        [HandoverItem(str(a.id), "Desk"), HandoverItem(str(b.id), "Sales")],
+    )
+    targets = await handover_targets(async_session, agent.id, "+14155550108")
+    assert [t.get("on_call", False) for t in targets] == [False, True]
+    assert "+1415" not in repr(targets)
+
+
 async def test_targets_skip_contacts_without_phone(async_session) -> None:
     _, agent, (a,) = await _agent_and_contacts(async_session, "+14155550107")
     await replace_handover(async_session, agent.id, [HandoverItem(str(a.id), "x")])

@@ -23,6 +23,7 @@ from hailhq.core.agent_tools.spec import (
     ToolContext,
     ToolSpec,
 )
+from hailhq.core.handover import ON_CALL_LINE
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_REASON_CHARS = 200
@@ -79,7 +80,17 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
     if not targets:
         return None
     by_label = {t["label"]: t["contact_id"] for t in targets}
-    menu = "; ".join(f"{t['label']} ({t.get('note') or ''})" for t in targets)
+    # The other party on this call: listed so the agent can explain, never
+    # dialed (it would ring the phone already in use).
+    on_call = {t["label"] for t in targets if t.get("on_call")}
+
+    def _entry(t: dict) -> str:
+        if t["label"] in on_call:
+            line = ON_CALL_LINE.format(name=t["label"])
+            return f"{t['label']} (already on this call, do not connect; say: {line})"
+        return f"{t['label']} ({t.get('note') or ''})"
+
+    menu = "; ".join(_entry(t) for t in targets)
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
@@ -88,13 +99,20 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         contact_id = by_label.get(label)
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
+        if label in on_call:
+            return ON_CALL_LINE.format(name=label)
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
 
         # One id per attempt: the route stores one event per id, so a retried
         # post (timeout, dropped connection) is not recorded twice.
         invocation_id = str(uuid.uuid4())
 
-        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
+        def _result(
+            outcome: str,
+            sip_status: int | None,
+            ring_ms: int,
+            picked_up_by: str | None = None,
+        ) -> dict:
             return {
                 "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
@@ -102,17 +120,18 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "outcome": outcome,
                 "sip_status": sip_status,
                 "ring_ms": ring_ms,
+                "picked_up_by": picked_up_by,
             }
 
         answer_reported = False
 
-        def on_answered(ring_ms: int) -> Awaitable[None]:
+        def on_answered(ring_ms: int, picked_up_by: str | None) -> Awaitable[None]:
             # Called the moment the contact picks up, before the intro; the
             # bridge runs the returned post in the background. The flag is
             # set here, synchronously, so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
-            return _post_answered(ctx, _result("answered", None, ring_ms))
+            return _post_answered(ctx, _result("answered", None, ring_ms, picked_up_by))
 
         route = await ctx.api.post(
             "/internal/agent/handover",
@@ -142,7 +161,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
-                _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
+                _result(
+                    outcome.outcome,
+                    outcome.sip_status,
+                    outcome.ring_ms,
+                    outcome.picked_up_by,
+                ),
             )
         except Exception:
             _log.exception("handover result post failed")

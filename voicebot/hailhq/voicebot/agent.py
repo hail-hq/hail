@@ -632,32 +632,29 @@ def make_agent_bridge(
             return BridgeOutcome("failed", None, _ring_ms())
 
         ring_ms = _ring_ms()
+        picked_up_by: str | None = None
         if screen is not None:
             try:
                 picked_up_by = await screen(identity)
             except Exception:
                 logger.exception("call_id=%s handover pickup check failed", call_id)
-                picked_up_by = None
+            logger.info("call_id=%s handover pickup check: %s", call_id, picked_up_by)
             if picked_up_by in NOT_A_PERSON:
-                logger.info(
-                    "call_id=%s handover reached %s, dropping the contact leg",
-                    call_id,
-                    picked_up_by,
-                )
+                logger.info("call_id=%s handover dropping the contact leg", call_id)
                 if not await _remove_handover_leg(ctx, identity, call_id):
                     # The mailbox would record the caller: end the call.
                     bridge_state["ending"] = True
                     await _drop_room(ctx, call_id)
                     ctx.shutdown(reason="handover_leg_stuck")
-                    return BridgeOutcome("failed", None, ring_ms)
+                    return BridgeOutcome("failed", None, ring_ms, picked_up_by)
                 bridge_state["human"] = None
-                return BridgeOutcome("no_answer", None, ring_ms)
+                return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
         if identity not in ctx.room.remote_participants:
             # The contact hung up during the check; the disconnect handler
             # ignores a leg that never connected.
             logger.info("call_id=%s handover contact left before connecting", call_id)
             bridge_state["human"] = None
-            return BridgeOutcome("no_answer", None, ring_ms)
+            return BridgeOutcome("no_answer", None, ring_ms, picked_up_by)
         bridge_state["connected"] = True
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
@@ -689,7 +686,7 @@ def make_agent_bridge(
             # the task is held in bridge_state and awaited briefly at job
             # shutdown.
             try:
-                post = route.on_answered(ring_ms)
+                post = route.on_answered(ring_ms, picked_up_by)
             except Exception:
                 logger.exception("call_id=%s handover answered hook failed", call_id)
             else:
@@ -708,7 +705,7 @@ def make_agent_bridge(
         finally:
             session.input.set_audio_enabled(False)
             session.output.set_audio_enabled(False)
-        return BridgeOutcome("answered", None, ring_ms)
+        return BridgeOutcome("answered", None, ring_ms, picked_up_by)
 
     return _bridge
 
