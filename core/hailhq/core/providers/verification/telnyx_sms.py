@@ -110,6 +110,21 @@ _DUPLICATE = {
 }
 
 
+def _campaign_replies(brand: dict) -> dict:
+    """The HELP, opt-in and STOP replies filed with a campaign, each opening
+    with the brand's name: carrier reviewers want the sender named."""
+    name = display_name(brand.get("displayName")) or display_name(
+        brand.get("firstName"), brand.get("lastName")
+    )
+    prefix = f"{name}: " if name else ""
+    return {
+        "helpMessage": f"{prefix}Reply STOP to opt out. For help contact hi@hail.so.",
+        "optinMessage": f"{prefix}You are opted in. Reply STOP to opt out, HELP for help.",
+        # Required when subscriberOptout is true (Telnyx 10015).
+        "optoutMessage": f"{prefix}{_OPT_OUT_MESSAGE}",
+    }
+
+
 def _policy_links(text: dict) -> dict:
     """Privacy and terms links for the campaign. Drafts filed before these
     fields existed carry no links; they are filed without them."""
@@ -410,10 +425,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,
                         "helpKeywords": _HELP,
-                        "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
-                        "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
-                        # Required when subscriberOptout is true (Telnyx 10015).
-                        "optoutMessage": _OPT_OUT_MESSAGE,
+                        **_campaign_replies(brand),
                         "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },

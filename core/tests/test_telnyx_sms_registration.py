@@ -180,9 +180,28 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["termsAndConditions"] is True
     # Telnyx 10015 "optoutMessage is required if subscriberOptout is true."
     assert posted[0]["subscriberOptout"] is True
+    # No name on the brand read: the replies are filed without one.
     assert posted[0]["optoutMessage"] == (
         "You are unsubscribed and will get no more messages from this number."
     )
+
+
+def test_campaign_replies_open_with_the_brand_name() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    replies = _campaign_replies({"displayName": "Acme Dental"})
+    assert replies == {
+        "helpMessage": "Acme Dental: Reply STOP to opt out. For help contact hi@hail.so.",
+        "optinMessage": (
+            "Acme Dental: You are opted in. Reply STOP to opt out, HELP for help."
+        ),
+        "optoutMessage": (
+            "Acme Dental: You are unsubscribed and will get no more messages "
+            "from this number."
+        ),
+    }
+    person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"})
+    assert person["optoutMessage"].startswith("Jo Doe: You are unsubscribed")
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
