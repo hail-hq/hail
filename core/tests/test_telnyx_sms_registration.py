@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
@@ -10,7 +11,6 @@ from hailhq.core.providers.verification.base import (
     Problem,
     VerificationProviderError,
 )
-from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
