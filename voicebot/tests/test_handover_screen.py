@@ -75,9 +75,14 @@ def leg(monkeypatch):
         "wait_for_track_publication",
         AsyncMock(return_value=publication),
     )
-    monkeypatch.setattr(
-        handover_screen.rtc.AudioStream, "from_track", lambda **_: audio
-    )
+    opened: list[object] = []
+
+    def from_track(**_):
+        opened.append(audio)
+        return audio
+
+    monkeypatch.setattr(handover_screen.rtc.AudioStream, "from_track", from_track)
+    audio.opened = opened
     monkeypatch.setattr(handover_screen, "NO_SPEECH_SECONDS", 0.05)
     monkeypatch.setattr(handover_screen, "END_SILENCE_SECONDS", 0.05)
     monkeypatch.setattr(handover_screen, "MAX_LISTEN_SECONDS", 2.0)
@@ -89,25 +94,40 @@ def _vad(script):
     return SimpleNamespace(stream=lambda: stream), stream
 
 
-async def test_silent_pickup_returns_no_audio(leg) -> None:
-    """Nobody spoke within NO_SPEECH_SECONDS: no audio comes back."""
+def _listener(vad, classify=None):
+    session = SimpleNamespace(vad=vad)
+    listener = handover_screen.ContactListener(object(), "human-x", session)  # type: ignore[arg-type]
+    heard: list[bytes] = []
+
+    async def _classify(pcm: bytes):
+        heard.append(pcm)
+        return classify
+
+    listener._classify = _classify  # type: ignore[method-assign]
+    return listener, heard
+
+
+async def test_silent_pickup_is_silent(leg) -> None:
+    """Nobody spoke within NO_SPEECH_SECONDS: "silent", nothing classified."""
     vad, stream = _vad([])
-    pcm = await handover_screen.listen_for_greeting(object(), "human-x", vad)
-    assert pcm == b""
+    listener, heard = _listener(vad)
+    assert await listener.pickup() == "silent"
+    assert heard == []
+    await listener.close()
     assert leg.closed and stream.closed
 
 
 async def test_greeting_ends_after_silence(leg) -> None:
-    """Speech, then silence: the greeting so far comes back for classifying."""
+    """Speech, then silence: the greeting is classified."""
     vad, _ = _vad(
         [VADEventType.START_OF_SPEECH]
         + [VADEventType.INFERENCE_DONE] * 3
         + [VADEventType.END_OF_SPEECH]
     )
-    pcm = await asyncio.wait_for(
-        handover_screen.listen_for_greeting(object(), "human-x", vad), timeout=1.5
-    )
-    assert len(pcm) >= 5 * 640
+    listener, heard = _listener(vad, classify="human")
+    verdict = await asyncio.wait_for(listener.pickup(), timeout=1.5)
+    await listener.close()
+    assert verdict == "human" and len(heard) == 1 and len(heard[0]) >= 5 * 640
 
 
 async def test_pause_inside_greeting_keeps_listening(leg) -> None:
@@ -115,13 +135,104 @@ async def test_pause_inside_greeting_keeps_listening(leg) -> None:
     vad, _ = _vad(
         [VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH]
         + [VADEventType.START_OF_SPEECH]
-        + [VADEventType.INFERENCE_DONE] * 200
+        + [VADEventType.INFERENCE_DONE] * 5000
     )
     # END_SILENCE_SECONDS would end it after the first END_OF_SPEECH if the
     # next START_OF_SPEECH did not reset the silence.
-    pcm = await handover_screen.listen_for_greeting(object(), "human-x", vad)
+    listener, heard = _listener(vad)
+    await listener.pickup()
+    await listener.close()
     # It listened to the cap: MAX_LISTEN_SECONDS of 16 kHz 16-bit audio.
-    assert len(pcm) == 2 * 16000 * 2
+    assert len(heard[0]) == 2 * 16000 * 2
+
+
+async def test_pickup_without_vad_cannot_run(leg) -> None:
+    listener, _ = _listener(None)
+    assert await listener.pickup() is None
+    await listener.close()
+    assert leg.opened == []
+
+
+async def test_reply_during_the_intro_is_classified(leg) -> None:
+    """Speech that starts during the intro is the reply."""
+    vad, _ = _vad([])
+    listener, heard = _listener(vad, classify="human")
+    assert await listener.pickup() == "silent"
+    stream = vad.stream()
+    stream._script = (
+        [VADEventType.START_OF_SPEECH]
+        + [VADEventType.INFERENCE_DONE] * 3
+        + [VADEventType.END_OF_SPEECH]
+    )
+    verdict = await asyncio.wait_for(listener.reply(asyncio.Event(), 0.05), timeout=1.5)
+    await listener.close()
+    assert verdict == "human" and len(heard) == 1
+
+
+async def test_late_mailbox_greeting_is_classified_not_counted(leg) -> None:
+    """Review of #296: a mailbox silent past 5 s then greeting during the
+    intro was taken for a person. The reply is classified like a pickup."""
+    vad, _ = _vad([])
+    listener, heard = _listener(vad, classify="machine-vm")
+    assert await listener.pickup() == "silent"
+    vad.stream()._script = [VADEventType.START_OF_SPEECH] + [VADEventType.END_OF_SPEECH]
+    done = asyncio.Event()
+    done.set()
+    assert await asyncio.wait_for(listener.reply(done, 1.0), timeout=1.5) == (
+        "machine-vm"
+    )
+    await listener.close()
+    assert len(heard) == 1
+
+
+async def test_reply_window_counts_from_the_end_of_the_intro(leg) -> None:
+    """The reply window starts when the intro ends, not when listening
+    starts; one audio stream covers both steps."""
+    vad, _ = _vad([])
+    listener, heard = _listener(vad, classify="human")
+    assert await listener.pickup() == "silent"
+    vad.stream()._script = [VADEventType.INFERENCE_DONE] * 150 + [
+        VADEventType.START_OF_SPEECH,
+        VADEventType.END_OF_SPEECH,
+    ]
+    done = asyncio.Event()
+
+    async def _intro():
+        await asyncio.sleep(0.2)
+        done.set()
+
+    intro = asyncio.create_task(_intro())
+    # 0.05 s alone would end before the speech (about 150 frames in).
+    assert await listener.reply(done, 0.05) == "human"
+    await intro
+    await listener.close()
+    assert len(leg.opened) == 1
+
+
+async def test_silence_through_the_intro_is_no_reply(leg) -> None:
+    vad, stream = _vad([])
+    listener, heard = _listener(vad, classify="human")
+    assert await listener.pickup() == "silent"
+    done = asyncio.Event()
+    done.set()
+    assert await listener.reply(done, 0.05) == handover_screen.NO_REPLY
+    await listener.close()
+    assert heard == [] and leg.closed and stream.closed
+
+
+async def test_contact_without_audio_is_silent_then_no_reply(monkeypatch) -> None:
+    monkeypatch.setattr(
+        handover_screen,
+        "wait_for_track_publication",
+        AsyncMock(return_value=SimpleNamespace(track=None)),
+    )
+    vad, _ = _vad([VADEventType.START_OF_SPEECH])
+    listener, _ = _listener(vad)
+    assert await listener.pickup() == "silent"
+    done = asyncio.Event()
+    done.set()
+    assert await listener.reply(done, 0.05) == handover_screen.NO_REPLY
+    await listener.close()
 
 
 def _stt(text):
@@ -168,91 +279,26 @@ async def test_classify_skips_empty_or_tiny_audio(monkeypatch) -> None:
     )
 
 
-async def test_silent_pickup_without_transcriber_is_silent(monkeypatch) -> None:
-    """The 5 s silence rule needs only the VAD: it applies to every org."""
+async def test_greeting_without_transcriber_is_unknown(leg, monkeypatch) -> None:
+    """Speech was heard but the org's STT cannot transcribe it: unknown,
+    which connects."""
     monkeypatch.setattr(handover_screen, "_build_stt", lambda _cfgs: None)
-    monkeypatch.setattr(
-        handover_screen, "listen_for_greeting", AsyncMock(return_value=b"")
+    vad, _ = _vad([VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH])
+    listener = handover_screen.ContactListener(
+        object(), "human-x", SimpleNamespace(vad=vad)  # type: ignore[arg-type]
     )
-    monkeypatch.setattr(handover_screen, "_close_all", AsyncMock())
-    session = SimpleNamespace(vad=object())
-    verdict = await handover_screen.screen_handover_pickup(
-        object(), "human-x", session  # type: ignore[arg-type]
-    )
-    assert verdict == "silent"
+    assert await asyncio.wait_for(listener.pickup(), timeout=1.5) is None
+    await listener.close()
 
 
-async def test_silent_pickup_verdict_is_silent(monkeypatch) -> None:
-    """Nobody spoke. Not a machine verdict: the intro and reply check decide,
-    since a person's phone can send no sound for seconds after answering."""
-    monkeypatch.setattr(handover_screen, "_build_stt", lambda _cfgs: _stt("x"))
-    llm = AsyncMock(spec=handover_screen.LLM)
-    monkeypatch.setattr(
-        handover_screen, "build_classifier", lambda *_a, **_k: (llm, [])
-    )
-    monkeypatch.setattr(
-        handover_screen, "listen_for_greeting", AsyncMock(return_value=b"")
-    )
-    monkeypatch.setattr(handover_screen, "_close_all", AsyncMock())
-    session = SimpleNamespace(vad=object())
-    verdict = await handover_screen.screen_handover_pickup(
-        object(), "human-x", session  # type: ignore[arg-type]
-    )
-    assert verdict == "silent" and verdict not in handover_screen.NOT_A_PERSON
+def test_silent_pickup_and_no_reply_verdicts() -> None:
+    """A silent pickup goes on to the intro; silence through it drops."""
+    assert "silent" not in handover_screen.NOT_A_PERSON
+    assert handover_screen.NO_REPLY in handover_screen.NOT_A_PERSON
 
 
 def test_no_speech_limit_is_five_seconds() -> None:
     assert handover_screen.NO_SPEECH_SECONDS == 5.0
-
-
-async def test_contact_speaks_after_intro(leg) -> None:
-    vad, stream = _vad(
-        [VADEventType.INFERENCE_DONE] * 3 + [VADEventType.START_OF_SPEECH]
-    )
-    assert await handover_screen.contact_speaks(object(), "human-x", vad, 2.0)
-    assert leg.closed and stream.closed
-
-
-async def test_contact_speaking_during_intro_counts(leg) -> None:
-    """Speech before ``after`` is set (during the intro) is a reply."""
-    vad, _ = _vad([VADEventType.START_OF_SPEECH])
-    after = asyncio.Event()
-    assert await handover_screen.contact_speaks(
-        object(), "human-x", vad, 0.05, after=after
-    )
-
-
-async def test_reply_window_counts_from_after(leg) -> None:
-    """The window starts when ``after`` is set, not when listening starts."""
-    vad, _ = _vad([VADEventType.INFERENCE_DONE] * 40 + [VADEventType.START_OF_SPEECH])
-    after = asyncio.Event()
-
-    async def _intro():
-        await asyncio.sleep(0.2)
-        after.set()
-
-    intro = asyncio.create_task(_intro())
-    # 0.05 s alone would end before the speech (about 40 frames in).
-    assert await handover_screen.contact_speaks(
-        object(), "human-x", vad, 0.05, after=after
-    )
-    await intro
-
-
-async def test_contact_silent_after_intro(leg) -> None:
-    vad, stream = _vad([])
-    assert not await handover_screen.contact_speaks(object(), "human-x", vad, 0.05)
-    assert leg.closed and stream.closed
-
-
-async def test_contact_without_audio_is_silent(monkeypatch) -> None:
-    monkeypatch.setattr(
-        handover_screen,
-        "wait_for_track_publication",
-        AsyncMock(return_value=SimpleNamespace(track=None)),
-    )
-    vad, _ = _vad([VADEventType.START_OF_SPEECH])
-    assert not await handover_screen.contact_speaks(object(), "human-x", vad, 1.0)
 
 
 def test_person_verdicts_connect() -> None:

@@ -74,13 +74,15 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   removed), once per call. A text from a US number to a US number
   needs an approved US SMS registration; without one the call still rings,
   with no text.
-- When the phone picks up, the agent first listens. If voicemail, a phone
-  menu or a carrier message answers, it hangs up that line and comes back
-  the same way. If nobody speaks within 5 seconds, it says the intro. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
-- On answer, the agent says who is calling and why, then goes silent. If
-  the contact says nothing during that intro or within 8 seconds after it,
-  the agent hangs up their line and comes back to the caller. Once connected, if either side
-  hangs up, the call ends.
+- The agent stops listening when it dials. When the phone picks up, it
+  listens to the contact. If voicemail, a phone menu or a carrier message
+  answers, it hangs up that line and comes back the same way. If the
+  contact speaks, the two people talk; the agent says nothing. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
+- If nobody speaks within 5 seconds, the agent says who is calling and why.
+  If the contact says nothing during that intro or within 8 seconds after
+  it, or a voicemail greeting starts, the agent hangs up their line and
+  comes back to the caller. Once connected, if either side hangs up, the
+  call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached

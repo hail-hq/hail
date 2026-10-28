@@ -1614,6 +1614,8 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
 
 
 async def test_bridge_answered_mutes_agent() -> None:
+    """The agent stops listening when it dials and stops speaking on
+    connect. With no pickup check it says nothing to the contact."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state = {"human": None, "connected": False}
@@ -1630,12 +1632,7 @@ async def test_bridge_answered_mutes_agent() -> None:
     assert req.participant_identity == f"human-{CALL_ID}"
     assert req.wait_until_answered is True
     assert req.ringing_timeout.seconds == 30
-    assert session.said == [
-        (
-            "Hi Sam, I have a caller on the line. "
-            "Reason given: an invoice. Connecting you now."
-        )
-    ]
+    assert session.said == []
     assert session.input.enabled == [False] and session.output.enabled == [False]
     assert state["connected"] is True
 
@@ -1654,7 +1651,8 @@ async def test_bridge_failure_keeps_agent(status, expected) -> None:
         BridgeRoute("+1", "+1", "ST", None, "Sam", "")
     )
     assert out.outcome == expected and out.sip_status == status
-    assert session.input.enabled == [] and state["human"] is None
+    # Muted for the dial, given back to the caller when it fails.
+    assert session.input.enabled == [False, True] and state["human"] is None
 
 
 async def test_bridge_timeout_is_no_answer() -> None:
@@ -1667,6 +1665,7 @@ async def test_bridge_timeout_is_no_answer() -> None:
     )
     assert out.outcome == "no_answer" and out.sip_status is None
     assert state == {"human": None, "connected": False}
+    assert session.input.enabled == [False, True]
 
 
 def test_human_leg_disconnect_does_not_restamp_call() -> None:
@@ -1811,9 +1810,9 @@ async def test_bridge_intro_failure_still_mutes_and_answers() -> None:
 
     session.say = _boom  # type: ignore[method-assign]
     state = {"human": None, "connected": False}
-    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
-        BridgeRoute("+1", "+1", "ST", None, "Sam", "")
-    )
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, listen=_listener("silent", "human")  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "answered"
     assert session.input.enabled == [False] and session.output.enabled == [False]
 
@@ -2043,7 +2042,9 @@ async def test_bridge_reports_answer_after_intro() -> None:
         return _post(ring_ms)
 
     route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
-    out = await make_agent_bridge(ctx, session, CALL_ID, state)(route)  # type: ignore[arg-type]
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, listen=_listener("silent", "human")  # type: ignore[arg-type]
+    )(route)
     assert out.outcome == "answered"
     assert len(seen) == 1 and seen[0][1] == 1
     assert len(session.said) == 1
@@ -2064,7 +2065,9 @@ async def test_slow_answer_post_does_not_delay_intro_or_mute() -> None:
 
     route = BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=on_answered)
     out = await asyncio.wait_for(
-        make_agent_bridge(ctx, session, CALL_ID, state)(route),  # type: ignore[arg-type]
+        make_agent_bridge(
+            ctx, session, CALL_ID, state, listen=_listener("silent", "human")  # type: ignore[arg-type]
+        )(route),
         timeout=2,
     )
     assert out.outcome == "answered"
@@ -2200,16 +2203,49 @@ async def test_known_name_reaches_the_stt_as_a_keyterm():
 # --- handover pickup check -------------------------------------------------
 
 
-def _screen(verdict):
-    seen: list[str] = []
+class _FakeListener:
+    """``ContactListener``: scripted verdicts for the pickup and the reply."""
 
-    async def screen(identity: str):
-        seen.append(identity)
-        if isinstance(verdict, Exception):
-            raise verdict
-        return verdict
+    def __init__(self, identity, pickup, reply, session) -> None:
+        self.identity = identity
+        self._pickup = pickup
+        self._reply = reply
+        self._session = session
+        self.calls: list[str] = []
+        self.input_at_pickup: list[bool] | None = None
+        self.closed = False
 
-    return screen, seen
+    async def pickup(self):
+        self.calls.append("pickup")
+        if self._session is not None:
+            self.input_at_pickup = list(self._session.input.enabled)
+        if callable(self._pickup):
+            return await self._pickup(self.identity)
+        if isinstance(self._pickup, Exception):
+            raise self._pickup
+        return self._pickup
+
+    async def reply(self, intro_done: asyncio.Event, seconds: float):
+        # Listening starts before the intro has finished playing.
+        self.calls.append(f"reply:{'after' if intro_done.is_set() else 'during'}")
+        await intro_done.wait()
+        if callable(self._reply):
+            return await self._reply(self.identity)
+        return self._reply
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _listener(pickup, reply=None, session=None):
+    made: list[_FakeListener] = []
+
+    def listen(identity: str) -> _FakeListener:
+        made.append(_FakeListener(identity, pickup, reply, session))
+        return made[-1]
+
+    listen.made = made  # type: ignore[attr-defined]
+    return listen
 
 
 @pytest.mark.parametrize(
@@ -2219,7 +2255,7 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
     """Call 83119e48: a French mobile's voicemail picked up after 24 s and
     the agent introduced the caller to it. A machine pickup is now
     no_answer: the leg is dropped, nothing is said, no answer is reported,
-    and the pending time limit stays."""
+    the pending time limit stays, and the agent hears the caller again."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     soft_cap = asyncio.create_task(asyncio.sleep(3600))
@@ -2229,18 +2265,20 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
     async def _post(ring_ms: int, _picked_up_by: str | None) -> None:
         answered.append(ring_ms)
 
-    screen, seen = _screen(verdict)
+    listen = _listener(verdict, session=session)
     route = BridgeRoute("+33600000000", "+1", "ST", None, "Rym", "", on_answered=_post)
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
     )(route)
     assert out.outcome == "no_answer" and out.sip_status is None
     assert out.picked_up_by == verdict
-    assert seen == [f"human-{CALL_ID}"]
+    (listener,) = listen.made
+    assert listener.identity == f"human-{CALL_ID}" and listener.calls == ["pickup"]
+    assert listener.closed
     req = ctx.api.room.remove_participant.await_args.args[0]
     assert req.room == ctx.room.name and req.identity == f"human-{CALL_ID}"
     assert session.said == [] and answered == []
-    assert session.input.enabled == [] and session.output.enabled == []
+    assert session.input.enabled == [False, True] and session.output.enabled == []
     assert state["human"] is None and state["connected"] is False
     assert state["soft_cap_task"] is soft_cap and not soft_cap.done()
     soft_cap.cancel()
@@ -2250,26 +2288,44 @@ async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
 @pytest.mark.parametrize(
     "verdict", ["human", "uncertain", None, RuntimeError("classifier down")]
 )
-async def test_bridge_person_or_unknown_pickup_connects(verdict) -> None:
-    """A person, an unsure verdict, or a failed check connects as before. The verdict reaches the answer post and the outcome."""
+async def test_bridge_contact_who_speaks_connects_without_intro(verdict) -> None:
+    """Call 325ab64c: the contact said hello, the caller answered them, and
+    the agent's intro 7 s later talked over both. A contact who speaks at
+    pickup (or an unknown verdict) now connects with nothing said; the text
+    they got while it rang names the caller and the reason."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
-    screen, _ = _screen(verdict)
+    listen = _listener(verdict, session=session)
     reported: list[str | None] = []
 
     async def _post(_ring_ms: int, picked_up_by: str | None) -> None:
         reported.append(picked_up_by)
 
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=_post))
     await state["answer_task"]
     expected = None if isinstance(verdict, Exception) else verdict
     assert out.outcome == "answered" and out.picked_up_by == expected
     assert reported == [expected]
-    assert len(session.said) == 1 and state["connected"] is True
+    assert session.said == [] and state["connected"] is True
+    assert session.input.enabled == [False] and session.output.enabled == [False]
+    assert listen.made[0].calls == ["pickup"] and listen.made[0].closed
     ctx.api.room.remove_participant.assert_not_awaited()
+
+
+async def test_bridge_stops_hearing_the_caller_before_the_check() -> None:
+    """Call 325ab64c: the agent heard the caller talk to the contact during
+    the check and started a reply. Its input is off before the check runs."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    listen = _listener("human", session=session)
+    await make_agent_bridge(
+        ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
+    assert listen.made[0].input_at_pickup == [False]
 
 
 async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
@@ -2279,15 +2335,16 @@ async def test_bridge_contact_gone_after_check_is_no_answer() -> None:
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
 
-    async def screen(identity: str):
+    async def gone(identity: str):
         ctx.room.remote_participants.pop(identity)
         return "human"
 
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener(gone)  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "no_answer"
     assert session.said == [] and state == {"human": None, "connected": False}
+    assert session.input.enabled == [False, True]
 
 
 async def test_bridge_mailbox_that_hung_up_itself_is_no_answer() -> None:
@@ -2297,12 +2354,12 @@ async def test_bridge_mailbox_that_hung_up_itself_is_no_answer() -> None:
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
 
-    async def screen(identity: str):
+    async def gone(identity: str):
         ctx.room.remote_participants.pop(identity)
         return "machine-unavailable"
 
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener(gone)  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "no_answer"
     ctx.api.room.remove_participant.assert_not_awaited()
@@ -2316,9 +2373,8 @@ async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
     ctx.api.room.remove_participant.side_effect = RuntimeError("livekit down")
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
-    screen, _ = _screen("machine-vm")
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener("machine-vm")  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "failed" and out.picked_up_by == "machine-vm"
     assert ctx.api.room.remove_participant.await_count == 2
@@ -2326,26 +2382,41 @@ async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
     assert state["ending"] is True and session.said == []
 
 
-# --- handover reply check (after the intro) --------------------------------
+# --- silent pickup: intro, then the reply ----------------------------------
 
 
-def _watch(replied):
-    seen: list[str] = []
+@pytest.mark.parametrize("reply", ["human", "uncertain", None])
+async def test_bridge_silent_pickup_says_the_intro_then_connects(reply) -> None:
+    """Call 8f21e03c: a French mobile sent no sound for 7 s after answering,
+    then the contact said "Allô" as the leg was dropped. A silent pickup now
+    hears the intro, and a reply that is not a machine connects."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    listen = _listener("silent", reply, session=session)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
+    )(BridgeRoute("+33600000000", "+1", "ST", None, "Rym", "an invoice"))
+    assert session.said == [
+        "Hi Rym, I have a caller on the line. "
+        "Reason given: an invoice. Connecting you now."
+    ]
+    # One listener for both steps; the reply listen starts with the intro.
+    (listener,) = listen.made
+    assert listener.calls == ["pickup", "reply:during"] and listener.closed
+    assert out.outcome == "answered" and out.picked_up_by == reply
+    assert state["connected"] is True
+    assert session.input.enabled == [False] and session.output.enabled == [False]
+    ctx.api.room.remove_participant.assert_not_awaited()
 
-    async def watch(identity: str, intro_done: asyncio.Event) -> bool:
-        await intro_done.wait()
-        seen.append(identity)
-        if isinstance(replied, Exception):
-            raise replied
-        return replied
 
-    return watch, seen
-
-
-async def test_bridge_silent_after_intro_gives_the_caller_back() -> None:
-    """A mailbox that got past the pickup check says nothing after the intro.
-    The leg is dropped, the agent is unmuted to take the caller back, and no
-    answer is reported."""
+@pytest.mark.parametrize("reply", ["no_reply", "machine-vm"])
+async def test_bridge_silent_pickup_without_a_person_gives_the_caller_back(
+    reply,
+) -> None:
+    """Silence through the intro and 8 s after it, or a mailbox greeting that
+    starts late: the leg is dropped, no answer is reported, and the agent
+    hears the caller again."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     soft_cap = asyncio.create_task(asyncio.sleep(3600))
@@ -2355,71 +2426,24 @@ async def test_bridge_silent_after_intro_gives_the_caller_back() -> None:
     async def _post(ring_ms: int, _picked_up_by: str | None) -> None:
         answered.append(ring_ms)
 
-    screen, _ = _screen("human")
-    watch, seen = _watch(False)
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen, watch=watch  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener("silent", reply, session)  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", "", on_answered=_post))
-    assert out.outcome == "no_answer" and out.picked_up_by == "no_reply"
-    assert seen == [f"human-{CALL_ID}"]
+    assert out.outcome == "no_answer" and out.picked_up_by == reply
     req = ctx.api.room.remove_participant.await_args.args[0]
     assert req.identity == f"human-{CALL_ID}"
     assert len(session.said) == 1 and answered == []
-    assert session.input.enabled == [False, True]
-    assert session.output.enabled == [False, True]
+    assert session.input.enabled == [False, True] and session.output.enabled == []
     assert state["human"] is None and state["connected"] is False
     assert state["soft_cap_task"] is soft_cap and not soft_cap.done()
     soft_cap.cancel()
     await asyncio.gather(soft_cap, return_exceptions=True)
 
 
-@pytest.mark.parametrize("replied", [True, False])
-async def test_bridge_silent_pickup_gets_the_intro(replied) -> None:
-    """A French mobile sent no sound for 7 s after answering,
-    then the contact said "Allô" as the leg was dropped. A silent pickup now
-    hears the intro; the reply check connects a person and drops a mailbox
-    that never speaks."""
-    ctx = FakeJobContext()
-    session = FakeBridgeSession()
-    state: dict = {"human": None, "connected": False}
-    screen, _ = _screen("silent")
-    watch, seen = _watch(replied)
-    out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, screen=screen, watch=watch  # type: ignore[arg-type]
-    )(BridgeRoute("+33600000000", "+1", "ST", None, "Rym", ""))
-    assert len(session.said) == 1 and seen == [f"human-{CALL_ID}"]
-    if replied:
-        assert out.outcome == "answered" and out.picked_up_by == "silent"
-        assert state["connected"] is True
-        assert session.input.enabled == [False]
-        ctx.api.room.remove_participant.assert_not_awaited()
-    else:
-        assert out.outcome == "no_answer" and out.picked_up_by == "no_reply"
-        assert state["connected"] is False and state["human"] is None
-        assert session.input.enabled == [False, True]
-        assert session.output.enabled == [False, True]
-        ctx.api.room.remove_participant.assert_awaited_once()
-
-
-@pytest.mark.parametrize("replied", [True, RuntimeError("vad down")])
-async def test_bridge_reply_or_failed_check_connects(replied) -> None:
-    ctx = FakeJobContext()
-    session = FakeBridgeSession()
-    state: dict = {"human": None, "connected": False}
-    watch, seen = _watch(replied)
-    out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, watch=watch  # type: ignore[arg-type]
-    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
-    assert out.outcome == "answered" and len(seen) == 1
-    assert session.input.enabled == [False] and state["connected"] is True
-    ctx.api.room.remove_participant.assert_not_awaited()
-
-
 async def test_bridge_contact_gone_during_intro_gives_the_caller_back() -> None:
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
-    watch, _ = _watch(True)
     real_say = session.say
 
     def say(text, **kwargs):
@@ -2428,50 +2452,30 @@ async def test_bridge_contact_gone_during_intro_gives_the_caller_back() -> None:
 
     session.say = say  # type: ignore[method-assign]
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, watch=watch  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener("silent", "human")  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "no_answer"
     assert session.input.enabled == [False, True]
     assert state == {"human": None, "connected": False}
 
 
-async def test_bridge_contact_gone_when_the_check_fails_is_no_answer() -> None:
-    """The contact left just before the reply check, so the check raised.
-    The caller is given back, never connected to an empty leg."""
+async def test_bridge_reply_check_failure_after_contact_left_is_no_answer() -> None:
+    """The contact left during the reply listen and the check failed: the
+    caller is given back, never connected to an empty leg."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
 
-    async def watch(identity: str, intro_done: asyncio.Event) -> bool:
-        await intro_done.wait()
+    async def gone(identity: str):
         ctx.room.remote_participants.pop(identity)
-        raise RuntimeError("participant gone")
+        return None
 
     out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, watch=watch  # type: ignore[arg-type]
+        ctx, session, CALL_ID, state, listen=_listener("silent", gone)  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
     assert out.outcome == "no_answer"
-    assert session.output.enabled == [False, True]
+    assert session.input.enabled == [False, True] and session.output.enabled == []
     assert state == {"human": None, "connected": False}
-
-
-async def test_bridge_reply_check_starts_with_the_intro() -> None:
-    ctx = FakeJobContext()
-    session = FakeBridgeSession()
-    state: dict = {"human": None, "connected": False}
-    started: list[int] = []
-
-    async def watch(_identity: str, intro_done: asyncio.Event) -> bool:
-        started.append(len(session.said))
-        await intro_done.wait()
-        return True
-
-    out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, watch=watch  # type: ignore[arg-type]
-    )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
-    assert out.outcome == "answered"
-    # The check started before the intro finished, not after it.
-    assert len(started) == 1
 
 
 async def test_soft_cap_during_reply_check_unmutes_for_goodbye() -> None:
