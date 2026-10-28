@@ -1037,6 +1037,9 @@ def _outage_after_the_brand(step: str, failure, calls: list):
                 raise state["failure"]
             if state["failure"] == "html":
                 return httpx.Response(200, content=b"<html>")
+            if state["failure"] == "list":
+                # JSON, but not the object the code reads.
+                return httpx.Response(200, json=["odd"])
             if state["failure"]:
                 return httpx.Response(state["failure"])
             return httpx.Response(200, json={"referenceId": "R1"})
@@ -1045,7 +1048,7 @@ def _outage_after_the_brand(step: str, failure, calls: list):
     return _provider(handler), state
 
 
-@pytest.mark.parametrize("failure", [502, 429, httpx.ConnectError("down"), "html"])
+@pytest.mark.parametrize("failure", [502, 429, 404, httpx.ConnectError("down"), "html"])
 async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> None:
     """A retry would file and bill a new brand: keep this one, and the
     background pass asks for vetting."""
@@ -1063,7 +1066,9 @@ async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> N
     assert draft.refs["vetting_requested"] is True
 
 
-@pytest.mark.parametrize("failure", [503, httpx.ReadTimeout("slow"), "html"])
+@pytest.mark.parametrize(
+    "failure", [503, 404, httpx.ReadTimeout("slow"), "html", "list"]
+)
 async def test_an_outage_after_the_brand_keeps_the_person_filing(failure) -> None:
     calls: list = []
     p, state = _outage_after_the_brand("/smsOtp", failure, calls)
@@ -1077,6 +1082,82 @@ async def test_an_outage_after_the_brand_keeps_the_person_filing(failure) -> Non
     assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/smsOtp")
     assert draft.refs["otp_reference_id"] == "R1" and draft.refs["otp_sent_at"]
     assert p.confirmation(draft.refs) == "code"
+
+
+async def test_an_odd_answer_after_the_brand_keeps_the_filing() -> None:
+    """Any failure after Telnyx made the brand, not only an HTTP error,
+    keeps the filing: the brand is billed and never deleted."""
+    calls: list = []
+    p, _ = _outage_after_the_brand("/vetting", None, calls)
+
+    async def broken(refs):
+        raise AttributeError("odd body")
+
+    p._request_vetting = broken
+    draft = await _draft(p)
+    assert draft.problems == [] and draft.billed_refs == {}
+    assert draft.refs["brand_id"] == "B1"
+    assert draft.refs["vetting_requested"] is False
+    assert not any(m == "DELETE" for m, _ in calls)
+
+
+def _vetting_retry(listed, post_status=200, post_errors=None):
+    """A registered brand whose vetting call failed at filing. Telnyx
+    lists ``listed`` vettings and answers a new request ``post_status``."""
+    calls: list = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/externalVetting"):
+            if isinstance(listed, int):
+                return httpx.Response(listed)
+            return httpx.Response(200, json=listed)
+        if req.method == "POST" and req.url.path.endswith("/vetting"):
+            return httpx.Response(post_status, json={"errors": post_errors or []})
+        return httpx.Response(
+            200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
+        )
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "vetting_requested": False,
+    }
+    return _provider(handler), refs, calls
+
+
+async def test_a_vetting_telnyx_already_has_is_not_asked_again() -> None:
+    """The vetting call timed out at filing but reached Telnyx: each
+    request is billed, so the background pass checks first."""
+    p, refs, calls = _vetting_retry([{"evpId": "AEGIS", "vettingClass": "STANDARD"}])
+    assert (await p.status(refs)).state == "pending"
+    assert ("GET", "/v2/10dlc/brand/B1/externalVetting") in calls
+    assert ("POST", "/v2/10dlc/brand/B1/vetting") not in calls
+    assert refs["vetting_requested"] is True
+
+
+@pytest.mark.parametrize("listed", [[], 404])
+async def test_no_vetting_listed_asks_for_one(listed) -> None:
+    p, refs, calls = _vetting_retry(listed)
+    assert (await p.status(refs)).state == "pending"
+    assert calls.count(("POST", "/v2/10dlc/brand/B1/vetting")) == 1
+    assert refs["vetting_requested"] is True
+
+
+async def test_a_duplicate_vetting_answer_counts_as_asked() -> None:
+    """Telnyx answers 10012 when a vetting is in progress or passed."""
+    p, refs, _ = _vetting_retry([], 400, [{"code": "10012"}])
+    assert (await p.status(refs)).state == "pending"
+    assert refs["vetting_requested"] is True
+
+
+async def test_a_failed_vetting_list_asks_on_the_next_pass() -> None:
+    p, refs, calls = _vetting_retry(503)
+    with pytest.raises(VerificationProviderError):
+        await p.status(refs)
+    assert ("POST", "/v2/10dlc/brand/B1/vetting") not in calls
+    assert refs["vetting_requested"] is False
 
 
 async def test_a_brand_read_that_is_not_json_is_read_again() -> None:

@@ -42,7 +42,10 @@ from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
-from hailhq.core.internal_webhook import notify_sms_registration_changed
+from hailhq.core.internal_webhook import (
+    notify_sms_registration_changed,
+    rate_sms_registration,
+)
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -489,6 +492,40 @@ def _notify_billing(rows: list[CarrierVerification]) -> None:
     for row in rows:
         if row.purpose == "sms":
             notify_sms_registration_changed(str(row.id))
+
+
+BillingView = tuple[str, dict]
+
+
+def _billing_view(row: CarrierVerification) -> BillingView:
+    """What the fee rater reads of a row: its state and refs (a copy)."""
+    return row.state, copy.deepcopy(row.provider_refs)
+
+
+def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> None:
+    """``_notify_billing`` for a committed row whose state or refs differ
+    from ``before`` (its ``_billing_view`` before the change). ``before``
+    None means a new row: always told."""
+    if before is None or _billing_view(row) != before:
+        _notify_billing([row])
+
+
+async def _rate_before_wipe(
+    db: AsyncSession, row: CarrierVerification, provider: object
+) -> None:
+    """Before ``provider_refs`` is emptied: the rater charges the carrier
+    review by the campaign id in the refs, so let it read them first. A
+    campaign's ping when it was filed can be lost; once the id is gone,
+    neither a ping nor the rater's sweep can charge it. Awaited, not
+    fire-and-forget, so the rater reads before the wipe is committed.
+
+    Commits first. Never call it while holding the organization's lock
+    (``org_lock``): the rater takes the same lock."""
+    key = getattr(provider, "campaign_ref", None)
+    if row.purpose != "sms" or not key or not (row.provider_refs or {}).get(key):
+        return
+    await db.commit()
+    await rate_sms_registration(str(row.id))
 
 
 async def _audit_carrier_rejection(
@@ -1175,11 +1212,12 @@ async def create_verification(
     await db.refresh(row)
     # No human gate: the draft goes to the carrier now. If the carrier is
     # down, the row stays 'awaiting_review' and the sweeper retries it.
-    # _submit_row pings the fee rater once the row is saved.
+    # A new row: _submit_row pings the fee rater whatever the outcome.
     await _submit_row(
         db,
         row,
         provider,
+        before=None,
         actor=actor_of(principal),
         action="verification.submit",
     )
@@ -1191,6 +1229,7 @@ async def _submit_row(
     row: CarrierVerification,
     provider: VerificationProvider,
     *,
+    before: BillingView | None,
     actor: tuple[UUID | None, str],
     action: str,
     extra: dict | None = None,
@@ -1209,8 +1248,10 @@ async def _submit_row(
     approved_by names the superadmin who approved, or nobody for the
     automatic submits.
 
-    Every exit pings the fee rater (``_notify_billing``) after its commit,
-    so creation, the sweeper's retry and a superadmin's approve all do."""
+    ``before`` is the row's ``_billing_view`` before the caller touched it
+    (None for a new row). An exit pings the fee rater only when the row's
+    state or refs differ from it: a retry that found the carrier down
+    changed nothing and is not told."""
     actor_user_id, actor_kind = actor
     approved_by = actor_user_id if actor_kind == "superadmin" else None
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
@@ -1228,7 +1269,7 @@ async def _submit_row(
             row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
             row.approved_by = None
             await db.commit()
-            _notify_billing([row])
+            _notify_if_changed(row, before)
         elif raise_refused:
             raise
         return False
@@ -1237,12 +1278,12 @@ async def _submit_row(
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
         row.approved_by = None
         await db.commit()
-        _notify_billing([row])
+        _notify_if_changed(row, before)
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
     await db.commit()
-    _notify_billing([row])
+    _notify_if_changed(row, before)
     await write_audit_log(
         row.organization_id,
         None,
@@ -1291,6 +1332,7 @@ async def _retry_submit(
     if provider is None:
         await db.rollback()
         return False
+    before = _billing_view(row)
     try:
         problems = await provider.check(row.provider_refs)
     except Exception:
@@ -1301,7 +1343,12 @@ async def _retry_submit(
         await _refuse_row(db, row, provider, problems)
         return False
     return await _submit_row(
-        db, row, provider, actor=(None, "system"), action="verification.submit"
+        db,
+        row,
+        provider,
+        before=before,
+        actor=(None, "system"),
+        action="verification.submit",
     )
 
 
@@ -1337,6 +1384,7 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row is left as it was and tried again next tick; the sweeper never dies
     on carrier trouble."""
+    await _rate_before_wipe(db, row, provider)
     try:
         await provider.discard(row.provider_refs)
     except Exception:
@@ -1511,6 +1559,8 @@ async def cancel_verification(
             detail=f"cannot cancel a verification that is {row.state}",
         )
     provider = registry(row.provider, row.purpose)
+    # Before org_lock: the rater takes the same lock.
+    await _rate_before_wipe(db, row, provider)
     if approved_sms:
         # Serialize with purchases, routing and releases: they attach and
         # detach numbers too.
@@ -1727,6 +1777,7 @@ async def admin_approve(
     """Submit the draft to the carrier for its review."""
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
+    before = _billing_view(row)
     try:
         problems = await provider.check(row.provider_refs)
     except Exception as exc:
@@ -1744,6 +1795,7 @@ async def admin_approve(
             db,
             row,
             provider,
+            before=before,
             actor=actor_of(admin),
             action="verification.approve",
             raise_refused=True,
@@ -1770,6 +1822,7 @@ async def admin_reject(
 ) -> AdminVerification:
     row = await _admin_row(db, verification_id)
     provider = registry(row.provider, row.purpose)
+    await _rate_before_wipe(db, row, provider)
     if provider is not None:
         await provider.discard(row.provider_refs)
     row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}

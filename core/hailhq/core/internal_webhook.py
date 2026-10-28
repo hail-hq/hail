@@ -184,11 +184,16 @@ def notify_sms_registration_changed(verification_id: str) -> None:
     """Fire-and-forget kick to the website's US texting fee rater. Call it
     after the commit that made the change (a filing saved, a campaign sent
     for review). The rater is idempotent and also sweeps on its own."""
-    task = asyncio.create_task(
-        _post(
-            "/api/internal/sms-registrations/rate",
-            {"verification_id": verification_id},
-        )
-    )
+    task = asyncio.create_task(rate_sms_registration(verification_id))
     _pending_tasks.add(task)
     task.add_done_callback(_pending_tasks.discard)
+
+
+async def rate_sms_registration(verification_id: str) -> None:
+    """The same kick, awaited: returns once the rater answered, failed or
+    timed out (``_TIMEOUT_SECONDS``). For a caller about to remove what the
+    rater reads. The rater takes the organization's lock (``org_lock``):
+    never await this while holding it."""
+    await _post(
+        "/api/internal/sms-registrations/rate", {"verification_id": verification_id}
+    )

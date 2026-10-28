@@ -3162,6 +3162,153 @@ async def test_a_refused_retry_pings_the_rater_once(
     assert pinged == [vid]
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_a_retry_that_finds_the_carrier_down_does_not_ping(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    """Nothing changed: the row is 'awaiting_review' with the same refs."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+
+    async def down(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit = down
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 0
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert pinged == []
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_new_filing_pings_even_when_the_carrier_is_down(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    """A new row is a billed submission, whatever its submit did."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+
+    async def down(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit = down
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "awaiting_review"
+    assert pinged == [resp.json()["id"]]
+
+
+@pytest.fixture()
+def rated(monkeypatch, session_factory) -> list[tuple[str, dict]]:
+    """Each awaited rater call, with the refs the rater would read then
+    (a separate session: only what is committed)."""
+    got: list[tuple[str, dict]] = []
+
+    async def rate(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            got.append((verification_id, dict(row.provider_refs)))
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", rate)
+    return got
+
+
+async def _with_campaign(async_session, vid: str, state: str) -> None:
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    row.state = state
+    row.provider_refs = {**row.provider_refs, "campaign_id": "C1"}
+    await async_session.commit()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("state", ["rejected", "approved"])
+async def test_a_cancel_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, pinged, rated, state
+) -> None:
+    """The rater charges the carrier review by the campaign id in the refs.
+    A cancel empties them: the rater reads them first."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _with_campaign(async_session, vid, state)
+    pinged.clear()
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert len(rated) == 1
+    assert rated[0][0] == vid and rated[0][1]["campaign_id"] == "C1"
+    # Then the wipe, and the usual ping for the new state.
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and row.provider_refs == {}
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_reject_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    assert rated == [(vid, rated[0][1])] and rated[0][1]["campaign_id"] == "C1"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refused_retry_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def refuse(refs):
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    sms_carrier.check = refuse
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "rejected"
+    assert [(v, r["campaign_id"]) for v, r in rated] == [(vid, "C1")]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
+    client, org_and_key, sms_carrier, async_session, pinged, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    pinged.clear()
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert rated == []
+    assert pinged == [vid]
+
+
 # -- Telnyx outage after the brand ----------------------------------------
 
 _TELNYX_BUSINESS = {
