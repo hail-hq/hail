@@ -168,6 +168,11 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
     )
 
 
+def _other_party(call: Call) -> str | None:
+    """The person on the line: the caller on inbound, the callee on outbound."""
+    return call.from_e164 if call.direction == "inbound" else call.to_e164
+
+
 async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
     key = str(call_id)
     email_count = (
@@ -287,8 +292,7 @@ async def agent_send_sms(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
-    # The person on the line: the callee on outbound, the caller on inbound.
-    counterpart = call.from_e164 if call.direction == "inbound" else call.to_e164
+    counterpart = _other_party(call)
 
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -815,14 +819,14 @@ async def agent_handover(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None or not contact.phone_e164:
         return deny
-    # The other party on this call: inbound came from it, outbound dialed it.
-    other_party = call.from_e164 if call.direction == "inbound" else call.to_e164
-    if contact.phone_e164 == other_party:
+    if contact.phone_e164 == _other_party(call):
         # Dialing it rings the phone already on the call: it declines or goes
         # to voicemail, and the agent introduces the caller to the mailbox.
-        await _deny_handover(call, body, "contact_is_on_call")
-        return AgentHandoverResponse(
-            ok=False, spoken=_SPOKEN_HANDOVER_SELF.format(name=contact.name)
+        return await _deny_handover(
+            call,
+            body,
+            "contact_is_on_call",
+            spoken=_SPOKEN_HANDOVER_SELF.format(name=contact.name),
         )
     # Any carrier, as on save: the second leg dials a person, not a number
     # the call's carrier sells.
@@ -853,7 +857,10 @@ async def agent_handover(
 
 
 async def _deny_handover(
-    call: Call, body: AgentHandoverRequest, reason: str
+    call: Call,
+    body: AgentHandoverRequest,
+    reason: str,
+    spoken: str = _SPOKEN_HANDOVER_UNAVAILABLE,
 ) -> AgentHandoverResponse:
     await write_audit_log(
         organization_id=call.organization_id,
@@ -864,7 +871,7 @@ async def _deny_handover(
         payload={"contact_id": body.contact_id, "reason": reason},
         actor_kind="system",
     )
-    return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_UNAVAILABLE)
+    return AgentHandoverResponse(ok=False, spoken=spoken)
 
 
 @router.post("/handover-result")

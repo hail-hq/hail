@@ -2286,7 +2286,7 @@ async def test_bridge_voicemail_leg_that_will_not_drop_ends_the_call() -> None:
     out = await make_agent_bridge(
         ctx, session, CALL_ID, state, screen=screen  # type: ignore[arg-type]
     )(BridgeRoute("+1", "+1", "ST", None, "Sam", ""))
-    assert out.outcome == "failed"
+    assert out.outcome == "failed" and out.picked_up_by == "machine-vm"
     assert ctx.api.room.remove_participant.await_count == 2
     assert ctx.delete_room_calls == 1 and ctx.shutdown_calls == ["handover_leg_stuck"]
     assert state["ending"] is True and session.said == []
