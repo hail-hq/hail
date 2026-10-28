@@ -211,7 +211,7 @@ def _answering_bridge(order: list[str], ring_ms: int = 9000):
     return bridge
 
 
-async def test_answered_posted_before_intro_and_once() -> None:
+async def test_answered_posted_once_before_the_bridge_returns() -> None:
     spec = transfer_call.bind(META)
     order: list[str] = []
     ctx, api, _ = _ctx(ROUTE)

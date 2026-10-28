@@ -913,6 +913,23 @@ async def agent_handover_sms(
     caller = _other_party(call)
     if to == caller:
         return AgentHandoverSmsResponse(sms="skipped:contact_is_on_call")
+    if await has_answered_handover(db, call.id):
+        return AgentHandoverSmsResponse(sms="skipped:already_connected")
+    # One text per contact per call: a second dial to the same person does
+    # not text them again.
+    texted = (
+        await db.execute(
+            select(Sms.id)
+            .where(
+                Sms.organization_id == org,
+                Sms.metadata_["call_id"].astext == str(call.id),
+                Sms.metadata_["handover_contact_id"].astext == body.contact_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    if texted is not None:
+        return AgentHandoverSmsResponse(sms="skipped:already_texted")
     number_id = call.to_number_id if call.direction == "inbound" else None
     number_id = number_id or call.from_number_id
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
@@ -931,8 +948,9 @@ async def agent_handover_sms(
         )
         return AgentHandoverSmsResponse(sms=f"blocked:{reason}")
 
-    if call.metadata_.get(CALL_META_BILLED) and not await has_funds(db, org):
-        return await _blocked("insufficient_funds")
+    denial = await _shared_denial(db, call)
+    if denial is not None:
+        return await _blocked(denial[1])
     gate = await check_sms_allowed(db, org, to)
     if not gate.allowed:
         return await _blocked("compliance", detail=gate.reason, checks=gate.checks)

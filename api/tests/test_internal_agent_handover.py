@@ -611,6 +611,10 @@ async def test_handover_sms_sent_from_the_call_number(
     )
     assert row.metadata_["tool_invocation_id"] == payload["tool_invocation_id"]
     assert sms_mock.send_sms.await_count == 1
+    # A second dial to the same person on this call texts nothing more.
+    r = await _post(client, "/internal/agent/handover-sms", _sms_payload(call, contact))
+    assert r.json() == {"sms": "skipped:already_texted"}
+    assert sms_mock.send_sms.await_count == 1
 
 
 async def test_handover_sms_blocked_without_us_registration(

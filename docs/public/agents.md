@@ -70,7 +70,7 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message.
 - While the phone rings, the contact gets a text from your Hail number with
-  the caller's number and the reason. A text from a US number to a US number
+  the caller's number and the reason (links removed), once per call. A text from a US number to a US number
   needs an approved US SMS registration; without one the call still rings,
   with no text.
 - When the phone picks up, the agent first listens. If voicemail, a phone
@@ -85,7 +85,8 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
   can hang up sooner.
-- Billed as one call at the normal voice rate.
+- Billed as one call at the normal voice rate. The text to the contact is
+  billed as a normal SMS and counts toward the agent's 5 sends per call.
 - Sends a [`call.transferred`](webhooks.md) webhook when the contact answers
   and speaks.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.

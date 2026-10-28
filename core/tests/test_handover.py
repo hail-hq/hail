@@ -387,3 +387,17 @@ def test_handover_sms_text() -> None:
     assert handover_sms_text("Sam", None, "Is it open?").endswith(
         "Reason given: Is it open?"
     )
+
+
+def test_handover_sms_text_drops_links() -> None:
+    from hailhq.core.handover import handover_sms_text
+
+    text = handover_sms_text(
+        "Desk",
+        None,
+        "verify at https://evil.example/x or www.evil.example or evil.co/pay now",
+    )
+    assert text.endswith("Reason given: verify at or or now.")
+    assert "evil" not in text
+    long = handover_sms_text("Desk", None, "x" * 500)
+    assert long.count("x") == 120

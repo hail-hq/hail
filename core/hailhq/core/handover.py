@@ -9,6 +9,7 @@ metadata) carries names and notes only.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -41,14 +42,23 @@ ON_CALL_LINE = (
 )
 
 
+# Cap on the caller-steered reason in the handover text.
+HANDOVER_SMS_REASON_CHARS = 120
+# Links and bare domains: a caller could steer the reason into a phishing link.
+_LINK = re.compile(
+    r"(?:https?://|www\.)\S+|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:/\S*)?",
+    re.IGNORECASE,
+)
+
+
 def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -> str:
     """The text a handover contact gets while the agent dials them: who is
     calling, the caller's number to call back, and the reason. The reason is
     LLM-written and a caller can steer it, so it is attributed ("Reason
-    given: ...") as in the spoken intro."""
+    given: ...") as in the spoken intro, kept short, and links are removed."""
     who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
     text = f"{agent_name} (AI agent) is calling you now to connect {who}."
-    said = " ".join((reason or "").split())
+    said = " ".join(_LINK.sub("", reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
     if said:
         end = "" if said.endswith((".", "!", "?")) else "."
         text += f" Reason given: {said}{end}"
