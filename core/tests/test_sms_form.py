@@ -158,13 +158,13 @@ GOOD = {
 
 
 def test_field_problems_accepts_a_complete_form() -> None:
-    assert field_problems(GOOD, "person") == []
+    assert field_problems("telnyx", GOOD, "person") == []
 
 
 def test_field_problems_names_missing_required_fields() -> None:
     data = {**GOOD, "terms_url": " "}
     data.pop("sample_1")
-    assert [(p.field, p.message) for p in field_problems(data, "person")] == [
+    assert [(p.field, p.message) for p in field_problems("telnyx", data, "person")] == [
         ("sample_1", "This is required."),
         ("terms_url", "This is required."),
     ]
@@ -175,14 +175,14 @@ def test_field_problems_names_missing_required_fields() -> None:
     ["acme.example/privacy", "ftp://acme.example/privacy", "https://", "n/a"],
 )
 def test_field_problems_rejects_a_link_without_scheme_or_host(value) -> None:
-    problems = field_problems({**GOOD, "privacy_policy_url": value}, "person")
+    problems = field_problems("telnyx", {**GOOD, "privacy_policy_url": value}, "person")
     assert [p.field for p in problems] == ["privacy_policy_url"]
     assert problems[0].message.startswith("Enter the full link")
 
 
 def test_field_problems_rejects_a_link_over_the_cap() -> None:
     long = "https://acme.example/" + "a" * 500
-    problems = field_problems({**GOOD, "terms_url": long}, "person")
+    problems = field_problems("telnyx", {**GOOD, "terms_url": long}, "person")
     assert [(p.field, p.message) for p in problems] == [
         ("terms_url", "Use a shorter link.")
     ]
@@ -229,12 +229,14 @@ def test_text_types_are_a_choice_of_one_to_five_for_a_person() -> None:
     ],
 )
 def test_field_problems_checks_text_types(value, message) -> None:
-    problems = field_problems({**GOOD, "text_types": value}, "person")
+    problems = field_problems("telnyx", {**GOOD, "text_types": value}, "person")
     assert [(p.field, p.message) for p in problems] == [("text_types", message)]
 
 
 def test_a_company_picks_at_least_two_text_types() -> None:
-    problems = field_problems({**GOOD, "text_types": "CUSTOMER_CARE"}, "business")
+    problems = field_problems(
+        "telnyx", {**GOOD, "text_types": "CUSTOMER_CARE"}, "business"
+    )
     assert ("text_types", "Pick at least 2.") in [
         (p.field, p.message) for p in problems
     ]
@@ -270,7 +272,28 @@ def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
 
 
 def test_field_problems_refuses_text_over_the_limit() -> None:
-    problems = field_problems({**GOOD, "sample_1": "s" * 1025}, "person")
+    problems = field_problems("telnyx", {**GOOD, "sample_1": "s" * 1025}, "person")
     assert [(p.field, p.message) for p in problems] == [
         ("sample_1", "Use at most 1024 characters.")
     ]
+
+
+def test_only_the_telnyx_form_asks_for_text_types() -> None:
+    for subject in ("person", "business"):
+        twilio = [f.name for f in sms_requirements("twilio", subject).fields]
+        telnyx = [f.name for f in sms_requirements("telnyx", subject).fields]
+        assert "text_types" not in twilio and "text_types" in telnyx
+        assert [n for n in telnyx if n != "text_types"] == twilio
+
+
+def test_a_twilio_form_without_text_types_passes() -> None:
+    data = {k: v for k, v in GOOD.items() if k != "text_types"}
+    assert field_problems("twilio", data, "person") == []
+    assert [p.field for p in field_problems("telnyx", data, "person")] == ["text_types"]
+
+
+def test_campaign_text_keeps_the_contact_email() -> None:
+    person = campaign_text({**GOOD, "email": " ada@example.com "}, "person")
+    assert person.contact_email == "ada@example.com"
+    company = campaign_text({**GOOD, "rep_email": "ops@acme.example"}, "business")
+    assert company.contact_email == "ops@acme.example"

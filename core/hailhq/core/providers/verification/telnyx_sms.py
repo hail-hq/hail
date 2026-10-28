@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
@@ -39,11 +40,36 @@ logger = logging.getLogger(__name__)
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
-# The STOP confirmation declared in the campaign filing. Hail's own STOP
-# reply (settings.hail_sms_stop_reply) is separate and off by default.
+# The STOP confirmation declared in the campaign filing. Telnyx answers STOP
+# itself (its default text names no sender) and has no default HELP answer,
+# so _set_replies makes the messaging profile's auto-replies the filed texts.
+# Hail's own replies (settings.hail_sms_compliance_replies_enabled) stay off:
+# on top of Telnyx's they would text the subscriber twice.
 _OPT_OUT_MESSAGE = (
     "You are unsubscribed and will get no more messages from this number."
 )
+# Help contact for campaigns whose snapshot has no contact email (filed
+# before it was kept) or one too long for the HELP reply.
+_HELP_CONTACT = "hi@hail.so"
+# Telnyx's maximum for helpMessage (Update campaign API schema); every filed
+# reply is kept within it.
+_TEXT_MAX = 255
+# A sender name cut to fit stops at a word boundary only when that keeps at
+# least this many characters; else it is cut mid-word.
+_NAME_MIN = 20
+# Polls that see the campaign approved while the auto-replies are not set
+# yet. Each one reports pending and tries again; after the last, the
+# registration is approved anyway and an error is logged. Polls are a
+# minute or more apart (the background pass runs every 10 minutes).
+_REPLY_WAITS = 6
+# The messaging profile auto-replies set from the filing: Telnyx's op, the
+# filed text it sends, its keywords. "info" is the API's name for HELP.
+_AUTO_REPLIES = (
+    ("stop", "optoutMessage", _OPT_OUT),
+    ("info", "helpMessage", _HELP),
+)
+# Auto-replies apply by the subscriber's country; 10DLC is US texting.
+_AUTO_REPLY_COUNTRY = "US"
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
@@ -110,19 +136,86 @@ _DUPLICATE = {
 }
 
 
-def _campaign_replies(brand: dict) -> dict:
+def _campaign_replies(brand: dict, refs: dict) -> dict:
     """The HELP, opt-in and STOP replies filed with a campaign, each opening
-    with the brand's name: carrier reviewers want the sender named."""
-    name = display_name(brand.get("displayName")) or display_name(
-        brand.get("firstName"), brand.get("lastName")
+    with the sender's name: carrier reviewers want the sender named. The
+    name is the brand's, else the one saved when the draft was filed. The
+    HELP reply gives the customer's own contact email, or hi@hail.so when
+    the name and that email do not fit in 255 characters."""
+    name = (
+        display_name(brand.get("displayName"))
+        or display_name(brand.get("firstName"), brand.get("lastName"))
+        or display_name(refs.get("subject_name"))
     )
-    prefix = f"{name}: " if name else ""
+    snapshot = refs.get("campaign")
+    contact = (
+        snapshot.get("contact_email") if isinstance(snapshot, dict) else None
+    ) or _HELP_CONTACT
+    help_text = f"Reply STOP to opt out. For help contact {contact}."
+    if len(f"{name}: {help_text}" if name else help_text) > _TEXT_MAX:
+        help_text = f"Reply STOP to opt out. For help contact {_HELP_CONTACT}."
     return {
-        "helpMessage": f"{prefix}Reply STOP to opt out. For help contact hi@hail.so.",
-        "optinMessage": f"{prefix}You are opted in. Reply STOP to opt out, HELP for help.",
+        "helpMessage": _named(name, help_text),
+        "optinMessage": _named(
+            name, "You are opted in. Reply STOP to opt out, HELP for help."
+        ),
         # Required when subscriberOptout is true (Telnyx 10015).
-        "optoutMessage": f"{prefix}{_OPT_OUT_MESSAGE}",
+        "optoutMessage": _named(name, _OPT_OUT_MESSAGE),
     }
+
+
+def _named(name: str | None, text: str) -> str:
+    """``text`` after "name: ", within 255 characters. The name is cut,
+    never the text: at a word boundary when that keeps at least
+    ``_NAME_MIN`` characters, else mid-word."""
+    room = _TEXT_MAX - len(text) - len(": ")
+    if name and len(name) > room:
+        cut = name[: max(0, room)]
+        if name[len(cut)] != " ":
+            whole = cut.rsplit(" ", 1)[0].rstrip()
+            if " " in cut and len(whole) >= min(_NAME_MIN, room):
+                cut = whole
+        name = cut.rstrip()
+    return f"{name}: {text}" if name else text
+
+
+def _filed_replies(campaign: dict, brand: dict, refs: dict) -> dict:
+    """The replies Telnyx holds for a filed campaign (its record has
+    ``helpMessage``, ``optinMessage`` and ``optoutMessage``). A text the
+    record lacks is built as Hail files it."""
+    built = _campaign_replies(brand, refs)
+    return {
+        key: text if isinstance(text, str) and text.strip() else built[key]
+        for key, text in ((k, campaign.get(k)) for k in built)
+    }
+
+
+def _saved_replies(refs: dict) -> dict | None:
+    """``refs['replies']`` when it holds a text for each auto-reply, else
+    None."""
+    replies = refs.get("replies")
+    if not isinstance(replies, dict):
+        return None
+    for _, key, _ in _AUTO_REPLIES:
+        text = replies.get(key)
+        if not isinstance(text, str) or not text.strip():
+            return None
+    return replies
+
+
+def _store_replies(refs: dict, campaign: dict, brand: dict) -> None:
+    """Keep the texts filed with the campaign in ``refs['replies']``, the
+    one source of the auto-replies. Texts already kept stay."""
+    if _saved_replies(refs) is not None:
+        return
+    try:
+        refs["replies"] = _filed_replies(campaign, brand, refs)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "10DLC filed replies not kept: campaign=%s %s",
+            refs.get("campaign_id"),
+            type(exc).__name__,
+        )
 
 
 def _policy_links(text: dict) -> dict:
@@ -149,7 +242,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         return sms_requirements(self.name, subject_type)
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(fields, subject_type)
+        problems = field_problems(self.name, fields, subject_type)
         mobile = (fields.get("mobile_phone_number") or "").strip()
         if subject_type == "person" and mobile and not mobile.startswith("+1"):
             problems.append(
@@ -188,9 +281,27 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         text = campaign_text(fields, subject_type)
         refs: dict = {
             "subject_type": subject_type,
+            # Finds the organization's messaging profile later, when it
+            # could not be found or made now.
+            "organization_id": str(organization_id),
+            # The sender name for the filed replies when the brand has none.
+            "subject_name": sms_subject_name(fields, address, subject_type),
             "campaign": text.__dict__,
             "messaging_profile_id": messaging_service_sid,
         }
+        if not messaging_service_sid:
+            # The profile gets the filed STOP and HELP replies; the
+            # organization's numbers find it by its name. Filing goes on
+            # without it: _set_replies finds or makes it later.
+            try:
+                refs["messaging_profile_id"] = await TelnyxSmsProvider(
+                    self._api
+                ).ensure_messaging_service(organization_id, None)
+            except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "10DLC messaging profile not ready at filing: %s",
+                    type(exc).__name__,
+                )
         try:
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
@@ -402,14 +513,17 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
                 )
                 existing = [
-                    r.get("campaignId")
+                    r
                     for r in found.get("records") or []
                     if isinstance(r, dict) and r.get("campaignId")
                 ]
                 if existing:
-                    refs["campaign_id"] = existing[0]
+                    refs["campaign_id"] = existing[0]["campaignId"]
+                    _store_replies(refs, existing[0], brand)
+                    await self._set_replies(refs)
                     return ProviderStatus(state="pending")
                 text = refs["campaign"]
+                replies = _campaign_replies(brand, refs)
                 campaign = await self._api.request(
                     "POST",
                     "/10dlc/campaignBuilder",
@@ -431,16 +545,21 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,
                         "helpKeywords": _HELP,
-                        **_campaign_replies(brand),
+                        **replies,
                         "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },
                 )
                 refs["campaign_id"] = campaign["campaignId"]
+                refs["replies"] = replies
+                await self._set_replies(refs)
                 return ProviderStatus(state="pending")
             campaign = await self._api.request(
                 "GET", f"/10dlc/campaign/{refs['campaign_id']}"
             )
+            # Rows filed before the texts were kept take them from Telnyx.
+            _store_replies(refs, campaign, brand)
+            await self._set_replies(refs)
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 logger.warning(
@@ -451,7 +570,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
         status = (campaign.get("campaignStatus") or "").upper()
         if status in _APPROVED:
-            return ProviderStatus(state="approved")
+            return self._approved(refs)
         if status in _REJECTED:
             return ProviderStatus(
                 state="rejected",
@@ -463,6 +582,118 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 ),
             )
         return ProviderStatus(state="pending")
+
+    def _approved(self, refs) -> ProviderStatus:
+        """Approved, once the auto-replies are set: until then pending, so
+        the next poll sets them (an approved row is not polled again). After
+        ``_REPLY_WAITS`` such polls it is approved anyway and an error is
+        logged; the profile then needs its replies set by hand."""
+        if refs.get("replies_set"):
+            return ProviderStatus(state="approved")
+        waits = refs.get("replies_waits")
+        waits = (waits if isinstance(waits, int) else 0) + 1
+        refs["replies_waits"] = waits
+        if waits <= _REPLY_WAITS:
+            return ProviderStatus(state="pending")
+        logger.error(
+            "10DLC campaign approved without its STOP and HELP auto-replies:"
+            " campaign=%s brand=%s profile=%s",
+            refs.get("campaign_id"),
+            refs.get("brand_id"),
+            refs.get("messaging_profile_id"),
+        )
+        return ProviderStatus(state="approved")
+
+    async def _set_replies(self, refs) -> None:
+        """Make the STOP and HELP auto-replies of the organization's
+        messaging profile the texts filed with the campaign
+        (``refs['replies']``). Once per registration; a failure is logged
+        and the next status() tries again. Never raises."""
+        if refs.get("replies_set"):
+            return
+        replies = _saved_replies(refs)
+        if replies is None:
+            logger.warning(
+                "10DLC auto-replies not set: no filed texts kept, campaign=%s",
+                refs.get("campaign_id"),
+            )
+            return
+        profile = await self._reply_profile(refs)
+        if not profile:
+            return
+        path = f"/messaging_profiles/{path_id(profile)}/autoresp_configs"
+        try:
+            found = await self._api.request(
+                "GET", path, params={"country_code": _AUTO_REPLY_COUNTRY}
+            )
+            # The list is already for US; match on the op alone, and update
+            # the first config of an op rather than add another.
+            ids: dict = {}
+            for c in found.get("data") or []:
+                if isinstance(c, dict) and c.get("op") and c.get("id"):
+                    ids.setdefault(c["op"], c["id"])
+            for op, key, keywords in _AUTO_REPLIES:
+                body = {
+                    "op": op,
+                    "keywords": keywords.split(","),
+                    "resp_text": replies[key],
+                    "country_code": _AUTO_REPLY_COUNTRY,
+                }
+                if op in ids:
+                    await self._api.request(
+                        "PUT", f"{path}/{path_id(ids[op])}", json=body
+                    )
+                else:
+                    await self._api.request("POST", path, json=body)
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "10DLC auto-replies not set: status=%s errors=%s",
+                exc.response.status_code,
+                _error_log(exc.response),
+            )
+            return
+        except (
+            httpx.HTTPError,
+            AttributeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logger.warning("10DLC auto-replies not set: %s", type(exc).__name__)
+            return
+        refs["replies_set"] = True
+
+    async def _reply_profile(self, refs) -> str | None:
+        """The messaging profile the auto-replies go on. A filing without
+        one (filed before the draft made it, or making it failed) finds or
+        makes the organization's ``hail-<org>`` profile and keeps its id.
+        None, logged, when that fails or no organization was saved."""
+        profile = refs.get("messaging_profile_id")
+        if profile:
+            return profile
+        org = refs.get("organization_id")
+        if not org:
+            logger.warning(
+                "10DLC auto-replies not set: no messaging profile or"
+                " organization saved, campaign=%s",
+                refs.get("campaign_id"),
+            )
+            return None
+        try:
+            profile = await TelnyxSmsProvider(self._api).ensure_messaging_service(
+                org, None
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "10DLC auto-replies not set: profile status=%s",
+                exc.response.status_code,
+            )
+            return None
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("10DLC auto-replies not set: profile %s", type(exc).__name__)
+            return None
+        refs["messaging_profile_id"] = profile
+        return profile
 
     async def purchase_handle(self, refs) -> dict:
         return {}
@@ -557,20 +788,23 @@ def _errors(response: httpx.Response) -> list[dict]:
     return [e for e in errors if isinstance(e, dict)]
 
 
+def _pointer(error: dict) -> str | None:
+    """The field a Telnyx error names (``source.pointer``), if any."""
+    source = error.get("source")
+    pointer = source.get("pointer") if isinstance(source, dict) else None
+    return str(pointer) if pointer else None
+
+
+def _detail(error: dict) -> str | None:
+    return error.get("detail") or error.get("title")
+
+
 def _error_log(response: httpx.Response) -> list:
     """Telnyx's errors, for the log: code, field and text. The text can quote
     the customer's details; logged anyway (owner decision 2026-10-28), since
     the code alone does not say which field Telnyx refused."""
     return [
-        {
-            "code": e.get("code"),
-            "field": (
-                e["source"].get("pointer")
-                if isinstance(e.get("source"), dict)
-                else None
-            ),
-            "detail": e.get("detail") or e.get("title"),
-        }
+        {"code": e.get("code"), "field": _pointer(e), "detail": _detail(e)}
         for e in _errors(response)
     ]
 
@@ -581,16 +815,10 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
     for e in _errors(response):
-        source = e.get("source")
-        pointer = str(source.get("pointer") or "") if isinstance(source, dict) else ""
-        field = names.get(pointer.rsplit("/", 1)[-1])
+        field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
-                Problem(
-                    field=field,
-                    message=VALUE_NOT_ACCEPTED,
-                    raw=e.get("detail") or e.get("title"),
-                )
+                Problem(field=field, message=VALUE_NOT_ACCEPTED, raw=_detail(e))
             )
     return problems or [Problem(field="", message=_safe_message(response))]
 

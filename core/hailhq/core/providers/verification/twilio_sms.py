@@ -109,7 +109,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(fields, subject_type)
+        problems = field_problems(self.name, fields, subject_type)
         if (
             subject_type == "business"
             and fields.get("ein")
