@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
+# The reply a person gets after they text STOP.
+_OPT_OUT_MESSAGE = (
+    "You are unsubscribed and will get no more messages from this number."
+)
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
@@ -178,7 +182,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if isinstance(exc, httpx.HTTPStatusError):
                 code = exc.response.status_code
                 logger.warning(
-                    "10DLC draft failed: status=%s codes=%s",
+                    "10DLC draft failed: status=%s errors=%s",
                     code,
                     _error_codes(exc.response),
                 )
@@ -407,6 +411,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "helpKeywords": _HELP,
                         "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
                         "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
+                        # Required when subscriberOptout is true (Telnyx 10015).
+                        "optoutMessage": _OPT_OUT_MESSAGE,
                         "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },
@@ -419,7 +425,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 logger.warning(
-                    "10DLC status failed: status=%s codes=%s",
+                    "10DLC status failed: status=%s errors=%s",
                     exc.response.status_code,
                     _error_codes(exc.response),
                 )
@@ -526,9 +532,21 @@ def _errors(response: httpx.Response) -> list[dict]:
 
 
 def _error_codes(response: httpx.Response) -> list:
-    """Telnyx's error codes, for the log. Never its text: it can quote the
-    customer's details."""
-    return [e.get("code") for e in _errors(response)]
+    """Telnyx's errors, for the log: code, field and text. The text can quote
+    the customer's details; logged anyway (owner decision 2026-10-28), since
+    the code alone does not say which field Telnyx refused."""
+    return [
+        {
+            "code": e.get("code"),
+            "field": (
+                e["source"].get("pointer")
+                if isinstance(e.get("source"), dict)
+                else None
+            ),
+            "detail": e.get("detail") or e.get("title"),
+        }
+        for e in _errors(response)
+    ]
 
 
 def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:

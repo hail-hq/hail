@@ -17,6 +17,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 - Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
 - Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.

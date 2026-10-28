@@ -178,6 +178,11 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     # MIXED needs 2 or more sub use cases; Telnyx refuses with 400 without.
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
     assert posted[0]["termsAndConditions"] is True
+    # Telnyx 10015 "optoutMessage is required if subscriberOptout is true."
+    assert posted[0]["subscriberOptout"] is True
+    assert posted[0]["optoutMessage"] == (
+        "You are unsubscribed and will get no more messages from this number."
+    )
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
@@ -957,3 +962,29 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
     await _provider(handler).status(refs)
     assert posted[0]["termsAndConditions"] is False
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
+
+
+def test_error_log_names_the_field_and_reason() -> None:
+    import httpx
+    from hailhq.core.providers.verification.telnyx_sms import _error_codes
+
+    response = httpx.Response(
+        400,
+        json={
+            "errors": [
+                {
+                    "code": "10015",
+                    "title": "Bad Request",
+                    "detail": "optoutMessage is required if subscriberOptout is true.",
+                    "source": {"pointer": "/body/optoutMessage"},
+                }
+            ]
+        },
+    )
+    assert _error_codes(response) == [
+        {
+            "code": "10015",
+            "field": "/body/optoutMessage",
+            "detail": "optoutMessage is required if subscriberOptout is true.",
+        }
+    ]
