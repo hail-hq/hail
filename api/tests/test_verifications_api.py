@@ -3365,7 +3365,9 @@ def telnyx_outage(monkeypatch):
             return httpx.Response(
                 200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
             )
-        if req.url.path.endswith(("/smsOtp", "/vetting")):
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json=[])
+        if req.url.path.endswith(("/smsOtp", "/externalVetting")):
             if state["down"]:
                 return httpx.Response(503)
             return httpx.Response(200, json={"referenceId": "R1"})
@@ -3390,7 +3392,7 @@ def telnyx_outage(monkeypatch):
 @pytest.mark.parametrize(
     ("subject_type", "fields", "step"),
     [
-        ("business", _TELNYX_BUSINESS, "/v2/10dlc/brand/B1/vetting"),
+        ("business", _TELNYX_BUSINESS, "/v2/10dlc/brand/B1/externalVetting"),
         ("person", _TELNYX_PERSON, "/v2/10dlc/brand/B1/smsOtp"),
     ],
 )
