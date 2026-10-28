@@ -8,7 +8,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
+- Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
 - Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
+
+### Changed
+
+- **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types`: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 
 ### Fixed
 

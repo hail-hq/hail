@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 SubjectType = Literal["person", "business"]
-FieldKind = Literal["text", "email", "phone", "url"]
+FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 
 class VerificationProviderError(Exception):
@@ -87,7 +87,10 @@ class FieldSpec(BaseModel):
     label: str = Field(description="Label to show the customer.")
     kind: FieldKind = Field(
         default="text",
-        description="Input kind: 'text', 'email', 'phone', or 'url'.",
+        description=(
+            "Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick "
+            "several of `options`; send their keys joined by commas)."
+        ),
     )
     help: str = Field(default="", description="Help text from the carrier.")
     pattern: str | None = Field(
@@ -100,6 +103,12 @@ class FieldSpec(BaseModel):
     )
     required: bool = Field(
         default=True, description="False when the field is optional."
+    )
+    min_choices: int | None = Field(
+        default=None, description="For kind 'choices': the fewest options to pick."
+    )
+    max_choices: int | None = Field(
+        default=None, description="For kind 'choices': the most options to pick."
     )
 
 
@@ -198,6 +207,12 @@ class Requirements(VerificationRequirements):
         model (with ``provider``) and sorts keys, so the value is the same
         as before the public model was split off."""
         body = self.model_dump(mode="json", exclude={"subject_types"})
+        # Fields added after hashes were stored count only when set, so
+        # older forms keep their hash.
+        for field in body["fields"]:
+            for key in ("min_choices", "max_choices"):
+                if field.get(key) is None:
+                    field.pop(key, None)
         raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
@@ -395,3 +410,19 @@ class SmsRegistrationProvider(VerificationProvider):
         'code' (type a code into Hail), 'reply' (answer the carrier's
         text), or None (no confirmation pending)."""
         return None
+
+    # The refs key that holds the campaign once it is filed.
+    campaign_ref: str | None = None
+
+    def in_review(self, refs: dict) -> bool:
+        """True while the carriers review the filing: the campaign is filed
+        (``campaign_ref``). A plug-in can add other review steps."""
+        return bool(self.campaign_ref and refs.get(self.campaign_ref))
+
+    def step(self, refs: dict) -> str | None:
+        """Where a filing still in progress is: 'confirm_identity' while the
+        person must act on a text already sent, 'carrier_review' while the
+        carriers review it, else 'filing'."""
+        if self.confirmation(refs):
+            return "confirm_identity"
+        return "carrier_review" if self.in_review(refs) else "filing"

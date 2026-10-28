@@ -497,15 +497,18 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 
 // Defines values for FieldSpecKind.
 const (
-	FieldSpecKindEmail FieldSpecKind = "email"
-	FieldSpecKindPhone FieldSpecKind = "phone"
-	FieldSpecKindText  FieldSpecKind = "text"
-	FieldSpecKindUrl   FieldSpecKind = "url"
+	FieldSpecKindChoices FieldSpecKind = "choices"
+	FieldSpecKindEmail   FieldSpecKind = "email"
+	FieldSpecKindPhone   FieldSpecKind = "phone"
+	FieldSpecKindText    FieldSpecKind = "text"
+	FieldSpecKindUrl     FieldSpecKind = "url"
 )
 
 // Valid indicates whether the value is a known member of the FieldSpecKind enum.
 func (e FieldSpecKind) Valid() bool {
 	switch e {
+	case FieldSpecKindChoices:
+		return true
 	case FieldSpecKindEmail:
 		return true
 	case FieldSpecKindPhone:
@@ -900,6 +903,27 @@ func (e VerificationRequirementsSubjectTypes) Valid() bool {
 	case VerificationRequirementsSubjectTypesBusiness:
 		return true
 	case VerificationRequirementsSubjectTypesPerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerificationResponseStep.
+const (
+	CarrierReview   VerificationResponseStep = "carrier_review"
+	ConfirmIdentity VerificationResponseStep = "confirm_identity"
+	Filing          VerificationResponseStep = "filing"
+)
+
+// Valid indicates whether the value is a known member of the VerificationResponseStep enum.
+func (e VerificationResponseStep) Valid() bool {
+	switch e {
+	case CarrierReview:
+		return true
+	case ConfirmIdentity:
+		return true
+	case Filing:
 		return true
 	default:
 		return false
@@ -2464,11 +2488,17 @@ type FieldSpec struct {
 	// Help Help text from the carrier.
 	Help *string `json:"help,omitempty"`
 
-	// Kind Input kind: 'text', 'email', 'phone', or 'url'.
+	// Kind Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick several of `options`; send their keys joined by commas).
 	Kind *FieldSpecKind `json:"kind,omitempty"`
 
 	// Label Label to show the customer.
 	Label string `json:"label"`
+
+	// MaxChoices For kind 'choices': the most options to pick.
+	MaxChoices *int `json:"max_choices,omitempty"`
+
+	// MinChoices For kind 'choices': the fewest options to pick.
+	MinChoices *int `json:"min_choices,omitempty"`
 
 	// Name Key to send this value under in `fields`.
 	Name string `json:"name"`
@@ -2483,7 +2513,7 @@ type FieldSpec struct {
 	Required *bool `json:"required,omitempty"`
 }
 
-// FieldSpecKind Input kind: 'text', 'email', 'phone', or 'url'.
+// FieldSpecKind Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick several of `options`; send their keys joined by commas).
 type FieldSpecKind string
 
 // ForwardTargetListResponse defines model for ForwardTargetListResponse.
@@ -3179,6 +3209,9 @@ type VerificationResponse struct {
 	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
 	State string `json:"state"`
 
+	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+	Step *VerificationResponseStep `json:"step,omitempty"`
+
 	// SubjectName Name of the person or company this verification is for, taken from the form (for example the business name, or the first and last name). Null when unknown.
 	SubjectName *string `json:"subject_name,omitempty"`
 
@@ -3191,6 +3224,9 @@ type VerificationResponse struct {
 	// UpdatedAt When it last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+type VerificationResponseStep string
 
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {

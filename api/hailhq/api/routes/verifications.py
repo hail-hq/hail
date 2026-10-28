@@ -508,15 +508,23 @@ async def _refresh(
         )
 
 
-def _confirmation(row: CarrierVerification, registry: Registry) -> str | None:
-    """How the person must confirm an SMS registration that waits on them:
-    'code', 'reply', or None."""
-    if row.purpose != "sms" or row.state not in _POLLED_STATES:
-        return None
+def _sms_progress(
+    row: CarrierVerification, registry: Registry
+) -> tuple[str | None, str | None]:
+    """``(confirmation, step)`` of an SMS registration in progress: how the
+    person must confirm ('code', 'reply' or None) and where the filing is.
+    A draft not yet submitted is still being filed."""
+    if row.purpose != "sms":
+        return None, None
+    if row.state == "awaiting_review":
+        return None, "filing"
+    if row.state not in _POLLED_STATES:
+        return None, None
     provider = registry(row.provider, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
-        return None
-    return provider.confirmation(row.provider_refs or {})
+        return None, None
+    refs = row.provider_refs or {}
+    return provider.confirmation(refs), provider.step(refs)
 
 
 def _out(
@@ -524,9 +532,10 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """The response for a row, with ``confirmation`` filled in."""
+    """The response for a row, with ``confirmation`` and ``step`` filled in."""
+    confirmation, step = _sms_progress(row, registry)
     return model.model_validate(row).model_copy(
-        update={"confirmation": _confirmation(row, registry)}
+        update={"confirmation": confirmation, "step": step}
     )
 
 

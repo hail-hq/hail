@@ -179,6 +179,10 @@ class FakeSmsCarrier(SmsRegistrationProvider):
             return self.confirm_kind
         return None
 
+    @property
+    def campaign_ref(self):
+        return self.campaign_key
+
     async def confirm(self, refs, code):
         if self.confirm_kind != "code":
             raise NotImplementedError
@@ -2868,6 +2872,7 @@ async def test_person_registration_asks_for_the_code(
     org_id, _, key = org_and_key
     body = await _person_sms(client, key, async_session, org_id)
     assert body["state"] == "submitted" and body["confirmation"] == "code"
+    assert body["step"] == "confirm_identity"
     got = await client.get(f"/verifications/{body['id']}", headers=_auth(key))
     assert got.json()["confirmation"] == "code"
     listed = await client.get("/verifications", headers=_auth(key))
@@ -2894,6 +2899,7 @@ async def test_confirm_sends_the_code_and_creates_the_campaign(
     resp = await _confirm(client, key, vid, "482913")
     assert resp.status_code == 200, resp.text
     assert resp.json()["confirmation"] is None
+    assert resp.json()["step"] == "carrier_review"
     assert [c for _, c in sms_carrier.confirmed] == ["482913"]
     assert sms_carrier.status_calls == calls_before + 1
     refs = await _stored_refs(async_session, vid)

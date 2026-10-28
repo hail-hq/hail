@@ -48,11 +48,10 @@ _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 _OTP_RESEND_AFTER = timedelta(hours=24)
 _REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
-# Sub use cases filed with every campaign. SOLE_PROPRIETOR needs at least
-# 1 and MIXED at least 2 (GET /10dlc/enum/usecase); without them Telnyx
-# refuses the campaign with 400. The form does not ask, so Hail files the
-# two that fit service texts.
-_SUB_USECASES = ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
+# Sub use cases for a campaign filed before the form asked for them
+# (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
+# (GET /10dlc/enum/usecase); without them Telnyx refuses with 400.
+_SUB_USECASES = ("CUSTOMER_CARE", "ACCOUNT_NOTIFICATION")
 # A campaign is approved once the mobile carriers accept it; TCR_ACCEPTED
 # alone is pending (the carriers have not reviewed it yet).
 _APPROVED = {"MNO_ACCEPTED", "MNO_PROVISIONED", "ACTIVE"}
@@ -119,6 +118,7 @@ def _policy_links(text: dict) -> dict:
 
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
+    campaign_ref = "campaign_id"
 
     def __init__(self, api_key=None, client=None) -> None:
         self._api = TelnyxClient(api_key, client)
@@ -303,9 +303,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         await self._send_pin(refs)
 
     def confirmation(self, refs) -> str | None:
+        # Only once the PIN text was sent (a brand still registering when
+        # filed gets its PIN from the background pass).
         if (
             refs.get("subject_type") == "person"
             and refs.get("identity_verified") is not True
+            and refs.get("otp_sent_at")
         ):
             return "code"
         return None
@@ -327,6 +330,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             logger.warning("10DLC PIN confirm failed: %s", type(exc).__name__)
             raise VerificationProviderError("Telnyx request failed") from None
         return []
+
+    def in_review(self, refs) -> bool:
+        # A company's brand vetting is a review too.
+        return super().in_review(refs) or bool(refs.get("vetting_requested"))
 
     async def check(self, refs) -> list[Problem]:
         return []
@@ -363,6 +370,19 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     await self._request_vetting(refs)
                 return ProviderStatus(state="pending")
             if "campaign_id" not in refs:
+                # A campaign filed by an earlier call whose answer was lost
+                # (a timeout): take it. Each campaign sent for review is paid.
+                found = await self._api.request(
+                    "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
+                )
+                existing = [
+                    r.get("campaignId")
+                    for r in found.get("records") or []
+                    if isinstance(r, dict) and r.get("campaignId")
+                ]
+                if existing:
+                    refs["campaign_id"] = existing[0]
+                    return ProviderStatus(state="pending")
                 text = refs["campaign"]
                 campaign = await self._api.request(
                     "POST",
@@ -370,7 +390,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     json={
                         "brandId": refs["brand_id"],
                         "usecase": text["use_case"],
-                        "subUsecases": _SUB_USECASES,
+                        "subUsecases": list(text.get("text_types") or _SUB_USECASES),
                         "description": text["description"],
                         "messageFlow": text["message_flow"],
                         "sample1": text["samples"][0],
@@ -387,7 +407,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "helpKeywords": _HELP,
                         "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
                         "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
-                        "termsAndConditions": True,
+                        "termsAndConditions": bool(text.get("terms_url")),
                         **_policy_links(text),
                     },
                 )
