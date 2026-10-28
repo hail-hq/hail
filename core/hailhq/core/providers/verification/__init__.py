@@ -23,6 +23,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
     VerificationRequirements,
 )
+from hailhq.core.providers.verification.forms import length_problems
 
 __all__ = [
     "Address",
@@ -44,6 +45,7 @@ __all__ = [
     "VerificationRequirements",
     "default_verification_provider_name",
     "get_verification_provider",
+    "length_problems",
     "register_verification_provider",
 ]
 

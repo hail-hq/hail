@@ -2497,7 +2497,7 @@ type FieldSpec struct {
 	// MaxChoices For kind 'choices': the most options to pick.
 	MaxChoices *int `json:"max_choices,omitempty"`
 
-	// MaxLength The most characters the value may hold, when known. A form can show a field allowed more than about 100 characters as a box that wraps.
+	// MaxLength The most characters the value may hold, when known, counted in UTF-16 code units (an emoji counts as 2). Enforced: a longer value gets 422. A form can show a field allowed more than about 100 characters as a box that wraps.
 	MaxLength *int `json:"max_length,omitempty"`
 
 	// MinChoices For kind 'choices': the fewest options to pick.

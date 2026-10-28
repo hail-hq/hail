@@ -1,5 +1,17 @@
-from hailhq.core.providers.verification.base import FieldSpec, Requirements
-from hailhq.core.providers.verification.forms import text_length, validate_input
+from hailhq.core.providers.verification.base import (
+    DocumentInput,
+    DocumentOption,
+    DocumentSlot,
+    FieldSpec,
+    Requirements,
+)
+from hailhq.core.providers.verification.forms import (
+    check_field,
+    cut_text,
+    length_problems,
+    text_length,
+    validate_input,
+)
 
 
 def _requirements(*fields: FieldSpec) -> Requirements:
@@ -40,3 +52,56 @@ def test_validate_input_ignores_padding_and_fields_without_a_limit() -> None:
     )
     fields = {"email": "  abcde  ", "note": "x" * 5000}
     assert validate_input(req, fields, None, {}) == []
+
+
+def test_check_field_reports_length_and_pattern_together() -> None:
+    spec = FieldSpec(name="code", label="Code", pattern=r"^\d+$", max_length=3)
+    problems = check_field(spec, "abcd", "code")
+    assert [p.message for p in problems] == [
+        "Use at most 3 characters.",
+        "Code is not valid.",
+    ]
+    assert check_field(spec, "123", "code") == []
+
+
+def test_cut_text_counts_utf16_units_and_never_splits_an_emoji() -> None:
+    assert cut_text("abc", 5) == "abc"
+    assert cut_text("abc", 2) == "ab"
+    assert cut_text("a\U0001f600b", 2) == "a"
+    assert cut_text("a\U0001f600b", 3) == "a\U0001f600"
+    assert cut_text("abc", 0) == ""
+
+
+def test_length_problems_checks_fields_and_the_chosen_document_type() -> None:
+    slot = DocumentSlot(
+        name="id",
+        label="ID",
+        options=(
+            DocumentOption(
+                key="passport",
+                label="Passport",
+                fields=(FieldSpec(name="number", label="Number", max_length=4),),
+            ),
+        ),
+    )
+    req = Requirements(
+        provider="didww",
+        country_code="DE",
+        number_type="local",
+        subject_type="person",
+        required=True,
+        # No pattern, required or other rule here: only lengths.
+        fields=(
+            FieldSpec(name="name", label="Name", max_length=3),
+            FieldSpec(name="note", label="Note", pattern=r"^x$"),
+        ),
+        documents=(slot,),
+        address_required=False,
+    )
+    docs = {"id": DocumentInput(option="passport", fields={"number": "12345"})}
+    problems = length_problems(req, {"name": "abcd", "note": "nope"}, docs)
+    assert [(p.field, p.message) for p in problems] == [
+        ("name", "Use at most 3 characters."),
+        ("id.number", "Use at most 4 characters."),
+    ]
+    assert length_problems(req, {}, {}) == []

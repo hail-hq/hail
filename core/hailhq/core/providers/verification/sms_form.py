@@ -16,8 +16,8 @@ from hailhq.core.providers.verification.base import (
     SubjectType,
 )
 from hailhq.core.providers.verification.forms import (
+    cut_text,
     display_name,
-    length_problem,
     text_length,
 )
 
@@ -73,7 +73,7 @@ def _fixed_flow(privacy_policy_url: str, terms_url: str) -> str:
 
 # The opt-in text shares the carrier's 2048 with the fixed text at its
 # longest (both links at _URL_MAX), so it always fits whole.
-_OPT_IN_MAX = _FLOW_MAX - len(_fixed_flow("x" * _URL_MAX, "x" * _URL_MAX))
+_OPT_IN_MAX = _FLOW_MAX - text_length(_fixed_flow("x" * _URL_MAX, "x" * _URL_MAX))
 
 _BUSINESS_FIELDS = (
     FieldSpec(name="legal_name", label="Legal company name"),
@@ -93,6 +93,7 @@ _BUSINESS_FIELDS = (
         name="website",
         label="Website",
         kind="url",
+        max_length=_URL_MAX,
         help="The carrier checks that the site names your company.",
     ),
     FieldSpec(name="rep_name", label="Contact person name"),
@@ -177,6 +178,7 @@ _CAMPAIGN_FIELDS = (
         name="privacy_policy_url",
         label="Privacy policy link",
         kind="url",
+        max_length=_URL_MAX,
         help=(
             "Public page that says mobile numbers and texting consent are not "
             "shared with third parties for marketing."
@@ -186,6 +188,7 @@ _CAMPAIGN_FIELDS = (
         name="terms_url",
         label="Terms of service link",
         kind="url",
+        max_length=_URL_MAX,
         help="Public page with your terms of service.",
     ),
     FieldSpec(name="has_links", label="Do your texts contain links?", options=_YES_NO),
@@ -227,24 +230,23 @@ def sms_subject_name(
 def field_problems(
     provider: str, fields: dict[str, str], subject_type: SubjectType
 ) -> list[Problem]:
-    """The fields of ``provider``'s form: required values are present and every link is an http(s) URL with a
-    host, at most _URL_MAX characters. Both carrier plug-ins run this before
-    anything is sent: the links are only filed later, with the campaign, where
-    a carrier error is retried forever instead of shown to the customer."""
+    """The fields of ``provider``'s form: required values are present, the
+    choices are allowed, and every link is an http(s) URL with a host. Both
+    carrier plug-ins run this before anything is sent: the links are only
+    filed later, with the campaign, where a carrier error is retried forever
+    instead of shown to the customer. Lengths (``max_length``, links
+    included) are checked by the API for every carrier
+    (``forms.length_problems``)."""
     problems: list[Problem] = []
     for spec in _fields_for(provider, subject_type):
         value = (fields.get(spec.name) or "").strip()
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
-        elif too_long := length_problem(spec, value):
-            problems.append(Problem(field=spec.name, message=too_long))
         elif spec.kind == "choices":
             problem = _choices_problem(spec, value)
             if problem:
                 problems.append(Problem(field=spec.name, message=problem))
-        elif spec.kind == "url" and text_length(value) > _URL_MAX:
-            problems.append(Problem(field=spec.name, message="Use a shorter link."))
         elif spec.kind == "url" and not _is_http_url(value):
             problems.append(
                 Problem(
@@ -312,11 +314,15 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     terms_url = fields["terms_url"].strip()
     # Reviewers reject a filing that lacks the consent disclosures and the
     # policy links, so they go on every filing after the customer's own text.
-    # field_problems caps the opt-in text at _OPT_IN_MAX and each link at
-    # _URL_MAX, so a checked form is never cut here (tested); the cut only
-    # guards a caller that skipped the check.
+    # The API caps the opt-in text at _OPT_IN_MAX and each link at _URL_MAX
+    # (forms.length_problems), so a checked form is never cut here (tested);
+    # the cut only guards a caller that skipped the check. Counted as the
+    # carrier counts: UTF-16 code units.
     fixed = _fixed_flow(privacy_policy_url, terms_url)
-    own = fields["opt_in_description"].strip()[: _FLOW_MAX - len(fixed)]
+    own = cut_text(
+        fields["opt_in_description"].strip(),
+        max(0, _FLOW_MAX - text_length(fixed)),
+    )
     flow = (own + fixed).strip()
     samples = [
         _at_least(fields["sample_1"], 20, _OPT_OUT),

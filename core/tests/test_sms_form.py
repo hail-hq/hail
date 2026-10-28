@@ -1,9 +1,16 @@
 import pytest
+from hailhq.core.providers.verification.forms import length_problems, text_length
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
     sms_requirements,
 )
+
+
+def _too_long(data: dict, subject: str = "person") -> list[tuple[str, str]]:
+    """The API's length check of this form (``forms.length_problems``)."""
+    problems = length_problems(sms_requirements("telnyx", subject), data, {})
+    return [(p.field, p.message) for p in problems]
 
 
 def test_business_form_lists_company_and_campaign_fields() -> None:
@@ -180,15 +187,15 @@ def test_field_problems_rejects_a_link_without_scheme_or_host(value) -> None:
     assert problems[0].message.startswith("Enter the full link")
 
 
-def test_field_problems_rejects_a_link_over_the_cap() -> None:
+def test_a_link_over_the_cap_is_too_long() -> None:
     long = "https://acme.example/" + "a" * 500
-    problems = field_problems("telnyx", {**GOOD, "terms_url": long}, "person")
-    assert [(p.field, p.message) for p in problems] == [
-        ("terms_url", "Use a shorter link.")
+    assert _too_long({**GOOD, "terms_url": long}) == [
+        ("terms_url", "Use at most 512 characters.")
     ]
+    assert field_problems("telnyx", {**GOOD, "terms_url": long}, "person") == []
 
 
-def test_message_flow_keeps_own_text_with_links_at_the_cap() -> None:
+def test_message_flow_keeps_own_text_with_links_under_the_cap() -> None:
     link = "https://acme.example/" + "a" * 491
     text = campaign_text(
         {
@@ -265,17 +272,49 @@ def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
         "terms_url": long,
     }
     assert field_problems("telnyx", data, "person") == []
+    assert _too_long(data) == []
     text = campaign_text(data, "person")
     # Nothing is cut: the opt-in text and both links fill the 2048 exactly.
     assert text.message_flow.startswith("x" * 861)
     assert len(text.message_flow) == 2048
 
 
-def test_field_problems_refuses_text_over_the_limit() -> None:
-    problems = field_problems("telnyx", {**GOOD, "sample_1": "s" * 1025}, "person")
-    assert [(p.field, p.message) for p in problems] == [
+def test_text_over_the_limit_is_too_long() -> None:
+    assert _too_long({**GOOD, "sample_1": "s" * 1025}) == [
         ("sample_1", "Use at most 1024 characters.")
     ]
+
+
+def _with_links(opt_in: str) -> dict:
+    link = "https://acme.example/" + "a" * 491
+    return {
+        **GOOD,
+        "opt_in_description": opt_in,
+        "privacy_policy_url": link,
+        "terms_url": link,
+    }
+
+
+def test_an_unchecked_opt_in_text_is_cut_to_the_carrier_limit() -> None:
+    # A caller that skipped the length check: the opt-in text is cut so the
+    # whole flow fits the carrier's 2048, and the fixed text stays whole.
+    data = _with_links("own text " * 300)
+    assert _too_long(data) == [("opt_in_description", "Use at most 861 characters.")]
+    text = campaign_text(data, "business")
+    assert text_length(text.message_flow) <= 2048
+    assert text.message_flow.startswith("own text own text")
+    assert text.message_flow.endswith(f"Terms: {data['terms_url']}")
+
+
+def test_the_opt_in_cut_counts_utf16_units_and_keeps_emoji_whole() -> None:
+    # 1100 emoji are 2200 UTF-16 units: counted by code points they would
+    # look short enough, and the flow would pass the carrier's 2048.
+    data = _with_links("\U0001f600" * 1100)
+    text = campaign_text(data, "business")
+    assert text_length(text.message_flow) <= 2048
+    own = text.message_flow.split(" Consent is not")[0]
+    assert own and set(own) == {"\U0001f600"}  # no half emoji
+    assert text.message_flow.endswith(f"Terms: {data['terms_url']}")
 
 
 def test_only_the_telnyx_form_asks_for_text_types() -> None:
@@ -299,15 +338,19 @@ def test_campaign_text_keeps_the_contact_email() -> None:
     assert company.contact_email == "ops@acme.example"
 
 
-def test_field_problems_counts_characters_as_the_carrier_does() -> None:
+def test_length_counts_characters_as_the_carrier_does() -> None:
     # An emoji is 2 UTF-16 code units, as the carrier and the browser count.
-    problems = field_problems(
-        "telnyx", {**GOOD, "sample_1": "s" * 1022 + "\U0001f600"}, "person"
-    )
-    assert problems == []
-    problems = field_problems(
-        "telnyx", {**GOOD, "sample_1": "s" * 1023 + "\U0001f600"}, "person"
-    )
-    assert [(p.field, p.message) for p in problems] == [
+    assert _too_long({**GOOD, "sample_1": "s" * 1022 + "\U0001f600"}) == []
+    assert _too_long({**GOOD, "sample_1": "s" * 1023 + "\U0001f600"}) == [
         ("sample_1", "Use at most 1024 characters.")
     ]
+
+
+def test_links_carry_their_limit() -> None:
+    for subject in ("person", "business"):
+        fields = sms_requirements("telnyx", subject).fields
+        assert {f.name: f.max_length for f in fields if f.kind == "url"} == {
+            **({"website": 512} if subject == "business" else {}),
+            "privacy_policy_url": 512,
+            "terms_url": 512,
+        }

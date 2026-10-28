@@ -483,6 +483,91 @@ async def test_create_returns_field_problems_and_stores_nothing(
     assert (await async_session.execute(select(CarrierVerification))).first() is None
 
 
+def _with_limits(carrier, monkeypatch, first_name_max: int, number_max: int) -> None:
+    """The fake carrier's form with a max_length on a field and on a
+    document type's field (the fake checks nothing itself, like DIDWW)."""
+    base = carrier.requirements
+
+    async def requirements(country_code, number_type, subject_type):
+        req = await base(country_code, number_type, subject_type)
+        return req.model_copy(
+            update={
+                "fields": (
+                    FieldSpec(
+                        name="first_name", label="First name", max_length=first_name_max
+                    ),
+                    FieldSpec(name="last_name", label="Last name"),
+                ),
+                "documents": (
+                    DocumentSlot(
+                        name="proof_of_identity",
+                        label="Proof of identity",
+                        options=(
+                            DocumentOption(
+                                key="passport",
+                                label="Passport",
+                                fields=(
+                                    FieldSpec(
+                                        name="number",
+                                        label="Number",
+                                        max_length=number_max,
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            }
+        )
+
+    monkeypatch.setattr(carrier, "requirements", requirements)
+
+
+async def test_create_refuses_values_over_max_length_for_any_carrier(
+    client, org_and_key, carrier, async_session, monkeypatch
+) -> None:
+    """The API checks every max_length itself, all at once, before the
+    plug-in sees the form: nothing is filed."""
+    _, _, key = org_and_key
+    _with_limits(carrier, monkeypatch, first_name_max=3, number_max=4)
+    resp = await _create(
+        client,
+        key,
+        fields=json.dumps({"first_name": "Adaline", "last_name": "Lovelace"}),
+        documents=json.dumps(
+            {"proof_of_identity": {"option": "passport", "fields": {"number": "12345"}}}
+        ),
+    )
+    assert resp.status_code == 422, resp.text
+    assert [(d["loc"], d["msg"]) for d in resp.json()["detail"]] == [
+        (["body", "first_name"], "Use at most 3 characters."),
+        (["body", "proof_of_identity", "number"], "Use at most 4 characters."),
+    ]
+    assert carrier.drafts == []
+    assert (await async_session.execute(select(CarrierVerification))).first() is None
+
+
+async def test_create_counts_max_length_in_utf16_units(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """2 emoji are 2 characters but 4 UTF-16 units: over a limit of 3."""
+    _, _, key = org_and_key
+    _with_limits(carrier, monkeypatch, first_name_max=3, number_max=10)
+    emoji = "\U0001f600" * 2
+    resp = await _create(
+        client,
+        key,
+        fields=json.dumps({"first_name": emoji, "last_name": "Lovelace"}),
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "first_name"]
+    assert carrier.drafts == []
+    resp = await _create(
+        client, key, fields=json.dumps({"first_name": "\U0001f600", "last_name": "L"})
+    )
+    assert resp.status_code == 201, resp.text
+
+
 async def test_carrier_text_is_neither_returned_nor_logged(
     client, org_and_key, carrier, async_session, caplog
 ) -> None:
@@ -2018,6 +2103,29 @@ async def _post_sms(client, key, **overrides):
         files={"_": (None, "1")},
         headers=_auth(key),
     )
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_sms_link_over_512_characters_is_refused(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    from hailhq.core.providers.verification.sms_form import sms_requirements
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements("fake", subject_type)
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    long = "https://acme.example/" + "a" * 600
+    resp = await _post_sms(
+        client, key, fields=json.dumps({"legal_name": "Acme", "terms_url": long})
+    )
+    assert resp.status_code == 422, resp.text
+    assert [(d["loc"], d["msg"]) for d in resp.json()["detail"]] == [
+        (["body", "terms_url"], "Use at most 512 characters.")
+    ]
+    assert sms_carrier.drafts == []
 
 
 async def _set_balance(async_session, org_id, cents: int) -> None:

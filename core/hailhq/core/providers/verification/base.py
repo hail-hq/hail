@@ -120,9 +120,10 @@ class FieldSpec(BaseModel):
     max_length: int | None = Field(
         default=None,
         description=(
-            "The most characters the value may hold, when known. A form can "
-            "show a field allowed more than about 100 characters as a box "
-            "that wraps."
+            "The most characters the value may hold, when known, counted in "
+            "UTF-16 code units (an emoji counts as 2). Enforced: a longer "
+            "value gets 422. A form can show a field allowed more than about "
+            "100 characters as a box that wraps."
         ),
     )
 
