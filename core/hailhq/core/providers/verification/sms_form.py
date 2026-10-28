@@ -82,8 +82,8 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_title", label="Contact person job title"),
 )
 # What the texts are about, as the carriers' sub use cases. A person (sole
-# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. Twilio files
-# no sub use cases; its plug-in ignores the answer.
+# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. Only the
+# Telnyx form asks: Twilio files no sub use cases.
 _TEXT_TYPES = (
     FieldOption(key="CUSTOMER_CARE", label="Customer care and appointments"),
     FieldOption(key="ACCOUNT_NOTIFICATION", label="Account notices and reminders"),
@@ -173,14 +173,10 @@ _CAMPAIGN_FIELDS = (
 )
 
 
-def _fields_for(subject_type: SubjectType) -> tuple[FieldSpec, ...]:
+def _fields_for(provider: str, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
-    return (
-        subject
-        + _CAMPAIGN_FIELDS[:1]
-        + (_text_types_field(subject_type),)
-        + _CAMPAIGN_FIELDS[1:]
-    )
+    types = (_text_types_field(subject_type),) if provider == "telnyx" else ()
+    return subject + _CAMPAIGN_FIELDS[:1] + types + _CAMPAIGN_FIELDS[1:]
 
 
 def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
@@ -190,7 +186,7 @@ def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
         number_type="local",
         subject_type=subject_type,
         required=True,
-        fields=_fields_for(subject_type),
+        fields=_fields_for(provider, subject_type),
         documents=(),
         address_required=True,
         subject_types=("person", "business"),
@@ -209,13 +205,15 @@ def sms_subject_name(
     return name or display_name(address.customer_name if address else None)
 
 
-def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Problem]:
-    """Required values are present and every link is an http(s) URL with a
+def field_problems(
+    provider: str, fields: dict[str, str], subject_type: SubjectType
+) -> list[Problem]:
+    """The fields of ``provider``'s form: required values are present and every link is an http(s) URL with a
     host, at most _URL_MAX characters. Both carrier plug-ins run this before
     anything is sent: the links are only filed later, with the campaign, where
     a carrier error is retried forever instead of shown to the customer."""
     problems: list[Problem] = []
-    for spec in _fields_for(subject_type):
+    for spec in _fields_for(provider, subject_type):
         value = (fields.get(spec.name) or "").strip()
         if not value:
             if spec.required:
@@ -276,6 +274,9 @@ class CampaignText:
     privacy_policy_url: str
     terms_url: str
     text_types: list[str]
+    # Where subscribers get help (the HELP reply): the person's email, or the
+    # company contact's.
+    contact_email: str
 
 
 _OPT_OUT = " Reply STOP to opt out, HELP for help."
@@ -324,4 +325,7 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
         privacy_policy_url=privacy_policy_url,
         terms_url=terms_url,
         text_types=picked(fields.get("text_types")),
+        contact_email=(
+            fields.get("email" if subject_type == "person" else "rep_email") or ""
+        ).strip(),
     )

@@ -102,7 +102,11 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
         draft.refs["brand_id"] == "B1" and draft.refs["messaging_profile_id"] == "MP1"
     )
     assert draft.refs["subject_type"] == "business"
-    assert "Acme" not in repr({k: v for k, v in draft.refs.items() if k != "campaign"})
+    # Personal data stays in the campaign snapshot and the sender name.
+    assert draft.refs["subject_name"] == "Acme Inc"
+    assert "Acme" not in repr(
+        {k: v for k, v in draft.refs.items() if k not in ("campaign", "subject_name")}
+    )
     method, path, body = calls[0]
     assert (method, path) == ("POST", "/v2/10dlc/brand")
     assert body["entityType"] == "PRIVATE_PROFIT" and body["ein"] == "123456789"
@@ -189,9 +193,12 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
 def test_campaign_replies_open_with_the_brand_name() -> None:
     from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
 
-    replies = _campaign_replies({"displayName": "Acme Dental"})
+    refs = {"campaign": {"contact_email": "help@acme.example"}}
+    replies = _campaign_replies({"displayName": "Acme Dental"}, refs)
     assert replies == {
-        "helpMessage": "Acme Dental: Reply STOP to opt out. For help contact hi@hail.so.",
+        "helpMessage": (
+            "Acme Dental: Reply STOP to opt out. For help contact help@acme.example."
+        ),
         "optinMessage": (
             "Acme Dental: You are opted in. Reply STOP to opt out, HELP for help."
         ),
@@ -200,7 +207,7 @@ def test_campaign_replies_open_with_the_brand_name() -> None:
             "from this number."
         ),
     }
-    person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"})
+    person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"}, refs)
     assert person["optoutMessage"].startswith("Jo Doe: You are unsubscribed")
 
 
@@ -507,7 +514,10 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert refs["brand_id"] == "B1" and refs["otp_reference_id"] == "R1"
     assert refs["subject_type"] == "person" and refs["confirm_attempts"] == 0
     datetime.fromisoformat(refs["otp_sent_at"])
-    assert "Ada" not in repr({k: v for k, v in refs.items() if k != "campaign"})
+    assert refs["subject_name"] == "Ada Lovelace"
+    assert "Ada" not in repr(
+        {k: v for k, v in refs.items() if k not in ("campaign", "subject_name")}
+    )
     assert "5550100" not in repr(refs)
 
 
@@ -1101,3 +1111,186 @@ async def test_a_4xx_on_the_brand_call_bills_nothing() -> None:
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert draft.problems and draft.billed_refs == {}
+
+
+@pytest.mark.parametrize("blank", [None, "", "   "])
+def test_campaign_replies_fall_back_to_the_saved_name(blank) -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    brand = {"displayName": blank, "firstName": blank, "lastName": blank}
+    replies = _campaign_replies(brand, {"subject_name": " Acme  Inc "})
+    assert replies["optoutMessage"].startswith("Acme Inc: You are unsubscribed")
+    assert replies["helpMessage"].startswith("Acme Inc: Reply STOP")
+    assert replies["optinMessage"].startswith("Acme Inc: You are opted in")
+    # No name anywhere: no empty "": " prefix.
+    nameless = _campaign_replies(brand, {"subject_name": blank})
+    assert nameless["optoutMessage"].startswith("You are unsubscribed")
+
+
+def test_help_reply_of_an_old_snapshot_names_hail_support() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    replies = _campaign_replies({"displayName": "Acme"}, {"campaign": {}})
+    assert replies["helpMessage"] == (
+        "Acme: Reply STOP to opt out. For help contact hi@hail.so."
+    )
+
+
+def test_help_reply_fits_the_carrier_limit() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    email = "a" * 60 + "@" + "b" * 60 + ".example"
+    replies = _campaign_replies(
+        {"displayName": "N" * 200}, {"campaign": {"contact_email": email}}
+    )
+    help_text = replies["helpMessage"]
+    assert len(help_text) <= 255
+    assert help_text.startswith("NNN") and help_text.endswith(f"contact {email}.")
+    # An email that leaves no room for the name gives Hail's contact instead.
+    huge = "a" * 240 + "@acme.example"
+    help_text = _campaign_replies(
+        {"displayName": "Acme"}, {"campaign": {"contact_email": huge}}
+    )["helpMessage"]
+    assert help_text == "Acme: Reply STOP to opt out. For help contact hi@hail.so."
+
+
+def _replies_handler(calls, configs=(), fail=False):
+    """Telnyx for a verified brand: files the campaign, serves and records
+    the messaging profile's auto-replies."""
+
+    def handler(req):
+        body = json.loads(req.content) if req.content else None
+        calls.append((req.method, req.url.path, body))
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"identityStatus": "VERIFIED", "displayName": "Acme"}
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            return httpx.Response(200, json={"campaignId": "C1"})
+        if req.url.path.endswith("/10dlc/campaign/C1"):
+            return httpx.Response(200, json={"campaignStatus": "TCR_ACCEPTED"})
+        if "/autoresp_configs" in req.url.path:
+            if fail:
+                return httpx.Response(500)
+            if req.method == "GET":
+                return httpx.Response(200, json={"data": list(configs)})
+            return httpx.Response(200, json={"data": {"id": "new"}})
+        return httpx.Response(404)
+
+    return handler
+
+
+def _filing_refs():
+    return {
+        "brand_id": "B1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "subject_name": "Acme Inc",
+        "campaign": {
+            "use_case": "MIXED",
+            "description": "d" * 40,
+            "message_flow": "f" * 40,
+            "samples": ["s" * 20, "t" * 20],
+            "has_links": False,
+            "contact_email": "help@acme.example",
+        },
+    }
+
+
+async def test_status_sets_the_profile_auto_replies_to_the_filed_texts() -> None:
+    calls = []
+    p = _provider(_replies_handler(calls))
+    refs = _filing_refs()
+    assert (await p.status(refs)).state == "pending"
+    filed = next(b for m, path, b in calls if path.endswith("/campaignBuilder"))
+    sent = {
+        b["op"]: b
+        for m, path, b in calls
+        if m == "POST" and path == "/v2/messaging_profiles/MP1/autoresp_configs"
+    }
+    assert sent["stop"]["resp_text"] == filed["optoutMessage"]
+    assert sent["info"]["resp_text"] == filed["helpMessage"]
+    assert filed["helpMessage"] == (
+        "Acme: Reply STOP to opt out. For help contact help@acme.example."
+    )
+    assert sent["stop"]["keywords"] == [
+        "STOP",
+        "STOPALL",
+        "UNSUBSCRIBE",
+        "CANCEL",
+        "END",
+        "QUIT",
+    ]
+    assert sent["info"]["keywords"] == ["HELP", "INFO"]
+    assert {b["country_code"] for b in sent.values()} == {"US"}
+    assert refs["replies_set"] is True and refs["replies"]["optoutMessage"] == (
+        filed["optoutMessage"]
+    )
+    # Set once: the next poll leaves the profile alone.
+    calls.clear()
+    assert (await p.status(refs)).state == "pending"
+    assert not any("/autoresp_configs" in path for _, path, _ in calls)
+
+
+async def test_status_updates_auto_replies_the_profile_already_has() -> None:
+    calls = []
+    configs = [
+        {"id": "S1", "op": "stop", "country_code": "US"},
+        {"id": "X1", "op": "info", "country_code": "CA"},
+    ]
+    p = _provider(_replies_handler(calls, configs))
+    refs = _filing_refs()
+    await p.status(refs)
+    writes = [(m, path) for m, path, _ in calls if "/autoresp_configs" in path]
+    assert writes == [
+        ("GET", "/v2/messaging_profiles/MP1/autoresp_configs"),
+        ("PUT", "/v2/messaging_profiles/MP1/autoresp_configs/S1"),
+        ("POST", "/v2/messaging_profiles/MP1/autoresp_configs"),
+    ]
+
+
+async def test_status_keeps_working_when_the_auto_replies_fail() -> None:
+    calls = []
+    p = _provider(_replies_handler(calls, fail=True))
+    refs = _filing_refs()
+    assert (await p.status(refs)).state == "pending"
+    assert refs["campaign_id"] == "C1" and "replies_set" not in refs
+    # The next poll tries again, with the texts that were filed.
+    calls.clear()
+    assert (await p.status(refs)).state == "pending"
+    assert any("/autoresp_configs" in path for _, path, _ in calls)
+
+
+async def test_draft_without_a_profile_makes_the_organizations_profile() -> None:
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/messaging_profiles") and req.method == "GET":
+            return httpx.Response(200, json={"data": []})
+        if req.url.path.endswith("/messaging_profiles"):
+            return httpx.Response(200, json={"data": {"id": "MP9"}})
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/vetting"):
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    p = _provider(handler)
+    req = await p.requirements("US", "local", "business")
+    draft = await p.create_draft(
+        organization_id="org1",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=FIELDS,
+        address=ADDRESS,
+        documents={},
+        messaging_service_sid=None,
+    )
+    assert draft.problems == [] and draft.refs["messaging_profile_id"] == "MP9"
+    assert calls[:2] == [
+        ("GET", "/v2/messaging_profiles"),
+        ("POST", "/v2/messaging_profiles"),
+    ]
