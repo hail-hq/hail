@@ -361,8 +361,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def _request_vetting(self, refs) -> None:
         await self._api.request(
             "POST",
-            f"/10dlc/brand/{refs['brand_id']}/vetting",
-            json={"vettingProvider": "AEGIS", "vettingClass": "STANDARD"},
+            f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting",
+            # POST .../vetting does not exist (Telnyx answers 404 "URL not
+            # found"); the API reference documents externalVetting with an
+            # external vetting provider id (Aegis) and class.
+            json={"evpId": "AEGIS", "vettingClass": "STANDARD"},
         )
         refs["vetting_requested"] = True
 

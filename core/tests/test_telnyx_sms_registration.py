@@ -92,7 +92,7 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
             )
         if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
             return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
+        if req.url.path.endswith("/externalVetting"):
             return httpx.Response(200, json={})
         return httpx.Response(404)
 
@@ -113,8 +113,8 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
     assert body["country"] == "US" and body["state"] == "TX"
     assert body["website"] == "https://acme.example"
     assert calls[1][:2] == ("GET", "/v2/10dlc/brand/B1")
-    assert calls[2][:2] == ("POST", "/v2/10dlc/brand/B1/vetting")
-    assert calls[2][2] == {"vettingProvider": "AEGIS", "vettingClass": "STANDARD"}
+    assert calls[2][:2] == ("POST", "/v2/10dlc/brand/B1/externalVetting")
+    assert calls[2][2] == {"evpId": "AEGIS", "vettingClass": "STANDARD"}
     assert draft.refs["vetting_requested"] is True
 
 
@@ -318,7 +318,7 @@ async def test_4xx_gives_neutral_problem_and_cleans_up() -> None:
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET":
             return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
+        if req.url.path.endswith("/externalVetting"):
             return httpx.Response(
                 422,
                 json={"errors": [{"detail": "Telnyx says the EIN 123456789 is bad"}]},
@@ -787,7 +787,7 @@ async def test_status_asks_for_vetting_once_if_the_draft_could_not() -> None:
     }
     assert (await p.status(refs)).state == "pending"
     assert (await p.status(refs)).state == "pending"
-    assert posted == ["/v2/10dlc/brand/B1/vetting"]
+    assert posted == ["/v2/10dlc/brand/B1/externalVetting"]
     assert refs["vetting_requested"] is True
 
 
@@ -1010,7 +1010,7 @@ async def test_a_failure_after_the_brand_reports_it_billed() -> None:
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET":
             return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
+        if req.url.path.endswith("/externalVetting"):
             return httpx.Response(400, json={"errors": [{"code": "10015"}]})
         return httpx.Response(204)
 
@@ -1019,7 +1019,7 @@ async def test_a_failure_after_the_brand_reports_it_billed() -> None:
 
 
 def _outage_after_the_brand(step: str, failure, calls: list):
-    """Telnyx registers the brand, then ``step`` (``/vetting`` or
+    """Telnyx registers the brand, then ``step`` (``/externalVetting`` or
     ``/smsOtp``) fails with ``failure`` (a status code or an exception)
     until the test clears it."""
     state = {"failure": failure}
@@ -1053,7 +1053,7 @@ async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> N
     """A retry would file and bill a new brand: keep this one, and the
     background pass asks for vetting."""
     calls: list = []
-    p, state = _outage_after_the_brand("/vetting", failure, calls)
+    p, state = _outage_after_the_brand("/externalVetting", failure, calls)
     draft = await _draft(p)
     assert draft.problems == [] and draft.billed_refs == {}
     assert draft.refs["brand_id"] == "B1"
@@ -1062,7 +1062,7 @@ async def test_an_outage_after_the_brand_keeps_the_business_filing(failure) -> N
     assert not any(m == "DELETE" for m, _ in calls)
     state["failure"] = None
     assert (await p.status(draft.refs)).state == "pending"
-    assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/vetting")
+    assert calls[-1] == ("POST", "/v2/10dlc/brand/B1/externalVetting")
     assert draft.refs["vetting_requested"] is True
 
 
@@ -1088,7 +1088,7 @@ async def test_an_odd_answer_after_the_brand_keeps_the_filing() -> None:
     """Any failure after Telnyx made the brand, not only an HTTP error,
     keeps the filing: the brand is billed and never deleted."""
     calls: list = []
-    p, _ = _outage_after_the_brand("/vetting", None, calls)
+    p, _ = _outage_after_the_brand("/externalVetting", None, calls)
 
     async def broken(refs):
         raise AttributeError("odd body")
@@ -1108,11 +1108,11 @@ def _vetting_retry(listed, post_status=200, post_errors=None):
 
     def handler(req: httpx.Request):
         calls.append((req.method, req.url.path))
-        if req.url.path.endswith("/externalVetting"):
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
             if isinstance(listed, int):
                 return httpx.Response(listed)
             return httpx.Response(200, json=listed)
-        if req.method == "POST" and req.url.path.endswith("/vetting"):
+        if req.method == "POST" and req.url.path.endswith("/externalVetting"):
             return httpx.Response(post_status, json={"errors": post_errors or []})
         return httpx.Response(
             200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
@@ -1133,7 +1133,7 @@ async def test_a_vetting_telnyx_already_has_is_not_asked_again() -> None:
     p, refs, calls = _vetting_retry([{"evpId": "AEGIS", "vettingClass": "STANDARD"}])
     assert (await p.status(refs)).state == "pending"
     assert ("GET", "/v2/10dlc/brand/B1/externalVetting") in calls
-    assert ("POST", "/v2/10dlc/brand/B1/vetting") not in calls
+    assert ("POST", "/v2/10dlc/brand/B1/externalVetting") not in calls
     assert refs["vetting_requested"] is True
 
 
@@ -1141,7 +1141,7 @@ async def test_a_vetting_telnyx_already_has_is_not_asked_again() -> None:
 async def test_no_vetting_listed_asks_for_one(listed) -> None:
     p, refs, calls = _vetting_retry(listed)
     assert (await p.status(refs)).state == "pending"
-    assert calls.count(("POST", "/v2/10dlc/brand/B1/vetting")) == 1
+    assert calls.count(("POST", "/v2/10dlc/brand/B1/externalVetting")) == 1
     assert refs["vetting_requested"] is True
 
 
@@ -1156,7 +1156,7 @@ async def test_a_failed_vetting_list_asks_on_the_next_pass() -> None:
     p, refs, calls = _vetting_retry(503)
     with pytest.raises(VerificationProviderError):
         await p.status(refs)
-    assert ("POST", "/v2/10dlc/brand/B1/vetting") not in calls
+    assert ("POST", "/v2/10dlc/brand/B1/externalVetting") not in calls
     assert refs["vetting_requested"] is False
 
 
@@ -1355,7 +1355,7 @@ async def test_draft_without_a_profile_makes_the_organizations_profile() -> None
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
             return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
+        if req.url.path.endswith("/externalVetting"):
             return httpx.Response(200, json={})
         return httpx.Response(404)
 
