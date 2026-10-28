@@ -183,8 +183,8 @@ async def test_silent_pickup_without_transcriber_is_silent(monkeypatch) -> None:
 
 
 async def test_silent_pickup_verdict_is_silent(monkeypatch) -> None:
-    """Nobody spoke: a mailbox that records with no greeting (calls 65c95d12
-    and b4dd5af6). The call is not connected."""
+    """Nobody spoke. Not a machine verdict: the intro and reply check decide,
+    since a person's phone can send no sound for seconds after answering."""
     monkeypatch.setattr(handover_screen, "_build_stt", lambda _cfgs: _stt("x"))
     llm = AsyncMock(spec=handover_screen.LLM)
     monkeypatch.setattr(
@@ -198,7 +198,7 @@ async def test_silent_pickup_verdict_is_silent(monkeypatch) -> None:
     verdict = await handover_screen.screen_handover_pickup(
         object(), "human-x", session  # type: ignore[arg-type]
     )
-    assert verdict == "silent" and verdict in handover_screen.NOT_A_PERSON
+    assert verdict == "silent" and verdict not in handover_screen.NOT_A_PERSON
 
 
 def test_no_speech_limit_is_five_seconds() -> None:

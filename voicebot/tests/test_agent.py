@@ -2213,15 +2213,13 @@ def _screen(verdict):
 
 
 @pytest.mark.parametrize(
-    "verdict", ["machine-vm", "machine-unavailable", "machine-ivr", "silent"]
+    "verdict", ["machine-vm", "machine-unavailable", "machine-ivr"]
 )
 async def test_bridge_voicemail_drops_leg_without_intro(verdict) -> None:
     """Call 83119e48: a French mobile's voicemail picked up after 24 s and
-    the agent introduced the caller to it. Calls 65c95d12 and b4dd5af6: a
-    mailbox answered with no sound at all. A machine or silent pickup is
-    now no_answer:
-    the leg is dropped, nothing is said, no answer is reported, and the
-    pending time limit stays."""
+    the agent introduced the caller to it. A machine pickup is now
+    no_answer: the leg is dropped, nothing is said, no answer is reported,
+    and the pending time limit stays."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     soft_cap = asyncio.create_task(asyncio.sleep(3600))
@@ -2373,6 +2371,31 @@ async def test_bridge_silent_after_intro_gives_the_caller_back() -> None:
     assert state["soft_cap_task"] is soft_cap and not soft_cap.done()
     soft_cap.cancel()
     await asyncio.gather(soft_cap, return_exceptions=True)
+
+
+@pytest.mark.parametrize("replied", [True, False])
+async def test_bridge_silent_pickup_gets_the_intro(replied) -> None:
+    """A French mobile sent no sound for 7 s after answering,
+    then the contact said "Allô" as the leg was dropped. A silent pickup now
+    hears the intro; the reply check connects a person and drops a mailbox
+    that never speaks."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    screen, _ = _screen("silent")
+    watch, seen = _watch(replied)
+    out = await make_agent_bridge(
+        ctx, session, CALL_ID, state, screen=screen, watch=watch  # type: ignore[arg-type]
+    )(BridgeRoute("+33600000000", "+1", "ST", None, "Rym", ""))
+    assert len(session.said) == 1 and seen == [f"human-{CALL_ID}"]
+    if replied:
+        assert out.outcome == "answered" and out.picked_up_by == "silent"
+        assert state["connected"] is True
+        ctx.api.room.remove_participant.assert_not_awaited()
+    else:
+        assert out.outcome == "no_answer" and out.picked_up_by == "no_reply"
+        assert state["connected"] is False
+        ctx.api.room.remove_participant.assert_awaited_once()
 
 
 @pytest.mark.parametrize("replied", [True, RuntimeError("vad down")])

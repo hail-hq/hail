@@ -36,14 +36,16 @@ from livekit.agents.voice import AgentSession
 logger = logging.getLogger("hailhq.voicebot")
 
 # Verdicts that mean no person took the call: voicemail, a full or missing
-# mailbox, a carrier announcement, call screening, or a pickup with no sound
-# at all (some mailboxes record without a greeting).
+# mailbox, a carrier announcement, or call screening. "silent" is not one:
+# some phones send no sound for several seconds after answering (a French
+# mobile spoke 7 s in), so a silent pickup hears the intro and the reply
+# check drops a mailbox that never speaks.
 NOT_A_PERSON: frozenset[str] = frozenset(
-    {"machine-vm", "machine-unavailable", "machine-ivr", "silent"}
+    {"machine-vm", "machine-unavailable", "machine-ivr"}
 )
 
-# A person says "Hello?" within a second or two. No speech by then: nobody
-# is there.
+# A person usually says "Hello?" within a second or two. No speech by then:
+# stop listening and say the intro.
 NO_SPEECH_SECONDS = 5.0
 # Silence after speech that ends the greeting. Longer than a pause inside a
 # recorded greeting ("Bonjour, ... vous êtes sur la messagerie de").

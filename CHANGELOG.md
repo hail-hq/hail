@@ -21,7 +21,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
 - Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
-- Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.
+- Handover: a contact who says nothing during or after the intro is hung up, so the caller is never left on a silent line. A phone that is silent for a few seconds after it answers still hears the intro. `call.transferred` now fires once the contact speaks.
 - Handover: the agent's intro to the contact now reads "Reason given: …", and the agent writes no extra reply after the two people are connected.
 
 ## [0.31.0] (2026-10-23)
