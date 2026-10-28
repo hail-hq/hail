@@ -163,6 +163,9 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["optoutKeywords"] == "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
     assert posted[0]["privacyPolicyLink"] == "https://acme.example/privacy"
     assert posted[0]["termsAndConditionsLink"] == "https://acme.example/terms"
+    # MIXED needs 2 or more sub use cases; Telnyx refuses with 400 without.
+    assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
+    assert posted[0]["termsAndConditions"] is True
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
@@ -589,6 +592,8 @@ async def test_status_marks_identity_verified_and_creates_campaign() -> None:
     assert st.state == "pending"
     assert refs["identity_verified"] is True and refs["campaign_id"] == "C1"
     assert posted[0]["usecase"] == "SOLE_PROPRIETOR"
+    # SOLE_PROPRIETOR needs 1 or more sub use cases.
+    assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
 
 
 def _unverified_handler(otp_posts: list):

@@ -48,6 +48,11 @@ _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 _OTP_RESEND_AFTER = timedelta(hours=24)
 _REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
+# Sub use cases filed with every campaign. SOLE_PROPRIETOR needs at least
+# 1 and MIXED at least 2 (GET /10dlc/enum/usecase); without them Telnyx
+# refuses the campaign with 400. The form does not ask, so Hail files the
+# two that fit service texts.
+_SUB_USECASES = ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
 # A campaign is approved once the mobile carriers accept it; TCR_ACCEPTED
 # alone is pending (the carriers have not reviewed it yet).
 _APPROVED = {"MNO_ACCEPTED", "MNO_PROVISIONED", "ACTIVE"}
@@ -365,6 +370,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     json={
                         "brandId": refs["brand_id"],
                         "usecase": text["use_case"],
+                        "subUsecases": _SUB_USECASES,
                         "description": text["description"],
                         "messageFlow": text["message_flow"],
                         "sample1": text["samples"][0],
@@ -381,6 +387,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "helpKeywords": _HELP,
                         "helpMessage": "Reply STOP to opt out. For help contact hi@hail.so.",
                         "optinMessage": "You are opted in. Reply STOP to opt out, HELP for help.",
+                        "termsAndConditions": True,
                         **_policy_links(text),
                     },
                 )
@@ -392,7 +399,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 logger.warning(
-                    "10DLC status failed: status=%s", exc.response.status_code
+                    "10DLC status failed: status=%s codes=%s",
+                    exc.response.status_code,
+                    _error_codes(exc.response),
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         status = (campaign.get("campaignStatus") or "").upper()
