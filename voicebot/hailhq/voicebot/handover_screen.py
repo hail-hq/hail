@@ -225,8 +225,8 @@ async def screen_handover_pickup(
 ) -> str | None:
     """Who answered the contact's leg: an AMD category, ``"silent"`` when
     nobody spoke within ``NO_SPEECH_SECONDS``, or None when the check could
-    not run. Any verdict outside ``NOT_A_PERSON`` connects the call, as
-    before this check existed."""
+    not run. Any verdict outside ``NOT_A_PERSON`` goes on to the intro and
+    the bridge's reply check."""
     if session.vad is None:
         logger.warning("handover pickup check unavailable (no VAD)")
         return None

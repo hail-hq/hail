@@ -2391,10 +2391,13 @@ async def test_bridge_silent_pickup_gets_the_intro(replied) -> None:
     if replied:
         assert out.outcome == "answered" and out.picked_up_by == "silent"
         assert state["connected"] is True
+        assert session.input.enabled == [False]
         ctx.api.room.remove_participant.assert_not_awaited()
     else:
         assert out.outcome == "no_answer" and out.picked_up_by == "no_reply"
-        assert state["connected"] is False
+        assert state["connected"] is False and state["human"] is None
+        assert session.input.enabled == [False, True]
+        assert session.output.enabled == [False, True]
         ctx.api.room.remove_participant.assert_awaited_once()
 
 
