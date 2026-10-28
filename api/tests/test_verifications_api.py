@@ -120,6 +120,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.attached: list[tuple[dict, str, str]] = []
         self.attach_error: Exception | None = None
         self.problems: list[Problem] = []
+        # True with problems: the carrier registered the brand, then refused it.
+        self.brand_billed = False
         # Set to "campaign_sid" (Twilio) or "campaign_id" (Telnyx): status()
         # then creates the campaign once, writes its id into refs in place
         # and reports pending, like the real plug-ins.
@@ -160,7 +162,9 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         if self.draft_delay:
             await asyncio.sleep(self.draft_delay)
         if self.problems:
-            return DraftResult(refs={}, problems=self.problems)
+            return DraftResult(
+                refs={}, problems=self.problems, brand_billed=self.brand_billed
+            )
         return DraftResult(
             refs={
                 "brand_sid": f"BN{len(self.drafts)}",
@@ -2088,6 +2092,46 @@ async def test_sms_registration_402_when_balance_too_low(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_brand_refused_after_it_was_registered_is_charged(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The carrier bills a brand it registered and then refused.
+    row = sms_registration_fees._load()["fake"]
+    monkeypatch.setitem(row["business"], "refused_brand_usd", "4.50")
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.brand_billed = True
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    assert await _balance(async_session, org_id) == 10_000 - 450
+    debit = (
+        await async_session.execute(
+            select(AccountCredit).where(
+                AccountCredit.ref == "sms_registration:refused_brand"
+            )
+        )
+    ).scalar_one()
+    assert debit.source == "sms_registration_fee" and debit.channel == "sms"
+    fees = await client.get("/verifications/sms-fees", headers=_auth(key))
+    assert fees.json()["business"]["refused_brand_cents"] == 450
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refusal_before_any_brand_is_free(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    row = sms_registration_fees._load()["fake"]
+    monkeypatch.setitem(row["business"], "refused_brand_usd", "4.50")
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="ein", message="Check the tax ID (EIN).")]
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    assert await _balance(async_session, org_id) == 10_000
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_sms_registration_rejected_brand_keeps_fee(
     client, org_and_key, sms_carrier, async_session, caplog
 ) -> None:
@@ -2153,8 +2197,18 @@ async def test_sms_requirements_endpoint(client, org_and_key, sms_carrier) -> No
 
 
 _FAKE_FEES = {
-    "person": {"filing_cents": 1950, "monthly_cents": 200, "minimum_months": 1},
-    "business": {"filing_cents": 6100, "monthly_cents": 1000, "minimum_months": 1},
+    "person": {
+        "filing_cents": 1950,
+        "monthly_cents": 200,
+        "refused_brand_cents": 0,
+        "minimum_months": 1,
+    },
+    "business": {
+        "filing_cents": 6100,
+        "monthly_cents": 1000,
+        "refused_brand_cents": 0,
+        "minimum_months": 1,
+    },
 }
 
 

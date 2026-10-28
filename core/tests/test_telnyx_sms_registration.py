@@ -693,7 +693,7 @@ async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
         return httpx.Response(204)
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-    assert draft.refs == {}
+    assert draft.refs == {} and draft.brand_billed is True
     by_field = {p.field: p for p in draft.problems}
     assert set(by_field) == {"mobile_phone_number", "email", "address.region"}
     assert "too many registrations" in by_field["mobile_phone_number"].message
@@ -856,3 +856,37 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
     assert [(p.field, p.message) for p in draft.problems] == [
         ("email", "The carrier did not accept this value.")
     ]
+
+
+async def test_a_4xx_before_any_brand_is_not_billed() -> None:
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(400, json={"errors": [{"code": "10015"}]})
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems and draft.brand_billed is False
+
+
+async def test_status_never_files_a_second_campaign() -> None:
+    """Each campaign sent for review costs $15. Once a campaign exists,
+    status only reads it, also after the carriers reject it."""
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(req.url.path)
+        if "/10dlc/campaign/" in req.url.path:
+            return httpx.Response(200, json={"campaignStatus": "MNO_REJECTED"})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    p = _provider(handler)
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "campaign_id": "C1",
+    }
+    assert (await p.status(refs)).state == "rejected"
+    assert (await p.status(refs)).state == "rejected"
+    assert posted == []

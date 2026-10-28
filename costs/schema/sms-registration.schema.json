@@ -29,6 +29,10 @@
         "brand_usd": { "$ref": "#/$defs/decimal" },
         "campaign_vetting_usd": { "$ref": "#/$defs/decimal" },
         "campaign_monthly_usd": { "$ref": "#/$defs/decimal" },
+        "refused_brand_usd": {
+          "description": "Charged when the carrier registers the brand and then refuses it at filing. Absent means 0.",
+          "$ref": "#/$defs/decimal"
+        },
         "minimum_months": {
           "description": "Monthly campaign fees the carrier bills at least, counted from approval, even when the registration is cancelled sooner. Absent means 1.",
           "type": "integer",

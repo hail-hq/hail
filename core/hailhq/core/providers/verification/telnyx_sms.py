@@ -185,7 +185,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             await self.discard(refs)
-            return DraftResult(refs={}, problems=problems)
+            # Telnyx registered the brand before it refused it.
+            return DraftResult(refs={}, problems=problems, brand_billed=True)
         return DraftResult(refs=refs)
 
     async def _build(self, refs, fields, address, subject_type) -> list[Problem]:

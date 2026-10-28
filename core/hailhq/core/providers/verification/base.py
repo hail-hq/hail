@@ -267,6 +267,9 @@ class DraftResult(BaseModel):
 
     refs: dict
     problems: list[Problem] = Field(default_factory=list)
+    # True when the carrier registered a brand and then refused it. The
+    # carrier bills the brand anyway, so Hail charges the customer for it.
+    brand_billed: bool = False
 
 
 class ProviderStatus(BaseModel):

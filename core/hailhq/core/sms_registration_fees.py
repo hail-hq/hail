@@ -34,6 +34,12 @@ def filing_fee_cents(provider: str, subject_type: str) -> int:
     return _cents(row["brand_usd"]) + _cents(row["campaign_vetting_usd"])
 
 
+def refused_brand_fee_cents(provider: str, subject_type: str) -> int:
+    """Charged when the carrier registers the brand and then refuses it at
+    filing: the carrier bills the brand anyway. 0 when the carrier lists none."""
+    return _cents(_load()[provider][subject_type].get("refused_brand_usd", "0"))
+
+
 def monthly_fee_cents(provider: str, subject_type: str) -> int:
     row = _load()[provider][subject_type]
     return _cents(row["campaign_monthly_usd"])

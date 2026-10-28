@@ -41,3 +41,12 @@ def test_unknown_provider_raises() -> None:
 
 def test_providers_lists_carriers() -> None:
     assert {"twilio", "telnyx"} <= set(fees.providers())
+
+
+def test_telnyx_bills_a_refused_brand() -> None:
+    for subject in ("person", "business"):
+        assert fees.refused_brand_fee_cents("telnyx", subject) == 450
+
+
+def test_a_carrier_without_a_refused_brand_fee_charges_nothing() -> None:
+    assert fees.refused_brand_fee_cents("twilio", "person") == 0

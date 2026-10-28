@@ -8711,6 +8711,13 @@ components:
           type: integer
           title: Monthly Cents
           description: Charged each month while approved.
+        refused_brand_cents:
+          type: integer
+          title: Refused Brand Cents
+          description:
+            Charged instead of the filing fee when the carrier refuses the
+            details after it registered them (it bills that part anyway). 0 when
+            nothing is charged for a refusal.
         minimum_months:
           type: integer
           title: Minimum Months
@@ -8721,6 +8728,7 @@ components:
       required:
         - filing_cents
         - monthly_cents
+        - refused_brand_cents
         - minimum_months
       title: SmsFee
     SmsFees:

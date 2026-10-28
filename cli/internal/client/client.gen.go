@@ -2991,6 +2991,9 @@ type SmsFee struct {
 
 	// MonthlyCents Charged each month while approved.
 	MonthlyCents int `json:"monthly_cents"`
+
+	// RefusedBrandCents Charged instead of the filing fee when the carrier refuses the details after it registered them (it bills that part anyway). 0 when nothing is charged for a refusal.
+	RefusedBrandCents int `json:"refused_brand_cents"`
 }
 
 // SmsFees defines model for SmsFees.

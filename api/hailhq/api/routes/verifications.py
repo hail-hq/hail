@@ -253,6 +253,29 @@ def _log_carrier_refusal(
         )
 
 
+async def _charge_refused_brand(
+    db: AsyncSession, principal: Principal, provider_name: str, subject_type: str
+) -> None:
+    """The carrier registered the customer's brand, then refused it. It
+    bills the brand anyway, so the customer pays that part of the filing
+    fee. The shared self-hosted key is not billed (as in number_orders)."""
+    cents = sms_registration_fees.refused_brand_fee_cents(provider_name, subject_type)
+    if not cents or principal.auth_kind == "shared":
+        return
+    db.add(
+        AccountCredit(
+            organization_id=principal.organization_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-cents,
+            qty=1,
+            ref="sms_registration:refused_brand",
+            source="sms_registration_fee",
+        )
+    )
+    await db.commit()
+
+
 def _problems_422(
     problems: list[Problem],
     organization_id: UUID,
@@ -1035,6 +1058,8 @@ async def create_verification(
             detail="carrier unavailable; try again later",
         ) from exc
     if draft.problems:
+        if draft.brand_billed and sub.purpose == "sms":
+            await _charge_refused_brand(db, principal, provider_name, sub.subject_type)
         raise _problems_422(draft.problems, principal.organization_id, provider_name)
 
     row = CarrierVerification(
@@ -1360,6 +1385,13 @@ class SmsFee(BaseModel):
         description="Charged once when the registration is filed."
     )
     monthly_cents: int = Field(description="Charged each month while approved.")
+    refused_brand_cents: int = Field(
+        description=(
+            "Charged instead of the filing fee when the carrier refuses the "
+            "details after it registered them (it bills that part anyway). "
+            "0 when nothing is charged for a refusal."
+        )
+    )
     minimum_months: int = Field(
         description=(
             "Monthly fees charged at least, counted from approval, even when "
@@ -1419,6 +1451,9 @@ async def get_sms_fees(
             subject: SmsFee(
                 filing_cents=sms_registration_fees.filing_fee_cents(carrier, subject),
                 monthly_cents=sms_registration_fees.monthly_fee_cents(carrier, subject),
+                refused_brand_cents=sms_registration_fees.refused_brand_fee_cents(
+                    carrier, subject
+                ),
                 minimum_months=sms_registration_fees.minimum_months(carrier, subject),
             )
             for subject in ("person", "business")
