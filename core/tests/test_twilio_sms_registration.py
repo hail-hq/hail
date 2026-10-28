@@ -82,6 +82,7 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.example/privacy",
     "terms_url": "https://acme.example/terms",
 }
@@ -764,3 +765,13 @@ async def test_status_marks_person_identity_verified() -> None:
     }
     assert (await _provider(r).status(refs)).state == "pending"
     assert refs["identity_verified"] is True and refs["campaign_sid"] == "QE1"
+
+
+def test_step_follows_the_filing() -> None:
+    p = _provider()
+    person = {"subject_type": "person"}
+    assert p.step(person) == "confirm_identity"
+    assert p.step({**person, "identity_verified": True}) == "filing"
+    assert p.step({"subject_type": "business", "campaign_sid": "QE1"}) == (
+        "carrier_review"
+    )

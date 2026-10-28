@@ -36,6 +36,7 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.example/privacy",
     "terms_url": "https://acme.example/terms",
 }
@@ -439,6 +440,7 @@ PERSON_FIELDS = {
     "sample_2": "Ada: thanks for booking. Reply STOP to opt out.",
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://ada.example/privacy",
     "terms_url": "https://ada.example/terms",
 }
@@ -861,3 +863,37 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
     assert [(p.field, p.message) for p in draft.problems] == [
         ("email", "The carrier did not accept this value.")
     ]
+
+
+async def test_status_files_the_picked_text_types() -> None:
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    p = _provider(handler)
+    campaign = {
+        "use_case": "MIXED",
+        "description": "d",
+        "message_flow": "f",
+        "samples": ["s" * 20, "t" * 20],
+        "has_links": False,
+        "text_types": ["2FA", "SECURITY_ALERT"],
+    }
+    refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
+    await p.status(refs)
+    assert posted[0]["subUsecases"] == ["2FA", "SECURITY_ALERT"]
+
+
+def test_step_follows_the_filing() -> None:
+    p = _provider(lambda req: httpx.Response(200, json={}))
+    person = {"subject_type": "person"}
+    assert p.step(person) == "confirm_identity"
+    assert p.step({**person, "identity_verified": True}) == "filing"
+    assert p.step({**person, "identity_verified": True, "campaign_id": "C1"}) == (
+        "carrier_review"
+    )
+    assert p.step({"subject_type": "business"}) == "filing"

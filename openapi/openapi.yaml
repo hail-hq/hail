@@ -7570,8 +7570,11 @@ components:
             - email
             - phone
             - url
+            - choices
           title: Kind
-          description: "Input kind: 'text', 'email', 'phone', or 'url'."
+          description:
+            "Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick
+            several of `options`; send their keys joined by commas)."
           default: text
         help:
           type: string
@@ -7601,6 +7604,18 @@ components:
           title: Required
           description: False when the field is optional.
           default: true
+        min_choices:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Min Choices
+          description: "For kind 'choices': the fewest options to pick."
+        max_choices:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Max Choices
+          description: "For kind 'choices': the most options to pick."
       type: object
       required:
         - name
@@ -9104,6 +9119,20 @@ components:
             must enter the code the carrier texted (POST /verifications/{id}/confirm),
             'reply' when you must answer the carrier's text, null when nothing
             is pending."
+        step:
+          anyOf:
+            - type: string
+              enum:
+                - confirm_identity
+                - filing
+                - carrier_review
+            - type: "null"
+          title: Step
+          description:
+            "For a US texting registration that is not yet approved or rejected:
+            'confirm_identity' while the person must confirm (see `confirmation`),
+            'filing' while Hail files the details with the carriers, 'carrier_review'
+            once the carriers are reviewing them (1 to 7 business days). Null otherwise."
       type: object
       required:
         - id

@@ -2732,3 +2732,13 @@ class VerificationResponse(BaseModel):
             "is pending."
         ),
     )
+    step: Literal["confirm_identity", "filing", "carrier_review"] | None = Field(
+        default=None,
+        description=(
+            "For a US texting registration that is not yet approved or "
+            "rejected: 'confirm_identity' while the person must confirm (see "
+            "`confirmation`), 'filing' while Hail files the details with the "
+            "carriers, 'carrier_review' once the carriers are reviewing them "
+            "(1 to 7 business days). Null otherwise."
+        ),
+    )

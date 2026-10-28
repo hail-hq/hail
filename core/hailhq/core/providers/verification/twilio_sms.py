@@ -394,6 +394,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return "reply"
         return None
 
+    def step(self, refs) -> str | None:
+        if self.confirmation(refs):
+            return "confirm_identity"
+        return "carrier_review" if refs.get("campaign_sid") else "filing"
+
     def _resend_otp_if_old(self, refs) -> None:
         """Send the person's confirmation code again when the last one is
         over a day old. Twilio texts the first code itself when the brand is

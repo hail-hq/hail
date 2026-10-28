@@ -48,10 +48,9 @@ _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 _OTP_RESEND_AFTER = timedelta(hours=24)
 _REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
-# Sub use cases filed with every campaign. SOLE_PROPRIETOR needs at least
-# 1 and MIXED at least 2 (GET /10dlc/enum/usecase); without them Telnyx
-# refuses the campaign with 400. The form does not ask, so Hail files the
-# two that fit service texts.
+# Sub use cases for a campaign filed before the form asked for them
+# (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
+# (GET /10dlc/enum/usecase); without them Telnyx refuses with 400.
 _SUB_USECASES = ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
 # A campaign is approved once the mobile carriers accept it; TCR_ACCEPTED
 # alone is pending (the carriers have not reviewed it yet).
@@ -328,6 +327,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from None
         return []
 
+    def step(self, refs) -> str | None:
+        if self.confirmation(refs):
+            return "confirm_identity"
+        return "carrier_review" if refs.get("campaign_id") else "filing"
+
     async def check(self, refs) -> list[Problem]:
         return []
 
@@ -370,7 +374,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     json={
                         "brandId": refs["brand_id"],
                         "usecase": text["use_case"],
-                        "subUsecases": _SUB_USECASES,
+                        "subUsecases": text.get("text_types") or _SUB_USECASES,
                         "description": text["description"],
                         "messageFlow": text["message_flow"],
                         "sample1": text["samples"][0],

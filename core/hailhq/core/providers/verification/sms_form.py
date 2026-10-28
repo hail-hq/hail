@@ -75,6 +75,43 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_phone", label="Contact person phone", kind="phone"),
     FieldSpec(name="rep_title", label="Contact person job title"),
 )
+# What the texts are about, as the carriers' sub use cases. A person (sole
+# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. Twilio files
+# no sub use cases; its plug-in ignores the answer.
+_TEXT_TYPES = (
+    FieldOption(key="CUSTOMER_CARE", label="Customer care and appointments"),
+    FieldOption(key="ACCOUNT_NOTIFICATION", label="Account notices and reminders"),
+    FieldOption(key="DELIVERY_NOTIFICATION", label="Delivery and shipping updates"),
+    FieldOption(key="2FA", label="Login and verification codes"),
+    FieldOption(key="SECURITY_ALERT", label="Security alerts"),
+    FieldOption(key="FRAUD_ALERT", label="Fraud alerts"),
+    FieldOption(key="MARKETING", label="Marketing and promotions"),
+    FieldOption(key="POLLING_VOTING", label="Polls and surveys"),
+    FieldOption(key="HIGHER_EDUCATION", label="School and college updates"),
+    FieldOption(
+        key="PUBLIC_SERVICE_ANNOUNCEMENT", label="Public service announcements"
+    ),
+)
+_TEXT_TYPES_MIN = {"person": 1, "business": 2}
+_TEXT_TYPES_MAX = 5
+
+
+def _text_types_field(subject_type: SubjectType) -> FieldSpec:
+    least = _TEXT_TYPES_MIN[subject_type]
+    return FieldSpec(
+        name="text_types",
+        label="What kinds of texts do you send?",
+        kind="choices",
+        options=_TEXT_TYPES,
+        min_choices=least,
+        max_choices=_TEXT_TYPES_MAX,
+        help=(
+            f"Pick {least} to {_TEXT_TYPES_MAX}. Reviewers check them against "
+            "your sample messages."
+        ),
+    )
+
+
 _PERSON_FIELDS = (
     FieldSpec(name="first_name", label="First name"),
     FieldSpec(name="last_name", label="Last name"),
@@ -130,7 +167,12 @@ _CAMPAIGN_FIELDS = (
 
 def _fields_for(subject_type: SubjectType) -> tuple[FieldSpec, ...]:
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
-    return subject + _CAMPAIGN_FIELDS
+    return (
+        subject
+        + _CAMPAIGN_FIELDS[:1]
+        + (_text_types_field(subject_type),)
+        + _CAMPAIGN_FIELDS[1:]
+    )
 
 
 def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
@@ -170,6 +212,10 @@ def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Pr
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
+        elif spec.kind == "choices":
+            problem = _choices_problem(spec, value)
+            if problem:
+                problems.append(Problem(field=spec.name, message=problem))
         elif spec.kind == "url" and len(value) > _URL_MAX:
             problems.append(Problem(field=spec.name, message="Use a shorter link."))
         elif spec.kind == "url" and not _is_http_url(value):
@@ -180,6 +226,24 @@ def field_problems(fields: dict[str, str], subject_type: SubjectType) -> list[Pr
                 )
             )
     return problems
+
+
+def picked(value: str | None) -> list[str]:
+    """The option keys of a 'choices' value, in order, without repeats."""
+    keys = [k.strip() for k in (value or "").split(",")]
+    return list(dict.fromkeys(k for k in keys if k))
+
+
+def _choices_problem(spec: FieldSpec, value: str) -> str | None:
+    keys = picked(value)
+    allowed = {o.key for o in spec.options or ()}
+    if any(k not in allowed for k in keys):
+        return "Pick from the list."
+    if spec.min_choices and len(keys) < spec.min_choices:
+        return f"Pick at least {spec.min_choices}."
+    if spec.max_choices and len(keys) > spec.max_choices:
+        return f"Pick at most {spec.max_choices}."
+    return None
 
 
 def _is_http_url(value: str) -> bool:
@@ -196,6 +260,7 @@ class CampaignText:
     has_links: bool
     privacy_policy_url: str
     terms_url: str
+    text_types: list[str]
 
 
 _OPT_OUT = " Reply STOP to opt out, HELP for help."
@@ -243,4 +308,5 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
         has_links=fields["has_links"].upper() == "YES",
         privacy_policy_url=privacy_policy_url,
         terms_url=terms_url,
+        text_types=picked(fields.get("text_types")),
     )

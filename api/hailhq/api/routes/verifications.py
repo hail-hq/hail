@@ -519,14 +519,32 @@ def _confirmation(row: CarrierVerification, registry: Registry) -> str | None:
     return provider.confirmation(row.provider_refs or {})
 
 
+def _step(row: CarrierVerification, registry: Registry) -> str | None:
+    """Where an SMS registration still in progress is. A draft not yet
+    submitted is still being filed."""
+    if row.purpose != "sms":
+        return None
+    if row.state == "awaiting_review":
+        return "filing"
+    if row.state not in _POLLED_STATES:
+        return None
+    provider = registry(row.provider, "sms")
+    if not isinstance(provider, SmsRegistrationProvider):
+        return None
+    return provider.step(row.provider_refs or {})
+
+
 def _out(
     row: CarrierVerification,
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """The response for a row, with ``confirmation`` filled in."""
+    """The response for a row, with ``confirmation`` and ``step`` filled in."""
     return model.model_validate(row).model_copy(
-        update={"confirmation": _confirmation(row, registry)}
+        update={
+            "confirmation": _confirmation(row, registry),
+            "step": _step(row, registry),
+        }
     )
 
 
