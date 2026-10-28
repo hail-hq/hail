@@ -288,6 +288,7 @@ async def test_status_approved_and_rejected_from_campaign() -> None:
         "campaign_id": "C1",
         "subject_type": "business",
         "campaign": {},
+        "replies_set": True,
     }
     assert (await p.status(refs)).state == "approved"
     state.update({"campaignStatus": "TCR_PENDING"})
@@ -468,6 +469,7 @@ async def test_campaign_status_mapping(campaign_status, state) -> None:
         "campaign_id": "C1",
         "subject_type": "business",
         "campaign": {},
+        "replies_set": True,
     }
     assert (await _provider(handler).status(refs)).state == state
 
@@ -1092,8 +1094,15 @@ def test_help_reply_fits_the_carrier_limit() -> None:
         {"displayName": "N" * 200}, {"campaign": {"contact_email": email}}
     )
     help_text = replies["helpMessage"]
-    assert len(help_text) <= 255
-    assert help_text.startswith("NNN") and help_text.endswith(f"contact {email}.")
+    # The full name and that email do not fit: Hail's contact, full name.
+    assert help_text == (
+        "N" * 200 + ": Reply STOP to opt out. For help contact hi@hail.so."
+    )
+    # A long email that fits next to the name is kept.
+    help_text = _campaign_replies(
+        {"displayName": "Acme"}, {"campaign": {"contact_email": email}}
+    )["helpMessage"]
+    assert help_text.endswith(f"contact {email}.") and len(help_text) <= 255
     # An email that leaves no room for the name gives Hail's contact instead.
     huge = "a" * 240 + "@acme.example"
     help_text = _campaign_replies(
@@ -1182,18 +1191,23 @@ async def test_status_sets_the_profile_auto_replies_to_the_filed_texts() -> None
 
 async def test_status_updates_auto_replies_the_profile_already_has() -> None:
     calls = []
+    # The list is asked for US only; items need not repeat country_code.
     configs = [
-        {"id": "S1", "op": "stop", "country_code": "US"},
-        {"id": "X1", "op": "info", "country_code": "CA"},
+        {"id": "S1", "op": "stop"},
+        {"id": "S2", "op": "stop", "country_code": "US"},
+        {"id": "I1", "op": "info", "country_code": "CA"},
     ]
     p = _provider(_replies_handler(calls, configs))
     refs = _filing_refs()
     await p.status(refs)
     writes = [(m, path) for m, path, _ in calls if "/autoresp_configs" in path]
+    get = next(c for c in calls if c[0] == "GET" and "/autoresp_configs" in c[1])
+    assert get[1] == "/v2/messaging_profiles/MP1/autoresp_configs"
+    # Matched on op, never a second config for an op that exists.
     assert writes == [
         ("GET", "/v2/messaging_profiles/MP1/autoresp_configs"),
         ("PUT", "/v2/messaging_profiles/MP1/autoresp_configs/S1"),
-        ("POST", "/v2/messaging_profiles/MP1/autoresp_configs"),
+        ("PUT", "/v2/messaging_profiles/MP1/autoresp_configs/I1"),
     ]
 
 
@@ -1242,3 +1256,322 @@ async def test_draft_without_a_profile_makes_the_organizations_profile() -> None
         ("GET", "/v2/messaging_profiles"),
         ("POST", "/v2/messaging_profiles"),
     ]
+
+
+def _approved_handler(calls, *, replies_fail=False, record=None, profiles=None):
+    """Telnyx for a campaign the carriers approved. ``record`` adds fields
+    to the campaign read; ``profiles`` serves GET /messaging_profiles."""
+
+    def handler(req):
+        body = json.loads(req.content) if req.content else None
+        calls.append((req.method, req.url.path, body))
+        path = req.url.path
+        if path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"identityStatus": "VERIFIED", "displayName": "Acme"}
+            )
+        if path.endswith("/10dlc/campaign/C1"):
+            return httpx.Response(
+                200, json={"campaignStatus": "MNO_ACCEPTED", **(record or {})}
+            )
+        if "/autoresp_configs" in path:
+            if replies_fail:
+                return httpx.Response(500)
+            if req.method == "GET":
+                return httpx.Response(200, json={"data": []})
+            return httpx.Response(200, json={"data": {"id": "new"}})
+        if path.endswith("/messaging_profiles"):
+            if req.method == "GET":
+                return httpx.Response(200, json={"data": list(profiles or [])})
+            return httpx.Response(200, json={"data": {"id": "MP7"}})
+        return httpx.Response(404)
+
+    return handler
+
+
+_FILED = {
+    "helpMessage": "Acme: Reply STOP to opt out. For help contact help@acme.example.",
+    "optinMessage": "Acme: You are opted in. Reply STOP to opt out, HELP for help.",
+    "optoutMessage": (
+        "Acme: You are unsubscribed and will get no more messages from this number."
+    ),
+}
+
+
+def _campaign_refs(**extra):
+    return {
+        "brand_id": "B1",
+        "campaign_id": "C1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "campaign": {"contact_email": "help@acme.example"},
+        "replies": dict(_FILED),
+        **extra,
+    }
+
+
+def _reply_texts(calls):
+    return {
+        b["op"]: b["resp_text"]
+        for m, path, b in calls
+        if m in ("POST", "PUT") and "/autoresp_configs" in path
+    }
+
+
+async def test_approval_waits_until_the_auto_replies_are_set() -> None:
+    """An approved row is not polled again, so approval waits for the
+    replies: a failure on that poll is tried again on the next."""
+    calls = []
+    refs = _campaign_refs()
+    failing = _provider(_approved_handler(calls, replies_fail=True))
+    assert (await failing.status(refs)).state == "pending"
+    assert "replies_set" not in refs and refs["replies_waits"] == 1
+    working = _provider(_approved_handler(calls))
+    assert (await working.status(refs)).state == "approved"
+    assert refs["replies_set"] is True
+    assert _reply_texts(calls) == {
+        "stop": _FILED["optoutMessage"],
+        "info": _FILED["helpMessage"],
+    }
+
+
+async def test_approval_goes_through_after_the_last_wait(caplog) -> None:
+    """A Telnyx call that keeps failing never blocks approval for good."""
+    p = _provider(_approved_handler([], replies_fail=True))
+    refs = _campaign_refs()
+    for _ in range(telnyx_sms._REPLY_WAITS):
+        assert (await p.status(refs)).state == "pending"
+    with caplog.at_level("ERROR"):
+        assert (await p.status(refs)).state == "approved"
+    assert "replies_set" not in refs
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert errors and "campaign=C1" in errors[0].getMessage()
+
+
+async def test_approved_at_once_when_the_replies_are_set() -> None:
+    calls = []
+    refs = _campaign_refs(replies_set=True)
+    assert (await _provider(_approved_handler(calls)).status(refs)).state == (
+        "approved"
+    )
+    assert not any("/autoresp_configs" in path for _, path, _ in calls)
+    assert "replies_waits" not in refs
+
+
+@pytest.mark.parametrize(
+    "replies",
+    [
+        {"helpMessage": "Acme: help"},  # a key missing
+        {"helpMessage": "h", "optoutMessage": None},
+        "not a dict",
+        ["a", "b"],
+    ],
+)
+async def test_odd_saved_replies_are_logged_not_raised(replies, caplog) -> None:
+    calls = []
+    p = _provider(_approved_handler(calls))
+    refs = _campaign_refs(replies=replies)
+    with caplog.at_level("WARNING"):
+        await p._set_replies(refs)
+    assert "replies_set" not in refs
+    assert not any("/autoresp_configs" in path for _, path, _ in calls)
+    assert "10DLC auto-replies not set" in caplog.text
+
+
+async def test_odd_saved_replies_are_replaced_by_the_campaign_texts() -> None:
+    """A poll never fails on odd saved texts: it takes Telnyx's."""
+    calls = []
+    p = _provider(_approved_handler(calls, record=_FILED))
+    refs = _campaign_refs(replies={"helpMessage": "x"})
+    assert (await p.status(refs)).state == "approved"
+    assert refs["replies"] == _FILED and refs["replies_set"] is True
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    [
+        # Two profiles with the org's name: ensure_messaging_service raises
+        # ValueError.
+        [{"id": "P1", "name": "hail-org1"}, {"id": "P2", "name": "hail-org1"}],
+        None,  # Telnyx answers 503
+    ],
+)
+async def test_draft_files_even_when_the_profile_fails(profiles, caplog) -> None:
+    """A profile error is logged, and the brand is filed without one."""
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/messaging_profiles"):
+            if profiles is None:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"data": profiles})
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/vetting"):
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    p = _provider(handler)
+    req = await p.requirements("US", "local", "business")
+    with caplog.at_level("WARNING"):
+        draft = await p.create_draft(
+            organization_id="org1",
+            contact_email="ops@hail.so",
+            requirements=req,
+            fields=FIELDS,
+            address=ADDRESS,
+            documents={},
+            messaging_service_sid=None,
+        )
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert draft.refs["messaging_profile_id"] is None
+    assert draft.refs["organization_id"] == "org1"
+    assert ("POST", "/v2/10dlc/brand") in calls
+    assert "10DLC messaging profile not ready at filing" in caplog.text
+
+
+async def test_replies_find_the_org_profile_when_the_filing_has_none() -> None:
+    calls = []
+    p = _provider(_approved_handler(calls))
+    refs = _campaign_refs(messaging_profile_id=None, organization_id="org1")
+    assert (await p.status(refs)).state == "approved"
+    assert refs["messaging_profile_id"] == "MP7" and refs["replies_set"] is True
+    profile_calls = [(m, path) for m, path, _ in calls if "messaging_profiles" in path]
+    assert profile_calls[:2] == [
+        ("GET", "/v2/messaging_profiles"),
+        ("POST", "/v2/messaging_profiles"),
+    ]
+    assert ("POST", "/v2/messaging_profiles/MP7/autoresp_configs") in profile_calls
+
+
+async def test_replies_skip_an_old_filing_with_no_profile_or_org(caplog) -> None:
+    calls = []
+    p = _provider(_approved_handler(calls))
+    refs = _campaign_refs(messaging_profile_id=None)
+    with caplog.at_level("WARNING"):
+        assert (await p.status(refs)).state == "pending"
+    assert not any("messaging_profiles" in path for _, path, _ in calls)
+    assert "no messaging profile or organization saved" in caplog.text
+
+
+async def test_adopted_campaign_keeps_the_texts_telnyx_has() -> None:
+    """A campaign filed by a lost call: its texts come from Telnyx's
+    record, and the auto-replies are those texts."""
+    calls = []
+    record = {
+        "campaignId": "C9",
+        "helpMessage": "Acme Co: For help write to us.",
+        "optinMessage": "Acme Co: opted in.",
+        "optoutMessage": "Acme Co: unsubscribed.",
+    }
+
+    def handler(req):
+        body = json.loads(req.content) if req.content else None
+        calls.append((req.method, req.url.path, body))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/campaign"):
+            return httpx.Response(200, json={"records": [record]})
+        if "/autoresp_configs" in req.url.path:
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "campaign": {},
+    }
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert refs["campaign_id"] == "C9"
+    assert refs["replies"] == {
+        "helpMessage": "Acme Co: For help write to us.",
+        "optinMessage": "Acme Co: opted in.",
+        "optoutMessage": "Acme Co: unsubscribed.",
+    }
+    assert _reply_texts(calls) == {
+        "stop": "Acme Co: unsubscribed.",
+        "info": "Acme Co: For help write to us.",
+    }
+    assert not any(path.endswith("/campaignBuilder") for _, path, _ in calls)
+
+
+async def test_adopted_campaign_without_texts_builds_them() -> None:
+    def handler(req):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/campaign"):
+            return httpx.Response(200, json={"records": [{"campaignId": "C9"}]})
+        if "/autoresp_configs" in req.url.path:
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(
+            200, json={"identityStatus": "VERIFIED", "displayName": "Acme"}
+        )
+
+    refs = {
+        "brand_id": "B1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "campaign": {"contact_email": "help@acme.example"},
+    }
+    await _provider(handler).status(refs)
+    assert refs["replies"] == _FILED
+
+
+async def test_an_old_row_takes_its_texts_once_from_the_campaign() -> None:
+    """A row filed before the texts were kept takes Telnyx's, keeps them,
+    and later polls use the kept ones."""
+    calls = []
+    record = {"helpMessage": "Old: help.", "optoutMessage": "Old: bye."}
+    p = _provider(_approved_handler(calls, replies_fail=True, record=record))
+    refs = _campaign_refs()
+    del refs["replies"]
+    await p.status(refs)
+    kept = refs["replies"]
+    assert kept["helpMessage"] == "Old: help." and kept["optoutMessage"] == "Old: bye."
+    # optinMessage missing from the record: built as Hail files it.
+    assert kept["optinMessage"] == _FILED["optinMessage"]
+    calls.clear()
+    p = _provider(
+        _approved_handler(calls, record={"helpMessage": "Changed.", **record})
+    )
+    await p.status(refs)
+    assert refs["replies"] is kept and kept["helpMessage"] == "Old: help."
+    assert _reply_texts(calls)["info"] == "Old: help."
+
+
+def test_every_reply_caps_the_name() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    words = " ".join(["Acme"] * 80)  # 399 characters
+    replies = _campaign_replies({"displayName": words}, {"campaign": {}})
+    for key, text in replies.items():
+        assert len(text) <= 255, key
+        name, _ = text.split(": ", 1)
+        # Cut at a word boundary.
+        assert name.split(" ")[-1] == "Acme", key
+    assert replies["optoutMessage"].endswith(
+        ": You are unsubscribed and will get no more messages from this number."
+    )
+    assert replies["optinMessage"].endswith(
+        ": You are opted in. Reply STOP to opt out, HELP for help."
+    )
+
+
+def test_a_name_with_no_room_for_a_word_boundary_is_cut_mid_word() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _named
+
+    text = "t" * 200
+    name = "Ab " + "c" * 100  # the only space leaves 2 characters
+    out = _named(name, text)
+    assert len(out) == 255 and out.startswith("Ab " + "c" * 50)
+
+
+def test_a_long_contact_email_gives_hail_support_not_a_cut_name() -> None:
+    from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
+
+    name = "Acme Dental Care of Austin"
+    email = "a" * 190 + "@acme.example"  # fits alone, not with the name
+    help_text = _campaign_replies(
+        {"displayName": name}, {"campaign": {"contact_email": email}}
+    )["helpMessage"]
+    assert help_text == (f"{name}: Reply STOP to opt out. For help contact hi@hail.so.")
