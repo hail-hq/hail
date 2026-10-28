@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
-# The reply a person gets after they text STOP.
+# The STOP confirmation declared in the campaign filing. Hail's own STOP
+# reply (settings.hail_sms_stop_reply) is separate and off by default.
 _OPT_OUT_MESSAGE = (
     "You are unsubscribed and will get no more messages from this number."
 )
@@ -184,7 +185,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC draft failed: status=%s errors=%s",
                     code,
-                    _error_codes(exc.response),
+                    _error_log(exc.response),
                 )
                 if 400 <= code < 500:
                     return DraftResult(
@@ -427,7 +428,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC status failed: status=%s errors=%s",
                     exc.response.status_code,
-                    _error_codes(exc.response),
+                    _error_log(exc.response),
                 )
             raise VerificationProviderError("Telnyx request failed") from exc
         status = (campaign.get("campaignStatus") or "").upper()
@@ -531,7 +532,7 @@ def _errors(response: httpx.Response) -> list[dict]:
     return [e for e in errors if isinstance(e, dict)]
 
 
-def _error_codes(response: httpx.Response) -> list:
+def _error_log(response: httpx.Response) -> list:
     """Telnyx's errors, for the log: code, field and text. The text can quote
     the customer's details; logged anyway (owner decision 2026-10-28), since
     the code alone does not say which field Telnyx refused."""

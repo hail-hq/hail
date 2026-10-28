@@ -966,7 +966,7 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
 
 def test_error_log_names_the_field_and_reason() -> None:
     import httpx
-    from hailhq.core.providers.verification.telnyx_sms import _error_codes
+    from hailhq.core.providers.verification.telnyx_sms import _error_log
 
     response = httpx.Response(
         400,
@@ -981,7 +981,7 @@ def test_error_log_names_the_field_and_reason() -> None:
             ]
         },
     )
-    assert _error_codes(response) == [
+    assert _error_log(response) == [
         {
             "code": "10015",
             "field": "/body/optoutMessage",
