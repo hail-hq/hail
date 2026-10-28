@@ -2089,7 +2089,7 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
         verifications_routes, "notify_sms_registration_changed", pinged.append
     )
     org_id, _, key = org_and_key
-    await _set_balance(async_session, org_id, 10_000)
+    await _set_balance(async_session, org_id, 20_000)
     sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
     sms_carrier.billed_refs = {"brand_id": "B7", "subject_type": "business"}
     resp = await _post_sms(client, key)
@@ -2993,3 +2993,39 @@ async def test_a_new_code_resets_the_attempt_cap(
         )
     ).scalar_one()
     assert audit.payload == {"ok": True, "attempts": 1}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_uncharged_recent_filings_count_against_the_balance(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The website charges each filing a moment later. Until it does, a new
+    # filing needs credit for the earlier ones too.
+    org_id, _, key = org_and_key
+    floor = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _set_balance(async_session, org_id, floor + 1)
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "subject_type": "business"}
+    assert (await _post_sms(client, key)).status_code == 422
+    assert (await _post_sms(client, key)).status_code == 402
+    # Once the website charged the first one, the account may file again.
+    row = (
+        await async_session.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
+            )
+        )
+    ).scalar_one()
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-1,
+            qty=1,
+            ref=f"sms_registration:{row.id}:submission",
+            source="sms_registration_submission",
+        )
+    )
+    await async_session.commit()
+    assert (await _post_sms(client, key)).status_code == 422

@@ -44,6 +44,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.internal_webhook import notify_sms_registration_changed
 from hailhq.core.models import (
+    AccountCredit,
     CarrierVerification,
     NumberOffer,
     PhoneNumber,
@@ -68,7 +69,7 @@ from hailhq.core.providers.verification import (
 from hailhq.core.providers.verification.base import NOT_ACCEPTED
 from hailhq.core.schemas import VerificationResponse
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import String, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -252,6 +253,34 @@ def _log_carrier_refusal(
             verification_id,
             p.field,
         )
+
+
+async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
+    """US texting filings of the last day with no ledger row yet: the
+    website's rater charges each one shortly after it is saved."""
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.purpose == "sms",
+                CarrierVerification.created_at > func.now() - text("interval '1 day'"),
+                ~select(AccountCredit.id)
+                .where(
+                    AccountCredit.organization_id == organization_id,
+                    AccountCredit.ref.like(
+                        func.concat(
+                            "sms_registration:",
+                            func.cast(CarrierVerification.id, String),
+                            "%",
+                        )
+                    ),
+                )
+                .exists(),
+            )
+        )
+    ).scalar_one()
 
 
 async def _record_billed_refusal(
@@ -1071,7 +1100,11 @@ async def create_verification(
             )
         if principal.auth_kind != "shared":
             balance = await get_balance_cents(db, principal.organization_id)
-            if balance < floor_cents:
+            # Filings the website has not charged yet (it charges a moment
+            # later) count too, or an account could file again and again on
+            # the same credit.
+            unsettled = await _unsettled_sms_filings(db, principal.organization_id)
+            if balance < floor_cents * (1 + unsettled):
                 raise HTTPException(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                     detail="not enough credit to file; add credit first",
