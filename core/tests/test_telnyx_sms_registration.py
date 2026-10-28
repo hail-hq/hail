@@ -51,8 +51,19 @@ ADDRESS = Address(
 
 
 def _provider(handler):
+    def answer(req):
+        resp = handler(req)
+        # No campaign filed yet for the brand, unless the test says so.
+        if (
+            req.method == "GET"
+            and req.url.path.endswith("/10dlc/campaign")
+            and resp.status_code == 404
+        ):
+            return httpx.Response(200, json={"records": []})
+        return resp
+
     client = httpx.AsyncClient(
-        transport=httpx.MockTransport(handler), base_url="https://api.telnyx.com/v2"
+        transport=httpx.MockTransport(answer), base_url="https://api.telnyx.com/v2"
     )
     return TelnyxSmsRegistrationProvider(api_key="k", client=client)
 
@@ -554,6 +565,9 @@ async def test_confirm_server_error_raises() -> None:
 async def test_confirmation_is_code_until_identity_verified() -> None:
     p = _provider(lambda req: httpx.Response(200, json={}))
     refs = {"subject_type": "person", "brand_id": "B1"}
+    # No PIN sent yet: nothing to type.
+    assert p.confirmation(refs) is None
+    refs["otp_sent_at"] = datetime.now(timezone.utc).isoformat()
     assert p.confirmation(refs) == "code"
     refs["identity_verified"] = True
     assert p.confirmation(refs) is None
@@ -891,9 +905,55 @@ async def test_status_files_the_picked_text_types() -> None:
 def test_step_follows_the_filing() -> None:
     p = _provider(lambda req: httpx.Response(200, json={}))
     person = {"subject_type": "person"}
-    assert p.step(person) == "confirm_identity"
+    assert p.step(person) == "filing"  # no PIN sent yet
+    assert p.step({**person, "otp_sent_at": "2026-10-28T00:00:00+00:00"}) == (
+        "confirm_identity"
+    )
     assert p.step({**person, "identity_verified": True}) == "filing"
     assert p.step({**person, "identity_verified": True, "campaign_id": "C1"}) == (
         "carrier_review"
     )
     assert p.step({"subject_type": "business"}) == "filing"
+    assert p.step({"subject_type": "business", "vetting_requested": True}) == (
+        "carrier_review"
+    )
+
+
+async def test_status_takes_a_campaign_filed_by_a_lost_call() -> None:
+    """A campaign Telnyx made although the answer never came back is taken,
+    not filed again: each review is paid."""
+    posted = []
+
+    def handler(req):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/campaign"):
+            assert req.url.params["brandId"] == "B1"
+            return httpx.Response(200, json={"records": [{"campaignId": "C9"}]})
+        if req.method == "POST":
+            posted.append(req.url.path)
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {"brand_id": "B1", "subject_type": "business", "campaign": {}}
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert refs["campaign_id"] == "C9" and posted == []
+
+
+async def test_terms_are_declared_only_with_a_terms_link() -> None:
+    posted = []
+
+    def handler(req):
+        if req.method == "POST":
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    campaign = {
+        "use_case": "MIXED",
+        "description": "d",
+        "message_flow": "f",
+        "samples": ["s" * 20, "t" * 20],
+        "has_links": False,
+    }
+    refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
+    await _provider(handler).status(refs)
+    assert posted[0]["termsAndConditions"] is False
+    assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]

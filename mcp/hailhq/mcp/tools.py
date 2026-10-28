@@ -2574,6 +2574,10 @@ def register_tools(
         Returns ``required`` (false means no verification is needed and
         submit_verification would fail), ``fields`` (values to collect),
         ``documents`` (slots, each with ``options``), ``address_required``.
+        A field of kind ``choices`` takes several of its ``options``: send
+        their keys joined by commas (for example
+        ``"CUSTOMER_CARE,DELIVERY_NOTIFICATION"``), between ``min_choices``
+        and ``max_choices`` of them.
         Skip any document slot whose ``needs_input`` is false: do not send it.
 
         Ask the USER for every value and every file. Never invent, guess or
@@ -2723,7 +2727,9 @@ def register_tools(
         Returns ``{"items": [{"id", "country_code", "number_type",
         "subject_type", "subject_name", "purpose", "state",
         "rejection_reason", "created_at",
-        "updated_at", "submitted_at", "approved_at", "confirmation"}]}``.
+        "updated_at", "submitted_at", "approved_at", "confirmation",
+        "step"}]}``. ``step`` says where a US texting filing in progress is:
+        ``confirm_identity``, ``filing`` or ``carrier_review``.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
         submission already exists before submitting again. ``confirmation``

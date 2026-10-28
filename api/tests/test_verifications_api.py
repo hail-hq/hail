@@ -179,10 +179,9 @@ class FakeSmsCarrier(SmsRegistrationProvider):
             return self.confirm_kind
         return None
 
-    def step(self, refs):
-        if self.confirmation(refs):
-            return "confirm_identity"
-        return "carrier_review" if refs.get("campaign_id") else "filing"
+    @property
+    def campaign_ref(self):
+        return self.campaign_key
 
     async def confirm(self, refs, code):
         if self.confirm_kind != "code":

@@ -411,7 +411,18 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
+    # The refs key that holds the campaign once it is filed.
+    campaign_ref: str | None = None
+
+    def in_review(self, refs: dict) -> bool:
+        """True while the carriers review the filing: the campaign is filed
+        (``campaign_ref``). A plug-in can add other review steps."""
+        return bool(self.campaign_ref and refs.get(self.campaign_ref))
+
     def step(self, refs: dict) -> str | None:
-        """Where a filing still in progress is: 'confirm_identity',
-        'filing' or 'carrier_review'. None when the plug-in cannot tell."""
-        return None
+        """Where a filing still in progress is: 'confirm_identity' while the
+        person must act on a text already sent, 'carrier_review' while the
+        carriers review it, else 'filing'."""
+        if self.confirmation(refs):
+            return "confirm_identity"
+        return "carrier_review" if self.in_review(refs) else "filing"
