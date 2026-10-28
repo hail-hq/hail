@@ -285,7 +285,7 @@ async def test_didww_registration_rejected_revokes_approval(
     monkeypatch.setattr("hailhq.core.providers.voice.didww.revoke_registration", revoke)
     decided: list[str] = []
     monkeypatch.setattr(
-        "hailhq.api.number_orders.notify_verification_decided", decided.append
+        "hailhq.api.verification_decisions.notify_verification_decided", decided.append
     )
     number = await buy(async_session, org, row, monkeypatch, offer)
     outcome.return_value = ("rejected_registration", DID, ORDER)

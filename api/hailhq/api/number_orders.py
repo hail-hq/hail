@@ -20,7 +20,6 @@ from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.carrier_routing import Outcome, carrier
 from hailhq.core.db import org_lock, session_scope
-from hailhq.core.internal_webhook import notify_verification_decided
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -198,14 +197,13 @@ async def give_back(number: PhoneNumber, resource_id: str) -> None:
 
 async def rejected_registration(
     db: AsyncSession, number: PhoneNumber, resource_id: str | None
-) -> tuple[str, UUID | None]:
+) -> str:
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
-    verification rejected. Returns the reason shown to the buyer (Hail's own
-    wording) and the id of the verification it rejected, if any. The
-    carrier's text is kept in the DB only (the audit row's ``carrier_reason``
-    and the number's ``provisioning_metadata['carrier_reason']``): never
-    logged, never shown.
+    verification rejected. Returns the reason shown to the buyer: Hail's own
+    wording. The carrier's text is kept in the DB only (the audit row's
+    ``carrier_reason`` and the number's
+    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
     The log line names the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run
@@ -264,8 +262,7 @@ async def rejected_registration(
             actor_user_id=None,
             actor_kind="system",
         )
-        return reason, verification.id
-    return reason, None
+    return reason
 
 
 async def _purchase_verification(
@@ -393,7 +390,7 @@ async def reconcile_order(
         # fee stays (the carrier billed it and does not refund).
         # The carrier calls in here run under the org lock on purpose (see
         # rejected_registration).
-        reason, rejected = await rejected_registration(db, number, resource_id)
+        reason = await rejected_registration(db, number, resource_id)
         await finish_order(
             db,
             number,
@@ -402,8 +399,6 @@ async def reconcile_order(
             keep_setup=True,
             reason=reason,
         )
-        if rejected is not None:
-            notify_verification_decided(str(rejected))
     elif (
         state == "pending" and datetime.now(timezone.utc) - number.created_at > timeout
     ):
