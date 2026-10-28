@@ -110,6 +110,14 @@ class FieldSpec(BaseModel):
     max_choices: int | None = Field(
         default=None, description="For kind 'choices': the most options to pick."
     )
+    max_length: int | None = Field(
+        default=None,
+        description=(
+            "The most characters the value may hold, when known. A form can "
+            "show a field allowed more than about 100 characters as a box "
+            "that wraps."
+        ),
+    )
 
 
 class DocumentOption(BaseModel):
@@ -210,7 +218,7 @@ class Requirements(VerificationRequirements):
         # Fields added after hashes were stored count only when set, so
         # older forms keep their hash.
         for field in body["fields"]:
-            for key in ("min_choices", "max_choices"):
+            for key in ("min_choices", "max_choices", "max_length"):
                 if field.get(key) is None:
                     field.pop(key, None)
         raw = json.dumps(body, sort_keys=True, separators=(",", ":"))

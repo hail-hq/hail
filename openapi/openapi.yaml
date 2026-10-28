@@ -7616,6 +7616,15 @@ components:
             - type: "null"
           title: Max Choices
           description: "For kind 'choices': the most options to pick."
+        max_length:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Max Length
+          description:
+            The most characters the value may hold, when known. A form can
+            show a field allowed more than about 100 characters as a box that
+            wraps.
       type: object
       required:
         - name

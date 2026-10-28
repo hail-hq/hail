@@ -243,3 +243,34 @@ def test_a_company_picks_at_least_two_text_types() -> None:
 def test_campaign_text_keeps_the_picked_text_types_without_repeats() -> None:
     text = campaign_text({**GOOD, "text_types": " 2FA, MARKETING,2FA "}, "person")
     assert text.text_types == ["2FA", "MARKETING"]
+
+
+def test_long_fields_carry_their_carrier_limits() -> None:
+    fields = {f.name: f for f in sms_requirements("telnyx", "person").fields}
+    assert fields["campaign_description"].max_length == 4096
+    assert fields["sample_1"].max_length == fields["sample_2"].max_length == 1024
+    assert fields["opt_in_description"].max_length == 861
+    assert fields["first_name"].max_length is None
+
+
+def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
+    # The longest links and the consent lines still fit in the carrier's 2048.
+    long = "https://acme.example/" + "a" * (512 - len("https://acme.example/"))
+    text = campaign_text(
+        {
+            **GOOD,
+            "opt_in_description": "x" * 861,
+            "privacy_policy_url": long,
+            "terms_url": long,
+        },
+        "person",
+    )
+    assert text.message_flow.startswith("x" * 861)
+    assert len(text.message_flow) <= 2048
+
+
+def test_field_problems_refuses_text_over_the_limit() -> None:
+    problems = field_problems({**GOOD, "sample_1": "s" * 1025}, "person")
+    assert [(p.field, p.message) for p in problems] == [
+        ("sample_1", "Use at most 1024 characters.")
+    ]
