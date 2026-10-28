@@ -133,7 +133,7 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 
-To register the organization to text US numbers from a US number, pass `purpose: "sms"` (default `"number"`) with `country_code: "US"` and `number_type: "local"` to `get_verification_requirements`, `submit_verification` and `list_verifications`. The carrier fee is debited from credit at filing:
+To register the organization to text US numbers from a US number, pass `purpose: "sms"` (default `"number"`) with `country_code: "US"` and `number_type: "local"` to `get_verification_requirements`, `submit_verification` and `list_verifications`. Fees are charged from credit per step: when the details are submitted, when the carriers start their review, then monthly after approval (prices: the console and hail.so/pricing):
 
 ```json
 {

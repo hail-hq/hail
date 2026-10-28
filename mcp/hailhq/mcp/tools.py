@@ -2566,8 +2566,9 @@ def register_tools(
 
         ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
         ``purpose='sms'`` registers the organization to text US numbers from a
-        US number (country_code US, number_type local). The carrier fee is
-        debited from credit at filing. If the error says to pass
+        US number (country_code US, number_type local). Fees are charged from
+        credit per step: when the details are submitted, when the carriers
+        start their review, then monthly after approval. If the error says to pass
         ``number_id``, pass the ``id`` of one of the organization's US numbers
         from list_numbers.
 

@@ -715,6 +715,7 @@ async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert draft.refs == {}
+    assert draft.billed_refs == {"brand_id": "B1", "subject_type": "person"}
     by_field = {p.field: p for p in draft.problems}
     assert set(by_field) == {"mobile_phone_number", "email", "address.region"}
     assert "too many registrations" in by_field["mobile_phone_number"].message
@@ -957,3 +958,44 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
     await _provider(handler).status(refs)
     assert posted[0]["termsAndConditions"] is False
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
+
+
+async def test_a_failure_after_the_brand_reports_it_billed() -> None:
+    """Telnyx bills a brand once made, whatever step fails after it."""
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/vetting"):
+            return httpx.Response(400, json={"errors": [{"code": "10015"}]})
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler))
+    assert draft.problems and draft.billed_refs["brand_id"] == "B1"
+
+
+async def test_an_outage_after_the_brand_reports_it_billed() -> None:
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/vetting"):
+            return httpx.Response(502)
+        return httpx.Response(204)
+
+    with pytest.raises(VerificationProviderError) as err:
+        await _draft(_provider(handler))
+    assert err.value.billed_refs["brand_id"] == "B1"
+
+
+async def test_a_4xx_on_the_brand_call_bills_nothing() -> None:
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(400, json={"errors": [{"code": "10015"}]})
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems and draft.billed_refs == {}
