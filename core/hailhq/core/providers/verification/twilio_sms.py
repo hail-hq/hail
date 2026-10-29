@@ -58,6 +58,7 @@ def _policy_links(text: dict) -> dict:
 
 class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     name = "twilio"
+    campaign_ref = "campaign_sid"
 
     def __init__(
         self,
@@ -108,7 +109,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(fields, subject_type)
+        problems = field_problems(self.name, fields, subject_type)
         if (
             subject_type == "business"
             and fields.get("ein")
@@ -327,7 +328,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     # -- lifecycle -----------------------------------------------------------
 
-    async def check(self, refs, subject_type) -> list[Problem]:
+    async def check(self, refs) -> list[Problem]:
         return []
 
     async def submit(self, refs) -> None:
@@ -387,9 +388,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     def confirmation(self, refs) -> str | None:
         # The person answers the carrier's text; there is no code to enter.
+        # Twilio texts only once the brand is approved (otp_sent_at).
         if (
             refs.get("subject_type") == "person"
             and refs.get("identity_verified") is not True
+            and refs.get("otp_sent_at")
         ):
             return "reply"
         return None

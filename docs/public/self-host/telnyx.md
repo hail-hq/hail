@@ -96,7 +96,10 @@ campaign from the console (Numbers → Register for US texting) or with
 `POST /verifications` and `purpose=sms`, as a company or a person. Telnyx
 texts a person a PIN; they enter it in the console or with
 `POST /verifications/{id}/confirm`. Until an organization is approved, texts
-from its US long codes to US numbers return 422.
+from its US long codes to US numbers return 422. Telnyx answers `STOP` and
+`HELP` itself; Hail sets the replies on the organization's messaging profile
+to the texts filed with the campaign. Keep
+`HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=false`, or subscribers get two replies.
 
 ## 5. Countries that need verification
 

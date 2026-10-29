@@ -59,6 +59,7 @@ import asyncio
 import dataclasses
 import logging
 import re
+from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
@@ -75,12 +76,21 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from livekit.agents import AgentSession, TurnHandlingOptions, inference
+from livekit.agents import (
+    AgentSession,
+    APIConnectOptions,
+    TurnHandlingOptions,
+    inference,
+)
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
 from livekit.agents import tts as agents_tts
 from livekit.agents import vad as agents_vad
-from livekit.agents.types import NOT_GIVEN
+from livekit.agents.llm.fallback_adapter import (
+    DEFAULT_FALLBACK_API_CONNECT_OPTIONS,
+    FallbackLLMStream,
+)
+from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.plugins import (
     anthropic as anthropic_plugin,
@@ -321,19 +331,184 @@ def _house_llms() -> list[agents_llm.LLM]:
     return [llm for llm in llms if llm is not None]
 
 
-def _fallback_chain(llms: list[agents_llm.LLM]) -> agents_llm.LLM:
+def _after_repeat(sent: str, new: str) -> int | None:
+    """Index in ``new`` just past its repeat of ``sent``, ignoring case and
+    whitespace. -1 when ``new`` does not repeat ``sent``; None when ``new``
+    is still too short to tell."""
+    i = 0
+    for ch in sent:
+        if ch.isspace():
+            continue
+        while i < len(new) and new[i].isspace():
+            i += 1
+        if i == len(new):
+            return None
+        if new[i].lower() != ch.lower():
+            return -1
+        i += 1
+    return i
+
+
+class _ToolCallSent(BaseException):
+    """Stops the chain when a model fails after it sent a tool call. A
+    BaseException, so ``FallbackLLMStream._run`` lets it through: no
+    hand-over, and no "retrying" log for a retry that does not happen."""
+
+
+class _CallLLMStream(FallbackLLMStream):
+    """One call reply over the chain (docs/operations/voice-llm.md):
+
+    * After a tool call was sent, a model that fails ends the reply. The
+      tool already runs, so the next model must not send it again.
+    * After text was sent, the next model restarts the reply. Its repeat of
+      the words already sent is dropped, so they are said once.
+    * When every model failed, the session reruns the chain (its
+      ``max_retry``) only if nothing was sent yet. The adapter's
+      ``retry_on_chunk_sent`` still lets one model hand over to the next."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Read by LLMStream._main_task (llm/llm.py): an error after output
+        # was sent is not retried. FallbackLLMStream copies the adapter's
+        # True here; the hand-over reads the adapter's own flag.
+        self._retry_on_chunk_sent = False
+        self._said = ""
+        # Trailing spaces go out with the next text, so a model that takes
+        # over decides the space after the words said ("Aw" + ", great.").
+        self._space = ""
+        self._tool_call_sent = False
+        self._failed: tuple[agents_llm.LLM, Exception] | None = None
+
+    async def _run(self) -> None:
+        try:
+            await super()._run()
+            return
+        except _ToolCallSent:
+            assert self._failed is not None
+            llm, error = self._failed
+        # What the adapter does for a failed model: mark it down until a
+        # background request succeeds (fallback_adapter.py, _run).
+        adapter = self._fallback_adapter
+        status = adapter._status[adapter._llm_instances.index(llm)]
+        status.selection_id = 0
+        if status.available:
+            status.available = False
+            adapter.emit(
+                "llm_availability_changed",
+                agents_llm.AvailabilityChangedEvent(llm=llm, available=False),
+            )
+        self._try_recovery(llm)
+        # LiveKit already logged "switching to next LLM" in _try_generate.
+        logger.warning(
+            "%s failed after a tool call was sent; no hand-over, "
+            "no switch to the next LLM",
+            llm.label,
+        )
+        # Raised outside the except block, so its cause and context stay.
+        raise error
+
+    def _out(self, content: str) -> str:
+        text = self._space + content
+        body = text.rstrip()
+        self._space = text[len(body) :]
+        self._said += body
+        return body
+
+    async def _try_generate(
+        self, *, llm: agents_llm.LLM, check_recovery: bool = False
+    ) -> AsyncIterable[agents_llm.ChatChunk]:
+        if check_recovery:
+            async for chunk in super()._try_generate(llm=llm, check_recovery=True):
+                yield chunk
+            return
+        # The failed model's trailing spaces are not said.
+        self._space = ""
+        restart = bool(self._said)
+        pending = "" if restart else None
+        try:
+            async for chunk in super()._try_generate(llm=llm):
+                delta = chunk.delta
+                if delta and (delta.content or pending):
+                    rest = delta.content or ""
+                    if pending is not None:
+                        pending += rest
+                        end = _after_repeat(self._said, pending)
+                        if end is None:
+                            # So far only a repeat of the words said: hold
+                            # it. The chunk still goes out, for its usage,
+                            # extra or tool call.
+                            rest = ""
+                        elif end == -1:
+                            # Not a repeat: keep it, apart from the words said.
+                            # A space held from before a tool call counts.
+                            gap = pending[:1].isspace() or bool(self._space)
+                            rest = pending if gap else " " + pending
+                            pending = None
+                        else:
+                            rest = pending[end:]
+                            pending = None
+                    delta = delta.model_copy(
+                        update={"content": self._out(rest) or None}
+                    )
+                    chunk = chunk.model_copy(update={"delta": delta})
+                if delta and delta.tool_calls:
+                    self._tool_call_sent = True
+                    if restart:
+                        # A tool call drops a held repeat; the text after it
+                        # is matched and spaced again.
+                        pending = ""
+                yield chunk
+        except Exception as e:
+            if not self._tool_call_sent:
+                raise
+            self._failed = (llm, e)
+            raise _ToolCallSent() from None
+
+
+class _CallFallbackAdapter(agents_llm.FallbackAdapter):
+    def chat(
+        self,
+        *,
+        chat_ctx: agents_llm.ChatContext,
+        tools: list[agents_llm.Tool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_FALLBACK_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[agents_llm.ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+    ) -> agents_llm.LLMStream:
+        return _CallLLMStream(
+            llm=self,
+            conn_options=conn_options,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            parallel_tool_calls=parallel_tool_calls,
+            tool_choice=tool_choice,
+            extra_kwargs=extra_kwargs,
+        )
+
+
+def _fallback_chain(
+    llms: list[agents_llm.LLM], *, retry_on_chunk_sent: bool
+) -> agents_llm.LLM:
     # One try per model, no retry: a failed model hands over to the next at
-    # once (docs/operations/voice-llm.md).
-    return agents_llm.FallbackAdapter(
-        llm=llms, attempt_timeout=10.0, max_retry_per_llm=0
+    # once. ``retry_on_chunk_sent`` is for calls: a model that fails after it
+    # sent text hands over too (docs/operations/voice-llm.md).
+    adapter = (
+        _CallFallbackAdapter if retry_on_chunk_sent else agents_llm.FallbackAdapter
+    )
+    return adapter(
+        llm=llms,
+        attempt_timeout=10.0,
+        max_retry_per_llm=0,
+        retry_on_chunk_sent=retry_on_chunk_sent,
     )
 
 
-def _house_llm() -> agents_llm.LLM:
+def _house_llm(*, retry_on_chunk_sent: bool) -> agents_llm.LLM:
     llms = _house_llms()
     if not llms:
         raise ProviderKeyError("no house LLM has a model and a key")
-    return _fallback_chain(llms)
+    return _fallback_chain(llms, retry_on_chunk_sent=retry_on_chunk_sent)
 
 
 def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
@@ -370,9 +545,16 @@ def org_llm(org: ResolvedLayer) -> agents_llm.LLM:
 
 
 def build_llm(
-    llm_cfg: dict[str, Any] | None, org: ResolvedLayer | None = None
+    llm_cfg: dict[str, Any] | None,
+    org: ResolvedLayer | None = None,
+    *,
+    retry_on_chunk_sent: bool = False,
 ) -> agents_llm.LLM:
-    """Precedence: per-call llm (mode B) > org BYO (mode C) > house chain (mode A)."""
+    """Precedence: per-call llm (mode B) > org BYO (mode C) > house chain (mode A).
+
+    ``retry_on_chunk_sent`` is True for calls: a model that fails mid-reply
+    hands over to the next one. Texts keep it False, so a failed reply is
+    retried whole instead of carrying the failed model's first words."""
     if llm_cfg is not None:
         return openai_plugin.LLM(
             base_url=llm_cfg["base_url"],
@@ -382,9 +564,11 @@ def build_llm(
     if org is not None:
         byo = org_llm(org)
         if org.fallback_enabled:
-            return _fallback_chain([byo, *_house_llms()])
+            return _fallback_chain(
+                [byo, *_house_llms()], retry_on_chunk_sent=retry_on_chunk_sent
+            )
         return byo
-    return _house_llm()
+    return _house_llm(retry_on_chunk_sent=retry_on_chunk_sent)
 
 
 def _house_tts(
@@ -751,7 +935,7 @@ def build_session(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
-        llm=build_llm(llm_cfg, org_cfgs.get("llm")),
+        llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
             # Only the setting that differs from the SDK defaults: a transcribed

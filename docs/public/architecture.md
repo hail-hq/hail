@@ -55,7 +55,7 @@ A text to a number with `sms_agent_id` set is stored and `sms.received` fires as
 
 ## LLM modes
 
-**A — system prompt (default).** The caller supplies `system_prompt`. The voicebot uses LiveKit's `FallbackAdapter`, which chains `ANTHROPIC_MODEL` → `ANTHROPIC_BACKUP_MODEL` → `OPENAI_MODEL` → `GOOGLE_MODEL`. Each model gets one try, and a model without its id or key is skipped. See [`pipeline.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/pipeline.py).
+**A — system prompt (default).** The caller supplies `system_prompt`. The voicebot uses LiveKit's `FallbackAdapter`, which chains `ANTHROPIC_MODEL` → `ANTHROPIC_BACKUP_MODEL` → `OPENAI_MODEL` → `GOOGLE_MODEL`. Each model gets one try per run, and a model without its id or key is skipped. On a call, a model that fails mid-reply hands over to the next one, except after a tool call. See [`pipeline.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/pipeline.py).
 
 **B — BYO endpoint.** The caller supplies `llm: { base_url, api_key, model }`. The voicebot points `openai.LLM` at that endpoint. There is no fallback.
 

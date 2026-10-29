@@ -17,8 +17,13 @@ from hailhq.core.providers.verification.base import (
 
 __all__ = [
     "address_complete",
+    "check_field",
+    "cut_text",
     "display_name",
+    "length_problem",
+    "length_problems",
     "pick_option",
+    "text_length",
     "validate_input",
 ]
 
@@ -33,6 +38,75 @@ def display_name(*parts: str | None) -> str | None:
     duplicate check and the unique index see them as one."""
     name = " ".join(" ".join(p for p in parts if p).split())
     return name[:_NAME_MAX].rstrip() or None
+
+
+def text_length(value: str) -> int:
+    """Length in UTF-16 code units, as the carriers and the browser's
+    ``maxLength`` count it: a character outside the BMP (most emoji) counts
+    as 2, so a value the form accepts is never too long for the carrier."""
+    return len(value) + sum(ord(c) > 0xFFFF for c in value)
+
+
+def cut_text(value: str, max_units: int) -> str:
+    """``value`` cut to at most ``max_units`` UTF-16 code units, counted as
+    ``text_length`` counts them. Cut between characters: never half an
+    emoji."""
+    units = 0
+    for i, c in enumerate(value):
+        units += 2 if ord(c) > 0xFFFF else 1
+        if units > max_units:
+            return value[:i]
+    return value
+
+
+def length_problem(spec: FieldSpec, value: str) -> str | None:
+    """The message for a value over the field's ``max_length``, else None."""
+    if spec.max_length and text_length(value) > spec.max_length:
+        return f"Use at most {spec.max_length} characters."
+    return None
+
+
+def length_problems(
+    requirements: Requirements,
+    fields: dict[str, str],
+    documents: dict[str, DocumentInput],
+) -> list[Problem]:
+    """Values over their field's ``max_length``: the form's fields and the
+    fields of each document type chosen. The API runs this for every
+    carrier before the plug-in sees the form; the plug-in reports anything
+    else (a missing value, a document type not chosen)."""
+    problems: list[Problem] = []
+
+    def check(spec: FieldSpec, value: str | None, where: str) -> None:
+        too_long = length_problem(spec, (value or "").strip())
+        if too_long:
+            problems.append(Problem(field=where, message=too_long))
+
+    for spec in requirements.fields:
+        check(spec, fields.get(spec.name), spec.name)
+    for slot in requirements.documents:
+        doc = documents.get(slot.name)
+        option = pick_option(slot, doc) if doc is not None else None
+        for spec in option.fields if option is not None else ():
+            check(spec, doc.fields.get(spec.name), f"{slot.name}.{spec.name}")
+    return problems
+
+
+def check_field(spec: FieldSpec, value: str | None, where: str) -> list[Problem]:
+    """A value's problems: missing when required; else too long and not
+    matching the field's pattern, both when both fail."""
+    value = (value or "").strip()
+    if not value:
+        if spec.required:
+            return [Problem(field=where, message=f"{spec.label} is required.")]
+        return []
+    problems: list[Problem] = []
+    too_long = length_problem(spec, value)
+    if too_long:
+        problems.append(Problem(field=where, message=too_long))
+    if spec.pattern and not re.search(spec.pattern, value):
+        problems.append(Problem(field=where, message=f"{spec.label} is not valid."))
+    return problems
 
 
 def pick_option(slot: DocumentSlot, doc: DocumentInput) -> DocumentOption | None:
@@ -65,20 +139,8 @@ def validate_input(
 ) -> list[Problem]:
     """Everything we can check without calling the carrier."""
     problems: list[Problem] = []
-
-    def check_field(spec: FieldSpec, value: str | None, where: str) -> None:
-        value = (value or "").strip()
-        if not value:
-            if spec.required:
-                problems.append(
-                    Problem(field=where, message=f"{spec.label} is required.")
-                )
-            return
-        if spec.pattern and not re.search(spec.pattern, value):
-            problems.append(Problem(field=where, message=f"{spec.label} is not valid."))
-
     for spec in requirements.fields:
-        check_field(spec, fields.get(spec.name), spec.name)
+        problems += check_field(spec, fields.get(spec.name), spec.name)
 
     needs_address = False
     for slot in requirements.documents:
@@ -105,7 +167,9 @@ def validate_input(
                 Problem(field=slot.name, message=f"Upload a file for {slot.label}.")
             )
         for spec in option.fields:
-            check_field(spec, doc.fields.get(spec.name), f"{slot.name}.{spec.name}")
+            problems += check_field(
+                spec, doc.fields.get(spec.name), f"{slot.name}.{spec.name}"
+            )
 
     if needs_address and not address_complete(address):
         problems.append(Problem(field="address", message="A full address is required."))

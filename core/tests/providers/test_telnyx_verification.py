@@ -13,9 +13,12 @@ from pathlib import Path
 
 import httpx
 import pytest
+from hailhq.core.providers.telnyx import subject_types_for
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
+    SubmitRefused,
+    UnsupportedSubjectType,
     UploadedFile,
     VerificationProviderError,
     get_verification_provider,
@@ -124,6 +127,8 @@ async def test_requirements_sweden_local_email_field() -> None:
     req = await provider(fake).requirements("SE", "local", "business")
     email = next(f for f in req.fields if "Email" in f.label)
     assert email.kind == "email"
+    # Telnyx's own limit reaches the form.
+    assert email.max_length == 150
     assert len(req.fields) == 4 and len(req.documents) == 3
     assert req.address_required is True
 
@@ -149,7 +154,7 @@ async def test_uk_website_is_only_collected_for_businesses(subject) -> None:
     }
 
 
-async def test_uk_person_draft_and_later_checks_need_no_company_website() -> None:
+async def test_uk_person_draft_sends_na_for_the_company_website() -> None:
     payload = json.loads((FIXTURES / "telnyx-regulatory-GB-mobile.json").read_text())
     rules = payload["data"][0]["regulatory_requirements"]
     stored: dict[str, str] = {}
@@ -222,17 +227,15 @@ async def test_uk_person_draft_and_later_checks_need_no_company_website() -> Non
     )
     assert result.problems == []
     assert result.refs["group_id"] == GROUP
-    assert website not in stored
-    # The operator's later check gets the persisted refs and the row's subject.
+    # Telnyx refuses to submit a group with an empty value, even one tagged
+    # "Business Use Only" (seen live on 2026-10-26), so Hail fills it in.
+    assert stored[website] == "N/A"
     refs = json.loads(json.dumps(result.refs))
-    assert await provider(fake).check(refs, "person") == []
-    # The exemption must not hide other missing fields.
+    assert await provider(fake).check(refs) == []
     stored.pop("2708e569-696a-4fc7-9305-5fdb3eb9c7dd")
-    assert [p.field for p in await provider(fake).check(refs, "person")] == [
+    assert [p.field for p in await provider(fake).check(refs)] == [
         "2708e569-696a-4fc7-9305-5fdb3eb9c7dd"
     ]
-    # A business must still give the website.
-    assert website in {p.field for p in await provider(fake).check(refs, "business")}
 
 
 def _tagged_rules() -> dict:
@@ -273,6 +276,51 @@ async def test_rules_tagged_for_the_other_subject_are_left_out(
     assert [f.name for f in req.fields] == expected
 
 
+def _with_business_file() -> dict:
+    payload = _tagged_rules()
+    payload["data"][0]["regulatory_requirements"].append(
+        {
+            "id": "biz-doc",
+            "name": "Company Registration (Business Use Only)",
+            "field_type": "document",
+        }
+    )
+    return payload
+
+
+async def test_business_only_file_means_only_a_business_can_buy() -> None:
+    # A file cannot be filled in, and Telnyx will not submit without it.
+    fake = Telnyx(lambda request: httpx.Response(200, json=_with_business_file()))
+    with pytest.raises(UnsupportedSubjectType) as refused:
+        await provider(fake).requirements("BR", "local", "person")
+    assert refused.value.allowed == ("business",)
+    req = await provider(fake).requirements("BR", "local", "business")
+    assert req.subject_types == ("business",)
+    assert [d.name for d in req.documents] == ["biz-doc"]
+
+
+@pytest.mark.parametrize(
+    ("rule", "allowed"),
+    [
+        ({"name": "Company Registration (Business Use Only)"}, ("business",)),
+        ({"name": "Legal Rep Address (Legal Entity Only)"}, ("business",)),
+        # A business can give its representative's ID.
+        ({"name": "ID/Passport Copy (Personal Use Only)"}, ("person", "business")),
+        (
+            {"name": "VAT (For Legal Entities and Sole Proprietorships Only)"},
+            ("person", "business"),
+        ),
+    ],
+)
+def test_subject_types_for_file_rules(rule, allowed) -> None:
+    assert subject_types_for([{**rule, "field_type": "document"}]) == allowed
+    # A text rule never limits who can buy: Hail sends N/A for it.
+    assert subject_types_for([{**rule, "field_type": "textual"}]) == (
+        "person",
+        "business",
+    )
+
+
 async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
     payload = _tagged_rules()
     rules = payload["data"][0]["regulatory_requirements"]
@@ -283,30 +331,6 @@ async def test_requirements_needed_when_only_other_subject_rules_exist() -> None
     req = await provider(fake).requirements("BR", "local", "person")
     # The carrier still wants a group, so the number is not open to buy.
     assert req.required is True and req.fields == ()
-
-
-async def test_check_skips_rules_tagged_for_the_other_subject() -> None:
-    payload = _tagged_rules()
-    group = {
-        "id": GROUP,
-        "country_code": "BR",
-        "phone_number_type": "local",
-        "regulatory_requirements": [
-            {"requirement_id": r["id"], "field_type": "textual", "field_value": ""}
-            for r in payload["data"][0]["regulatory_requirements"]
-        ],
-    }
-
-    def answers(request):
-        if request.url.path.endswith("/regulatory_requirements"):
-            return httpx.Response(200, json=payload)
-        return httpx.Response(200, json={"data": group})
-
-    p = provider(Telnyx(answers))
-    person = {pr.field for pr in await p.check({"group_id": GROUP}, "person")}
-    business = {pr.field for pr in await p.check({"group_id": GROUP}, "business")}
-    assert person == {"shared", "ita", "per"}
-    assert business == {"shared", "biz", "ita"}
 
 
 async def test_requirements_none_needed_when_telnyx_answers_empty() -> None:
@@ -594,13 +618,8 @@ async def test_check_reports_missing_and_declined_values() -> None:
     for req in group["regulatory_requirements"]:
         if req["requirement_id"] == textual[0]:
             req["status"] = "declined"
-
-    def answers(request):
-        if request.url.path.endswith("/regulatory_requirements"):
-            return httpx.Response(200, json=_rules("mobile"))
-        return httpx.Response(200, json={"data": group})
-
-    problems = await provider(Telnyx(answers)).check({"group_id": GROUP}, "person")
+    fake = Telnyx(lambda request: httpx.Response(200, json={"data": group}))
+    problems = await provider(fake).check({"group_id": GROUP})
     assert {p.field for p in problems} == {
         r["requirement_id"] for r in group["regulatory_requirements"]
     }
@@ -613,6 +632,40 @@ async def test_submit_posts_for_approval() -> None:
     (call,) = fake.calls
     assert call.method == "POST"
     assert call.url.path == f"/v2/requirement_groups/{GROUP}/submit_for_approval"
+
+
+def _submit_422(group_status: str):
+    errors = {"errors": [{"title": "Invalid", "detail": "Group is not fulfilled"}]}
+
+    def answers(request):
+        if request.method == "POST":
+            return httpx.Response(422, json=errors)
+        return httpx.Response(200, json={"data": _group("mobile", group_status)})
+
+    return Telnyx(answers)
+
+
+@pytest.mark.parametrize("group_status", ["pending-approval", "approved"])
+async def test_submit_of_a_group_already_sent_succeeds(group_status) -> None:
+    # Telnyx answers 422 when a group is sent again; it is already in review.
+    await provider(_submit_422(group_status)).submit({"group_id": GROUP})
+
+
+async def test_submit_refused_by_telnyx_is_final() -> None:
+    fake = _submit_422("unapproved")
+    with pytest.raises(SubmitRefused) as refused:
+        await provider(fake).submit({"group_id": GROUP})
+    assert [(p.message, p.raw) for p in refused.value.problems] == [
+        (NOT_ACCEPTED, "Group is not fulfilled")
+    ]
+
+
+@pytest.mark.parametrize("code", [401, 429, 503])
+async def test_submit_other_errors_stay_retryable(code) -> None:
+    fake = Telnyx(lambda request: httpx.Response(code, json={"errors": []}))
+    with pytest.raises(VerificationProviderError) as failed:
+        await provider(fake).submit({"group_id": GROUP})
+    assert not isinstance(failed.value, SubmitRefused)
 
 
 @pytest.mark.parametrize(
@@ -681,3 +734,33 @@ def test_default_provider_stays_twilio_when_both_are_configured(monkeypatch) -> 
     monkeypatch.setattr(settings, "twilio_auth_token", "tok")
     monkeypatch.setattr(settings, "telnyx_api_key", "key")
     assert registry.default_verification_provider_name() == "twilio"
+
+
+@pytest.mark.parametrize(
+    "value,limit", [(150, 150), (True, None), (0, None), ("150", None), (None, None)]
+)
+def test_max_length_takes_only_a_positive_whole_number(value, limit) -> None:
+    from hailhq.core.providers.verification.telnyx import _max_length
+
+    assert _max_length({"max_length": value}) == limit
+
+
+async def test_create_draft_refuses_a_value_over_the_carrier_limit() -> None:
+    fake = Telnyx(rules_answer("local"))
+    p = provider(fake)
+    req = await p.requirements("SE", "local", "business")
+    email = next(f for f in req.fields if "Email" in f.label)
+    fields, address, docs = _inputs("local")
+    fields[email.name] = "a" * 141 + "@acme.test"
+    result = await p.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=docs,
+    )
+    assert [(pr.field, pr.message) for pr in result.problems] == [
+        (email.name, "Use at most 150 characters.")
+    ]
+    assert len(fake.calls) == 1  # only the requirements lookup

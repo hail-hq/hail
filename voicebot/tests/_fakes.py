@@ -178,6 +178,17 @@ class FakeRoom:
         self.name = name
         self.local_participant = FakeLocalParticipant()
         self.remote_participants: dict[str, object] = {}
+        self.handlers: dict[str, list] = {}
+
+    def on(self, event: str, handler) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    def off(self, event: str, handler) -> None:
+        self.handlers.get(event, []).remove(handler)
+
+    def emit(self, event: str, *args) -> None:
+        for handler in list(self.handlers.get(event, [])):
+            handler(*args)
 
 
 class FakeSip:

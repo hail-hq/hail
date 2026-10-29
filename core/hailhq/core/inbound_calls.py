@@ -290,7 +290,7 @@ async def _answer_or_refuse(
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
-            "handover_targets": await handover_targets(db, agent.id),
+            "handover_targets": await handover_targets(db, agent.id, attrs.caller),
             "handover_max_duration_seconds": (
                 agent.handover_max_duration_seconds or HANDOVER_DEFAULT_MAX_SECONDS
             ),

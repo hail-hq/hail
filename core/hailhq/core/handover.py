@@ -9,6 +9,7 @@ metadata) carries names and notes only.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -32,6 +33,55 @@ from sqlalchemy.ext.asyncio import AsyncSession
 _log = logging.getLogger("hailhq.core.handover")
 
 MAX_HANDOVER_CONTACTS = 10
+
+# Said when the person to hand over to is the other party on the call:
+# dialing them would ring the phone already in use.
+ON_CALL_LINE = (
+    "It seems this call is already on {name}'s number. Handing it over to the "
+    "same number is not technically possible."
+)
+
+
+# Cap on the caller-steered reason in the handover text.
+HANDOVER_SMS_REASON_CHARS = 120
+# What a caller could steer the reason into to phish the contact: links, bare
+# or spelled-out domains, emails and phone numbers. File names stay.
+_FULLWIDTH_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+_FILE_EXTENSIONS = frozenset(
+    {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "jpg", "jpeg", "png", "heic"}
+)
+_LINK = re.compile(
+    r"\S+@\S+"  # email
+    r"|(?:https?://|www\.)\S+"  # link
+    r"|\b[\w-]+(?:\s*(?:\[\.\]|\(\.\)|\[dot\]|\(dot\)|\bdot\b)\s*[a-z]{2,})+\b"
+    r"|\b[\w-]+(?:\.[\w-]+)*\.([a-z]{2,})\b(?:/\S*)?"  # bare domain
+    r"|\+?\d[\d\s().-]{5,}\d",  # phone number
+    re.IGNORECASE,
+)
+
+
+def _strip_links(text: str) -> str:
+    def _drop(match: re.Match[str]) -> str:
+        ext = match.group(1)
+        return match.group(0) if ext and ext.lower() in _FILE_EXTENSIONS else ""
+
+    return _LINK.sub(_drop, text.translate(_FULLWIDTH_DOTS))
+
+
+def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -> str:
+    """The text a handover contact gets while the agent dials them: who is
+    calling, the caller's number to call back, and the reason. The reason is
+    LLM-written and a caller can steer it, so it is attributed ("Reason
+    given: ..."), kept short, and links, emails and phone numbers are
+    removed. The email to the contact uses the same words."""
+    who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
+    text = f"{agent_name} (AI agent) is calling you now to connect {who}."
+    said = " ".join(_strip_links(reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
+    if said:
+        end = "" if said.endswith((".", "!", "?")) else "."
+        text += f" Reason given: {said}{end}"
+    return text
+
 
 # How long a call may run after a handover contact answers, counted from the
 # answer, when the agent sets no ``handover_max_duration_seconds``.
@@ -92,6 +142,8 @@ class HandoverPerson:
     contact_id: str  # wire id
     name: str
     phone_e164: str | None
+    # Where the handover email goes: a contact's email, a member's login.
+    email: str | None = None
 
 
 class HandoverInvalid(ValueError):
@@ -272,16 +324,21 @@ async def prune_departed_members(db: AsyncSession, agent_id: UUID) -> None:
 
 async def _member_links(
     db: AsyncSession, agent_ids: list[UUID]
-) -> list[tuple[AgentHandoverContact, str, str | None]]:
+) -> list[tuple[AgentHandoverContact, str, str | None, str | None]]:
     """Member links whose user is still a member of the agent's org. Empty
     when the member tables are missing (pure self-host)."""
     try:
         async with db.begin_nested():
             return [
-                (link, name, phone)
-                for link, name, phone in (
+                (link, name, phone, email)
+                for link, name, phone, email in (
                     await db.execute(
-                        select(AgentHandoverContact, User.name, User.phone_number)
+                        select(
+                            AgentHandoverContact,
+                            User.name,
+                            User.phone_number,
+                            User.email,
+                        )
                         .join(Agent, Agent.id == AgentHandoverContact.agent_id)
                         .join(User, User.id == AgentHandoverContact.user_id)
                         .where(
@@ -308,8 +365,8 @@ async def load_handover(
     out."""
     if not agent_ids:
         return {}
-    rows: list[tuple[AgentHandoverContact, str, str, str | None]] = [
-        (link, str(contact.id), contact.name, contact.phone_e164)
+    rows: list[tuple[AgentHandoverContact, str, str, str | None, str | None]] = [
+        (link, str(contact.id), contact.name, contact.phone_e164, contact.email)
         for link, contact in (
             await db.execute(
                 select(AgentHandoverContact, Contact)
@@ -334,21 +391,30 @@ async def load_handover(
     ).first() is not None
     if has_member_links:
         rows += [
-            (link, contact_wire_id("member", link.user_id), name, phone)
-            for link, name, phone in await _member_links(db, agent_ids)
+            (link, contact_wire_id("member", link.user_id), name, phone, email)
+            for link, name, phone, email in await _member_links(db, agent_ids)
         ]
     rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
-    for link, wire, name, phone in rows:
+    for link, wire, name, phone, email in rows:
         out.setdefault(link.agent_id, []).append(
-            {"contact_id": wire, "name": name, "phone_e164": phone, "note": link.note}
+            {
+                "contact_id": wire,
+                "name": name,
+                "phone_e164": phone,
+                "email": email,
+                "note": link.note,
+            }
         )
     return out
 
 
-async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict]:
+async def handover_targets(
+    db: AsyncSession, agent_id: UUID | None, on_call_e164: str | None = None
+) -> list[dict]:
     """Dispatch-metadata shape. No numbers. Labels unique per call, across
-    contacts and members."""
+    contacts and members. A person whose number is ``on_call_e164`` (the
+    other party on the call) is flagged ``on_call``."""
     if agent_id is None:
         return []
     rows = (await load_handover(db, [agent_id])).get(agent_id, [])
@@ -360,7 +426,8 @@ async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict
         name = row["name"]
         seen[name] = seen.get(name, 0) + 1
         label = name if seen[name] == 1 else f"{name} ({seen[name]})"
-        targets.append(
-            {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
-        )
+        target = {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
+        if on_call_e164 and row["phone_e164"] == on_call_e164:
+            target["on_call"] = True
+        targets.append(target)
     return targets

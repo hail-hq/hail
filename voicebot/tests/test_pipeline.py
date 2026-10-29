@@ -94,7 +94,8 @@ def test_build_llm_mode_a_returns_fallback_adapter(monkeypatch) -> None:
 
 
 def test_house_chain_gives_each_model_one_try(monkeypatch) -> None:
-    """One adapter-wide setting: no retry on a failed model, 10 s per try."""
+    """One adapter-wide setting: no retry on a failed model, 10 s per try.
+    Texts keep the default: no hand-over after a model sent text."""
     from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
@@ -102,6 +103,28 @@ def test_house_chain_gives_each_model_one_try(monkeypatch) -> None:
     assert isinstance(adapter, FallbackAdapter)
     assert adapter._max_retry_per_llm == 0
     assert adapter._attempt_timeout == 10.0
+    assert adapter._retry_on_chunk_sent is False
+
+
+def test_call_chain_hands_over_after_text_was_sent(monkeypatch) -> None:
+    """Calls build the chain with ``retry_on_chunk_sent``."""
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_model", "claude-sonnet-5-5")
+    adapter = build_llm(None, retry_on_chunk_sent=True)
+    assert isinstance(adapter, FallbackAdapter)
+    assert adapter._retry_on_chunk_sent is True
+
+
+def test_build_session_hands_over_after_text_was_sent() -> None:
+    from unittest.mock import MagicMock
+
+    session = build_session(None, MagicMock())
+    assert isinstance(session.llm, FallbackAdapter)
+    assert session.llm._retry_on_chunk_sent is True
+    # The session keeps LiveKit's retries; the call stream limits them to
+    # turns where nothing was sent (test_llm_midstream_fallback.py).
+    assert session.conn_options.llm_conn_options.max_retry == 3
 
 
 def test_org_chain_with_fallback_gives_each_model_one_try(monkeypatch) -> None:
@@ -115,9 +138,10 @@ def test_org_chain_with_fallback_gives_each_model_one_try(monkeypatch) -> None:
         params={"base_url": "https://llm.example.com/v1", "model": "m"},
         fallback_enabled=True,
     )
-    adapter = build_llm(None, org)
+    adapter = build_llm(None, org, retry_on_chunk_sent=True)
     assert isinstance(adapter, FallbackAdapter)
     assert adapter._llm_instances[0].model == "m"
+    assert adapter._retry_on_chunk_sent is True
     assert adapter._max_retry_per_llm == 0
     assert adapter._attempt_timeout == 10.0
 

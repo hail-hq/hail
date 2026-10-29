@@ -109,6 +109,20 @@ async def test_targets_have_no_numbers(async_session) -> None:
     assert "+1415" not in repr(targets)
 
 
+async def test_targets_flag_the_person_on_the_call(async_session) -> None:
+    _, agent, (a, b) = await _agent_and_contacts(
+        async_session, "+14155550107", "+14155550108"
+    )
+    await replace_handover(
+        async_session,
+        agent.id,
+        [HandoverItem(str(a.id), "Desk"), HandoverItem(str(b.id), "Sales")],
+    )
+    targets = await handover_targets(async_session, agent.id, "+14155550108")
+    assert [t.get("on_call", False) for t in targets] == [False, True]
+    assert "+1415" not in repr(targets)
+
+
 async def test_targets_skip_contacts_without_phone(async_session) -> None:
     _, agent, (a,) = await _agent_and_contacts(async_session, "+14155550107")
     await replace_handover(async_session, agent.id, [HandoverItem(str(a.id), "x")])
@@ -255,12 +269,14 @@ async def test_replace_and_load_mixed(async_session) -> None:
             "contact_id": f"member:{m.id}",
             "name": "Sam",
             "phone_e164": "+14155550126",
+            "email": m.email,
             "note": "first",
         },
         {
             "contact_id": str(c.id),
             "name": "Person 0",
             "phone_e164": "+14155550125",
+            "email": c.email,
             "note": "second",
         },
     ]
@@ -356,3 +372,44 @@ async def test_missing_member_tables_warn_once(async_session, monkeypatch, caplo
         await handover_targets(async_session, agent.id)
     levels = [r.levelno for r in caplog.records if r.name == "hailhq.core.handover"]
     assert levels == [logging.WARNING, logging.DEBUG]
+
+
+def test_handover_sms_text() -> None:
+    from hailhq.core.handover import handover_sms_text
+
+    assert handover_sms_text(
+        "Front Desk", "+13105550100", " an urgent  plumbing issue "
+    ) == (
+        "Front Desk (AI agent) is calling you now to connect a caller "
+        "(+13105550100). Reason given: an urgent plumbing issue."
+    )
+    assert handover_sms_text("Front Desk", "anonymous", "") == (
+        "Front Desk (AI agent) is calling you now to connect a caller."
+    )
+    assert handover_sms_text("Sam", None, "Is it open?").endswith(
+        "Reason given: Is it open?"
+    )
+
+
+def test_handover_sms_text_drops_links() -> None:
+    from hailhq.core.handover import handover_sms_text
+
+    text = handover_sms_text(
+        "Desk",
+        None,
+        "verify at https://evil.example/x or www.evil.example or evil.co/pay now",
+    )
+    assert text.endswith("Reason given: verify at or or now.")
+    for reason, said in [
+        ("call +1 900 555 0100 to verify", "call to verify."),
+        ("pay at evil[.]com or evil dot com or evil\u3002com", "pay at or or."),
+        ("email bob@evil.com", "email."),
+        ("question about invoice.pdf", "question about invoice.pdf."),
+        ("a leak in apt 305", "a leak in apt 305."),
+    ]:
+        assert handover_sms_text("Desk", None, reason).endswith(
+            f"Reason given: {said}"
+        ), reason
+    assert "evil" not in text
+    long = handover_sms_text("Desk", None, "x" * 500)
+    assert long.count("x") == 120

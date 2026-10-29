@@ -8,7 +8,12 @@ import httpx
 import phonenumbers
 from hailhq.core.carrier_offer import Approval, CarrierOffer, cents
 from hailhq.core.config import settings
-from hailhq.core.providers.telnyx import TelnyxClient, get_http_client, path_id
+from hailhq.core.providers.telnyx import (
+    TelnyxClient,
+    get_http_client,
+    path_id,
+    subject_types_for,
+)
 from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel, Field
@@ -169,7 +174,8 @@ async def telnyx_offers(
     """Live Telnyx inventory. ``approvals`` are the org's approved Hail
     verifications; one counts while its requirement group is still approved
     at Telnyx for this country and type. Telnyx does not tie a group to a
-    subject type, so either kind is accepted."""
+    subject type, so either kind is accepted, except where only a business
+    can meet the rules."""
     if not settings.telnyx_api_key:
         return []
     approvals = approvals or []
@@ -289,7 +295,11 @@ async def telnyx_offers(
                 requirements=labels,
                 # With a group passed, Telnyx may list no rules left; the
                 # number still needs that group at purchase.
-                subject_types=(["business", "person"] if requirements or group else []),
+                subject_types=(
+                    sorted(subject_types_for(requirements))
+                    if requirements or group
+                    else []
+                ),
                 approvals=valid if requirements or group else [],
                 locality=q.locality,
                 region=q.region,

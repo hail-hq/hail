@@ -497,15 +497,18 @@ func (e EventStreamResponseCallStatus) Valid() bool {
 
 // Defines values for FieldSpecKind.
 const (
-	FieldSpecKindEmail FieldSpecKind = "email"
-	FieldSpecKindPhone FieldSpecKind = "phone"
-	FieldSpecKindText  FieldSpecKind = "text"
-	FieldSpecKindUrl   FieldSpecKind = "url"
+	FieldSpecKindChoices FieldSpecKind = "choices"
+	FieldSpecKindEmail   FieldSpecKind = "email"
+	FieldSpecKindPhone   FieldSpecKind = "phone"
+	FieldSpecKindText    FieldSpecKind = "text"
+	FieldSpecKindUrl     FieldSpecKind = "url"
 )
 
 // Valid indicates whether the value is a known member of the FieldSpecKind enum.
 func (e FieldSpecKind) Valid() bool {
 	switch e {
+	case FieldSpecKindChoices:
+		return true
 	case FieldSpecKindEmail:
 		return true
 	case FieldSpecKindPhone:
@@ -900,6 +903,27 @@ func (e VerificationRequirementsSubjectTypes) Valid() bool {
 	case VerificationRequirementsSubjectTypesBusiness:
 		return true
 	case VerificationRequirementsSubjectTypesPerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerificationResponseStep.
+const (
+	CarrierReview   VerificationResponseStep = "carrier_review"
+	ConfirmIdentity VerificationResponseStep = "confirm_identity"
+	Filing          VerificationResponseStep = "filing"
+)
+
+// Valid indicates whether the value is a known member of the VerificationResponseStep enum.
+func (e VerificationResponseStep) Valid() bool {
+	switch e {
+	case CarrierReview:
+		return true
+	case ConfirmIdentity:
+		return true
+	case Filing:
 		return true
 	default:
 		return false
@@ -2464,11 +2488,20 @@ type FieldSpec struct {
 	// Help Help text from the carrier.
 	Help *string `json:"help,omitempty"`
 
-	// Kind Input kind: 'text', 'email', 'phone', or 'url'.
+	// Kind Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick several of `options`; send their keys joined by commas).
 	Kind *FieldSpecKind `json:"kind,omitempty"`
 
 	// Label Label to show the customer.
 	Label string `json:"label"`
+
+	// MaxChoices For kind 'choices': the most options to pick.
+	MaxChoices *int `json:"max_choices,omitempty"`
+
+	// MaxLength The most characters the value may hold, when known, counted in UTF-16 code units (an emoji counts as 2). Enforced: a longer value gets 422. A form can show a field allowed more than about 100 characters as a box that wraps.
+	MaxLength *int `json:"max_length,omitempty"`
+
+	// MinChoices For kind 'choices': the fewest options to pick.
+	MinChoices *int `json:"min_choices,omitempty"`
 
 	// Name Key to send this value under in `fields`.
 	Name string `json:"name"`
@@ -2483,7 +2516,7 @@ type FieldSpec struct {
 	Required *bool `json:"required,omitempty"`
 }
 
-// FieldSpecKind Input kind: 'text', 'email', 'phone', or 'url'.
+// FieldSpecKind Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick several of `options`; send their keys joined by commas).
 type FieldSpecKind string
 
 // ForwardTargetListResponse defines model for ForwardTargetListResponse.
@@ -2981,24 +3014,6 @@ type SmsCreate struct {
 // SmsCreateMessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 type SmsCreateMessageType string
 
-// SmsFee defines model for SmsFee.
-type SmsFee struct {
-	// FilingCents Charged once when the registration is filed.
-	FilingCents int `json:"filing_cents"`
-
-	// MinimumMonths Monthly fees charged at least, counted from approval, even when the registration is cancelled sooner.
-	MinimumMonths int `json:"minimum_months"`
-
-	// MonthlyCents Charged each month while approved.
-	MonthlyCents int `json:"monthly_cents"`
-}
-
-// SmsFees defines model for SmsFees.
-type SmsFees struct {
-	Business SmsFee `json:"business"`
-	Person   SmsFee `json:"person"`
-}
-
 // SmsListResponse defines model for SmsListResponse.
 type SmsListResponse struct {
 	// Items Messages in this page, newest first.
@@ -3179,6 +3194,9 @@ type VerificationResponse struct {
 	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
 	State string `json:"state"`
 
+	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+	Step *VerificationResponseStep `json:"step,omitempty"`
+
 	// SubjectName Name of the person or company this verification is for, taken from the form (for example the business name, or the first and last name). Null when unknown.
 	SubjectName *string `json:"subject_name,omitempty"`
 
@@ -3191,6 +3209,9 @@ type VerificationResponse struct {
 	// UpdatedAt When it last changed.
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+type VerificationResponseStep string
 
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
@@ -3750,13 +3771,6 @@ type GetVerificationRequirementsParams struct {
 
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParamsSubjectType string
-
-// GetSmsRegistrationFeesParams defines parameters for GetSmsRegistrationFees.
-type GetSmsRegistrationFeesParams struct {
-	// NumberId One of your active US local numbers that can text. Needed when your US numbers are with more than one carrier.
-	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
-	Authorization *string             `json:"authorization,omitempty"`
-}
 
 // CancelVerificationParams defines parameters for CancelVerification.
 type CancelVerificationParams struct {
@@ -4464,9 +4478,6 @@ type ClientInterface interface {
 
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetSmsRegistrationFees request
-	GetSmsRegistrationFees(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CancelVerification request
 	CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5428,18 +5439,6 @@ func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificat
 
 func (c *Client) GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVerificationRequirementsRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) GetSmsRegistrationFees(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSmsRegistrationFeesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9320,70 +9319,6 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 	return req, nil
 }
 
-// NewGetSmsRegistrationFeesRequest generates requests for GetSmsRegistrationFees
-func NewGetSmsRegistrationFeesRequest(server string, params *GetSmsRegistrationFeesParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/verifications/sms-fees")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		queryValues := queryURL.Query()
-
-		if params.NumberId != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "number_id", *params.NumberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
-				return nil, err
-			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
-				return nil, err
-			} else {
-				for k, v := range parsed {
-					for _, v2 := range v {
-						queryValues.Add(k, v2)
-					}
-				}
-			}
-
-		}
-
-		queryURL.RawQuery = queryValues.Encode()
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-
-		if params.Authorization != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("authorization", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
 // NewCancelVerificationRequest generates requests for CancelVerification
 func NewCancelVerificationRequest(server string, verificationId openapi_types.UUID, params *CancelVerificationParams) (*http.Request, error) {
 	var err error
@@ -10356,9 +10291,6 @@ type ClientWithResponsesInterface interface {
 
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
-
-	// GetSmsRegistrationFeesWithResponse request
-	GetSmsRegistrationFeesWithResponse(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*GetSmsRegistrationFeesResponse, error)
 
 	// CancelVerificationWithResponse request
 	CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error)
@@ -11774,28 +11706,6 @@ func (r GetVerificationRequirementsResponse) StatusCode() int {
 	return 0
 }
 
-type GetSmsRegistrationFeesResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *SmsFees
-}
-
-// Status returns HTTPResponse.Status
-func (r GetSmsRegistrationFeesResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetSmsRegistrationFeesResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 type CancelVerificationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12767,15 +12677,6 @@ func (c *ClientWithResponses) GetVerificationRequirementsWithResponse(ctx contex
 		return nil, err
 	}
 	return ParseGetVerificationRequirementsResponse(rsp)
-}
-
-// GetSmsRegistrationFeesWithResponse request returning *GetSmsRegistrationFeesResponse
-func (c *ClientWithResponses) GetSmsRegistrationFeesWithResponse(ctx context.Context, params *GetSmsRegistrationFeesParams, reqEditors ...RequestEditorFn) (*GetSmsRegistrationFeesResponse, error) {
-	rsp, err := c.GetSmsRegistrationFees(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetSmsRegistrationFeesResponse(rsp)
 }
 
 // CancelVerificationWithResponse request returning *CancelVerificationResponse
@@ -14809,32 +14710,6 @@ func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificat
 			return nil, err
 		}
 		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetSmsRegistrationFeesResponse parses an HTTP response from a GetSmsRegistrationFeesWithResponse call
-func ParseGetSmsRegistrationFeesResponse(rsp *http.Response) (*GetSmsRegistrationFeesResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetSmsRegistrationFeesResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SmsFees
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
 
 	}
 

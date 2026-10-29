@@ -9,15 +9,15 @@
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "icons": [
     {
-      "src": "https://hail.so/assets/monogram-512.png",
+      "src": "https://hail.so/assets/brand/icons/icon-512.png",
       "sizes": ["512x512"],
       "mimeType": "image/png"
     },
     {
-      "src": "https://hail.so/assets/monogram-1024.png",
+      "src": "https://hail.so/assets/brand/icons/icon-1024.png",
       "sizes": ["1024x1024"],
       "mimeType": "image/png"
     }
