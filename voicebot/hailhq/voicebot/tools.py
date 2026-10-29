@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
@@ -123,6 +124,8 @@ async def build_agent_tools(
     send_dtmf,
     bridge=None,
     spoke_since=None,
+    cancel_bridge=None,
+    prompt=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -165,6 +168,10 @@ async def build_agent_tools(
                 continue
             s = bound
         specs.append(s)
+        if s.name == transfer_call.SPEC.name:
+            # Its dial runs in the background: cancel_transfer stops the ring.
+            # It comes with transfer_call, so a `tools` list never names it.
+            specs.append(transfer_call.CANCEL_SPEC)
     if not specs:
         return [], None
 
@@ -180,6 +187,8 @@ async def build_agent_tools(
         send_dtmf=send_dtmf,
         bridge=bridge,
         spoke_since=spoke_since,
+        cancel_bridge=cancel_bridge,
+        prompt=prompt,
     )
 
     available: list[ToolSpec] = []

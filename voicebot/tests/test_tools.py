@@ -177,7 +177,7 @@ async def test_bind_shapes_transfer_call(db) -> None:
     )
     try:
         names = [t.info.name for t in tools]
-        assert "transfer_call" in names
+        assert "transfer_call" in names and "cancel_transfer" in names
         (tool,) = [t for t in tools if t.info.name == "transfer_call"]
         assert "Sam (Billing)" in tool.info.raw_schema["description"]
     finally:
@@ -195,7 +195,30 @@ async def test_transfer_call_hidden_without_targets(db) -> None:
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
     )
     try:
-        assert "transfer_call" not in [t.info.name for t in tools]
+        names = [t.info.name for t in tools]
+        assert "transfer_call" not in names and "cancel_transfer" not in names
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
+    """A `tools` list names transfer_call only; cancel_transfer comes with it."""
+    meta = {
+        "organization_id": str(uuid.uuid4()),
+        "tools": ["transfer_call"],
+        "handover_targets": [
+            {"contact_id": str(uuid.uuid4()), "label": "Sam", "note": "Billing"}
+        ],
+    }
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
+    )
+    try:
+        assert sorted(t.info.name for t in tools) == [
+            "cancel_transfer",
+            "transfer_call",
+        ]
     finally:
         if api is not None:
             await api.aclose()

@@ -44,7 +44,8 @@ class BridgeRoute:
 
 @dataclass(frozen=True)
 class BridgeOutcome:
-    outcome: Literal["answered", "no_answer", "busy", "failed"]
+    # cancelled: the caller asked to stop while it rang (cancel_transfer).
+    outcome: Literal["answered", "no_answer", "busy", "failed", "cancelled"]
     sip_status: int | None
     ring_ms: int
 
@@ -76,6 +77,11 @@ class ToolContext:
     # True when the other party started speaking at or after the given
     # time.monotonic(). None outside a live session.
     spoke_since: Callable[[float], bool] | None = None
+    # Stop a handover dial that is still ringing; True when one was stopped.
+    cancel_bridge: Callable[[], Awaitable[bool]] | None = None
+    # Make the agent speak about something that happened after its tool
+    # returned (a handover dial that ended). The text is an instruction.
+    prompt: Callable[[str], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)

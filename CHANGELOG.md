@@ -20,7 +20,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
-- Handover is a plain forward: the two people are connected when the contact's phone picks up, the agent says nothing to the contact and writes no reply after, and `call.transferred` fires on pickup.
+- Handover is a plain forward: the agent says nothing to the contact, the caller can stop the ring, a line silent for 15 s gives the caller back, and `call.transferred` fires when the contact's side speaks.
 
 ## [0.31.0] (2026-10-23)
 

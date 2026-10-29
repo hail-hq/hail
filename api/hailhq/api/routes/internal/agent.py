@@ -736,11 +736,14 @@ class AgentHandoverResponse(BaseModel):
 
 
 class AgentHandoverResultRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Unknown fields are ignored, not refused: during a rollback an older API
+    # still records results from a newer voicebot.
+    model_config = ConfigDict(extra="ignore")
     tool_invocation_id: UUID
     call_id: UUID
     contact_id: HandoverWireId
-    outcome: Literal["answered", "no_answer", "busy", "failed"]
+    # cancelled: the caller asked to stop while it rang.
+    outcome: Literal["answered", "no_answer", "busy", "failed", "cancelled"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
     # Sent by voicebots from before the plain forward (their pickup check's
@@ -753,7 +756,10 @@ class AgentHandoverResultRequest(BaseModel):
     email: str | None = Field(default=None, max_length=48)
 
 
-class AgentHandoverSmsRequest(BaseModel):
+class AgentHandoverNoticeRequest(BaseModel):
+    """The text (``/handover-sms``) or email (``/handover-email``) to the
+    contact while the voicebot dials them."""
+
     model_config = ConfigDict(extra="forbid")
     tool_invocation_id: UUID
     call_id: UUID
@@ -773,6 +779,7 @@ class AgentHandoverEmailResponse(BaseModel):
 
 # Subject of the email a handover contact gets while the agent dials them.
 HANDOVER_EMAIL_SUBJECT = "{agent} is calling you to connect a caller"
+HANDOVER_EMAIL_SUBJECT_NAME_CHARS = 80
 
 
 async def _handover_result_recorded(
@@ -902,81 +909,135 @@ async def _deny_handover(
     return AgentHandoverResponse(ok=False, spoken=spoken)
 
 
+async def _notice_start(
+    db: AsyncSession,
+    body: AgentHandoverNoticeRequest,
+    model: type[Sms | Email],
+    failed_statuses: tuple[str, ...],
+    noun: str,
+) -> tuple[Call, HandoverPerson] | str:
+    """The steps the text and the email to the contact share: the call, a
+    retried post, the call's state, the person, and one notice per contact
+    per call. The call and person, or the result to return now."""
+    call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
+    if call is None:
+        return "skipped:no_call"
+    org = call.organization_id
+    prior = await _prior_send(db, model, org, body.tool_invocation_id)
+    if prior is not None:
+        return "failed" if prior.status in failed_statuses else "sent"
+    if call.status != "in_progress":
+        return "skipped:call_ended"
+    contact = await _linked_person(db, call, body.contact_id)
+    if contact is None:
+        return "skipped:no_contact"
+    # A second dial to the same person on this call sends nothing more. Not
+    # skipped once connected: a voicemail pickup connects at once, and that
+    # is when the contact needs the caller's number most.
+    sent = (
+        await db.execute(
+            select(model.id)
+            .where(
+                model.organization_id == org,
+                model.metadata_["call_id"].astext == str(call.id),
+                model.metadata_["handover_contact_id"].astext == body.contact_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    if sent is not None:
+        return f"skipped:already_{noun}"
+    return call, contact
+
+
+async def _notice_blocked(
+    call: Call,
+    body: AgentHandoverNoticeRequest,
+    channel: str,
+    reason: str,
+    **extra: Any,
+) -> str:
+    await write_audit_log(
+        organization_id=call.organization_id,
+        api_key_id=None,
+        action=f"agent.handover.{channel}_blocked",
+        resource_type="call",
+        resource_id=call.id,
+        payload={"contact_id": body.contact_id, "reason": reason, **extra},
+        actor_kind="system",
+    )
+    return f"blocked:{reason}"
+
+
+def _notice_meta(call: Call, body: AgentHandoverNoticeRequest) -> dict[str, str]:
+    return {
+        "call_id": str(call.id),
+        "tool_invocation_id": str(body.tool_invocation_id),
+        "handover_contact_id": body.contact_id,
+    }
+
+
+async def _notice_text(db: AsyncSession, call: Call, body: AgentHandoverNoticeRequest):
+    """The agent's name and the words of the text and the email."""
+    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
+    agent_name = agent.name if agent else "Your agent"
+    caller = _other_party(call)
+    words = handover_sms_text(
+        agent_name, caller if is_e164(caller) else None, body.reason
+    )
+    return agent_name, words
+
+
 @router.post("/handover-sms", response_model=AgentHandoverSmsResponse)
 async def agent_handover_sms(
-    body: AgentHandoverSmsRequest,
+    body: AgentHandoverNoticeRequest,
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentHandoverSmsResponse:
     """Text the handover contact while the voicebot dials them, from the Hail
     number on the call. Never blocks the dial: the voicebot posts this in
     parallel and records ``sms`` on the handover event."""
-    call = await _load_call_for_update(db, body.call_id)
-    await _tag_call(db, call)
-    if call is None:
-        return AgentHandoverSmsResponse(sms="skipped:no_call")
-    org = call.organization_id
-    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
-    if prior is not None:
-        failed = prior.status in ("failed", "undelivered")
-        return AgentHandoverSmsResponse(sms="failed" if failed else "sent")
-    if call.status != "in_progress":
-        return AgentHandoverSmsResponse(sms="skipped:call_ended")
-    contact = await _linked_person(db, call, body.contact_id)
-    if contact is None or not contact.phone_e164:
-        return AgentHandoverSmsResponse(sms="skipped:no_contact")
+    start = await _notice_start(db, body, Sms, ("failed", "undelivered"), "texted")
+    if isinstance(start, str):
+        return AgentHandoverSmsResponse(sms=start)
+    call, contact = start
     to = contact.phone_e164
-    caller = _other_party(call)
-    if to == caller:
+    if not to:
+        return AgentHandoverSmsResponse(sms="skipped:no_contact")
+    if to == _other_party(call):
         return AgentHandoverSmsResponse(sms="skipped:contact_is_on_call")
-    if await has_answered_handover(db, call.id):
-        return AgentHandoverSmsResponse(sms="skipped:already_connected")
-    # One text per contact per call: a second dial to the same person does
-    # not text them again.
-    texted = (
-        await db.execute(
-            select(Sms.id)
-            .where(
-                Sms.organization_id == org,
-                Sms.metadata_["call_id"].astext == str(call.id),
-                Sms.metadata_["handover_contact_id"].astext == body.contact_id,
-            )
-            .limit(1)
-        )
-    ).first()
-    if texted is not None:
-        return AgentHandoverSmsResponse(sms="skipped:already_texted")
     number_id = (
         call.to_number_id if call.direction == "inbound" else call.from_number_id
     )
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
     if from_number is None or "sms" not in from_number.capabilities:
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
-
-    async def _blocked(reason: str, **extra: Any) -> AgentHandoverSmsResponse:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
-            action="agent.handover.sms_blocked",
-            resource_type="call",
-            resource_id=call.id,
-            payload={"contact_id": body.contact_id, "reason": reason, **extra},
-            actor_kind="system",
-        )
-        return AgentHandoverSmsResponse(sms=f"blocked:{reason}")
-
+    org = call.organization_id
     denial = await _shared_denial(db, call)
     if denial is not None:
-        return await _blocked(denial[1])
+        return AgentHandoverSmsResponse(
+            sms=await _notice_blocked(call, body, "sms", denial[1])
+        )
     gate = await check_sms_allowed(db, org, to)
     if not gate.allowed:
-        return await _blocked("compliance", detail=gate.reason, checks=gate.checks)
+        return AgentHandoverSmsResponse(
+            sms=await _notice_blocked(
+                call, body, "sms", "compliance", detail=gate.reason, checks=gate.checks
+            )
+        )
     cap_denial = await check_agent_send_allowed(db, org, "sms", [to])
     if cap_denial is not None:
-        return await _blocked("agent_caps", detail=cap_denial.reason)
+        return AgentHandoverSmsResponse(
+            sms=await _notice_blocked(
+                call, body, "sms", "agent_caps", detail=cap_denial.reason
+            )
+        )
     if await us_registration_block(db, org, from_number, to) is not None:
-        return await _blocked("us_registration")
+        return AgentHandoverSmsResponse(
+            sms=await _notice_blocked(call, body, "sms", "us_registration")
+        )
 
-    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
+    _, words = await _notice_text(db, call, body)
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -986,16 +1047,8 @@ async def agent_handover_sms(
         agent_id=call.agent_id,
         direction="outbound",
         status="queued",
-        body=handover_sms_text(
-            agent.name if agent else "Your agent",
-            caller if is_e164(caller) else None,
-            body.reason,
-        )[:SMS_MAX_BODY_CHARS],
-        metadata_={
-            "call_id": str(call.id),
-            "tool_invocation_id": str(body.tool_invocation_id),
-            "handover_contact_id": body.contact_id,
-        },
+        body=words[:SMS_MAX_BODY_CHARS],
+        metadata_=_notice_meta(call, body),
     )
     db.add(sms)
     await db.commit()
@@ -1030,96 +1083,66 @@ async def agent_handover_sms(
 
 @router.post("/handover-email", response_model=AgentHandoverEmailResponse)
 async def agent_handover_email(
-    body: AgentHandoverSmsRequest,
+    body: AgentHandoverNoticeRequest,
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentHandoverEmailResponse:
     """Email the handover contact while the voicebot dials them, with the
-    same words as the text (``/handover-sms``). Never blocks the dial: the
-    voicebot posts this in parallel and records ``email`` on the handover
-    event."""
-    call = await _load_call_for_update(db, body.call_id)
-    await _tag_call(db, call)
-    if call is None:
-        return AgentHandoverEmailResponse(email="skipped:no_call")
+    same words as the text. Never blocks the dial: the voicebot posts this
+    in parallel and records ``email`` on the handover event."""
+    start = await _notice_start(db, body, Email, ("failed", "bounced"), "emailed")
+    if isinstance(start, str):
+        return AgentHandoverEmailResponse(email=start)
+    call, _ = start
     org = call.organization_id
-    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
-    if prior is not None:
-        failed = prior.status in ("failed", "bounced")
-        return AgentHandoverEmailResponse(email="failed" if failed else "sent")
-    if call.status != "in_progress":
-        return AgentHandoverEmailResponse(email="skipped:call_ended")
-    contact = await _linked_person(db, call, body.contact_id)
-    if contact is None:
-        return AgentHandoverEmailResponse(email="skipped:no_contact")
     to = await handover_email(db, org, body.contact_id)
     if not to:
         return AgentHandoverEmailResponse(email="skipped:no_email")
-    if await has_answered_handover(db, call.id):
-        return AgentHandoverEmailResponse(email="skipped:already_connected")
-    # One email per contact per call, as with the text.
-    emailed = (
-        await db.execute(
-            select(Email.id)
-            .where(
-                Email.organization_id == org,
-                Email.metadata_["call_id"].astext == str(call.id),
-                Email.metadata_["handover_contact_id"].astext == body.contact_id,
-            )
-            .limit(1)
-        )
-    ).first()
-    if emailed is not None:
-        return AgentHandoverEmailResponse(email="skipped:already_emailed")
-
-    async def _blocked(reason: str, **extra: Any) -> AgentHandoverEmailResponse:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
-            action="agent.handover.email_blocked",
-            resource_type="call",
-            resource_id=call.id,
-            payload={"contact_id": body.contact_id, "reason": reason, **extra},
-            actor_kind="system",
-        )
-        return AgentHandoverEmailResponse(email=f"blocked:{reason}")
-
-    denial = await _shared_denial(db, call)
-    if denial is not None:
-        return await _blocked(denial[1])
-    gate = await check_email_allowed(db, org, [to])
-    if not gate.allowed:
-        return await _blocked("compliance", detail=gate.reason, checks=gate.checks)
-    cap_denial = await check_agent_send_allowed(
-        db, org, "email", [normalize_recipient(to)]
-    )
-    if cap_denial is not None:
-        return await _blocked("agent_caps", detail=cap_denial.reason)
     try:
         # As in /send-email: a voice agent cannot pick a sending domain.
         sd = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentHandoverEmailResponse(email="skipped:no_sender")
+    denial = await _shared_denial(db, call)
+    if denial is not None:
+        return AgentHandoverEmailResponse(
+            email=await _notice_blocked(call, body, "email", denial[1])
+        )
+    gate = await check_email_allowed(db, org, [to])
+    if not gate.allowed:
+        return AgentHandoverEmailResponse(
+            email=await _notice_blocked(
+                call,
+                body,
+                "email",
+                "compliance",
+                detail=gate.reason,
+                checks=gate.checks,
+            )
+        )
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(to)]
+    )
+    if cap_denial is not None:
+        return AgentHandoverEmailResponse(
+            email=await _notice_blocked(
+                call, body, "email", "agent_caps", detail=cap_denial.reason
+            )
+        )
 
-    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
-    agent_name = agent.name if agent else "Your agent"
-    caller = _other_party(call)
+    agent_name, words = await _notice_text(db, call, body)
+    # The name goes in a header: one line, kept short.
+    subject_name = " ".join(agent_name.split())[:HANDOVER_EMAIL_SUBJECT_NAME_CHARS]
     email = Email(
         organization_id=org,
         email_domain_id=sd.id,
         from_address=from_address_for(sd, None),
         to_addresses=[to],
-        subject=HANDOVER_EMAIL_SUBJECT.format(agent=agent_name),
-        body_text=handover_sms_text(
-            agent_name, caller if is_e164(caller) else None, body.reason
-        ),
+        subject=HANDOVER_EMAIL_SUBJECT.format(agent=subject_name or "Your agent"),
+        body_text=words,
         status="queued",
         provider="ses",
-        metadata_={
-            "call_id": str(call.id),
-            "tool_invocation_id": str(body.tool_invocation_id),
-            "handover_contact_id": body.contact_id,
-        },
+        metadata_=_notice_meta(call, body),
     )
     db.add(email)
     await db.commit()
