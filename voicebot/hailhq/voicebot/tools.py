@@ -17,8 +17,8 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools import transfer_call
+from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
