@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def compose(tmp_path, profile, *args):
-    env_file = tmp_path / "compose.env"
+    # Older Compose versions still check service env_file paths with
+    # --no-env-resolution. Keep those paths inside the isolated fixture.
+    env_file = tmp_path / ".env"
     env_file.write_text(
         "DATABASE_URL=postgresql://fixture\nHAIL_ACTIVITY_DIGEST_API_KEY=test-key\n"
     )
@@ -20,6 +22,8 @@ def compose(tmp_path, profile, *args):
         [
             "docker",
             "compose",
+            "--project-directory",
+            str(tmp_path),
             "--env-file",
             str(env_file),
             "-f",
