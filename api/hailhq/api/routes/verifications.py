@@ -27,6 +27,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
+from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
@@ -557,13 +558,12 @@ async def _audit_carrier_rejection(
 
 
 async def _lock_for_poll(db: AsyncSession, row: CarrierVerification) -> bool:
-    """Lock an SMS registration row before asking the carrier about it, and
+    """Lock a verification row before asking the carrier about it, and
     re-read it. False when another poll holds the lock: that poll is in
-    flight, so this one skips the row. An SMS plug-in creates the campaign
-    inside status(), so two polls at once would create two campaigns. The
-    lock is held until the caller commits."""
-    if row.purpose != "sms":
-        return True
+    flight, so this one skips the row. Two polls at once would both apply
+    the carrier's answer: an SMS plug-in would create two campaigns, and the
+    owners would get two decision emails. The lock is held until the caller
+    commits."""
     locked = (
         await db.execute(
             select(CarrierVerification)
@@ -726,9 +726,11 @@ async def refresh_number_verifications(
         .all()
     )
     now = time.monotonic()
-    due = [r for r in rows if _poll_due(r, now)]
-    if not due:
+    asked = [r for r in rows if _poll_due(r, now)]
+    if not asked:
         return
+    # Locked and re-read first (see _lock_for_poll).
+    due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
     changed = [
@@ -736,7 +738,7 @@ async def refresh_number_verifications(
         for r, st, b in zip(due, statuses, before)
         if await _poll_and_apply(db, r, st, registry, b)
     ]
-    await db.commit()
+    await db.commit()  # saves changes and ends the row locks
     _notify_billing(changed)
 
 
@@ -1490,7 +1492,7 @@ async def list_verifications(
     # Only the carrier calls run concurrently; the session is used in order.
     now = time.monotonic()
     asked = [r for r in rows if _poll_due(r, now)]
-    # SMS rows are locked and re-read first (see _lock_for_poll).
+    # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
