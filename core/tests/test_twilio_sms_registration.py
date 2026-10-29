@@ -82,6 +82,7 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.example/privacy",
     "terms_url": "https://acme.example/terms",
 }
@@ -737,6 +738,9 @@ async def test_person_otp_is_sent_again_after_a_day(age_hours, sends) -> None:
 async def test_confirmation_is_reply_until_identity_verified() -> None:
     p = _provider()
     refs = {"subject_type": "person", "brand_sid": "BN1"}
+    # Twilio texts only once the brand is approved.
+    assert p.confirmation(refs) is None
+    refs["otp_sent_at"] = "2026-10-28T00:00:00+00:00"
     assert p.confirmation(refs) == "reply"
     refs["identity_verified"] = True
     assert p.confirmation(refs) is None
@@ -764,3 +768,16 @@ async def test_status_marks_person_identity_verified() -> None:
     }
     assert (await _provider(r).status(refs)).state == "pending"
     assert refs["identity_verified"] is True and refs["campaign_sid"] == "QE1"
+
+
+def test_step_follows_the_filing() -> None:
+    p = _provider()
+    person = {"subject_type": "person"}
+    assert p.step(person) == "filing"  # Twilio has not texted yet
+    assert p.step({**person, "otp_sent_at": "2026-10-28T00:00:00+00:00"}) == (
+        "confirm_identity"
+    )
+    assert p.step({**person, "identity_verified": True}) == "filing"
+    assert p.step({"subject_type": "business", "campaign_sid": "QE1"}) == (
+        "carrier_review"
+    )

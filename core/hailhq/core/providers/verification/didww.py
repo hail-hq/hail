@@ -27,6 +27,7 @@ from hailhq.core.providers.verification.base import (
     ProviderStatus,
     Requirements,
     SubjectType,
+    SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
@@ -494,7 +495,7 @@ class DidwwVerificationProvider(VerificationProvider):
 
     # -- lifecycle -------------------------------------------------------
 
-    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
+    async def check(self, refs: dict) -> list[Problem]:
         try:
             return await asyncio.to_thread(self._validate, refs)
         except DidwwApiError as exc:
@@ -512,6 +513,8 @@ class DidwwVerificationProvider(VerificationProvider):
                 set_address_ref, self._client, refs["address_id"], ref
             )
         except DidwwApiError as exc:
+            if carrier_status(exc) == 422:
+                raise SubmitRefused(_problems(exc)) from exc
             raise VerificationProviderError("DIDWW request failed") from exc
 
     async def status(self, refs: dict) -> ProviderStatus:

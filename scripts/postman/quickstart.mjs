@@ -224,12 +224,6 @@ export function quickstartItems() {
           "/v1/verifications/{{verification_id}}",
           "Uses verification_id from the list. Some carrier reviews take business days.",
         ),
-        request(
-          "Read US texting fees",
-          "GET",
-          "/v1/verifications/sms-fees",
-          "Read registration and monthly fees before filing a US SMS registration.",
-        ),
       ],
     },
     {

@@ -17,7 +17,12 @@ import logging
 import re
 
 import httpx
-from hailhq.core.providers.telnyx import TelnyxClient, path_id
+from hailhq.core.providers.telnyx import (
+    TelnyxClient,
+    path_id,
+    rule_applies_to,
+    subject_types_for,
+)
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
@@ -32,6 +37,8 @@ from hailhq.core.providers.verification.base import (
     ProviderStatus,
     Requirements,
     SubjectType,
+    SubmitRefused,
+    UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
 )
@@ -46,20 +53,10 @@ logger = logging.getLogger(__name__)
 
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 _UPLOAD_TIMEOUT_SECONDS = 60
-_SUBJECT_TYPES: tuple[SubjectType, ...] = ("person", "business")
-# Telnyx returns one list for both kinds of end user and marks a rule that
-# applies to only one kind with a tag in its name. "Sole Proprietorships"
-# tags (Italy) can mean either kind, so those rules stay for both.
-_ONLY_FOR: dict[SubjectType, tuple[str, ...]] = {
-    "business": ("(business use only)", "(legal entity only)"),
-    "person": ("(personal use only)", "(personal only)"),
-}
-
-
-def _applies_to(rule: dict, subject_type: SubjectType) -> bool:
-    name = (rule.get("name") or "").lower()
-    other = "person" if subject_type == "business" else "business"
-    return not any(tag in name for tag in _ONLY_FOR[other])
+# Telnyx refuses to submit a group with any value missing, even a rule tagged
+# for the other kind of end user. Such a text rule is sent as this; a file or
+# address rule is asked of everyone who may buy (see subject_types_for).
+_NOT_APPLICABLE = "N/A"
 
 
 def _customer_reference(organization_id: str) -> str:
@@ -86,6 +83,11 @@ def _pattern(criteria: dict) -> str | None:
     return regex
 
 
+def _max_length(criteria: dict) -> int | None:
+    value = criteria.get("max_length")
+    return value if isinstance(value, int) and value > 0 else None
+
+
 def _options(criteria: dict) -> tuple[FieldOption, ...] | None:
     values = criteria.get("acceptable_values") or []
     if not values:
@@ -110,6 +112,7 @@ def _field_spec(req: dict) -> FieldSpec:
         pattern=_pattern(criteria),
         options=options,
         required=True,
+        max_length=_max_length(criteria),
     )
 
 
@@ -188,34 +191,45 @@ class TelnyxVerificationProvider(VerificationProvider):
     async def _not_for(
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> set[str]:
-        """Ids of the rules Telnyx tags for the other kind of end user."""
+        """Ids of the text rules Telnyx tags for the other kind of end user."""
         rules = await self._rules(country_code, number_type)
-        return {r["id"] for r in rules if not _applies_to(r, subject_type)}
+        return {
+            r["id"]
+            for r in rules
+            if r.get("field_type") == "textual" and not rule_applies_to(r, subject_type)
+        }
 
     async def requirements(
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> Requirements:
         try:
-            all_rules = await self._rules(country_code, number_type)
+            rules = await self._rules(country_code, number_type)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
-        # Both subjects are accepted; the form leaves out the rules tagged
-        # for the other kind.
-        rules = [r for r in all_rules if _applies_to(r, subject_type)]
+        allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
+        if subject_type not in allowed:
+            raise UnsupportedSubjectType(
+                f"{subject_type} is not accepted for {number_type} numbers in "
+                f"{country_code}",
+                allowed=allowed,
+            )
         base = {
             "provider": self.name,
             "country_code": country_code,
             "number_type": number_type,
             "subject_type": subject_type,
-            "subject_types": _SUBJECT_TYPES,
+            "subject_types": allowed,
         }
-        # Any rule means a group is needed, even if none is left to fill.
-        if not all_rules:
+        if not rules:
             return Requirements(required=False, **base)
         return Requirements(
             required=True,
+            # Text rules tagged for the other kind are filled in by
+            # create_draft, not asked.
             fields=tuple(
-                _field_spec(r) for r in rules if r.get("field_type") == "textual"
+                _field_spec(r)
+                for r in rules
+                if r.get("field_type") == "textual" and rule_applies_to(r, subject_type)
             ),
             documents=tuple(
                 _document_slot(r) for r in rules if r.get("field_type") == "document"
@@ -265,7 +279,7 @@ class TelnyxVerificationProvider(VerificationProvider):
             # type, including the address ones the form only reported as
             # address_required. The create response is not relied on for that.
             group = await self._group(refs)
-            skipped = await self._not_for(
+            not_applicable = await self._not_for(
                 requirements.country_code,
                 requirements.number_type,
                 requirements.subject_type,
@@ -274,9 +288,11 @@ class TelnyxVerificationProvider(VerificationProvider):
             address_id: str | None = None
             for req in group.get("regulatory_requirements") or []:
                 req_id, kind = req["requirement_id"], req.get("field_type")
-                if req_id in skipped:
-                    continue
-                if kind == "textual":
+                if req_id in not_applicable:
+                    values.append(
+                        {"requirement_id": req_id, "field_value": _NOT_APPLICABLE}
+                    )
+                elif kind == "textual":
                     value = (fields.get(req_id) or "").strip()
                     if value:
                         values.append({"requirement_id": req_id, "field_value": value})
@@ -339,7 +355,7 @@ class TelnyxVerificationProvider(VerificationProvider):
             await self.discard(refs)
             raise
         try:
-            problems = await self._problems(refs, requirements.subject_type)
+            problems = await self._problems(refs)
         except httpx.HTTPError as exc:
             await self.discard(refs)
             raise VerificationProviderError("Telnyx request failed") from exc
@@ -377,18 +393,14 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
         )["data"]
 
-    async def _problems(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
+    async def _problems(self, refs: dict) -> list[Problem]:
         """Telnyx has no evaluation call. A draft is complete when every
-        requirement for this subject holds a value and none was declined."""
+        requirement holds a value and no document was denied: Telnyx will
+        not submit a group with any value missing."""
         group = await self._group(refs)
-        skipped = await self._not_for(
-            group["country_code"], group["phone_number_type"], subject_type
-        )
         problems: list[Problem] = []
         for req in group.get("regulatory_requirements") or []:
             req_id = req["requirement_id"]
-            if req_id in skipped:
-                continue
             if not req.get("field_value"):
                 problems.append(
                     Problem(field=req_id, message="This requirement is missing.")
@@ -397,9 +409,9 @@ class TelnyxVerificationProvider(VerificationProvider):
                 problems.append(Problem(field=req_id, message=VALUE_NOT_ACCEPTED))
         return problems
 
-    async def check(self, refs: dict, subject_type: SubjectType) -> list[Problem]:
+    async def check(self, refs: dict) -> list[Problem]:
         try:
-            return await self._problems(refs, subject_type)
+            return await self._problems(refs)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 
@@ -409,6 +421,28 @@ class TelnyxVerificationProvider(VerificationProvider):
                 "POST",
                 f"/requirement_groups/{path_id(refs['group_id'])}/submit_for_approval",
             )
+        except httpx.HTTPStatusError as exc:
+            # 422: Telnyx will not take this group for review as it is. It
+            # also answers 422 for a group already sent, which is a success.
+            if exc.response.status_code == 422:
+                try:
+                    state = (await self._group(refs)).get("status")
+                except httpx.HTTPError as read_exc:
+                    raise VerificationProviderError(
+                        "Telnyx request failed"
+                    ) from read_exc
+                if state in ("pending-approval", "approved"):
+                    return
+                raise SubmitRefused(
+                    [
+                        Problem(
+                            field="",
+                            message=NOT_ACCEPTED,
+                            raw=_rejection(exc.response),
+                        )
+                    ]
+                ) from exc
+            raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 

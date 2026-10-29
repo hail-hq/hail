@@ -108,3 +108,32 @@ def verify_webhook(
     except (ValueError, OverflowError, InvalidSignature):
         # OverflowError: an absurdly long timestamp digit string cannot become a float.
         return False
+
+
+# Telnyx returns one regulatory rule list for both kinds of end user and marks
+# a rule that applies to only one kind with a tag in its name. "Sole
+# Proprietorships" tags (Italy) can mean either kind, so those rules stay for
+# both.
+_ONLY_FOR: dict[str, tuple[str, ...]] = {
+    "business": ("(business use only)", "(legal entity only)"),
+    "person": ("(personal use only)", "(personal only)"),
+}
+
+
+def rule_applies_to(rule: dict, subject_type: str) -> bool:
+    """False when the rule's name tags it for the other kind of end user."""
+    name = (rule.get("name") or "").lower()
+    other = "person" if subject_type == "business" else "business"
+    return not any(tag in name for tag in _ONLY_FOR[other])
+
+
+def subject_types_for(rules: list[dict]) -> tuple[str, ...]:
+    """The kinds of end user who can meet these rules. A person cannot give
+    a file or address meant only for a business; a business can give a
+    person's file (its representative's ID)."""
+    if any(
+        r.get("field_type") != "textual" and not rule_applies_to(r, "person")
+        for r in rules
+    ):
+        return ("business",)
+    return ("person", "business")

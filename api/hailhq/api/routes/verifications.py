@@ -27,6 +27,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
+from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
@@ -42,6 +43,7 @@ from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
+from hailhq.core.internal_webhook import notify_sms_registration_changed
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -56,6 +58,7 @@ from hailhq.core.providers.verification import (
     Requirements,
     SmsRegistrationProvider,
     SubjectType,
+    SubmitRefused,
     UnsupportedSubjectType,
     UploadedFile,
     VerificationProvider,
@@ -64,9 +67,10 @@ from hailhq.core.providers.verification import (
     default_verification_provider_name,
     get_verification_provider,
 )
+from hailhq.core.providers.verification.base import NOT_ACCEPTED
 from hailhq.core.schemas import VerificationResponse
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import String, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -252,6 +256,76 @@ def _log_carrier_refusal(
         )
 
 
+async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
+    """US texting filings of the last day with no ledger row yet: the
+    website's rater charges each one shortly after it is saved."""
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.purpose == "sms",
+                CarrierVerification.created_at > func.now() - text("interval '1 day'"),
+                ~select(AccountCredit.id)
+                .where(
+                    AccountCredit.organization_id == organization_id,
+                    AccountCredit.ref.like(
+                        func.concat(
+                            "sms_registration:",
+                            func.cast(CarrierVerification.id, String),
+                            "%",
+                        )
+                    ),
+                )
+                .exists(),
+            )
+        )
+    ).scalar_one()
+
+
+async def _record_billed_refusal(
+    db: AsyncSession,
+    principal: Principal,
+    provider_name: str,
+    sub,
+    subject_name: str | None,
+    billed_refs: dict,
+    reason: str,
+    requirements_version: str,
+) -> None:
+    """The carrier made and bills part of a filing that then failed (a
+    brand it registered, then refused). Keep it as a rejected registration,
+    so the submission is charged and support can trace the carrier id. It
+    holds no live state, so it never blocks a new filing."""
+    row = CarrierVerification(
+        organization_id=principal.organization_id,
+        provider=provider_name,
+        purpose=sub.purpose,
+        country_code=sub.country_code,
+        number_type=sub.number_type,
+        subject_type=sub.subject_type,
+        subject_name=subject_name,
+        state="rejected",
+        rejection_reason=reason[:500],
+        provider_refs={**billed_refs, "refused_at_filing": True},
+        requirements_version=requirements_version,
+    )
+    db.add(row)
+    await db.commit()
+    await write_audit_log(
+        principal.organization_id,
+        None,
+        "verification.reject",
+        "carrier_verification",
+        row.id,
+        {"rejected_by": None, "reason": row.rejection_reason, "at_filing": True},
+        actor_user_id=None,
+        actor_kind="system",
+    )
+    notify_sms_registration_changed(str(row.id))
+
+
 def _problems_422(
     problems: list[Problem],
     organization_id: UUID,
@@ -418,6 +492,14 @@ async def _poll_and_apply(
     return changed
 
 
+def _notify_billing(rows: list[CarrierVerification]) -> None:
+    """Tell the website's fee rater about US texting rows that changed and
+    are committed (a campaign sent for review is a billed step)."""
+    for row in rows:
+        if row.purpose == "sms":
+            notify_sms_registration_changed(str(row.id))
+
+
 async def _audit_carrier_rejection(
     row: CarrierVerification, raw_reason: str | None
 ) -> None:
@@ -447,13 +529,12 @@ async def _audit_carrier_rejection(
 
 
 async def _lock_for_poll(db: AsyncSession, row: CarrierVerification) -> bool:
-    """Lock an SMS registration row before asking the carrier about it, and
+    """Lock a verification row before asking the carrier about it, and
     re-read it. False when another poll holds the lock: that poll is in
-    flight, so this one skips the row. An SMS plug-in creates the campaign
-    inside status(), so two polls at once would create two campaigns. The
-    lock is held until the caller commits."""
-    if row.purpose != "sms":
-        return True
+    flight, so this one skips the row. Two polls at once would both apply
+    the carrier's answer: an SMS plug-in would create two campaigns, and the
+    owners would get two decision emails. The lock is held until the caller
+    commits."""
     locked = (
         await db.execute(
             select(CarrierVerification)
@@ -488,6 +569,7 @@ async def _refresh(
     await db.commit()  # also ends the row lock
     if not changed:
         return
+    _notify_billing([row])
     if was_submitting and row.state in ("submitted", "approved", "rejected"):
         # approved_by is set only by a superadmin's approve; an automatic
         # submit (creation or the sweeper) that was cut off has none.
@@ -507,15 +589,23 @@ async def _refresh(
         )
 
 
-def _confirmation(row: CarrierVerification, registry: Registry) -> str | None:
-    """How the person must confirm an SMS registration that waits on them:
-    'code', 'reply', or None."""
-    if row.purpose != "sms" or row.state not in _POLLED_STATES:
-        return None
+def _sms_progress(
+    row: CarrierVerification, registry: Registry
+) -> tuple[str | None, str | None]:
+    """``(confirmation, step)`` of an SMS registration in progress: how the
+    person must confirm ('code', 'reply' or None) and where the filing is.
+    A draft not yet submitted is still being filed."""
+    if row.purpose != "sms":
+        return None, None
+    if row.state == "awaiting_review":
+        return None, "filing"
+    if row.state not in _POLLED_STATES:
+        return None, None
     provider = registry(row.provider, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
-        return None
-    return provider.confirmation(row.provider_refs or {})
+        return None, None
+    refs = row.provider_refs or {}
+    return provider.confirmation(refs), provider.step(refs)
 
 
 def _out(
@@ -523,9 +613,10 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """The response for a row, with ``confirmation`` filled in."""
+    """The response for a row, with ``confirmation`` and ``step`` filled in."""
+    confirmation, step = _sms_progress(row, registry)
     return model.model_validate(row).model_copy(
-        update={"confirmation": _confirmation(row, registry)}
+        update={"confirmation": confirmation, "step": step}
     )
 
 
@@ -606,14 +697,20 @@ async def refresh_number_verifications(
         .all()
     )
     now = time.monotonic()
-    due = [r for r in rows if _poll_due(r, now)]
-    if not due:
+    asked = [r for r in rows if _poll_due(r, now)]
+    if not asked:
         return
+    # Locked and re-read first (see _lock_for_poll).
+    due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
-    for r, st, b in zip(due, statuses, before):
-        await _poll_and_apply(db, r, st, registry, b)
-    await db.commit()
+    changed = [
+        r
+        for r, st, b in zip(due, statuses, before)
+        if await _poll_and_apply(db, r, st, registry, b)
+    ]
+    await db.commit()  # saves changes and ends the row locks
+    _notify_billing(changed)
 
 
 # -- customer routes ------------------------------------------------------
@@ -829,8 +926,10 @@ async def create_verification(
     """Submit your details and documents (multipart/form-data).
 
     Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
-    in the US; `sms` takes `country_code=US` and `number_type=local` and charges
-    the filing fee), `country_code`, `number_type`, `subject_type` (required:
+    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+    are charged from credit per step, when the details are submitted and when
+    the carriers start their review, and 402 means there is not enough credit
+    to file), `country_code`, `number_type`, `subject_type` (required:
     `person` for you, `business` for your company; ask the user which),
     `quote_id` (required for `number`: the offer to verify for), `number_id`
     (optional, for `sms`: one of your US numbers; needed when your US numbers
@@ -987,11 +1086,13 @@ async def create_verification(
             ),
         )
 
-    fee_cents = 0
     draft_kwargs: dict = {}
     if sub.purpose == "sms":
+        # Hail Cloud charges each step of the filing from prepaid credit (the
+        # website prices it; this repo holds no prices). The carrier's own
+        # cost is the floor the balance must cover before anything is filed.
         try:
-            fee_cents = sms_registration_fees.filing_fee_cents(
+            floor_cents = sms_registration_fees.filing_fee_cents(
                 provider_name, sub.subject_type
             )
         except KeyError:
@@ -1001,10 +1102,14 @@ async def create_verification(
             )
         if principal.auth_kind != "shared":
             balance = await get_balance_cents(db, principal.organization_id)
-            if balance < fee_cents:
+            # Filings the website has not charged yet (it charges a moment
+            # later) count too, or an account could file again and again on
+            # the same credit.
+            unsettled = await _unsettled_sms_filings(db, principal.organization_id)
+            if balance < floor_cents * (1 + unsettled):
                 raise HTTPException(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=f"filing costs ${fee_cents / 100:.2f}; add credit first",
+                    detail="not enough credit to file; add credit first",
                 )
         draft_kwargs["messaging_service_sid"] = (
             await sms_setup.org_messaging_service_sid(
@@ -1023,6 +1128,17 @@ async def create_verification(
             **draft_kwargs,
         )
     except VerificationProviderError as exc:
+        if exc.billed_refs:
+            await _record_billed_refusal(
+                db,
+                principal,
+                provider_name,
+                sub,
+                subject_name,
+                exc.billed_refs,
+                NOT_ACCEPTED,
+                requirements.version,
+            )
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
@@ -1034,6 +1150,17 @@ async def create_verification(
             detail="carrier unavailable; try again later",
         ) from exc
     if draft.problems:
+        if draft.billed_refs:
+            await _record_billed_refusal(
+                db,
+                principal,
+                provider_name,
+                sub,
+                subject_name,
+                draft.billed_refs,
+                "; ".join(p.message for p in draft.problems),
+                requirements.version,
+            )
         raise _problems_422(draft.problems, principal.organization_id, provider_name)
 
     row = CarrierVerification(
@@ -1050,20 +1177,6 @@ async def create_verification(
     )
     db.add(row)
     try:
-        # The shared self-hosted key is not billed (as in number_orders).
-        if fee_cents and principal.auth_kind != "shared":
-            await db.flush()  # row.id is a server default
-            db.add(
-                AccountCredit(
-                    organization_id=principal.organization_id,
-                    kind="debit",
-                    channel="sms",
-                    amount_cents=-fee_cents,
-                    qty=1,
-                    ref=f"sms_registration:{row.id}",
-                    source="sms_registration_fee",
-                )
-            )
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it
@@ -1089,8 +1202,9 @@ async def create_verification(
         provider,
         actor=actor_of(principal),
         action="verification.submit",
-        extra={"fee_cents": fee_cents} if sub.purpose == "sms" else None,
     )
+    if row.purpose == "sms":
+        notify_sms_registration_changed(str(row.id))
     return _out(row, registry)
 
 
@@ -1102,12 +1216,15 @@ async def _submit_row(
     actor: tuple[UUID | None, str],
     action: str,
     extra: dict | None = None,
+    raise_refused: bool = False,
 ) -> bool:
     """Send an 'awaiting_review' draft the carrier has already evaluated
     (create_draft or check). True when it is now 'submitted'; False when the
-    carrier was unreachable (the row stays 'awaiting_review' for the next try).
+    carrier was unreachable (the row stays 'awaiting_review' for the next try)
+    or refused the draft (the row is 'rejected').
     Never raises for carrier trouble: creation must still answer 201 and the
-    sweeper must keep going.
+    sweeper must keep going. With ``raise_refused`` a refusal re-raises
+    SubmitRefused after the row is rejected, so a superadmin sees why.
 
     The row is saved as 'submitting' before the carrier call so a crash in
     between cannot submit twice; _refresh settles a stuck 'submitting' row.
@@ -1120,6 +1237,19 @@ async def _submit_row(
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
+    except SubmitRefused as exc:
+        # The same draft would be refused on every retry: reject it so the
+        # customer sees why and can start again.
+        await _refuse_row(db, row, provider, exc.problems)
+        await db.refresh(row)
+        if row.state != "rejected":
+            # The discard failed: wait for the next try, as when it is down.
+            row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
+            row.approved_by = None
+            await db.commit()
+        elif raise_refused:
+            raise
+        return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
@@ -1178,27 +1308,35 @@ async def _retry_submit(
         await db.rollback()
         return False
     try:
-        problems = await provider.check(
-            row.provider_refs, row.subject_type  # type: ignore[arg-type]
-        )
+        problems = await provider.check(row.provider_refs)
     except Exception:
         logger.exception("verification check failed for %s", row.id)
         await db.rollback()
         return False
     if problems:
-        _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
-        await _reject_row(
-            db,
-            row,
-            provider,
-            "; ".join(
-                f"{p.field}: {p.message}" if p.field else p.message for p in problems
-            ),
-            carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
-        )
+        await _refuse_row(db, row, provider, problems)
         return False
     return await _submit_row(
         db, row, provider, actor=(None, "system"), action="verification.submit"
+    )
+
+
+async def _refuse_row(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    problems: list[Problem],
+) -> None:
+    """Reject a draft the carrier refused, with its per-field reasons."""
+    _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
+    await _reject_row(
+        db,
+        row,
+        provider,
+        "; ".join(
+            f"{p.field}: {p.message}" if p.field else p.message for p in problems
+        ),
+        carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
     )
 
 
@@ -1222,6 +1360,7 @@ async def _reject_row(
         await db.rollback()
         return
     row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await write_audit_log(
@@ -1318,86 +1457,19 @@ async def list_verifications(
     # Only the carrier calls run concurrently; the session is used in order.
     now = time.monotonic()
     asked = [r for r in rows if _poll_due(r, now)]
-    # SMS rows are locked and re-read first (see _lock_for_poll).
+    # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
-    for r, s, b in zip(due, statuses, before):
-        await _poll_and_apply(db, r, s, registry, b)
+    changed = [
+        r
+        for r, s, b in zip(due, statuses, before)
+        if await _poll_and_apply(db, r, s, registry, b)
+    ]
     if asked:
         await db.commit()  # saves changes and ends the row locks
+    _notify_billing(changed)
     return [_out(r, registry) for r in rows]
-
-
-class SmsFee(BaseModel):
-    filing_cents: int = Field(
-        description="Charged once when the registration is filed."
-    )
-    monthly_cents: int = Field(description="Charged each month while approved.")
-    minimum_months: int = Field(
-        description=(
-            "Monthly fees charged at least, counted from approval, even when "
-            "the registration is cancelled sooner."
-        )
-    )
-
-
-class SmsFees(BaseModel):
-    person: SmsFee = Field(description="Fees for a person's registration.")
-    business: SmsFee = Field(description="Fees for a business's registration.")
-
-
-@router.get(
-    "/sms-fees",
-    response_model=SmsFees,
-    operation_id="get_sms_registration_fees",
-    responses={
-        404: {
-            "description": "number_id is not one of your active US local "
-            "numbers that can text, or SMS registration is not available."
-        },
-        422: {
-            "description": "Your US numbers are with more than one carrier: "
-            "pass number_id."
-        },
-    },
-)
-async def get_sms_fees(
-    principal: Annotated[Principal, Depends(get_current_principal)],
-    db: Annotated[AsyncSession, Depends(get_session)],
-    default_provider: Annotated[str | None, Depends(get_default_sms_provider_name)],
-    number_id: Annotated[
-        UUID | None,
-        Query(
-            description="One of your active US local numbers that can text. "
-            "Needed when your US numbers are with more than one carrier."
-        ),
-    ] = None,
-) -> SmsFees:
-    """Fees for US SMS registration, per subject type, in cents. Passed
-    through at cost. They are the fees for the carrier of your US numbers
-    that can text, or of `number_id` when given (404 when it is not one of
-    your active US local numbers that can text). When your US numbers are
-    with more than one carrier, pass `number_id` (422 otherwise). With no US
-    number yet, the fees are those of the carrier a new US number is
-    registered with by default."""
-    carriers = await _sms_carriers(db, principal.organization_id, number_id)
-    carrier = _one_carrier(carriers, "query") if carriers else default_provider
-    if carrier not in sms_registration_fees.providers():
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="no SMS registration is available",
-        )
-    return SmsFees(
-        **{
-            subject: SmsFee(
-                filing_cents=sms_registration_fees.filing_fee_cents(carrier, subject),
-                monthly_cents=sms_registration_fees.monthly_fee_cents(carrier, subject),
-                minimum_months=sms_registration_fees.minimum_months(carrier, subject),
-            )
-            for subject in ("person", "business")
-        }
-    )
 
 
 @router.get(
@@ -1438,9 +1510,9 @@ async def cancel_verification(
     its numbers leave the campaign, the campaign is deleted at the carrier,
     and US-to-US texts from those numbers get 422 again. Its monthly fee is
     charged through the month of the cancellation, then stops. Some carriers
-    bill a minimum number of monthly fees from approval (`minimum_months` in
-    GET /verifications/sms-fees): a registration cancelled sooner is still
-    charged for that many months."""
+    bill a minimum number of monthly fees from approval: a registration
+    cancelled sooner is still charged for that many months (prices: see the
+    console)."""
     row = await _org_row_or_404(db, principal, verification_id)
     if row.state in ("submitting", "submitted"):
         raise HTTPException(
@@ -1670,9 +1742,7 @@ async def admin_approve(
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
     try:
-        problems = await provider.check(
-            row.provider_refs, row.subject_type  # type: ignore[arg-type]
-        )
+        problems = await provider.check(row.provider_refs)
     except Exception as exc:
         logger.exception("verification check failed")
         raise _carrier_unavailable() from exc
@@ -1683,9 +1753,23 @@ async def admin_approve(
             detail="the carrier no longer accepts this draft: "
             + "; ".join(p.raw or p.message for p in problems),
         )
-    if not await _submit_row(
-        db, row, provider, actor=actor_of(admin), action="verification.approve"
-    ):
+    try:
+        submitted = await _submit_row(
+            db,
+            row,
+            provider,
+            actor=actor_of(admin),
+            action="verification.approve",
+            raise_refused=True,
+        )
+    except SubmitRefused as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            # Superadmin only: the carrier's own words help the review.
+            detail="the carrier refused the submission: "
+            + "; ".join(p.raw or p.message for p in exc.problems),
+        ) from exc
+    if not submitted:
         raise _carrier_unavailable()
     return _out(row, registry, AdminVerification)
 

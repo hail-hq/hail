@@ -657,11 +657,12 @@ func newNumberRegisterSmsCmd(opts *Options) *cobra.Command {
 		Short: "Register to send SMS from US numbers (A2P 10DLC brand and campaign)",
 		Long: `hail numbers register-sms — file your US SMS registration.
 
-Posts purpose=sms to POST /v1/verifications for a US local number. The carrier
-fee is debited from prepaid credit at filing. Required fields and fees:
+Posts purpose=sms to POST /v1/verifications for a US local number. Fees are
+charged from prepaid credit per step: when the details are submitted, when the
+carriers start their review, then monthly after approval (prices:
+https://hail.so/pricing). Required fields:
 GET /v1/verifications/requirements?purpose=sms&country_code=US&number_type=local&subject_type=business
-and GET /v1/verifications/sms-fees. --subject-type is required: person (you)
-or business (your company).`,
+--subject-type is required: person (you) or business (your company).`,
 		Example: `  hail numbers register-sms --subject-type business \
     --field legal_name="Acme Inc" --field ein=12-3456789 \
     --address customer_name="Acme Inc" --address street="1 Main St" \

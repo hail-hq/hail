@@ -12,6 +12,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from hailhq.api import verification_decisions
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
@@ -36,11 +37,13 @@ from hailhq.core.providers.verification import (
     ProviderStatus,
     Requirements,
     SmsRegistrationProvider,
+    SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
 )
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
+    NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
 )
 from hailhq.core.providers.verification.forms import display_name
@@ -88,7 +91,7 @@ class FakeCarrier(VerificationProvider):
             return DraftResult(refs={}, problems=self.problems)
         return DraftResult(refs={"bundle_sid": f"B{len(self.drafts)}"})
 
-    async def check(self, refs, subject_type):
+    async def check(self, refs):
         return self.check_problems
 
     async def submit(self, refs):
@@ -118,6 +121,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.attached: list[tuple[dict, str, str]] = []
         self.attach_error: Exception | None = None
         self.problems: list[Problem] = []
+        # With problems: what the carrier made and bills anyway.
+        self.billed_refs: dict = {}
         # Set to "campaign_sid" (Twilio) or "campaign_id" (Telnyx): status()
         # then creates the campaign once, writes its id into refs in place
         # and reports pending, like the real plug-ins.
@@ -158,7 +163,9 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         if self.draft_delay:
             await asyncio.sleep(self.draft_delay)
         if self.problems:
-            return DraftResult(refs={}, problems=self.problems)
+            return DraftResult(
+                refs={}, problems=self.problems, billed_refs=self.billed_refs
+            )
         return DraftResult(
             refs={
                 "brand_sid": f"BN{len(self.drafts)}",
@@ -166,7 +173,7 @@ class FakeSmsCarrier(SmsRegistrationProvider):
             }
         )
 
-    async def check(self, refs, subject_type):
+    async def check(self, refs):
         return []
 
     async def submit(self, refs):
@@ -176,6 +183,10 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         if refs.get("subject_type") == "person" and not refs.get("identity_verified"):
             return self.confirm_kind
         return None
+
+    @property
+    def campaign_ref(self):
+        return self.campaign_key
 
     async def confirm(self, refs, code):
         if self.confirm_kind != "code":
@@ -952,8 +963,12 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
 
 
 async def test_superadmin_reject_records_reason_and_discards(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -968,14 +983,19 @@ async def test_superadmin_reject_records_reason_and_discards(
     assert resp.json()["state"] == "rejected"
     assert resp.json()["rejection_reason"] == "ID unreadable"
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     # rejected does not block starting again
     app.dependency_overrides.pop(require_superadmin)
     assert (await _create(client, key)).status_code == 201
 
 
 async def test_status_is_pulled_from_the_carrier_after_submit(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -986,9 +1006,14 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     assert (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()[
         "state"
     ] == "submitted"
+    assert decided == []
     carrier.remote_status = ProviderStatus(state="approved")
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert got["state"] == "approved" and got["approved_at"]
+    # The owners are emailed once: an approved row is not polled again.
+    verifications_routes._last_polled.clear()
+    await client.get("/verifications", headers=_auth(key))
+    assert decided == [vid]
 
 
 async def test_list_polls_the_carrier_at_most_once_a_minute(
@@ -1771,7 +1796,7 @@ async def test_quote_from_an_unconfigured_carrier_is_404(
     assert resp.status_code == 404
 
 
-async def test_create_keeps_waiting_when_the_carrier_refuses_the_submit(
+async def test_create_keeps_waiting_when_the_carrier_is_down(
     client, org_and_key, carrier
 ) -> None:
     _, _, key = org_and_key
@@ -1784,6 +1809,75 @@ async def test_create_keeps_waiting_when_the_carrier_refuses_the_submit(
     assert resp.status_code == 201, resp.text
     assert resp.json()["state"] == "awaiting_review"
     assert resp.json()["submitted_at"] is None
+
+
+async def test_create_rejects_when_the_carrier_refuses_the_submit(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused(
+            [Problem(field="", message=NOT_ACCEPTED, raw="Group is not fulfilled")]
+        )
+
+    carrier.submit = refuse
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    # Not left waiting: every retry would be refused the same way.
+    assert resp.json()["state"] == "rejected"
+    assert resp.json()["rejection_reason"] == NOT_ACCEPTED
+    assert carrier.discarded == [{"bundle_sid": "B1"}]
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one()
+    assert audit.payload["carrier_reason"] == "Group is not fulfilled"
+
+
+async def test_create_keeps_waiting_when_a_refused_draft_cannot_be_discarded(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.submit, carrier.discard = refuse, boom
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    # Not stuck in 'submitting': the sweeper tries again.
+    assert resp.json()["state"] == "awaiting_review"
+
+
+async def test_superadmin_approve_reports_a_refused_submit(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+
+    async def refuse(refs):
+        raise SubmitRefused(
+            [Problem(field="", message=NOT_ACCEPTED, raw="Group is not fulfilled")]
+        )
+
+    carrier.submit = refuse
+    resp = await client.post(f"/admin/verifications/{vid}/approve", headers=_auth(key))
+    assert resp.status_code == 409
+    assert "Group is not fulfilled" in resp.json()["detail"]
+    got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert got["state"] == "rejected"
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    # A rejected row never names an approving admin.
+    assert row.approved_by is None
 
 
 async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
@@ -1823,10 +1917,14 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
 
 
 async def test_sweeper_rejects_a_draft_the_carrier_refuses(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
     from hailhq.api.routes.verifications import sweep_verifications
 
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
@@ -1850,6 +1948,7 @@ async def test_sweeper_rejects_a_draft_the_carrier_refuses(
         f"document unreadable; proof_of_identity: {VALUE_NOT_ACCEPTED}"
     )
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     audit = (
         await async_session.execute(
             select(AuditLog).where(AuditLog.action == "verification.reject")
@@ -1983,25 +2082,81 @@ async def test_sms_registration_requires_purpose_sms_provider(
 
 
 @pytest.mark.usefixtures("us_number")
-async def test_sms_registration_debits_filing_fee(
-    client, org_and_key, sms_carrier, async_session
+async def test_sms_registration_takes_no_money_and_pings_the_rater(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
 ) -> None:
+    pinged: list[str] = []
+    monkeypatch.setattr(
+        verifications_routes, "notify_sms_registration_changed", pinged.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
     resp = await _post_sms(client, key)
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["purpose"] == "sms"
-    assert body["state"] == "submitted"
-    assert await _balance(async_session, org_id) == 10_000 - 6100
-    debit = (
+    assert body["purpose"] == "sms" and body["state"] == "submitted"
+    # Prices live in the website: the API writes no ledger row.
+    assert await _balance(async_session, org_id) == 10_000
+    assert pinged == [body["id"]]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_brand_billed_then_refused_is_kept_as_rejected(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    pinged: list[str] = []
+    monkeypatch.setattr(
+        verifications_routes, "notify_sms_registration_changed", pinged.append
+    )
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "subject_type": "business"}
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    row = (
         await async_session.execute(
-            select(AccountCredit).where(
-                AccountCredit.ref == f"sms_registration:{body['id']}"
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
             )
         )
     ).scalar_one()
-    assert debit.channel == "sms" and int(debit.amount_cents) == -6100
+    assert row.state == "rejected" and row.provider_refs["brand_id"] == "B7"
+    assert row.provider_refs["refused_at_filing"] is True
+    assert row.rejection_reason == "Use another one."
+    assert pinged == [str(row.id)]
+    assert decided == [str(row.id)]
+    # A rejected row never blocks a new filing.
+    sms_carrier.problems = []
+    sms_carrier.billed_refs = {}
+    assert (await _post_sms(client, key)).status_code == 201
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refusal_before_any_brand_keeps_nothing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="ein", message="Check the tax ID (EIN).")]
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    rows = (
+        (
+            await async_session.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.organization_id == org_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2017,7 +2172,7 @@ async def test_sms_registration_402_when_balance_too_low(
 
 
 @pytest.mark.usefixtures("us_number")
-async def test_sms_registration_rejected_brand_keeps_fee(
+async def test_sms_registration_rejected_brand_is_audited(
     client, org_and_key, sms_carrier, async_session, caplog
 ) -> None:
     org_id, _, key = org_and_key
@@ -2046,7 +2201,8 @@ async def test_sms_registration_rejected_brand_keeps_fee(
         )
     ).scalar_one()
     assert audit.payload["carrier_reason"] == "EIN does not match"
-    assert await _balance(async_session, org_id) == 10_000 - 6100
+    # The API takes no money; the website rater charges per step.
+    assert await _balance(async_session, org_id) == 10_000
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2079,88 +2235,6 @@ async def test_sms_requirements_endpoint(client, org_and_key, sms_carrier) -> No
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["address_required"] is True
-
-
-_FAKE_FEES = {
-    "person": {"filing_cents": 1950, "monthly_cents": 200, "minimum_months": 1},
-    "business": {"filing_cents": 6100, "monthly_cents": 1000, "minimum_months": 1},
-}
-
-
-async def test_sms_fees_endpoint(client, org_and_key, sms_carrier) -> None:
-    # No US number yet: the fees of the default carrier.
-    _, _, key = org_and_key
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_endpoint_shows_a_carrier_minimum(
-    client, org_and_key, sms_carrier, monkeypatch
-) -> None:
-    # The file's minimum_months reaches the API; "fake" stands in.
-    row = sms_registration_fees._load()["fake"]
-    monkeypatch.setitem(row["person"], "minimum_months", 3)
-    _, _, key = org_and_key
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.json()["person"]["minimum_months"] == 3
-
-
-async def test_sms_fees_follow_the_carrier_of_the_us_numbers(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    # The default carrier has no fees: only the org's number can pick "fake".
-    app.dependency_overrides[get_default_sms_provider_name] = lambda: "none"
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 404, resp.text
-    mine = await _us_number(async_session, org_id)
-    for params in ({}, {"number_id": str(mine.id)}):
-        resp = await client.get(
-            "/verifications/sms-fees", params=params, headers=_auth(key)
-        )
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_with_numbers_on_two_carriers_need_number_id(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    mine = await _us_number(async_session, org_id, "+15125550100", resource="PN1")
-    await _us_number(
-        async_session, org_id, "+15125550101", provider="telnyx", resource="PN2"
-    )
-    resp = await client.get("/verifications/sms-fees", headers=_auth(key))
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"][0]["loc"] == ["query", "number_id"]
-    resp = await client.get(
-        "/verifications/sms-fees",
-        params={"number_id": str(mine.id)},
-        headers=_auth(key),
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == _FAKE_FEES
-
-
-async def test_sms_fees_for_a_number_that_is_not_yours_is_404(
-    client, async_session, org_and_key, sms_carrier
-) -> None:
-    org_id, _, key = org_and_key
-    other_org, _, _ = await insert_org_and_key(async_session)
-    theirs = await _us_number(async_session, other_org, e164="+15125550199")
-    voice_only = await _us_number(
-        async_session, org_id, e164="+15125550198", resource="PN2"
-    )
-    voice_only.capabilities = ["voice"]
-    await async_session.commit()
-    for number_id in (theirs.id, voice_only.id, uuid.uuid4()):
-        resp = await client.get(
-            "/verifications/sms-fees",
-            params={"number_id": str(number_id)},
-            headers=_auth(key),
-        )
-        assert resp.status_code == 404, resp.text
 
 
 async def test_sms_registration_rejects_non_us(
@@ -2497,11 +2571,15 @@ async def _stored_refs(async_session, vid: str) -> dict:
 @pytest.mark.parametrize("campaign_key", ["campaign_sid", "campaign_id"])
 @pytest.mark.parametrize("via", ["get", "list"])
 async def test_campaign_id_written_during_a_poll_is_saved(
-    client, org_and_key, sms_carrier, async_session, campaign_key, via
+    client, org_and_key, sms_carrier, async_session, campaign_key, via, monkeypatch
 ) -> None:
     # The plug-ins create the campaign inside status() and write its id into
     # refs in place. The id must reach the database, or every later poll
     # creates (and pays for) another campaign.
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
     vid = (await _post_sms(client, key)).json()["id"]
@@ -2514,6 +2592,8 @@ async def test_campaign_id_written_during_a_poll_is_saved(
         assert resp.status_code == 200, resp.text
         assert (await _stored_refs(async_session, vid))[campaign_key] == "QE1"
     assert sms_carrier.campaigns_created == 1
+    # A new campaign id is not a decision: nobody is emailed.
+    assert decided == []
 
 
 async def test_telnyx_release_unlinks_the_number_from_the_campaign(
@@ -2608,6 +2688,47 @@ async def test_overlapping_polls_create_one_campaign(
         restore()
     assert sms_carrier.campaigns_created == 1
     assert (await _stored_refs(async_session, vid))["campaign_sid"] == "QE1"
+
+
+async def test_overlapping_polls_email_the_owners_once(
+    client, org_and_key, carrier, session_factory, monkeypatch
+) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
+    _, _, key = org_and_key
+    created = (await _create(client, key)).json()  # sent to the carrier at once
+    vid = created["id"]
+    assert created["state"] == "submitted"
+    carrier.remote_status = ProviderStatus(state="approved")
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = carrier.status
+
+    async def held(refs):
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return await original(refs)
+
+    carrier.status = held
+    restore = _per_request_sessions(session_factory)
+    try:
+        first = asyncio.create_task(
+            client.get(f"/verifications/{vid}", headers=_auth(key))
+        )
+        await asyncio.wait_for(entered.wait(), 5)
+        # The first poll holds the row: the second skips the carrier call.
+        second = await asyncio.wait_for(
+            client.get(f"/verifications/{vid}", headers=_auth(key)), 5
+        )
+        assert second.status_code == 200, second.text
+        release.set()
+        assert (await first).json()["state"] == "approved"
+    finally:
+        release.set()
+        restore()
+    assert decided == [vid]
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2797,6 +2918,7 @@ async def test_person_registration_asks_for_the_code(
     org_id, _, key = org_and_key
     body = await _person_sms(client, key, async_session, org_id)
     assert body["state"] == "submitted" and body["confirmation"] == "code"
+    assert body["step"] == "confirm_identity"
     got = await client.get(f"/verifications/{body['id']}", headers=_auth(key))
     assert got.json()["confirmation"] == "code"
     listed = await client.get("/verifications", headers=_auth(key))
@@ -2823,6 +2945,7 @@ async def test_confirm_sends_the_code_and_creates_the_campaign(
     resp = await _confirm(client, key, vid, "482913")
     assert resp.status_code == 200, resp.text
     assert resp.json()["confirmation"] is None
+    assert resp.json()["step"] == "carrier_review"
     assert [c for _, c in sms_carrier.confirmed] == ["482913"]
     assert sms_carrier.status_calls == calls_before + 1
     refs = await _stored_refs(async_session, vid)
@@ -2942,3 +3065,39 @@ async def test_a_new_code_resets_the_attempt_cap(
         )
     ).scalar_one()
     assert audit.payload == {"ok": True, "attempts": 1}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_uncharged_recent_filings_count_against_the_balance(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The website charges each filing a moment later. Until it does, a new
+    # filing needs credit for the earlier ones too.
+    org_id, _, key = org_and_key
+    floor = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _set_balance(async_session, org_id, floor + 1)
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "subject_type": "business"}
+    assert (await _post_sms(client, key)).status_code == 422
+    assert (await _post_sms(client, key)).status_code == 402
+    # Once the website charged the first one, the account may file again.
+    row = (
+        await async_session.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
+            )
+        )
+    ).scalar_one()
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-1,
+            qty=1,
+            ref=f"sms_registration:{row.id}:submission",
+            source="sms_registration_submission",
+        )
+    )
+    await async_session.commit()
+    assert (await _post_sms(client, key)).status_code == 422

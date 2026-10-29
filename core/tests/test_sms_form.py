@@ -32,6 +32,7 @@ def test_campaign_text_pads_short_values_to_carrier_minimums() -> None:
             "sample_2": "Bye",
             "opt_in_description": "Web form",
             "has_links": "NO",
+            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
             "privacy_policy_url": "https://acme.example/privacy",
             "terms_url": "https://acme.example/terms",
         },
@@ -62,6 +63,7 @@ def test_message_flow_carries_links_and_consent_disclosures() -> None:
             "sample_2": "Bye",
             "opt_in_description": "Customers tick an unchecked SMS box at checkout.",
             "has_links": "NO",
+            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
             "privacy_policy_url": "https://acme.example/privacy",
             "terms_url": "https://acme.example/terms",
         },
@@ -91,6 +93,7 @@ def test_message_flow_never_exceeds_carrier_maximum() -> None:
             "sample_2": "x",
             "opt_in_description": "word " * 600,
             "has_links": "NO",
+            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
             "privacy_policy_url": "https://acme.example/privacy",
             "terms_url": "https://acme.example/terms",
         },
@@ -109,6 +112,7 @@ def test_person_use_case() -> None:
                 "sample_2": "x",
                 "opt_in_description": "x",
                 "has_links": "YES",
+                "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
                 "privacy_policy_url": "https://ada.example/privacy",
                 "terms_url": "https://ada.example/terms",
             },
@@ -128,6 +132,7 @@ def test_missing_required_field_raises(field) -> None:
         "sample_2": "x",
         "opt_in_description": "x",
         "has_links": "NO",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
         "privacy_policy_url": "https://acme.example/privacy",
         "terms_url": "https://acme.example/terms",
     }
@@ -142,6 +147,7 @@ GOOD = {
     "sample_2": "x",
     "opt_in_description": "x",
     "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.example/privacy",
     "terms_url": "https://acme.example/terms",
     "first_name": "Ada",
@@ -152,13 +158,13 @@ GOOD = {
 
 
 def test_field_problems_accepts_a_complete_form() -> None:
-    assert field_problems(GOOD, "person") == []
+    assert field_problems("telnyx", GOOD, "person") == []
 
 
 def test_field_problems_names_missing_required_fields() -> None:
     data = {**GOOD, "terms_url": " "}
     data.pop("sample_1")
-    assert [(p.field, p.message) for p in field_problems(data, "person")] == [
+    assert [(p.field, p.message) for p in field_problems("telnyx", data, "person")] == [
         ("sample_1", "This is required."),
         ("terms_url", "This is required."),
     ]
@@ -169,14 +175,14 @@ def test_field_problems_names_missing_required_fields() -> None:
     ["acme.example/privacy", "ftp://acme.example/privacy", "https://", "n/a"],
 )
 def test_field_problems_rejects_a_link_without_scheme_or_host(value) -> None:
-    problems = field_problems({**GOOD, "privacy_policy_url": value}, "person")
+    problems = field_problems("telnyx", {**GOOD, "privacy_policy_url": value}, "person")
     assert [p.field for p in problems] == ["privacy_policy_url"]
     assert problems[0].message.startswith("Enter the full link")
 
 
 def test_field_problems_rejects_a_link_over_the_cap() -> None:
     long = "https://acme.example/" + "a" * 500
-    problems = field_problems({**GOOD, "terms_url": long}, "person")
+    problems = field_problems("telnyx", {**GOOD, "terms_url": long}, "person")
     assert [(p.field, p.message) for p in problems] == [
         ("terms_url", "Use a shorter link.")
     ]
@@ -191,6 +197,7 @@ def test_message_flow_keeps_own_text_with_links_at_the_cap() -> None:
             "sample_2": "x",
             "opt_in_description": "own text " * 300,
             "has_links": "NO",
+            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
             "privacy_policy_url": link,
             "terms_url": link,
         },
@@ -199,3 +206,94 @@ def test_message_flow_keeps_own_text_with_links_at_the_cap() -> None:
     assert len(text.message_flow) <= 2048
     assert text.message_flow.startswith("own text own text")
     assert text.message_flow.endswith(f"Terms: {link}")
+
+
+def test_text_types_are_a_choice_of_one_to_five_for_a_person() -> None:
+    for subject, least in (("person", 1), ("business", 2)):
+        fields = {f.name: f for f in sms_requirements("telnyx", subject).fields}
+        spec = fields["text_types"]
+        assert spec.kind == "choices" and spec.required
+        assert (spec.min_choices, spec.max_choices) == (least, 5)
+        assert len(spec.options) == 10
+        assert "CUSTOMER_CARE" in {o.key for o in spec.options}
+
+
+@pytest.mark.parametrize(
+    "value,message",
+    [
+        ("CUSTOMER_CARE,NOT_A_TYPE", "Pick from the list."),
+        (
+            "2FA,MARKETING,FRAUD_ALERT,SECURITY_ALERT,POLLING_VOTING,CUSTOMER_CARE",
+            "Pick at most 5.",
+        ),
+    ],
+)
+def test_field_problems_checks_text_types(value, message) -> None:
+    problems = field_problems("telnyx", {**GOOD, "text_types": value}, "person")
+    assert [(p.field, p.message) for p in problems] == [("text_types", message)]
+
+
+def test_a_company_picks_at_least_two_text_types() -> None:
+    problems = field_problems(
+        "telnyx", {**GOOD, "text_types": "CUSTOMER_CARE"}, "business"
+    )
+    assert ("text_types", "Pick at least 2.") in [
+        (p.field, p.message) for p in problems
+    ]
+
+
+def test_campaign_text_keeps_the_picked_text_types_without_repeats() -> None:
+    text = campaign_text({**GOOD, "text_types": " 2FA, MARKETING,2FA "}, "person")
+    assert text.text_types == ["2FA", "MARKETING"]
+
+
+def test_long_fields_carry_their_carrier_limits() -> None:
+    fields = {f.name: f for f in sms_requirements("telnyx", "person").fields}
+    assert fields["campaign_description"].max_length == 4096
+    assert fields["sample_1"].max_length == fields["sample_2"].max_length == 1024
+    assert fields["opt_in_description"].max_length == 861
+    assert fields["first_name"].max_length is None
+
+
+def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
+    # The longest links and the consent lines still fit in the carrier's 2048.
+    long = "https://acme.example/" + "a" * (512 - len("https://acme.example/"))
+    text = campaign_text(
+        {
+            **GOOD,
+            "opt_in_description": "x" * 861,
+            "privacy_policy_url": long,
+            "terms_url": long,
+        },
+        "person",
+    )
+    assert text.message_flow.startswith("x" * 861)
+    assert len(text.message_flow) <= 2048
+
+
+def test_field_problems_refuses_text_over_the_limit() -> None:
+    problems = field_problems("telnyx", {**GOOD, "sample_1": "s" * 1025}, "person")
+    assert [(p.field, p.message) for p in problems] == [
+        ("sample_1", "Use at most 1024 characters.")
+    ]
+
+
+def test_only_the_telnyx_form_asks_for_text_types() -> None:
+    for subject in ("person", "business"):
+        twilio = [f.name for f in sms_requirements("twilio", subject).fields]
+        telnyx = [f.name for f in sms_requirements("telnyx", subject).fields]
+        assert "text_types" not in twilio and "text_types" in telnyx
+        assert [n for n in telnyx if n != "text_types"] == twilio
+
+
+def test_a_twilio_form_without_text_types_passes() -> None:
+    data = {k: v for k, v in GOOD.items() if k != "text_types"}
+    assert field_problems("twilio", data, "person") == []
+    assert [p.field for p in field_problems("telnyx", data, "person")] == ["text_types"]
+
+
+def test_campaign_text_keeps_the_contact_email() -> None:
+    person = campaign_text({**GOOD, "email": " ada@example.com "}, "person")
+    assert person.contact_email == "ada@example.com"
+    company = campaign_text({**GOOD, "rep_email": "ops@acme.example"}, "business")
+    assert company.contact_email == "ops@acme.example"

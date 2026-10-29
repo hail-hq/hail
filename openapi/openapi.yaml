@@ -4580,9 +4580,13 @@ paths:
 
         Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
 
-        in the US; `sms` takes `country_code=US` and `number_type=local` and charges
+        in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
 
-        the filing fee), `country_code`, `number_type`, `subject_type` (required:
+        are charged from credit per step, when the details are submitted and when
+
+        the carriers start their review, and 402 means there is not enough credit
+
+        to file), `country_code`, `number_type`, `subject_type` (required:
 
         `person` for you, `business` for your company; ask the user which),
 
@@ -4730,84 +4734,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /v1/verifications/sms-fees:
-    get:
-      tags:
-        - verifications
-      summary: Get Sms Fees
-      description:
-        "Fees for US SMS registration, per subject type, in cents. Passed
-
-        through at cost. They are the fees for the carrier of your US numbers
-
-        that can text, or of `number_id` when given (404 when it is not one of
-
-        your active US local numbers that can text). When your US numbers are
-
-        with more than one carrier, pass `number_id` (422 otherwise). With no US
-
-        number yet, the fees are those of the carrier a new US number is
-
-        registered with by default."
-      operationId: get_sms_registration_fees
-      parameters:
-        - name: number_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-                format: uuid
-              - type: "null"
-            description:
-              One of your active US local numbers that can text. Needed when
-              your US numbers are with more than one carrier.
-            title: Number Id
-          description:
-            One of your active US local numbers that can text. Needed when
-            your US numbers are with more than one carrier.
-        - name: authorization
-          in: header
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: "null"
-            title: Authorization
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SmsFees"
-        "429":
-          description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-            RateLimit-Limit:
-              description: The request ceiling for the current window.
-              schema:
-                type: integer
-            RateLimit-Remaining:
-              description: Requests remaining in the current window.
-              schema:
-                type: integer
-            RateLimit-Reset:
-              description: Seconds until the current window resets.
-              schema:
-                type: integer
-        "404":
-          description:
-            number_id is not one of your active US local numbers that can
-            text, or SMS registration is not available.
-        "422":
-          description: "Your US numbers are with more than one carrier: pass number_id."
   /v1/verifications/{verification_id}:
     get:
       tags:
@@ -4891,11 +4817,11 @@ paths:
 
         charged through the month of the cancellation, then stops. Some carriers
 
-        bill a minimum number of monthly fees from approval (`minimum_months` in
+        bill a minimum number of monthly fees from approval: a registration
 
-        GET /verifications/sms-fees): a registration cancelled sooner is still
+        cancelled sooner is still charged for that many months (prices: see the
 
-        charged for that many months."
+        console)."
       operationId: cancel_verification
       parameters:
         - name: verification_id
@@ -7570,8 +7496,11 @@ components:
             - email
             - phone
             - url
+            - choices
           title: Kind
-          description: "Input kind: 'text', 'email', 'phone', or 'url'."
+          description:
+            "Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick
+            several of `options`; send their keys joined by commas)."
           default: text
         help:
           type: string
@@ -7601,6 +7530,27 @@ components:
           title: Required
           description: False when the field is optional.
           default: true
+        min_choices:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Min Choices
+          description: "For kind 'choices': the fewest options to pick."
+        max_choices:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Max Choices
+          description: "For kind 'choices': the most options to pick."
+        max_length:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Max Length
+          description:
+            The most characters the value may hold, when known. A form can
+            show a field allowed more than about 100 characters as a box that
+            wraps.
       type: object
       required:
         - name
@@ -8701,41 +8651,6 @@ components:
         - to
         - body
       title: SmsCreate
-    SmsFee:
-      properties:
-        filing_cents:
-          type: integer
-          title: Filing Cents
-          description: Charged once when the registration is filed.
-        monthly_cents:
-          type: integer
-          title: Monthly Cents
-          description: Charged each month while approved.
-        minimum_months:
-          type: integer
-          title: Minimum Months
-          description:
-            Monthly fees charged at least, counted from approval, even
-            when the registration is cancelled sooner.
-      type: object
-      required:
-        - filing_cents
-        - monthly_cents
-        - minimum_months
-      title: SmsFee
-    SmsFees:
-      properties:
-        person:
-          $ref: "#/components/schemas/SmsFee"
-          description: Fees for a person's registration.
-        business:
-          $ref: "#/components/schemas/SmsFee"
-          description: Fees for a business's registration.
-      type: object
-      required:
-        - person
-        - business
-      title: SmsFees
     SmsListResponse:
       properties:
         items:
@@ -9104,6 +9019,20 @@ components:
             must enter the code the carrier texted (POST /verifications/{id}/confirm),
             'reply' when you must answer the carrier's text, null when nothing
             is pending."
+        step:
+          anyOf:
+            - type: string
+              enum:
+                - confirm_identity
+                - filing
+                - carrier_review
+            - type: "null"
+          title: Step
+          description:
+            "For a US texting registration that is not yet approved or rejected:
+            'confirm_identity' while the person must confirm (see `confirmation`),
+            'filing' while Hail files the details with the carriers, 'carrier_review'
+            once the carriers are reviewing them (1 to 7 business days). Null otherwise."
       type: object
       required:
         - id
