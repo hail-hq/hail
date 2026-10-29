@@ -305,25 +305,35 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         try:
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
-            # Telnyx bills a brand once it registered it, whatever fails next.
-            billed = _billed(refs)
+            refused = _refused(exc)
+            if refs.get("brand_id") and not refused:
+                # Telnyx bills a brand once made, and a retry would file and
+                # bill another: keep this one, whatever went wrong after it
+                # (an outage, a body we could not read). The background pass
+                # reads the brand, then sends the PIN or asks for vetting.
+                logger.warning(
+                    "10DLC step after the brand failed; brand kept: %s",
+                    _failure(exc),
+                )
+                if subject_type != "person":
+                    # False, not unset: rows filed before this flag existed
+                    # already asked for vetting and must not ask again.
+                    refs.setdefault("vetting_requested", False)
+                return DraftResult(refs=refs)
             await self.discard(refs)
-            if isinstance(exc, httpx.HTTPStatusError):
-                code = exc.response.status_code
+            if refused:
                 logger.warning(
                     "10DLC draft failed: status=%s errors=%s",
-                    code,
+                    exc.response.status_code,
                     _error_log(exc.response),
                 )
-                if 400 <= code < 500:
-                    return DraftResult(
-                        refs={},
-                        problems=_response_problems(exc.response, subject_type),
-                        billed_refs=billed,
-                    )
-            raise VerificationProviderError(
-                "Telnyx request failed", billed_refs=billed
-            ) from exc
+                return DraftResult(
+                    refs={},
+                    problems=_response_problems(exc.response, subject_type),
+                    # Telnyx bills a brand once made, even one it refused.
+                    billed_refs=_billed(refs),
+                )
+            raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             billed = _billed(refs)
             await self.discard(refs)
@@ -334,7 +344,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         """File the brand, wait for Telnyx to register it, then send the
         person's PIN or ask for the company's vetting. Returns the problems
         of a refused brand. A brand still registering after the wait is
-        kept; the background pass sends the PIN or asks for vetting."""
+        kept: Telnyx bills it anyway, and the background pass sends the PIN
+        or asks for vetting. So is a brand when a later call fails without
+        refusing it (``create_draft``)."""
         if subject_type == "person":
             mobile = fields["mobile_phone_number"].strip()
             display = f"{fields['first_name'].strip()} {fields['last_name'].strip()}"
@@ -372,12 +384,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if brand is None:
             logger.warning("10DLC brand still registering after the wait")
             if subject_type != "person":
-                # False, not unset: rows filed before this flag existed
-                # already asked for vetting and must not ask again.
+                # See create_draft: False means "ask on the next pass".
                 refs["vetting_requested"] = False
             return []
         if brand.get("failureReasons") or brand.get("status") != "OK":
             return _reason_problems(brand.get("failureReasons"), subject_type)
+        # A failure here keeps the brand unless Telnyx refused a value
+        # (create_draft). ``otp_sent_at`` stays unset for a person.
         if subject_type == "person":
             # No vetting for a sole proprietor; the PIN confirms the person.
             await self._send_pin(refs)
@@ -401,7 +414,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if code not in (404, 429) and code < 500:
                     raise
                 continue
-            except httpx.TransportError:
+            except (httpx.RequestError, ValueError):
+                # No answer, or a body that is not JSON: read again.
                 continue
             if brand.get("failureReasons") or brand.get("status") in (
                 "OK",
@@ -413,10 +427,39 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def _request_vetting(self, refs) -> None:
         await self._api.request(
             "POST",
-            f"/10dlc/brand/{refs['brand_id']}/vetting",
-            json={"vettingProvider": "AEGIS", "vettingClass": "STANDARD"},
+            f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting",
+            # POST .../vetting does not exist (Telnyx answers 404 "URL not
+            # found"); the API reference documents externalVetting with an
+            # external vetting provider id (Aegis) and class.
+            json={"evpId": "AEGIS", "vettingClass": "STANDARD"},
         )
         refs["vetting_requested"] = True
+
+    async def _request_vetting_once(self, refs) -> None:
+        """Ask for vetting unless Telnyx already has a request: each one is
+        billed. A request that timed out or got a 5xx may have reached it."""
+        try:
+            found = await self._api.request(
+                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting"
+            )
+        except httpx.HTTPStatusError as exc:
+            # 404: none listed. Any other failure: ask on the next pass.
+            if exc.response.status_code != 404:
+                raise
+            found = []
+        # A bare list (API reference); a "data" list is read too.
+        if isinstance(found, dict):
+            found = found.get("data")
+        if isinstance(found, list) and found:
+            refs["vetting_requested"] = True
+            return
+        try:
+            await self._request_vetting(refs)
+        except httpx.HTTPStatusError as exc:
+            # 10012: a vetting is in progress or passed in the last 180 days.
+            if not any(str(e.get("code")) == "10012" for e in _errors(exc.response)):
+                raise
+            refs["vetting_requested"] = True
 
     async def _send_pin(self, refs) -> None:
         """Ask Telnyx to text the person a PIN. The caller saves refs."""
@@ -503,8 +546,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if person:
                     await self._resend_pin_if_old(refs)
                 elif refs.get("vetting_requested") is False:
-                    # The brand was still registering when it was filed.
-                    await self._request_vetting(refs)
+                    # The brand was still registering when it was filed, or
+                    # the vetting call failed (Telnyx may have got it).
+                    await self._request_vetting_once(refs)
                 return ProviderStatus(state="pending")
             if "campaign_id" not in refs:
                 # A campaign filed by an earlier call whose answer was lost
@@ -769,6 +813,23 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     )
             except Exception:
                 logger.warning("10DLC discard failed: step=%s", key)
+
+
+def _refused(exc: Exception) -> bool:
+    """Telnyx refused a value (a 4xx). Not 429 (slow down), and not 404:
+    for about 2 seconds after a new brand, its PIN and vetting calls answer
+    404, so the brand is kept and the background pass asks again."""
+    return isinstance(exc, httpx.HTTPStatusError) and (
+        400 <= exc.response.status_code < 500
+        and exc.response.status_code not in (404, 429)
+    )
+
+
+def _failure(exc: Exception) -> str:
+    """A failure for the log: the status code, else the exception's type."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"status={exc.response.status_code}"
+    return type(exc).__name__
 
 
 def _billed(refs: dict) -> dict:
