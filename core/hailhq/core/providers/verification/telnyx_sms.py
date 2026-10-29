@@ -20,7 +20,8 @@ from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
-    VALUE_NOT_ACCEPTED,
+    SMS_REFUSED,
+    SMS_VALUE_REFUSED,
     DraftResult,
     FieldSpec,
     Problem,
@@ -80,7 +81,7 @@ _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
 _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
-_REFUSED = "The carrier refused a detail. Check your entries and try again."
+_REFUSED = SMS_REFUSED
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
 # Sub use cases for a campaign filed before the form asked for them
 # (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
@@ -907,7 +908,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
-                Problem(field=field, message=VALUE_NOT_ACCEPTED, raw=_detail(e))
+                Problem(field=field, message=SMS_VALUE_REFUSED, raw=_detail(e))
             )
     return problems or [Problem(field="", message=_safe_message(response))]
 
@@ -925,7 +926,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             field = names.get(name)
             if not field or any(p.field == field for p in problems):
                 continue
-            message = VALUE_NOT_ACCEPTED
+            message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
             problems.append(Problem(field=field, message=message, raw=text or None))

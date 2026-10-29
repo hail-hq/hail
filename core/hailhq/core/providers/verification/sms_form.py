@@ -95,7 +95,7 @@ _BUSINESS_FIELDS = (
         label="Website",
         kind="url",
         max_length=_URL_MAX,
-        help="The carrier checks that the site names your company.",
+        help="Reviewers check that the site names your company.",
     ),
     FieldSpec(name="rep_name", label="Contact person name"),
     FieldSpec(name="rep_email", label="Contact person email", kind="email"),
@@ -148,7 +148,7 @@ _PERSON_FIELDS = (
         label="Your mobile number",
         kind="phone",
         help=(
-            "The carrier texts this number to confirm. Follow the instructions in "
+            "You get a text on this number to confirm. Follow the instructions in "
             "that text. Use your own "
             "mobile, not a Hail number. A mobile can confirm three registrations "
             "in its lifetime."

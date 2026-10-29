@@ -24,6 +24,8 @@ __all__ = [
     "CAMPAIGN_REJECTED",
     "DETAILS_REJECTED",
     "NOT_ACCEPTED",
+    "SMS_REFUSED",
+    "SMS_VALUE_REFUSED",
     "VALUE_NOT_ACCEPTED",
     "Address",
     "DocumentInput",
@@ -263,14 +265,18 @@ NOT_ACCEPTED = (
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
 DETAILS_REJECTED = "The carrier rejected the details. Start again."
+# US texting (10DLC): the registry checks the business or person, then the
+# US mobile networks review what will be sent.
 BRAND_REJECTED = (
-    "The carrier rejected the brand registration. Check the business or "
+    "The 10DLC registry rejected the registration. Check the business or "
     "person details and start again."
 )
 CAMPAIGN_REJECTED = (
-    "The carrier rejected the campaign. Check the use case, description, "
-    "sample messages and links, and start again."
+    "The registration was rejected in review. Check the use case, "
+    "description, sample messages and links, and start again."
 )
+SMS_REFUSED = "The 10DLC registry refused a detail. Check your entries and try again."
+SMS_VALUE_REFUSED = "The 10DLC registry did not accept this value."
 
 
 class Problem(BaseModel):

@@ -18,6 +18,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
 - US texting registration: on Telnyx, the website, company name, person name and email take at most 100 characters.
+- US texting registration: refusal and rejection messages name the 10DLC registry instead of "the carrier".
 
 ### Fixed
 

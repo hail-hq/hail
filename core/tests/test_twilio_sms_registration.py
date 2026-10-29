@@ -535,7 +535,7 @@ async def test_draft_4xx_unknown_message_is_generic() -> None:
     r = _ok_responses()
     r["brand_registrations.create"] = _raise(_tw(400, "Twilio internal thing"))
     draft = await _draft(_provider(r))
-    assert draft.problems[0].message.startswith("The carrier refused a detail")
+    assert draft.problems[0].message.startswith("The 10DLC registry refused a detail")
 
 
 async def test_draft_5xx_raises_provider_error() -> None:

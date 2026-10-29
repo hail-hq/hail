@@ -16,6 +16,7 @@ from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
+    SMS_REFUSED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -591,4 +592,4 @@ def _safe_message(msg) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return "The carrier refused a detail. Check your entries and try again."
+    return SMS_REFUSED
