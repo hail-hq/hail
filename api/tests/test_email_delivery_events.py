@@ -6,12 +6,14 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+from hailhq.core.compliance_gate import add_suppression, check_email_allowed
 from hailhq.core.email_delivery_events import apply_delivery_event
 from hailhq.core.models import (
     Email,
     EmailEvent,
     EmailForwardTarget,
     OrganizationMember,
+    Suppression,
     User,
 )
 from hailhq.core.providers.email.inbound.ses_delivery import DeliveryEvent
@@ -436,3 +438,131 @@ async def test_complaint_on_confirm_mail_stops_pending_target(async_session):
     assert target.status == "stopped"
     assert target.stopped_reason == "complaint"
     assert target.token_hash is None
+
+
+async def _suppressions(session: AsyncSession, org_id: UUID) -> list[Suppression]:
+    return list(
+        (
+            await session.execute(
+                select(Suppression)
+                .where(Suppression.organization_id == org_id)
+                .order_by(Suppression.recipient)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_hard_bounce_suppresses_recipient_and_blocks_next_send(async_session):
+    email = await _mk_email(async_session, status="sent")
+    ev = _ev(
+        email.provider_message_id,
+        "bounced",
+        detail={"hard": True, "recipients": ["Bob@Example.com"]},
+    )
+    fanout = AsyncMock(return_value=0)
+    await apply_delivery_event(async_session, ev, fanout=fanout)
+    await async_session.commit()
+    # SNS redelivery adds no second row.
+    await apply_delivery_event(async_session, ev, fanout=fanout)
+    await async_session.commit()
+
+    rows = await _suppressions(async_session, email.organization_id)
+    assert [(r.recipient, r.channel, r.reason, r.source) for r in rows] == [
+        ("bob@example.com", "email", "hard_bounce", "bounce")
+    ]
+    gate = await check_email_allowed(
+        async_session, email.organization_id, ["bob@example.com"]
+    )
+    assert not gate.allowed
+    assert "hard_bounce" in gate.reason
+
+
+async def test_complaint_suppresses_only_reported_recipients_on_the_send(
+    async_session,
+):
+    email = await _mk_email(async_session, status="delivered")
+    email.cc_addresses = ["carol@example.com"]
+    await async_session.commit()
+    await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "complained",
+            detail={"recipients": ["carol@example.com", "stranger@example.com"]},
+        ),
+        fanout=AsyncMock(return_value=0),
+    )
+    await async_session.commit()
+
+    rows = await _suppressions(async_session, email.organization_id)
+    assert [(r.recipient, r.reason) for r in rows] == [
+        ("carol@example.com", "spam_complaint")
+    ]
+
+
+async def test_soft_bounce_and_unnamed_recipients_suppress_nobody(async_session):
+    email = await _mk_email(async_session, status="sent")
+    fanout = AsyncMock(return_value=0)
+    await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "bounced",
+            detail={"hard": False, "recipients": ["bob@example.com"]},
+        ),
+        fanout=fanout,
+    )
+    await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "bounced",
+            ts=datetime(2026, 7, 1, 13, 0, tzinfo=timezone.utc),
+            detail={"hard": True, "recipients": []},
+        ),
+        fanout=fanout,
+    )
+    await async_session.commit()
+    assert await _suppressions(async_session, email.organization_id) == []
+
+
+async def test_existing_suppression_is_not_duplicated(async_session):
+    email = await _mk_email(async_session, status="delivered")
+    await add_suppression(
+        async_session,
+        organization_id=email.organization_id,
+        recipient="bob@example.com",
+        channel="email",
+        reason="recipient_unsubscribed",
+        source="unsubscribe_link",
+    )
+    await async_session.commit()
+    await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "complained",
+            detail={"recipients": ["bob@example.com"]},
+        ),
+        fanout=AsyncMock(return_value=0),
+    )
+    await async_session.commit()
+    rows = await _suppressions(async_session, email.organization_id)
+    assert [r.source for r in rows] == ["unsubscribe_link"]
+
+
+async def test_complaint_on_forward_adds_no_suppression(async_session):
+    email = await _mk_forward(async_session, to="victim@example.com")
+    await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "complained",
+            detail={"recipients": ["victim@example.com"]},
+        ),
+        fanout=AsyncMock(return_value=0),
+    )
+    await async_session.commit()
+    assert await _suppressions(async_session, email.organization_id) == []

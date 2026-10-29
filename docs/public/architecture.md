@@ -112,6 +112,10 @@ If none of those resolve, the request returns `503` with instructions on how to 
 
 `GET /email-domains` answers the same question ahead of a send: its `default_from` field holds the address a `from`-less send would use, and is `null` when the caller must choose.
 
+### Bounces and complaints
+
+A hard bounce or a spam complaint adds the recipient to the org's suppression list (`reason`: `hard_bounce` or `spam_complaint`). The next `POST /emails` to that address returns `403`. Only addresses the event names and the email was sent to are added. A soft bounce adds nothing. Forwards and Hail's own system mail are left out; a complaint on a forward stops the forward address instead (see below). Code: [`core/hailhq/core/email_delivery_events.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/email_delivery_events.py).
+
 Refer to [AWS SES setup](./self-host/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
 ## Inbound email
