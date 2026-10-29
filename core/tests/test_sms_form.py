@@ -395,5 +395,9 @@ def test_every_sms_carrier_names_its_campaign_key() -> None:
     sms = {name: f for (name, purpose), f in _FACTORIES.items() if purpose == "sms"}
     assert sms
     for name, factory in sms.items():
-        assert issubclass(factory, SmsRegistrationProvider), name
-        assert isinstance(factory.campaign_ref, str) and factory.campaign_ref, name
+        # Registered as the class, or as a functools.partial of it.
+        cls = factory if isinstance(factory, type) else getattr(factory, "func", None)
+        assert isinstance(cls, type), f"{name}: register the plug-in class"
+        assert issubclass(cls, SmsRegistrationProvider), name
+        ref = cls.__dict__.get("campaign_ref") or getattr(cls, "campaign_ref", None)
+        assert isinstance(ref, str) and ref, f"{name}: set campaign_ref"

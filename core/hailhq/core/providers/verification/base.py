@@ -431,8 +431,10 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
-    # The refs key that holds the campaign once it is filed. Required: the
-    # API marks a filing as sent for review (``campaign_filed_at``) by it.
+    # The refs key that holds the campaign once it is filed. Required, as a
+    # class attribute: the API marks a filing as sent for review
+    # (``campaign_filed_at``) by it, and a test checks every registered
+    # SMS plug-in sets it.
     campaign_ref: str | None = None
     # Carrier maximums, in characters, for fields of the shared US form
     # (``sms_form``), by field name.

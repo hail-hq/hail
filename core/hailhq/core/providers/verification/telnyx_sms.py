@@ -81,7 +81,6 @@ _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
 _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
-_REFUSED = SMS_REFUSED
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
 # Sub use cases for a campaign filed before the form asked for them
 # (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
@@ -930,7 +929,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
             problems.append(Problem(field=field, message=message, raw=text or None))
-    return problems or [Problem(field="", message=_REFUSED)]
+    return problems or [Problem(field="", message=SMS_REFUSED)]
 
 
 def _safe_message(response: httpx.Response) -> str:
@@ -946,4 +945,4 @@ def _safe_message(response: httpx.Response) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return _REFUSED
+    return SMS_REFUSED

@@ -18,12 +18,20 @@ spec = importlib.util.spec_from_file_location(
 )
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
+_reword_spec = importlib.util.spec_from_file_location(
+    "sms_campaign_filed_backfill",
+    Path(__file__).parents[1]
+    / "migrations/versions/0068_sms_campaign_filed_backfill.py",
+)
+reword = importlib.util.module_from_spec(_reword_spec)
+_reword_spec.loader.exec_module(reword)
 
 
 def test_wording_matches_the_code() -> None:
     assert migration.DETAILS_REJECTED == base.DETAILS_REJECTED
-    assert migration.BRAND_REJECTED == base.BRAND_REJECTED
-    assert migration.CAMPAIGN_REJECTED == base.CAMPAIGN_REJECTED
+    # 0068 later moved the US texting wording on; it keeps the old text.
+    assert migration.BRAND_REJECTED == reword.OLD_BRAND_REJECTED
+    assert migration.CAMPAIGN_REJECTED == reword.OLD_CAMPAIGN_REJECTED
     assert migration.NOT_ACCEPTED == base.NOT_ACCEPTED
     assert migration.VALUE_NOT_ACCEPTED == base.VALUE_NOT_ACCEPTED
     assert migration.REGISTRATION_REJECTED == REGISTRATION_REJECTED
@@ -165,8 +173,8 @@ async def test_upgrade_moves_carrier_text_and_downgrade_restores_it(
     assert got[polled.id] == base.DETAILS_REJECTED
     assert got[sweeper.id] == base.DETAILS_REJECTED
     assert got[registration.id] == REGISTRATION_REJECTED
-    assert got[brand.id] == base.BRAND_REJECTED
-    assert got[campaign.id] == base.CAMPAIGN_REJECTED
+    assert got[brand.id] == migration.BRAND_REJECTED
+    assert got[campaign.id] == migration.CAMPAIGN_REJECTED
     assert got[admin.id] == raw[admin.id]
     assert got[hail.id] == raw[hail.id]
     audits = await moved()
