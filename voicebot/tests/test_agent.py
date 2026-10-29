@@ -27,7 +27,6 @@ from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
     SIP_CALL_STATUS_ATTRIBUTE,
-    SOFT_CAP_ANNOUNCEMENT,
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
     _sanitize_tts_stream,
@@ -50,6 +49,7 @@ from hailhq.voicebot.agent import (
     speak_greeting,
     speech_text,
 )
+from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
 from livekit.api import SipCallError
@@ -1283,7 +1283,7 @@ async def test_soft_cap_speaks_announcement_then_shuts_down() -> None:
 
     assert len(session.say_calls) == 1
     text, allow_interruptions = session.say_calls[0]
-    assert text == SOFT_CAP_ANNOUNCEMENT
+    assert text == SPOKEN_LINES["en"].soft_cap
     # Uninterruptible, the caller must actually hear the goodbye before
     # the line drops.
     assert allow_interruptions is False
@@ -1818,7 +1818,7 @@ async def test_soft_cap_while_connected_unmutes_announces_and_drops_room() -> No
         bridge_state=state,
     )
     assert session.output.enabled == [True]
-    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert session.said == [SPOKEN_LINES["en"].soft_cap]
     assert fired == [True]
     assert state["ending"] is True
     assert ctx.delete_room_calls == 1
@@ -1837,7 +1837,7 @@ async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
         bridge_state=state,  # type: ignore[arg-type]
     )
     assert session.output.enabled == []
-    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert session.said == [SPOKEN_LINES["en"].soft_cap]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
@@ -1942,7 +1942,7 @@ async def test_bridge_answer_cancels_pending_soft_cap() -> None:
     assert out.outcome == "answered"
     assert cap.done()
     assert fired == []
-    assert SOFT_CAP_ANNOUNCEMENT not in session.said
+    assert SPOKEN_LINES["en"].soft_cap not in session.said
     assert ctx.shutdown_calls == []
     assert ctx.delete_room_calls == 0
 
@@ -1971,7 +1971,7 @@ async def test_bridge_answer_starts_the_handover_limit_from_the_answer() -> None
     assert new_cap is not cap
     await new_cap
     assert fired == [True]
-    assert SOFT_CAP_ANNOUNCEMENT in session.said
+    assert SPOKEN_LINES["en"].soft_cap in session.said
     assert ctx.delete_room_calls == 1
 
 
@@ -1992,7 +1992,7 @@ async def test_soft_cap_while_ringing_ends_both_legs() -> None:
     )
     # Output is on while ringing; turning it on again is a no-op in the SDK.
     assert session.output.enabled == [True]
-    assert session.said == [SOFT_CAP_ANNOUNCEMENT]
+    assert session.said == [SPOKEN_LINES["en"].soft_cap]
     assert fired == [True]
     assert state["ending"] is True
     assert ctx.delete_room_calls == 1

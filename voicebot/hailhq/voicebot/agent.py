@@ -99,6 +99,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
 from livekit import rtc
@@ -561,6 +562,7 @@ def make_agent_bridge(
     handover_seconds: int = 0,
     on_cap_fired: Callable[[], None] | None = None,
     watch: Callable[[str], Awaitable[bool]] | None = None,
+    language: str | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
 
@@ -750,6 +752,7 @@ def make_agent_bridge(
                         handover_seconds,
                         on_fire=on_cap_fired,
                         bridge_state=bridge_state,
+                        language=language,
                     )
                 )
         if route.on_answered is not None:
@@ -1149,14 +1152,6 @@ def arm_deferred_greeting(
             agent.phone_menu.invalidate()
 
 
-# Soft-cap announcement spoken when a call hits HAIL_VOICE_MAX_DURATION_SECONDS.
-# Phrased like an honest operator note rather than a robotic cutoff so the
-# caller has a moment to say their goodbyes.
-SOFT_CAP_ANNOUNCEMENT = (
-    "Sorry, we've reached the time limit for this call. "
-    "Thanks for talking, I'll let you go now. Goodbye."
-)
-
 # Shutdown reason passed to ctx.shutdown() when the soft cap fires. Value
 # matches the call_end_reason ENUM so it can land directly in the calls row.
 SOFT_CAP_END_REASON: str = CallEndReason.SOFT_CAP_REACHED.value
@@ -1168,13 +1163,6 @@ SOFT_CAP_END_REASON: str = CallEndReason.SOFT_CAP_REACHED.value
 # to end the call promptly, there is no operator decision between those, so
 # there is no env var.
 MAX_CONSECUTIVE_LLM_ERRORS = 3
-
-# Spoken once, right before the give-up hangup. Fixed text: the endpoint that
-# would normally compose a line is exactly what is broken.
-BYO_LLM_FAILURE_ANNOUNCEMENT = (
-    "Sorry, I'm having trouble reaching the service that powers this call, "
-    "so I have to end it here. Goodbye."
-)
 
 # Shutdown reason passed to ctx.shutdown() when the BYO endpoint is given up
 # on. Value matches the call_end_reason ENUM, like SOFT_CAP_END_REASON.
@@ -1556,6 +1544,7 @@ async def soft_cap_announce_and_hangup(
     delay_seconds: int,
     on_fire: Callable[[], None] | None = None,
     bridge_state: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> None:
     """Wait ``delay_seconds`` then politely end the call.
 
@@ -1604,7 +1593,7 @@ async def soft_cap_announce_and_hangup(
     ):
         session.output.set_audio_enabled(True)
     try:
-        handle = session.say(SOFT_CAP_ANNOUNCEMENT, allow_interruptions=False)
+        handle = session.say(spoken_lines(language).soft_cap, allow_interruptions=False)
         await handle.wait_for_playout()
     except Exception:  # pragma: no cover, best-effort; we still hang up
         logger.exception(
@@ -1624,6 +1613,7 @@ def arm_byo_llm_giveup(
     call_id: UUID,
     tasks: set[asyncio.Task[None]],
     on_fire: Callable[[], None] | None = None,
+    language: str | None = None,
 ) -> None:
     """End the call after 3 consecutive non-recoverable LLM errors.
 
@@ -1691,8 +1681,9 @@ def arm_byo_llm_giveup(
             MAX_CONSECUTIVE_LLM_ERRORS,
         )
         try:
+            # Fixed text: the endpoint that would compose a line is what broke.
             handle = session.say(
-                BYO_LLM_FAILURE_ANNOUNCEMENT, allow_interruptions=False
+                spoken_lines(language).llm_failure, allow_interruptions=False
             )
             await handle.wait_for_playout()
         except Exception:
@@ -2468,6 +2459,7 @@ async def _run_call(
             handover_seconds=metadata.get("handover_max_duration_seconds")
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
+            language=language,
             watch=lambda identity: _contact_spoke(ctx, session, identity),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
@@ -2565,6 +2557,7 @@ async def _run_call(
                 soft_cap_seconds,
                 on_fire=_on_soft_cap_fired,
                 bridge_state=bridge_state,
+                language=language,
             )
         )
         # The bridge handle cancels it when the handover contact answers.
@@ -2584,7 +2577,12 @@ async def _run_call(
             captured["status"] = "failed"
 
         arm_byo_llm_giveup(
-            ctx, session, call_id, event_tasks, on_fire=_on_byo_llm_giveup
+            ctx,
+            session,
+            call_id,
+            event_tasks,
+            on_fire=_on_byo_llm_giveup,
+            language=language,
         )
 
     shutdown_identity = get_identity()
@@ -2811,13 +2809,11 @@ async def _run_call(
 
 __all__ = [
     "AI_DISCLOSURE_LINE",
-    "BYO_LLM_FAILURE_ANNOUNCEMENT",
     "BYO_LLM_FAILURE_END_REASON",
     "DTMF_TOOL_NAME",
     "MAX_CONSECUTIVE_LLM_ERRORS",
     "SIP_CALL_STATUS_ACTIVE",
     "SIP_CALL_STATUS_ATTRIBUTE",
-    "SOFT_CAP_ANNOUNCEMENT",
     "SOFT_CAP_END_REASON",
     "VOICE_PREAMBLE",
     "VOICE_PREAMBLE_INBOUND",
