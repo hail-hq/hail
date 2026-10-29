@@ -1543,8 +1543,8 @@ async def test_draft_files_even_when_the_profile_fails(profiles, caplog) -> None
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
             return httpx.Response(200, json={"status": "OK"})
-        if req.url.path.endswith("/vetting"):
-            return httpx.Response(200, json={})
+        if req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json=[] if req.method == "GET" else {})
         return httpx.Response(404)
 
     p = _provider(handler)
@@ -1563,6 +1563,8 @@ async def test_draft_files_even_when_the_profile_fails(profiles, caplog) -> None
     assert draft.refs["messaging_profile_id"] is None
     assert draft.refs["organization_id"] == "org1"
     assert ("POST", "/v2/10dlc/brand") in calls
+    assert ("POST", "/v2/10dlc/brand/B1/externalVetting") in calls
+    assert draft.refs.get("vetting_requested") is not False
     assert "10DLC messaging profile not ready at filing" in caplog.text
 
 
