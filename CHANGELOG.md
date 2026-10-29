@@ -10,10 +10,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
 - Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
+- Hail Cloud emails the organization's owners when a verification is approved or rejected.
 
 ### Changed
 
+- **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
+- Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
 
 ### Fixed
 

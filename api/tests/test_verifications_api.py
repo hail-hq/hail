@@ -12,10 +12,10 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from hailhq.api import verification_decisions
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
-    get_default_sms_provider_name,
     get_verification_registry,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -265,10 +265,8 @@ def sms_carrier():
 
     app.dependency_overrides[get_verification_registry] = lambda: registry
     verifications_routes._last_polled.clear()
-    app.dependency_overrides[get_default_sms_provider_name] = lambda: "fake"
     yield fake
     app.dependency_overrides.pop(get_verification_registry, None)
-    app.dependency_overrides.pop(get_default_sms_provider_name, None)
 
 
 @pytest.fixture(autouse=True)
@@ -481,6 +479,91 @@ async def test_create_returns_field_problems_and_stores_nothing(
     assert detail[0]["loc"] == ["body", "proof_of_identity", "first_name"]
     assert detail[0]["msg"] == "Name mismatch."
     assert (await async_session.execute(select(CarrierVerification))).first() is None
+
+
+def _with_limits(carrier, monkeypatch, first_name_max: int, number_max: int) -> None:
+    """The fake carrier's form with a max_length on a field and on a
+    document type's field (the fake checks nothing itself, like DIDWW)."""
+    base = carrier.requirements
+
+    async def requirements(country_code, number_type, subject_type):
+        req = await base(country_code, number_type, subject_type)
+        return req.model_copy(
+            update={
+                "fields": (
+                    FieldSpec(
+                        name="first_name", label="First name", max_length=first_name_max
+                    ),
+                    FieldSpec(name="last_name", label="Last name"),
+                ),
+                "documents": (
+                    DocumentSlot(
+                        name="proof_of_identity",
+                        label="Proof of identity",
+                        options=(
+                            DocumentOption(
+                                key="passport",
+                                label="Passport",
+                                fields=(
+                                    FieldSpec(
+                                        name="number",
+                                        label="Number",
+                                        max_length=number_max,
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            }
+        )
+
+    monkeypatch.setattr(carrier, "requirements", requirements)
+
+
+async def test_create_refuses_values_over_max_length_for_any_carrier(
+    client, org_and_key, carrier, async_session, monkeypatch
+) -> None:
+    """The API checks every max_length itself, all at once, before the
+    plug-in sees the form: nothing is filed."""
+    _, _, key = org_and_key
+    _with_limits(carrier, monkeypatch, first_name_max=3, number_max=4)
+    resp = await _create(
+        client,
+        key,
+        fields=json.dumps({"first_name": "Adaline", "last_name": "Lovelace"}),
+        documents=json.dumps(
+            {"proof_of_identity": {"option": "passport", "fields": {"number": "12345"}}}
+        ),
+    )
+    assert resp.status_code == 422, resp.text
+    assert [(d["loc"], d["msg"]) for d in resp.json()["detail"]] == [
+        (["body", "first_name"], "Use at most 3 characters."),
+        (["body", "proof_of_identity", "number"], "Use at most 4 characters."),
+    ]
+    assert carrier.drafts == []
+    assert (await async_session.execute(select(CarrierVerification))).first() is None
+
+
+async def test_create_counts_max_length_in_utf16_units(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """2 emoji are 2 characters but 4 UTF-16 units: over a limit of 3."""
+    _, _, key = org_and_key
+    _with_limits(carrier, monkeypatch, first_name_max=3, number_max=10)
+    emoji = "\U0001f600" * 2
+    resp = await _create(
+        client,
+        key,
+        fields=json.dumps({"first_name": emoji, "last_name": "Lovelace"}),
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "first_name"]
+    assert carrier.drafts == []
+    resp = await _create(
+        client, key, fields=json.dumps({"first_name": "\U0001f600", "last_name": "L"})
+    )
+    assert resp.status_code == 201, resp.text
 
 
 async def test_carrier_text_is_neither_returned_nor_logged(
@@ -962,8 +1045,12 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
 
 
 async def test_superadmin_reject_records_reason_and_discards(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -978,14 +1065,19 @@ async def test_superadmin_reject_records_reason_and_discards(
     assert resp.json()["state"] == "rejected"
     assert resp.json()["rejection_reason"] == "ID unreadable"
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     # rejected does not block starting again
     app.dependency_overrides.pop(require_superadmin)
     assert (await _create(client, key)).status_code == 201
 
 
 async def test_status_is_pulled_from_the_carrier_after_submit(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -996,9 +1088,14 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     assert (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()[
         "state"
     ] == "submitted"
+    assert decided == []
     carrier.remote_status = ProviderStatus(state="approved")
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert got["state"] == "approved" and got["approved_at"]
+    # The owners are emailed once: an approved row is not polled again.
+    verifications_routes._last_polled.clear()
+    await client.get("/verifications", headers=_auth(key))
+    assert decided == [vid]
 
 
 async def test_list_polls_the_carrier_at_most_once_a_minute(
@@ -1902,10 +1999,14 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
 
 
 async def test_sweeper_rejects_a_draft_the_carrier_refuses(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
     from hailhq.api.routes.verifications import sweep_verifications
 
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
@@ -1929,6 +2030,7 @@ async def test_sweeper_rejects_a_draft_the_carrier_refuses(
         f"document unreadable; proof_of_identity: {VALUE_NOT_ACCEPTED}"
     )
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     audit = (
         await async_session.execute(
             select(AuditLog).where(AuditLog.action == "verification.reject")
@@ -2020,6 +2122,29 @@ async def _post_sms(client, key, **overrides):
     )
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_an_sms_link_over_512_characters_is_refused(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    from hailhq.core.providers.verification.sms_form import sms_requirements
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements("fake", subject_type)
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    long = "https://acme.example/" + "a" * 600
+    resp = await _post_sms(
+        client, key, fields=json.dumps({"legal_name": "Acme", "terms_url": long})
+    )
+    assert resp.status_code == 422, resp.text
+    assert [(d["loc"], d["msg"]) for d in resp.json()["detail"]] == [
+        (["body", "terms_url"], "Use at most 512 characters.")
+    ]
+    assert sms_carrier.drafts == []
+
+
 async def _set_balance(async_session, org_id, cents: int) -> None:
     """The org fixture starts with credit; move the balance to exactly ``cents``."""
     diff = cents - await _balance(async_session, org_id)
@@ -2088,6 +2213,10 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     monkeypatch.setattr(
         verifications_routes, "notify_sms_registration_changed", pinged.append
     )
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 20_000)
     sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
@@ -2105,6 +2234,7 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     assert row.provider_refs["refused_at_filing"] is True
     assert row.rejection_reason == "Use another one."
     assert pinged == [str(row.id)]
+    assert decided == [str(row.id)]
     # A rejected row never blocks a new filing.
     sms_carrier.problems = []
     sms_carrier.billed_refs = {}
@@ -2546,11 +2676,15 @@ async def _stored_refs(async_session, vid: str) -> dict:
 @pytest.mark.parametrize("campaign_key", ["campaign_sid", "campaign_id"])
 @pytest.mark.parametrize("via", ["get", "list"])
 async def test_campaign_id_written_during_a_poll_is_saved(
-    client, org_and_key, sms_carrier, async_session, campaign_key, via
+    client, org_and_key, sms_carrier, async_session, campaign_key, via, monkeypatch
 ) -> None:
     # The plug-ins create the campaign inside status() and write its id into
     # refs in place. The id must reach the database, or every later poll
     # creates (and pays for) another campaign.
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
     vid = (await _post_sms(client, key)).json()["id"]
@@ -2563,6 +2697,8 @@ async def test_campaign_id_written_during_a_poll_is_saved(
         assert resp.status_code == 200, resp.text
         assert (await _stored_refs(async_session, vid))[campaign_key] == "QE1"
     assert sms_carrier.campaigns_created == 1
+    # A new campaign id is not a decision: nobody is emailed.
+    assert decided == []
 
 
 async def test_telnyx_release_unlinks_the_number_from_the_campaign(
@@ -2657,6 +2793,47 @@ async def test_overlapping_polls_create_one_campaign(
         restore()
     assert sms_carrier.campaigns_created == 1
     assert (await _stored_refs(async_session, vid))["campaign_sid"] == "QE1"
+
+
+async def test_overlapping_polls_email_the_owners_once(
+    client, org_and_key, carrier, session_factory, monkeypatch
+) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
+    _, _, key = org_and_key
+    created = (await _create(client, key)).json()  # sent to the carrier at once
+    vid = created["id"]
+    assert created["state"] == "submitted"
+    carrier.remote_status = ProviderStatus(state="approved")
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = carrier.status
+
+    async def held(refs):
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return await original(refs)
+
+    carrier.status = held
+    restore = _per_request_sessions(session_factory)
+    try:
+        first = asyncio.create_task(
+            client.get(f"/verifications/{vid}", headers=_auth(key))
+        )
+        await asyncio.wait_for(entered.wait(), 5)
+        # The first poll holds the row: the second skips the carrier call.
+        second = await asyncio.wait_for(
+            client.get(f"/verifications/{vid}", headers=_auth(key)), 5
+        )
+        assert second.status_code == 200, second.text
+        release.set()
+        assert (await first).json()["state"] == "approved"
+    finally:
+        release.set()
+        restore()
+    assert decided == [vid]
 
 
 @pytest.mark.usefixtures("us_number")
@@ -3029,3 +3206,416 @@ async def test_uncharged_recent_filings_count_against_the_balance(
     )
     await async_session.commit()
     assert (await _post_sms(client, key)).status_code == 422
+    # A filing made before fees were charged per step is settled by its
+    # one-time debit (no ':submission' suffix).
+    second = (
+        await async_session.execute(
+            select(CarrierVerification)
+            .where(
+                CarrierVerification.organization_id == org_id,
+                CarrierVerification.id != row.id,
+            )
+            .order_by(CarrierVerification.created_at.desc())
+        )
+    ).scalar_one()
+    assert (await _post_sms(client, key)).status_code == 402
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-1,
+            qty=1,
+            ref=f"sms_registration:{second.id}",
+            source="sms_registration",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, floor)
+    assert (await _post_sms(client, key)).status_code == 422
+
+
+# -- fee rater pings ------------------------------------------------------
+
+
+def _sms_registry(fake):
+    return lambda name, purpose="number": (
+        fake if name == "fake" and purpose == "sms" else None
+    )
+
+
+@pytest.fixture()
+def pinged(monkeypatch) -> list[str]:
+    got: list[str] = []
+    monkeypatch.setattr(
+        verifications_routes, "notify_sms_registration_changed", got.append
+    )
+    return got
+
+
+async def _waiting_sms(client, key, async_session, org_id) -> str:
+    """A US texting registration put back to 'awaiting_review', as when the
+    carrier was down at creation."""
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    return vid
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_the_sweeper_retry_pings_the_rater(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 1
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_approve_pings_the_rater(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_reject_and_a_cancel_ping_the_rater(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    assert pinged == [vid]
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert pinged == [vid, vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refused_retry_pings_the_rater_once(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    sms_carrier.submit = refuse
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "rejected"
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_retry_that_finds_the_carrier_down_does_not_ping(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    """Nothing changed: the row is 'awaiting_review' with the same refs."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    pinged.clear()
+
+    async def down(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit = down
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 0
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert pinged == []
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_new_filing_pings_even_when_the_carrier_is_down(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    """A new row is a billed submission, whatever its submit did."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+
+    async def down(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit = down
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "awaiting_review"
+    assert pinged == [resp.json()["id"]]
+
+
+@pytest.fixture()
+def rated(monkeypatch, session_factory) -> list[tuple[str, dict]]:
+    """Each awaited rater call, with the refs the rater would read then
+    (a separate session: only what is committed)."""
+    got: list[tuple[str, dict]] = []
+
+    async def rate(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            got.append((verification_id, dict(row.provider_refs)))
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", rate)
+    return got
+
+
+async def _with_campaign(async_session, vid: str, state: str) -> None:
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    row.state = state
+    row.provider_refs = {**row.provider_refs, "campaign_id": "C1"}
+    await async_session.commit()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("state", ["rejected", "approved"])
+async def test_a_cancel_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, pinged, rated, state
+) -> None:
+    """The rater charges the carrier review by the campaign id in the refs.
+    A cancel empties them: the rater reads them first."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _with_campaign(async_session, vid, state)
+    pinged.clear()
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert len(rated) == 1
+    assert rated[0][0] == vid and rated[0][1]["campaign_id"] == "C1"
+    # Then the wipe, and the usual ping for the new state.
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and row.provider_refs == {}
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_reject_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    assert rated == [(vid, rated[0][1])] and rated[0][1]["campaign_id"] == "C1"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refused_retry_rates_the_campaign_before_its_id_is_wiped(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def refuse(refs):
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    sms_carrier.check = refuse
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "rejected"
+    assert [(v, r["campaign_id"]) for v, r in rated] == [(vid, "C1")]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
+    client, org_and_key, sms_carrier, async_session, pinged, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    pinged.clear()
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert rated == []
+    assert pinged == [vid]
+
+
+# -- Telnyx outage after the brand ----------------------------------------
+
+_TELNYX_BUSINESS = {
+    "legal_name": "Acme Inc",
+    "business_type": "PRIVATE_PROFIT",
+    "ein": "12-3456789",
+    "industry": "RETAIL",
+    "website": "https://acme.example",
+    "rep_name": "Ada Lovelace",
+    "rep_email": "ada@acme.example",
+    "rep_phone": "+15125550100",
+    "rep_title": "CEO",
+    "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
+    "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
+    "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
+    "opt_in_description": "Customers tick a box at checkout on acme.example.",
+    "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "privacy_policy_url": "https://acme.example/privacy",
+    "terms_url": "https://acme.example/terms",
+}
+_TELNYX_PERSON = {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    "mobile_phone_number": "+15125550100",
+    "campaign_description": "Appointment reminders for my own clients who asked for them.",
+    "sample_1": "Ada: your session is tomorrow at 10. Reply STOP to opt out.",
+    "sample_2": "Ada: thanks for booking. Reply STOP to opt out.",
+    "opt_in_description": "Clients give their number on my booking form.",
+    "has_links": "NO",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "privacy_policy_url": "https://ada.example/privacy",
+    "terms_url": "https://ada.example/terms",
+}
+
+
+@pytest.fixture()
+def telnyx_outage(monkeypatch):
+    """The real Telnyx plug-in behind the org's 'fake' US numbers. The
+    brand registers; the PIN and vetting calls answer 503 until the test
+    sets ``state['down']`` to False."""
+    import httpx
+    from hailhq.core.providers.verification import telnyx_sms
+
+    monkeypatch.setattr(telnyx_sms, "_BRAND_READ_GAP", 0)
+    state = {"down": True, "calls": []}
+
+    def handler(req: httpx.Request):
+        state["calls"].append((req.method, req.url.path))
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
+            )
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json=[])
+        if req.url.path.endswith(("/smsOtp", "/externalVetting")):
+            if state["down"]:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"referenceId": "R1"})
+        return httpx.Response(404)
+
+    provider = telnyx_sms.TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: _sms_registry(
+        provider
+    )
+    verifications_routes._last_polled.clear()
+    yield state
+    app.dependency_overrides.pop(get_verification_registry, None)
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    ("subject_type", "fields", "step"),
+    [
+        ("business", _TELNYX_BUSINESS, "/v2/10dlc/brand/B1/externalVetting"),
+        ("person", _TELNYX_PERSON, "/v2/10dlc/brand/B1/smsOtp"),
+    ],
+)
+async def test_a_telnyx_outage_after_the_brand_keeps_the_filing(
+    client,
+    org_and_key,
+    async_session,
+    telnyx_outage,
+    pinged,
+    subject_type,
+    fields,
+    step,
+) -> None:
+    """A retry would file and bill a new brand: the brand is kept as a
+    normal filing, and the next read sends the PIN or asks for vetting."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    resp = await _post_sms(
+        client, key, subject_type=subject_type, fields=json.dumps(fields)
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["state"] == "submitted" and body["confirmation"] is None
+    assert pinged == [body["id"]]
+    rows = (
+        (
+            await async_session.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.organization_id == org_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.state for r in rows] == ["submitted"]
+    assert rows[0].provider_refs["brand_id"] == "B1"
+    assert not any(m == "DELETE" for m, _ in telnyx_outage["calls"])
+    # Telnyx is back: the next read finishes the step.
+    telnyx_outage["down"] = False
+    got = await client.get(f"/verifications/{body['id']}", headers=_auth(key))
+    assert got.status_code == 200, got.text
+    assert ("POST", step) in telnyx_outage["calls"]
+    assert pinged == [body["id"], body["id"]]
+    if subject_type == "person":
+        assert got.json()["confirmation"] == "code"
