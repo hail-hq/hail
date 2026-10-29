@@ -68,6 +68,7 @@ from hailhq.core.providers.verification import (
     VerificationProviderError,
     VerificationRequirements,
     get_verification_provider,
+    length_problems,
 )
 from hailhq.core.schemas import VerificationResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -328,17 +329,19 @@ def _problems_422(
     """422 with one entry per problem: the field as ``loc`` and Hail's own
     wording as ``msg``. The carrier's text is neither returned nor logged."""
     _log_carrier_refusal(problems, organization_id, verification_id, carrier)
-    return HTTPException(
-        status_code=422,
-        detail=[
-            {
-                "loc": ["body", *(p.field.split(".") if p.field else [])],
-                "msg": p.message,
-                "type": "verification_problem",
-            }
-            for p in problems
-        ],
-    )
+    return HTTPException(status_code=422, detail=_problem_details(problems))
+
+
+def _problem_details(problems: list[Problem]) -> list[dict]:
+    """The 422 ``detail``: one entry per problem, the field as ``loc``."""
+    return [
+        {
+            "loc": ["body", *(p.field.split(".") if p.field else [])],
+            "msg": p.message,
+            "type": "verification_problem",
+        }
+        for p in problems
+    ]
 
 
 async def _requirements(
@@ -1059,15 +1062,11 @@ async def create_verification(
     # The name the customer typed, as the plug-in reads it from this form.
     # Some plug-ins read it from a document's fields; none reads the files,
     # so they are not read yet. Stored on the row; never logged.
-    subject_name = provider.subject_name(
-        requirements,
-        sub.fields,
-        sub.address,
-        {
-            slot: DocumentInput(option=value.option, fields=value.fields)
-            for slot, value in sub.documents.items()
-        },
-    )
+    typed = {
+        slot: DocumentInput(option=value.option, fields=value.fields)
+        for slot, value in sub.documents.items()
+    }
+    subject_name = provider.subject_name(requirements, sub.fields, sub.address, typed)
 
     # Every 409 comes before the uploads are checked and copied, and before
     # any filing with the carrier. Number: several live verifications per
@@ -1101,6 +1100,12 @@ async def create_verification(
                 else f"a verification already exists ({existing.state}); id {existing.id}"
             ),
         )
+
+    # Hail's own check of the form's limits (max_length), for every carrier:
+    # some plug-ins check nothing. Before any file is read or anything filed.
+    too_long = length_problems(requirements, sub.fields, typed)
+    if too_long:
+        raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
     documents: dict[str, DocumentInput] = {}
     for slot, value in sub.documents.items():

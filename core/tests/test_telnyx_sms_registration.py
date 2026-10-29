@@ -132,6 +132,19 @@ async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     assert draft.refs == {} and calls == []
 
 
+async def test_a_name_too_long_for_the_brand_is_a_problem_and_sends_nothing() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={})
+
+    fields = {**PERSON_FIELDS, "first_name": "a" * 50, "last_name": "b" * 50}
+    draft = await _draft(_provider(handler), subject="person", fields=fields)
+    assert [p.field for p in draft.problems] == ["last_name"]
+    assert draft.refs == {} and calls == []
+
+
 async def test_missing_field_is_a_problem_and_sends_nothing() -> None:
     calls = []
 

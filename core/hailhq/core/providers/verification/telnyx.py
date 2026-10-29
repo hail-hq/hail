@@ -85,7 +85,10 @@ def _pattern(criteria: dict) -> str | None:
 
 def _max_length(criteria: dict) -> int | None:
     value = criteria.get("max_length")
-    return value if isinstance(value, int) and value > 0 else None
+    # bool is an int in Python: a stray true must not become a limit of 1.
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
 
 
 def _options(criteria: dict) -> tuple[FieldOption, ...] | None:

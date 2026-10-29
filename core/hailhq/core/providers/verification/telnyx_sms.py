@@ -27,7 +27,7 @@ from hailhq.core.providers.verification.base import (
     SmsRegistrationProvider,
     VerificationProviderError,
 )
-from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
@@ -249,6 +249,16 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 Problem(
                     field="mobile_phone_number",
                     message="Use a US or Canadian mobile number.",
+                )
+            )
+        first = (fields.get("first_name") or "").strip()
+        last = (fields.get("last_name") or "").strip()
+        if subject_type == "person" and text_length(f"{first} {last}") > 100:
+            # Telnyx files both names as one brand name of at most 100.
+            problems.append(
+                Problem(
+                    field="last_name",
+                    message="First and last name together must fit in 100 characters.",
                 )
             )
         if (
