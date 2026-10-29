@@ -2346,6 +2346,33 @@ async def test_cancel_drops_a_leg_that_joins_after_a_failed_remove() -> None:
     assert f"human-{CALL_ID}" not in ctx.room.remote_participants
 
 
+async def test_no_new_dial_while_a_cancelled_leg_is_watched() -> None:
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    watched = asyncio.create_task(asyncio.sleep(3600))
+    state: dict = {"human": None, "connected": False, "late_leg_task": watched}
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam")
+    )
+    assert out.outcome == "failed"
+    ctx.api.sip.create_sip_participant.assert_not_awaited()
+    watched.cancel()
+    await asyncio.gather(watched, return_exceptions=True)
+
+
+async def test_late_leg_that_will_not_drop_ends_the_call() -> None:
+    ctx = FakeJobContext()
+    ctx.api.room.remove_participant.side_effect = RuntimeError("livekit down")
+    state: dict = {"human": f"human-{CALL_ID}", "connected": False}
+    state["dial_task"] = asyncio.ensure_future(asyncio.sleep(3600))
+    cancel = make_bridge_cancel(ctx, CALL_ID, state)  # type: ignore[arg-type]
+    assert await cancel() is True
+    ctx.room.remote_participants[f"human-{CALL_ID}"] = object()
+    await asyncio.wait_for(state["late_leg_task"], timeout=3)
+    assert ctx.delete_room_calls == 1 and ctx.shutdown_calls == ["handover_leg_stuck"]
+    assert state["ending"] is True
+
+
 async def test_stuck_leg_after_a_cancel_is_recorded_failed() -> None:
     """The phone picked up as the caller said stop, and the leg cannot be
     dropped: the call ends, and the outcome says failed, not cancelled."""

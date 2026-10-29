@@ -571,6 +571,12 @@ def make_agent_bridge(
             # identity is fixed, so a second dial would collide with the first.
             logger.info("call_id=%s handover already in progress", call_id)
             return BridgeOutcome("failed", None, 0)
+        late = bridge_state.get("late_leg_task")
+        if late is not None and not late.done():
+            # A cancelled leg may still ring on and pick up under the same
+            # identity: a new dial would take it for its own contact.
+            logger.info("call_id=%s cancelled leg still watched", call_id)
+            return BridgeOutcome("failed", None, 0)
         identity = human_identity(call_id)
         bridge_state["human"] = identity
         bridge_state.pop("cancelled", None)
@@ -726,15 +732,19 @@ def make_bridge_cancel(
     up after the cancel never lands in the call unnoticed.
     """
 
-    async def _drop_late_leg(identity: str, dial: asyncio.Future) -> None:
+    async def _drop_late_leg(identity: str) -> None:
+        # No new dial starts while this runs (the bridge refuses), so any
+        # leg under this identity is the cancelled one.
         loop = asyncio.get_running_loop()
         until = loop.time() + LATE_LEG_WATCH_SECONDS
         while loop.time() < until:
-            if bridge_state.get("dial_task") not in (None, dial):
-                return  # a new dial owns the identity now
             if identity in ctx.room.remote_participants:
                 logger.info("call_id=%s dropping a leg that rang on", call_id)
-                await _remove_handover_leg(ctx, identity, call_id)
+                if not await _remove_handover_leg(ctx, identity, call_id):
+                    # The contact would hear the caller: end the call.
+                    bridge_state["ending"] = True
+                    await _drop_room(ctx, call_id)
+                    ctx.shutdown(reason="handover_leg_stuck")
                 return
             await asyncio.sleep(0.5)
 
@@ -758,7 +768,7 @@ def make_bridge_cancel(
         dial.cancel()
         if not removed:
             bridge_state["late_leg_task"] = asyncio.create_task(
-                _drop_late_leg(identity, dial)
+                _drop_late_leg(identity)
             )
         return True
 
