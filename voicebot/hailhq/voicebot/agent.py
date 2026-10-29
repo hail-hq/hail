@@ -581,7 +581,10 @@ def make_agent_bridge(
 
         def _gone(outcome: str, code: int | None = None) -> BridgeOutcome:
             bridge_state["human"] = None
-            if bridge_state.pop("cancelled", False):
+            # A dial that ends after the caller asked to stop ended because
+            # of it, except a leg that could not be dropped: that stays
+            # "failed" so the event shows it.
+            if bridge_state.pop("cancelled", False) and outcome != "failed":
                 outcome = "cancelled"
             return BridgeOutcome(outcome, code, _ring_ms())  # type: ignore[arg-type]
 
@@ -608,7 +611,7 @@ def make_agent_bridge(
             if not dial.cancelled() or not bridge_state.get("cancelled"):
                 raise  # this task itself was cancelled, not just the dial
             logger.info("call_id=%s handover dial cancelled", call_id)
-            return _gone("cancelled")
+            return _gone("no_answer")
         except SipCallError as exc:
             code = exc.sip_status_code
             outcome = _sip_outcome(code)
@@ -704,6 +707,11 @@ def make_agent_bridge(
     return _bridge
 
 
+# How long after a cancel the bridge keeps watching for a ringing leg that
+# could not be removed: past the ring timeout, so a late pickup is caught.
+LATE_LEG_WATCH_SECONDS = HANDOVER_RING_SECONDS + 10
+
+
 def make_bridge_cancel(
     ctx: JobContext, call_id: UUID, bridge_state: dict[str, Any]
 ) -> Callable[[], Awaitable[bool]]:
@@ -713,7 +721,22 @@ def make_bridge_cancel(
     Removing the ringing participant hangs up the contact's phone; the
     pending dial request is cancelled too, and the bridge reports
     ``cancelled``. A pickup that races the cancel is dropped by the bridge.
+    When the ringing leg cannot be removed (not in the room yet, or the API
+    failed twice), it is removed if it joins later, so a contact who picks
+    up after the cancel never lands in the call unnoticed.
     """
+
+    async def _drop_late_leg(identity: str, dial: asyncio.Future) -> None:
+        loop = asyncio.get_running_loop()
+        until = loop.time() + LATE_LEG_WATCH_SECONDS
+        while loop.time() < until:
+            if bridge_state.get("dial_task") not in (None, dial):
+                return  # a new dial owns the identity now
+            if identity in ctx.room.remote_participants:
+                logger.info("call_id=%s dropping a leg that rang on", call_id)
+                await _remove_handover_leg(ctx, identity, call_id)
+                return
+            await asyncio.sleep(0.5)
 
     async def _cancel() -> bool:
         identity = bridge_state.get("human")
@@ -722,15 +745,21 @@ def make_bridge_cancel(
             return False
         bridge_state["cancelled"] = True
         logger.info("call_id=%s handover cancel requested", call_id)
-        try:
-            await ctx.api.room.remove_participant(
-                RoomParticipantIdentity(room=ctx.room.name, identity=identity)
-            )
-        except Exception:
-            # Not in the room yet (the INVITE was not accepted): cancelling
-            # the dial request below ends it.
-            logger.info("call_id=%s ringing leg not in the room yet", call_id)
+        removed = False
+        for _ in range(2):
+            try:
+                await ctx.api.room.remove_participant(
+                    RoomParticipantIdentity(room=ctx.room.name, identity=identity)
+                )
+                removed = True
+                break
+            except Exception:
+                logger.info("call_id=%s could not remove the ringing leg", call_id)
         dial.cancel()
+        if not removed:
+            bridge_state["late_leg_task"] = asyncio.create_task(
+                _drop_late_leg(identity, dial)
+            )
         return True
 
     return _cancel
@@ -1467,8 +1496,8 @@ async def soft_cap_announce_and_hangup(
     The cap stops applying once a handover contact answers: the bridge
     handle cancels this task (it sets ``bridge_state["soft_cap_fired"]``
     once the wait is over, so a cap already announcing is not cut short).
-    With a contact leg in the room (connected, or still in the intro and
-    reply check) the agent's output audio may be off, so it is turned back
+    With a contact leg in the room (connected, or picked up and still in
+    the silence check) the agent's output audio may be off, so it is turned back
     on for the announcement (both people hear it). With a
     contact leg ringing or connected the room is deleted before shutdown,
     so no leg outlives the job.

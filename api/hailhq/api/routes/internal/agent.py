@@ -782,12 +782,12 @@ HANDOVER_EMAIL_SUBJECT = "{agent} is calling you to connect a caller"
 HANDOVER_EMAIL_SUBJECT_NAME_CHARS = 80
 
 
-async def _handover_result_recorded(
+async def _handover_result_event(
     db: AsyncSession, call_id: UUID, tool_invocation_id: UUID
-) -> bool:
+) -> CallEvent | None:
     return (
         await db.execute(
-            select(CallEvent.id)
+            select(CallEvent)
             .where(
                 CallEvent.call_id == call_id,
                 CallEvent.kind == HANDOVER_EVENT_KIND,
@@ -796,7 +796,7 @@ async def _handover_result_recorded(
             )
             .limit(1)
         )
-    ).first() is not None
+    ).scalar_one_or_none()
 
 
 async def _linked_person(
@@ -1190,10 +1190,21 @@ async def agent_handover_result(
     contact = await _linked_person(db, call, body.contact_id)
     if contact is None and not await _link_row_exists(db, call, body.contact_id):
         return {"ok": False}
+    recorded = await _handover_result_event(db, call.id, body.tool_invocation_id)
+    if recorded is not None:
+        # A retry, or the voicebot's follow-up once the text and email
+        # finished: only what became of them may change.
+        notices = {
+            k: v
+            for k, v in (("sms", body.sms), ("email", body.email))
+            if v not in (None, "pending") and recorded.payload.get(k) != v
+        }
+        if notices:
+            recorded.payload = {**recorded.payload, **notices}
+            await db.commit()
+        return {"ok": True}
     if body.outcome == HANDOVER_ANSWERED and await has_answered_handover(db, call.id):
         return {"ok": True}  # retried result: already recorded
-    if await _handover_result_recorded(db, call.id, body.tool_invocation_id):
-        return {"ok": True}
     name = contact.name if contact else None
     db.add(
         CallEvent(

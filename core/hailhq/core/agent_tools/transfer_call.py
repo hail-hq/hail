@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import re
 import uuid
 from collections.abc import Awaitable
 from typing import Any
@@ -44,9 +45,11 @@ _NO_ANSWER = "{name} could not pick up. Tell the caller and offer to take a mess
 _STILL_RINGING = (
     "{name} is still ringing. To try someone else, call cancel_transfer first."
 )
-# How long a result post waits for the text and email to finish, so it
-# records what became of them rather than "pending".
-_NOTICE_WAIT_SECONDS = 5.0
+# How long the result's follow-up waits for a text or email still in flight,
+# so the handover event records what became of it rather than "pending".
+_NOTICE_WAIT_SECONDS = 30.0
+# " (2)" that core.handover adds to repeated names in the tool's labels.
+_DEDUPE_SUFFIX = re.compile(r"\s\(\d+\)$")
 # Waits between the 7 attempts of the "answered" result post (about a minute
 # in all). The stale-call and pool sweeps rely on that event to lift the time
 # limit, so a short API outage must not lose it.
@@ -69,7 +72,6 @@ SPEC = ToolSpec(
     risk_tier="session_control",
     is_available=_always,
     execute=_unbound,
-    uninterruptible=True,
 )
 
 
@@ -101,6 +103,11 @@ def _notice_state(task: asyncio.Task[str]) -> str:
     return "failed" if task.cancelled() else task.result()
 
 
+def _spoken(label: str) -> str:
+    """A label as the agent should say it: "Sam (2)" is Sam."""
+    return _DEDUPE_SUFFIX.sub("", label)
+
+
 async def _post_answered(ctx: ToolContext, body: dict[str, Any]) -> None:
     """Post the "answered" result; retried, never raises."""
     for attempt in range(len(_ANSWERED_BACKOFF) + 1):
@@ -129,13 +136,14 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
 
     def _entry(t: dict) -> str:
         if t["label"] in on_call:
-            line = ON_CALL_LINE.format(name=t["label"])
+            line = ON_CALL_LINE.format(name=_spoken(t["label"]))
             return f"{t['label']} (already on this call, do not connect; say: {line})"
         return f"{t['label']} ({t.get('note') or ''})"
 
     menu = "; ".join(_entry(t) for t in targets)
-    # This call's dial in progress, if any: (label, task).
-    ringing: list[tuple[str, asyncio.Task]] = []
+    # The label of this call's dial while it rings (set before the first
+    # await, so a second call in the same turn sees it), else None.
+    ringing: list[str | None] = [None]
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
@@ -145,9 +153,19 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         if contact_id is None:
             return "I can only connect you to: " + ", ".join(by_label) + "."
         if label in on_call:
-            return ON_CALL_LINE.format(name=label)
-        if ringing and not ringing[0][1].done():
-            return _STILL_RINGING.format(name=ringing[0][0])
+            return ON_CALL_LINE.format(name=_spoken(label))
+        if ringing[0] is not None:
+            return _STILL_RINGING.format(name=_spoken(ringing[0]))
+        ringing[0] = label
+        try:
+            return await _start(ctx, args, label, contact_id)
+        except BaseException:
+            ringing[0] = None
+            raise
+
+    async def _start(
+        ctx: ToolContext, args: dict[str, Any], label: str, contact_id: str
+    ) -> str | None:
         reason = " ".join(str(args.get("reason", "")).split())[:MAX_REASON_CHARS]
 
         # One id per attempt: the route stores one event per id, so a retried
@@ -157,10 +175,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         sms: asyncio.Task[str] | None = None
         email: asyncio.Task[str] | None = None
 
-        async def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
-            notices = {t for t in (sms, email) if t is not None and not t.done()}
-            if notices:
-                await asyncio.wait(notices, timeout=_NOTICE_WAIT_SECONDS)
+        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
             return {
                 "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
@@ -172,10 +187,29 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "email": _notice_state(email) if email is not None else None,
             }
 
+        async def _settle_notices(body: dict) -> None:
+            """Post the result again once a text or email still in flight
+            finishes, so the event records it. Never raises."""
+            notices = {t for t in (sms, email) if t is not None and not t.done()}
+            if not notices:
+                return
+            await asyncio.wait(notices, timeout=_NOTICE_WAIT_SECONDS)
+            try:
+                await ctx.api.post(
+                    "/internal/agent/handover-result",
+                    _result(body["outcome"], body["sip_status"], body["ring_ms"]),
+                )
+            except Exception:
+                _log.exception("handover notice update failed")
+
         answer_reported = False
 
         async def _answered(ring_ms: int) -> None:
-            await _post_answered(ctx, await _result("answered", None, ring_ms))
+            # Posted at once: job shutdown waits only a few seconds for it,
+            # and it lifts the call's time limit. The notices follow.
+            body = _result("answered", None, ring_ms)
+            await _post_answered(ctx, body)
+            _hold(asyncio.create_task(_settle_notices(body)))
 
         def on_answered(ring_ms: int) -> Awaitable[None]:
             # Called once someone on the contact's side speaks; the bridge
@@ -190,6 +224,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             {"call_id": str(ctx.call_id), "contact_id": contact_id},
         )
         if not route.get("ok"):
+            ringing[0] = None
             return str(route.get("spoken") or SPOKEN_FALLBACK)
         notice = {
             "tool_invocation_id": invocation_id,
@@ -209,32 +244,34 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                         from_e164=route["from_e164"],
                         trunk_id=route["trunk_id"],
                         headers=route.get("headers"),
-                        name=label,
+                        name=_spoken(label),
                         on_answered=on_answered,
                     )
                 )
             except Exception:
                 _log.exception("handover bridge failed")
                 outcome = BridgeOutcome("failed", None, 0)
+            finally:
+                # The ring is over: a new transfer may start.
+                ringing[0] = None
             if outcome.outcome == "answered" and answer_reported:
                 return
+            if outcome.outcome not in ("answered", "cancelled") and ctx.prompt:
+                # Tell the caller first; the bookkeeping can wait. Connected:
+                # the agent is muted. Cancelled: cancel_transfer already gave
+                # the agent its turn.
+                try:
+                    await ctx.prompt(_NO_ANSWER.format(name=_spoken(label)))
+                except Exception:
+                    _log.exception("handover no-answer prompt failed")
+            body = _result(outcome.outcome, outcome.sip_status, outcome.ring_ms)
             try:
-                await ctx.api.post(
-                    "/internal/agent/handover-result",
-                    await _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
-                )
+                await ctx.api.post("/internal/agent/handover-result", body)
             except Exception:
                 _log.exception("handover result post failed")
-            if outcome.outcome in ("answered", "cancelled") or ctx.prompt is None:
-                # Connected: the agent is muted. Cancelled: cancel_transfer
-                # already gave the agent its turn.
-                return
-            try:
-                await ctx.prompt(_NO_ANSWER.format(name=label))
-            except Exception:
-                _log.exception("handover no-answer prompt failed")
+            await _settle_notices(body)
 
-        ringing[:] = [(label, _hold(asyncio.create_task(_dial())))]
+        _hold(asyncio.create_task(_dial()))
         # None: no reply turn. The agent already told the caller it is
         # connecting them and that it is still here while it rings.
         return None
@@ -292,6 +329,9 @@ CANCEL_SPEC = ToolSpec(
     risk_tier="session_control",
     is_available=_always,
     execute=_cancel,
+    # Stop at once, not after the agent's "okay, stopping": the phone keeps
+    # ringing while the agent speaks, and the contact could pick up.
+    waits_for_speech=False,
 )
 
 __all__ = ["CANCEL_SPEC", "MAX_REASON_CHARS", "SPEC", "bind"]

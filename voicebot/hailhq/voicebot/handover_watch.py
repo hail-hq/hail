@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import asyncio
 
+from hailhq.voicebot.pickup import SAMPLE_RATE
 from livekit import rtc
 from livekit.agents.utils.participant import wait_for_track_publication
 from livekit.agents.vad import VAD, VADEventType
-
-SAMPLE_RATE = 16000
 
 
 async def _contact_audio(room: rtc.Room, identity: str) -> rtc.AudioStream | None:

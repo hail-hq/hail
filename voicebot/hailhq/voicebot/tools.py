@@ -72,16 +72,12 @@ class SpeechTracker:
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
     async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
-            if spec.uninterruptible:
-                # The caller talking while a dial rings must not cancel this
-                # tool: that would leave the contact leg half-dialed.
-                context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
             # Someone who starts talking during the goodbye is not done: keep
             # the call. Only end_call: DTMF and transfers run over IVR menus
             # and "okay"s, so speech must not cancel them.
-            if spec.risk_tier == "session_control":
+            if spec.risk_tier == "session_control" and spec.waits_for_speech:
                 started = time.monotonic()
                 await context.wait_for_playout()
                 if (
@@ -93,7 +89,7 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
                     return STILL_TALKING
-            # None (a connected handover) means no reply turn.
+            # None means no reply turn (a transfer that started ringing).
             return await spec.execute(tctx, raw_arguments)
         except Exception:
             logger.exception(

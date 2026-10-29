@@ -305,8 +305,9 @@ async def test_answered_posted_once() -> None:
     assert "picked_up_by" not in result
 
 
-async def test_answered_post_waits_for_the_text_and_email() -> None:
-    """A fast pickup must not record the notices as "pending"."""
+async def test_answered_is_posted_at_once_then_the_notices_follow() -> None:
+    """The answer lifts the time limit and job shutdown waits only briefly,
+    so it never waits on a slow text or email. A second post records them."""
     spec = transfer_call.bind(META)
     ctx, api, _ = _ctx(ROUTE)
     base = _post_by_path(ROUTE)
@@ -320,8 +321,99 @@ async def test_answered_post_waits_for_the_text_and_email() -> None:
     ctx.bridge = _answering_bridge([])
     await spec.execute(ctx, {"contact": "Sam"})
     await _settled()
-    [result] = _posted(api, RESULT_PATH)
-    assert result["sms"] == "sent" and result["email"] == "sent"
+    first, update = _posted(api, RESULT_PATH)
+    assert first["outcome"] == update["outcome"] == "answered"
+    assert first["sms"] == "pending" and first["email"] == "pending"
+    assert update["sms"] == "sent" and update["email"] == "sent"
+    assert update["tool_invocation_id"] == first["tool_invocation_id"]
+
+
+async def test_caller_hears_the_no_answer_before_the_bookkeeping() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("busy", 486, 1000))
+    order: list[str] = []
+    base = _post_by_path(ROUTE)
+
+    async def post(path, body):
+        if path == RESULT_PATH:
+            order.append("result")
+        return await base(path, body)
+
+    async def prompt(_text):
+        order.append("prompt")
+
+    api.post.side_effect = post
+    ctx.prompt = prompt
+    await spec.execute(ctx, {"contact": "Sam"})
+    await _settled()
+    assert order[0] == "prompt"
+
+
+async def test_two_transfers_in_one_turn_dial_once() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, bridge = _ctx(ROUTE, BridgeOutcome("no_answer", 480, 1))
+    first, second = await asyncio.gather(
+        spec.execute(ctx, {"contact": "Sam"}), spec.execute(ctx, {"contact": "Sam"})
+    )
+    await _settled()
+    assert first is None
+    assert second == (
+        "Sam is still ringing. To try someone else, call cancel_transfer first."
+    )
+    assert bridge.await_count == 1
+    assert (
+        len([c for c in api.post.await_args_list if c.args[0].endswith("/handover")])
+        == 1
+    )
+
+
+async def test_ring_over_frees_the_tool_before_the_bookkeeping() -> None:
+    """Once the dial returned, a new transfer may start even while the
+    result post is still going."""
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("busy", 486, 1))
+    hold = asyncio.Event()
+    base = _post_by_path(ROUTE)
+    asked: list = []
+
+    async def post(path, body):
+        if path == RESULT_PATH:
+            await hold.wait()
+        return await base(path, body)
+
+    async def prompt(_text):
+        if not asked:  # once: the second dial prompts too
+            asked.append(await spec.execute(ctx, {"contact": "Sam"}))
+
+    api.post.side_effect = post
+    ctx.prompt = prompt
+    await spec.execute(ctx, {"contact": "Sam"})
+    while not asked:
+        await asyncio.sleep(0)
+    assert asked == [None]
+    hold.set()
+    await _settled()
+
+
+def test_repeated_names_are_spoken_plainly() -> None:
+    meta = {
+        "handover_targets": [
+            {"contact_id": CID, "label": "Sam", "note": "Billing"},
+            {"contact_id": str(uuid.uuid4()), "label": "Sam (2)", "note": "Sales"},
+        ]
+    }
+    assert transfer_call.bind(meta) is not None
+    assert transfer_call._spoken("Sam (2)") == "Sam"
+
+
+async def test_no_answer_names_a_repeated_person_plainly() -> None:
+    meta = {"handover_targets": [{"contact_id": CID, "label": "Sam (2)", "note": "x"}]}
+    spec = transfer_call.bind(meta)
+    ctx, _, bridge = _ctx(ROUTE, BridgeOutcome("no_answer", 480, 1))
+    await spec.execute(ctx, {"contact": "Sam (2)"})
+    await _settled()
+    assert ctx.prompt.await_args.args[0].startswith("Sam could not pick up")
+    assert bridge.await_args.args[0].name == "Sam"
 
 
 async def test_answered_post_retries(monkeypatch) -> None:

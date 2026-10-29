@@ -95,9 +95,9 @@ class ToolSpec:
     # Per-call shaping from dispatch metadata (names in the description,
     # enum of choices). None result hides the tool for this call.
     bind: Callable[[dict[str, Any]], ToolSpec | None] | None = None
-    # True when a caller speaking mid-call must not cancel the tool (a dial
-    # that rings for up to 30 s would be left half-done).
-    uninterruptible: bool = False
+    # session_control tools first let the agent's own sentence finish
+    # playing (end_call must not cut off the goodbye). False runs at once.
+    waits_for_speech: bool = True
 
 
 __all__ = [

@@ -914,3 +914,48 @@ async def test_handover_email_subject_is_one_short_line(
     assert "\n" not in row.subject and "\r" not in row.subject
     assert row.subject.startswith("Front Bcc: x@evil.test y")
     assert len(row.subject) <= 80 + len(" is calling you to connect a caller")
+
+
+async def test_result_follow_up_records_the_finished_notices(
+    client, async_session, add_phone_number
+):
+    """The answer is posted at once with the text and email still pending;
+    the voicebot's second post with the same id fills them in, and changes
+    nothing else."""
+    call, contact = await _seed(async_session, add_phone_number)
+    body = {
+        "tool_invocation_id": str(uuid.uuid4()),
+        "call_id": str(call.id),
+        "contact_id": str(contact.id),
+        "outcome": "answered",
+        "ring_ms": 1000,
+        "sms": "pending",
+        "email": "pending",
+    }
+    assert (await _post(client, "/internal/agent/handover-result", body)).json() == {
+        "ok": True
+    }
+    update = {**body, "ring_ms": 99, "sms": "sent", "email": "pending"}
+    assert (await _post(client, "/internal/agent/handover-result", update)).json() == {
+        "ok": True
+    }
+    [event] = (
+        await async_session.execute(
+            select(CallEvent).where(CallEvent.kind == "handover")
+        )
+    ).scalars()
+    await async_session.refresh(event)
+    assert event.payload["sms"] == "sent" and event.payload["email"] == "pending"
+    assert event.payload["ring_ms"] == 1000
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.transferred"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) <= 1

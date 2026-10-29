@@ -2310,6 +2310,62 @@ async def test_cancel_races_the_pickup() -> None:
     assert await cancel() is False
 
 
+async def test_cancel_drops_a_leg_that_joins_after_a_failed_remove() -> None:
+    """The ringing leg could not be removed: the dial request is cancelled,
+    and when the contact picks up later anyway their leg is removed, so they
+    never land in the call unnoticed."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    ringing = asyncio.Event()
+
+    async def dial(_req):
+        ringing.set()
+        await asyncio.sleep(3600)
+
+    ctx.api.sip.create_sip_participant.side_effect = dial
+    removals: list[str] = []
+
+    async def remove(req):
+        removals.append(req.identity)
+        if len(removals) <= 2:
+            raise RuntimeError("not found")  # not in the room yet
+        ctx.room.remote_participants.pop(req.identity, None)
+
+    ctx.api.room.remove_participant.side_effect = remove
+    bridge = make_agent_bridge(ctx, session, CALL_ID, state)  # type: ignore[arg-type]
+    cancel = make_bridge_cancel(ctx, CALL_ID, state)  # type: ignore[arg-type]
+    task = asyncio.create_task(bridge(BridgeRoute("+1", "+1", "ST", None, "Sam")))
+    await ringing.wait()
+    assert await cancel() is True
+    assert (await task).outcome == "cancelled"
+    # The phone kept ringing on the server and the contact picked up.
+    ctx.room.remote_participants[f"human-{CALL_ID}"] = object()
+    await asyncio.wait_for(state["late_leg_task"], timeout=3)
+    assert len(removals) == 3
+    assert f"human-{CALL_ID}" not in ctx.room.remote_participants
+
+
+async def test_stuck_leg_after_a_cancel_is_recorded_failed() -> None:
+    """The phone picked up as the caller said stop, and the leg cannot be
+    dropped: the call ends, and the outcome says failed, not cancelled."""
+    ctx = FakeJobContext()
+    ctx.api.room.remove_participant.side_effect = RuntimeError("livekit down")
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+
+    async def dial(req):
+        ctx.room.remote_participants[req.participant_identity] = object()
+        state["cancelled"] = True
+
+    ctx.api.sip.create_sip_participant.side_effect = dial
+    out = await make_agent_bridge(ctx, session, CALL_ID, state)(  # type: ignore[arg-type]
+        BridgeRoute("+1", "+1", "ST", None, "Sam")
+    )
+    assert out.outcome == "failed"
+    assert ctx.shutdown_calls == ["handover_leg_stuck"]
+
+
 async def test_cancel_with_nothing_ringing() -> None:
     ctx = FakeJobContext()
     state: dict = {"human": None, "connected": False}
