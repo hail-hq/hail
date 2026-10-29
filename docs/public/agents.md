@@ -68,28 +68,32 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   (all tools) stays `null`. The agent never sees a phone number.
 - The contact sees your Hail number as caller ID.
 - The contact has 30 seconds to answer. If not, the agent comes back and
-  offers to take a message.
-- While the phone rings, the contact gets a text from your Hail number with
-  the caller's number and the reason (links, emails and phone numbers
-  removed), once per call. A text from a US number to a US number
+  offers to take a message. While it rings the agent keeps listening: the
+  caller can say stop, or ask for someone else, and the agent hangs up the
+  ringing phone (`cancel_transfer`, which comes with `transfer_call`).
+- While the phone rings, the contact gets a text from your Hail number and
+  an email with the caller's number and the reason (links, emails and phone
+  numbers removed), once per call. A text from a US number to a US number
   needs an approved US SMS registration; without one the call still rings,
-  with no text.
-- When the phone picks up, the agent first listens. If voicemail, a phone
-  menu or a carrier message answers, or nobody speaks within 5 seconds, it
-  hangs up that line and comes back the same way. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
-- On answer, the agent says who is calling and why, then goes silent. If
-  the contact says nothing during that intro or within 8 seconds after it,
-  the agent hangs up their line and comes back to the caller. Once connected, if either side
-  hangs up, the call ends.
+  with no text. The email needs a verified email domain and an email on the
+  contact (a team member's login email); without one, no email.
+- A plain forward: when the phone picks up, the two people are connected
+  and the agent stops listening and speaking. It says nothing to the
+  contact. If voicemail answers, the caller hears it and can leave a
+  message. If nobody on the contact's side makes a sound for 15 seconds
+  (some mailboxes answer in silence), or the line hangs up within 10
+  seconds of its first sound (a carrier message), the agent hangs up that
+  line and comes back to the caller. Code: [`handover_watch.py`](../../voicebot/hailhq/voicebot/handover_watch.py).
+  Once connected, if either side hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
   can hang up sooner.
-- Billed as one call at the normal voice rate. The text to the contact is
-  billed as a normal SMS and counts toward the agent's 5 sends per call.
-- Sends a [`call.transferred`](webhooks.md) webhook when the contact answers
-  and speaks.
+- Billed as one call at the normal voice rate. The text and the email to the
+  contact are billed as a normal SMS and email.
+- Sends a [`call.transferred`](webhooks.md) webhook once someone on the
+  contact's side has spoken and stayed on the line for 10 seconds.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call

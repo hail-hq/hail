@@ -17,6 +17,8 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     Contact,
+    Email,
+    EmailDomain,
     PhoneNumber,
     Sms,
     UsageEvent,
@@ -178,6 +180,7 @@ async def test_handover_denied_when_contact_is_on_the_call(
 async def test_result_answered_writes_event_and_webhook(
     client, async_session, add_phone_number
 ):
+    """An older voicebot still sends ``picked_up_by``: accepted, not stored."""
     call, contact = await _seed(async_session, add_phone_number)
     async_session.add(
         WebhookSubscription(
@@ -217,8 +220,8 @@ async def test_result_answered_writes_event_and_webhook(
         "outcome": "answered",
         "sip_status": None,
         "ring_ms": 12000,
-        "picked_up_by": "silent",
         "sms": "blocked:us_registration",
+        "email": None,
     }
     deliveries = (
         (
@@ -650,3 +653,309 @@ async def test_handover_sms_skipped(
     expected = "number_cannot_text" if case == "voice_only" else "call_ended"
     assert r.json() == {"sms": f"skipped:{expected}"}
     sms_mock.send_sms.assert_not_awaited()
+
+
+# --- email to the contact while the agent dials ---------------------------
+
+
+async def _with_sender(s, call, contact, email="sam@a.test"):
+    contact.email = email
+    s.add(
+        EmailDomain(
+            organization_id=call.organization_id,
+            kind="custom",
+            domain="mail.a.test",
+            verification_status="verified",
+        )
+    )
+    await s.commit()
+
+
+async def test_handover_email_sent_with_the_text_words(
+    client, async_session, add_phone_number, email_mock
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    await _with_sender(async_session, call, contact)
+    payload = _sms_payload(call, contact)
+    r = await _post(client, "/internal/agent/handover-email", payload)
+    assert r.json() == {"email": "sent"}
+    # A retried post learns the outcome and sends nothing more.
+    r = await _post(client, "/internal/agent/handover-email", payload)
+    assert r.json() == {"email": "sent"}
+    [row] = (await async_session.execute(select(Email))).scalars().all()
+    assert row.to_addresses == ["sam@a.test"]
+    assert row.subject == "Desk is calling you to connect a caller"
+    assert row.body_text == (
+        "Desk (AI agent) is calling you now to connect a caller "
+        "(+14155550199). Reason given: a leak."
+    )
+    assert row.metadata_["call_id"] == str(call.id)
+    # A second dial to the same person on this call emails nothing more.
+    r = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert r.json() == {"email": "skipped:already_emailed"}
+    assert len((await async_session.execute(select(Email))).scalars().all()) == 1
+
+
+async def test_handover_email_goes_out_without_us_text_registration(
+    client, async_session, add_phone_number, email_mock
+):
+    """A number without US texting registration cannot text the contact; the
+    email still tells them who is calling."""
+    call, contact = await _seed(async_session, add_phone_number)
+    await _with_sender(async_session, call, contact)
+    sms = await _post(
+        client, "/internal/agent/handover-sms", _sms_payload(call, contact)
+    )
+    mail = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert sms.json() == {"sms": "blocked:us_registration"}
+    assert mail.json() == {"email": "sent"}
+
+
+@pytest.mark.parametrize("case", ["no_email", "no_sender", "ended"])
+async def test_handover_email_skipped(
+    client, async_session, add_phone_number, email_mock, case
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    if case != "no_email":
+        await _with_sender(async_session, call, contact)
+    if case == "no_sender":
+        for d in (await async_session.execute(select(EmailDomain))).scalars():
+            await async_session.delete(d)
+    if case == "ended":
+        call.status = "completed"
+        call.end_reason = "normal_hangup"
+    await async_session.commit()
+    r = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    expected = "call_ended" if case == "ended" else case
+    assert r.json() == {"email": f"skipped:{expected}"}
+    assert (await async_session.execute(select(Email))).scalars().all() == []
+
+
+async def test_handover_email_blocked_by_suppression(
+    client, async_session, add_phone_number, email_mock
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    await _with_sender(async_session, call, contact)
+    await add_suppression(
+        async_session,
+        organization_id=call.organization_id,
+        recipient="sam@a.test",
+        channel="email",
+        reason="unsubscribe",
+        source="test",
+    )
+    await async_session.commit()
+    r = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert r.json() == {"email": "blocked:compliance"}
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "agent.handover.email_blocked")
+        )
+    ).scalar_one()
+    assert audit.payload["reason"] == "compliance"
+
+
+async def test_handover_email_to_team_member_uses_login_email(
+    client, async_session, add_phone_number, email_mock
+):
+    call, wire = await _seed_member(async_session, add_phone_number)
+    async_session.add(
+        EmailDomain(
+            organization_id=call.organization_id,
+            kind="custom",
+            domain="mail.a.test",
+            verification_status="verified",
+        )
+    )
+    await async_session.commit()
+    r = await _post(
+        client,
+        "/internal/agent/handover-email",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": wire,
+            "reason": "",
+        },
+    )
+    assert r.json() == {"email": "sent"}
+    [row] = (await async_session.execute(select(Email))).scalars().all()
+    assert row.to_addresses and "@" in row.to_addresses[0]
+
+
+async def test_result_records_the_email_outcome(
+    client, async_session, add_phone_number
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": str(contact.id),
+            "outcome": "no_answer",
+            "ring_ms": 30000,
+            "sms": "blocked:us_registration",
+            "email": "sent",
+        },
+    )
+    assert r.json() == {"ok": True}
+    event = (
+        await async_session.execute(
+            select(CallEvent).where(CallEvent.kind == "handover")
+        )
+    ).scalar_one()
+    assert event.payload["email"] == "sent"
+
+
+async def test_notices_still_go_out_after_a_fast_pickup(
+    client, async_session, add_phone_number, email_mock, sms_mock
+):
+    """A voicemail picks up at once and the handover is recorded answered
+    before the text and email run: both still go out, since that is when
+    the contact needs the caller's number most."""
+    call, contact = await _seed(async_session, add_phone_number)
+    await approve_us_sms(async_session, call.organization_id)
+    await _with_sender(async_session, call, contact)
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": str(contact.id),
+            "outcome": "answered",
+            "ring_ms": 1000,
+        },
+    )
+    assert r.json() == {"ok": True}
+    sms = await _post(
+        client, "/internal/agent/handover-sms", _sms_payload(call, contact)
+    )
+    mail = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert sms.json() == {"sms": "sent"} and mail.json() == {"email": "sent"}
+
+
+async def test_result_records_a_cancelled_dial_and_ignores_unknown_fields(
+    client, async_session, add_phone_number
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    r = await _post(
+        client,
+        "/internal/agent/handover-result",
+        {
+            "tool_invocation_id": str(uuid.uuid4()),
+            "call_id": str(call.id),
+            "contact_id": str(contact.id),
+            "outcome": "cancelled",
+            "ring_ms": 4000,
+            "from_a_newer_voicebot": True,
+        },
+    )
+    assert r.json() == {"ok": True}
+    event = (
+        await async_session.execute(
+            select(CallEvent).where(CallEvent.kind == "handover")
+        )
+    ).scalar_one()
+    assert event.payload["outcome"] == "cancelled"
+    assert "from_a_newer_voicebot" not in event.payload
+
+
+async def test_handover_email_without_sender_writes_no_block(
+    client, async_session, add_phone_number, email_mock
+):
+    """No verified sending domain: skipped before any send check runs."""
+    call, contact = await _seed(async_session, add_phone_number)
+    contact.email = "sam@a.test"
+    await async_session.commit()
+    r = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert r.json() == {"email": "skipped:no_sender"}
+    blocked = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "agent.handover.email_blocked"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert blocked == []
+
+
+async def test_handover_email_subject_is_one_short_line(
+    client, async_session, add_phone_number, email_mock
+):
+    call, contact = await _seed(async_session, add_phone_number)
+    await _with_sender(async_session, call, contact)
+    agent = await async_session.get(Agent, call.agent_id)
+    agent.name = "Front\r\nBcc: x@evil.test " + "y" * 200
+    await async_session.commit()
+    r = await _post(
+        client, "/internal/agent/handover-email", _sms_payload(call, contact)
+    )
+    assert r.json() == {"email": "sent"}
+    [row] = (await async_session.execute(select(Email))).scalars().all()
+    assert "\n" not in row.subject and "\r" not in row.subject
+    assert row.subject.startswith("Front Bcc: x@evil.test y")
+    assert len(row.subject) <= 80 + len(" is calling you to connect a caller")
+
+
+async def test_result_follow_up_records_the_finished_notices(
+    client, async_session, add_phone_number
+):
+    """The answer is posted at once with the text and email still pending;
+    the voicebot's second post with the same id fills them in, and changes
+    nothing else."""
+    call, contact = await _seed(async_session, add_phone_number)
+    body = {
+        "tool_invocation_id": str(uuid.uuid4()),
+        "call_id": str(call.id),
+        "contact_id": str(contact.id),
+        "outcome": "answered",
+        "ring_ms": 1000,
+        "sms": "pending",
+        "email": "pending",
+    }
+    assert (await _post(client, "/internal/agent/handover-result", body)).json() == {
+        "ok": True
+    }
+    update = {**body, "ring_ms": 99, "sms": "sent", "email": "pending"}
+    assert (await _post(client, "/internal/agent/handover-result", update)).json() == {
+        "ok": True
+    }
+    [event] = (
+        await async_session.execute(
+            select(CallEvent).where(CallEvent.kind == "handover")
+        )
+    ).scalars()
+    await async_session.refresh(event)
+    assert event.payload["sms"] == "sent" and event.payload["email"] == "pending"
+    assert event.payload["ring_ms"] == 1000
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.transferred"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) <= 1
