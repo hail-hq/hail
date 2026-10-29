@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 
 import httpx
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
@@ -21,6 +22,7 @@ from hailhq.core.providers.verification.base import (
     CAMPAIGN_REJECTED,
     VALUE_NOT_ACCEPTED,
     DraftResult,
+    FieldSpec,
     Problem,
     ProviderStatus,
     Requirements,
@@ -33,6 +35,7 @@ from hailhq.core.providers.verification.sms_form import (
     field_problems,
     sms_requirements,
     sms_subject_name,
+    text_types_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,6 +235,18 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # Telnyx brand maximums. The person's first and last name are also
+    # filed together as the brand name, under the same 100 (``_validate``).
+    field_limits = MappingProxyType(
+        {
+            "legal_name": 100,
+            "website": 100,
+            "rep_email": 100,
+            "first_name": 100,
+            "last_name": 100,
+            "email": 100,
+        }
+    )
 
     def __init__(self, api_key=None, client=None) -> None:
         self._api = TelnyxClient(api_key, client)
@@ -239,10 +254,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
-        return sms_requirements(self.name, subject_type)
+        return sms_requirements(self, subject_type)
+
+    def extra_fields(self, subject_type) -> tuple[FieldSpec, ...]:
+        return (text_types_field(subject_type),)
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self.name, fields, subject_type)
+        problems = field_problems(self, fields, subject_type)
         mobile = (fields.get("mobile_phone_number") or "").strip()
         if subject_type == "person" and mobile and not mobile.startswith("+1"):
             problems.append(

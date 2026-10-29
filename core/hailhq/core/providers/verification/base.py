@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -423,8 +425,17 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
-    # The refs key that holds the campaign once it is filed.
+    # The refs key that holds the campaign once it is filed. Required: the
+    # API marks a filing as sent for review (``campaign_filed_at``) by it.
     campaign_ref: str | None = None
+    # Carrier maximums, in characters, for fields of the shared US form
+    # (``sms_form``), by field name.
+    field_limits: Mapping[str, int] = MappingProxyType({})
+
+    def extra_fields(self, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
+        """Fields this carrier asks for on top of the shared US form. They
+        follow the campaign description."""
+        return ()
 
     def in_review(self, refs: dict) -> bool:
         """True while the carriers review the filing: the campaign is filed

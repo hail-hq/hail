@@ -95,7 +95,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
-        return sms_requirements(self.name, subject_type)
+        return sms_requirements(self, subject_type)
 
     # -- draft ---------------------------------------------------------------
 
@@ -109,7 +109,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self.name, fields, subject_type)
+        problems = field_problems(self, fields, subject_type)
         if (
             subject_type == "business"
             and fields.get("ein")

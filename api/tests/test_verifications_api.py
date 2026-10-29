@@ -2129,7 +2129,7 @@ async def test_an_sms_link_over_512_characters_is_refused(
     from hailhq.core.providers.verification.sms_form import sms_requirements
 
     async def requirements(country_code, number_type, subject_type):
-        return sms_requirements("fake", subject_type)
+        return sms_requirements(sms_carrier, subject_type)
 
     monkeypatch.setattr(sms_carrier, "requirements", requirements)
     org_id, _, key = org_and_key
@@ -2691,12 +2691,17 @@ async def test_campaign_id_written_during_a_poll_is_saved(
     sms_carrier.campaign_key = campaign_key
     sms_carrier.remote_status = ProviderStatus(state="pending")
     url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    stamps = []
     for _ in range(2):
         verifications_routes._last_polled.clear()
         resp = await client.get(url, headers=_auth(key))
         assert resp.status_code == 200, resp.text
-        assert (await _stored_refs(async_session, vid))[campaign_key] == "QE1"
+        refs = await _stored_refs(async_session, vid)
+        assert refs[campaign_key] == "QE1"
+        stamps.append(refs["campaign_filed_at"])
     assert sms_carrier.campaigns_created == 1
+    # One key for billing whatever the carrier's own key, set once.
+    assert stamps[0] and stamps[0] == stamps[1]
     # A new campaign id is not a decision: nobody is emailed.
     assert decided == []
 
@@ -3619,3 +3624,18 @@ async def test_a_telnyx_outage_after_the_brand_keeps_the_filing(
     assert pinged == [body["id"], body["id"]]
     if subject_type == "person":
         assert got.json()["confirmation"] == "code"
+
+
+def test_campaign_filed_at_is_stamped_once_from_the_carrier_key() -> None:
+    class Carrier:
+        campaign_ref = "campaign_xyz"
+
+    refs: dict = {"brand_id": "B1"}
+    verifications_routes._stamp_campaign_filed(Carrier(), refs)
+    assert "campaign_filed_at" not in refs
+    refs["campaign_xyz"] = "C1"
+    verifications_routes._stamp_campaign_filed(Carrier(), refs)
+    first = refs["campaign_filed_at"]
+    verifications_routes._stamp_campaign_filed(Carrier(), refs)
+    assert first and refs["campaign_filed_at"] == first
+    verifications_routes._stamp_campaign_filed(None, {"campaign_xyz": "C1"})

@@ -479,6 +479,7 @@ async def _poll_and_apply(
     plug-in creates the campaign inside status() and stores its id there;
     the JSONB column does not track in-place changes, so mark it)."""
     status = await _settle_sms_approval(db, row, status, registry)
+    _stamp_campaign_filed(registry(row.provider, row.purpose), row.provider_refs)
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
@@ -486,6 +487,17 @@ async def _poll_and_apply(
         flag_modified(row, "provider_refs")
         changed = True
     return changed
+
+
+def _stamp_campaign_filed(provider: object, refs: dict) -> None:
+    """Write ``campaign_filed_at`` once a US texting campaign is filed, under
+    whatever key the carrier keeps it (``campaign_ref``). The billing
+    service charges the carriers' review on this one key, so a new carrier
+    needs nothing more than its ``campaign_ref``. Call it after every
+    plug-in call that can file a campaign, before the commit."""
+    key = getattr(provider, "campaign_ref", None)
+    if key and refs.get(key) and not refs.get("campaign_filed_at"):
+        refs["campaign_filed_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def _notify_billing(rows: list[CarrierVerification]) -> None:
@@ -1172,6 +1184,7 @@ async def create_verification(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
         ) from exc
+    _stamp_campaign_filed(provider, draft.refs)
     if draft.problems:
         if draft.billed_refs:
             await _record_billed_refusal(
@@ -1289,6 +1302,8 @@ async def _submit_row(
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
+    _stamp_campaign_filed(provider, row.provider_refs)
+    flag_modified(row, "provider_refs")
     await db.commit()
     _notify_if_changed(row, before)
     await write_audit_log(

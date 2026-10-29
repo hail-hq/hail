@@ -13,6 +13,7 @@ from hailhq.core.providers.verification.base import (
     FieldSpec,
     Problem,
     Requirements,
+    SmsRegistrationProvider,
     SubjectType,
 )
 from hailhq.core.providers.verification.forms import (
@@ -102,8 +103,8 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_title", label="Contact person job title"),
 )
 # What the texts are about, as the carriers' sub use cases. A person (sole
-# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. Only the
-# Telnyx form asks: Twilio files no sub use cases.
+# proprietor) picks 1 to 5, a company (mixed use case) 2 to 5. A carrier
+# that files sub use cases adds this field (``extra_fields``).
 _TEXT_TYPES = (
     FieldOption(key="CUSTOMER_CARE", label="Customer care and appointments"),
     FieldOption(key="ACCOUNT_NOTIFICATION", label="Account notices and reminders"),
@@ -122,7 +123,7 @@ _TEXT_TYPES_MIN = {"person": 1, "business": 2}
 _TEXT_TYPES_MAX = 5
 
 
-def _text_types_field(subject_type: SubjectType) -> FieldSpec:
+def text_types_field(subject_type: SubjectType) -> FieldSpec:
     least = _TEXT_TYPES_MIN[subject_type]
     return FieldSpec(
         name="text_types",
@@ -195,36 +196,25 @@ _CAMPAIGN_FIELDS = (
 )
 
 
-# Telnyx brand maximums, in characters. Telnyx files the person's first and
-# last name together as the brand name, under the same 100.
-_TELNYX_MAX = {
-    "legal_name": 100,
-    "website": 100,
-    "rep_email": 100,
-    "first_name": 100,
-    "last_name": 100,
-    "email": 100,
-}
-
-
-def _fields_for(provider: str, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
+def _fields_for(
+    provider: SmsRegistrationProvider, subject_type: SubjectType
+) -> tuple[FieldSpec, ...]:
+    """The shared form with the carrier's extra fields and limits."""
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
-    if provider == "telnyx":
-        subject = tuple(
-            (
-                f.model_copy(update={"max_length": _TELNYX_MAX[f.name]})
-                if f.name in _TELNYX_MAX
-                else f
-            )
-            for f in subject
-        )
-    types = (_text_types_field(subject_type),) if provider == "telnyx" else ()
-    return subject + _CAMPAIGN_FIELDS[:1] + types + _CAMPAIGN_FIELDS[1:]
+    extra = provider.extra_fields(subject_type)
+    fields = subject + _CAMPAIGN_FIELDS[:1] + extra + _CAMPAIGN_FIELDS[1:]
+    limits = provider.field_limits
+    return tuple(
+        f.model_copy(update={"max_length": limits[f.name]}) if f.name in limits else f
+        for f in fields
+    )
 
 
-def sms_requirements(provider: str, subject_type: SubjectType) -> Requirements:
+def sms_requirements(
+    provider: SmsRegistrationProvider, subject_type: SubjectType
+) -> Requirements:
     return Requirements(
-        provider=provider,
+        provider=provider.name,
         country_code="US",
         number_type="local",
         subject_type=subject_type,
@@ -249,7 +239,7 @@ def sms_subject_name(
 
 
 def field_problems(
-    provider: str, fields: dict[str, str], subject_type: SubjectType
+    provider: SmsRegistrationProvider, fields: dict[str, str], subject_type: SubjectType
 ) -> list[Problem]:
     """The fields of ``provider``'s form: required values are present, the
     choices are allowed, and every link is an http(s) URL with a host. Both
