@@ -10,6 +10,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
 - Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
+- Hail Cloud emails the organization's owners when a verification is approved or rejected.
 
 ### Changed
 

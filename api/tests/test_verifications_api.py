@@ -12,6 +12,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from hailhq.api import verification_decisions
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
@@ -962,8 +963,12 @@ async def test_superadmin_approve_refuses_a_draft_the_carrier_now_rejects(
 
 
 async def test_superadmin_reject_records_reason_and_discards(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -978,14 +983,19 @@ async def test_superadmin_reject_records_reason_and_discards(
     assert resp.json()["state"] == "rejected"
     assert resp.json()["rejection_reason"] == "ID unreadable"
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     # rejected does not block starting again
     app.dependency_overrides.pop(require_superadmin)
     assert (await _create(client, key)).status_code == 201
 
 
 async def test_status_is_pulled_from_the_carrier_after_submit(
-    client, org_and_key, carrier
+    client, org_and_key, carrier, monkeypatch
 ) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -996,9 +1006,14 @@ async def test_status_is_pulled_from_the_carrier_after_submit(
     assert (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()[
         "state"
     ] == "submitted"
+    assert decided == []
     carrier.remote_status = ProviderStatus(state="approved")
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert got["state"] == "approved" and got["approved_at"]
+    # The owners are emailed once: an approved row is not polled again.
+    verifications_routes._last_polled.clear()
+    await client.get("/verifications", headers=_auth(key))
+    assert decided == [vid]
 
 
 async def test_list_polls_the_carrier_at_most_once_a_minute(
@@ -1902,10 +1917,14 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
 
 
 async def test_sweeper_rejects_a_draft_the_carrier_refuses(
-    client, org_and_key, carrier, async_session
+    client, org_and_key, carrier, async_session, monkeypatch
 ) -> None:
     from hailhq.api.routes.verifications import sweep_verifications
 
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     _, _, key = org_and_key
     vid = await _unsent(client, key, carrier, async_session)
     await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
@@ -1929,6 +1948,7 @@ async def test_sweeper_rejects_a_draft_the_carrier_refuses(
         f"document unreadable; proof_of_identity: {VALUE_NOT_ACCEPTED}"
     )
     assert carrier.discarded == [{"bundle_sid": "B1"}]
+    assert decided == [vid]
     audit = (
         await async_session.execute(
             select(AuditLog).where(AuditLog.action == "verification.reject")
@@ -2088,6 +2108,10 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     monkeypatch.setattr(
         verifications_routes, "notify_sms_registration_changed", pinged.append
     )
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 20_000)
     sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
@@ -2105,6 +2129,7 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     assert row.provider_refs["refused_at_filing"] is True
     assert row.rejection_reason == "Use another one."
     assert pinged == [str(row.id)]
+    assert decided == [str(row.id)]
     # A rejected row never blocks a new filing.
     sms_carrier.problems = []
     sms_carrier.billed_refs = {}
@@ -2546,11 +2571,15 @@ async def _stored_refs(async_session, vid: str) -> dict:
 @pytest.mark.parametrize("campaign_key", ["campaign_sid", "campaign_id"])
 @pytest.mark.parametrize("via", ["get", "list"])
 async def test_campaign_id_written_during_a_poll_is_saved(
-    client, org_and_key, sms_carrier, async_session, campaign_key, via
+    client, org_and_key, sms_carrier, async_session, campaign_key, via, monkeypatch
 ) -> None:
     # The plug-ins create the campaign inside status() and write its id into
     # refs in place. The id must reach the database, or every later poll
     # creates (and pays for) another campaign.
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
     vid = (await _post_sms(client, key)).json()["id"]
@@ -2563,6 +2592,8 @@ async def test_campaign_id_written_during_a_poll_is_saved(
         assert resp.status_code == 200, resp.text
         assert (await _stored_refs(async_session, vid))[campaign_key] == "QE1"
     assert sms_carrier.campaigns_created == 1
+    # A new campaign id is not a decision: nobody is emailed.
+    assert decided == []
 
 
 async def test_telnyx_release_unlinks_the_number_from_the_campaign(
@@ -2657,6 +2688,47 @@ async def test_overlapping_polls_create_one_campaign(
         restore()
     assert sms_carrier.campaigns_created == 1
     assert (await _stored_refs(async_session, vid))["campaign_sid"] == "QE1"
+
+
+async def test_overlapping_polls_email_the_owners_once(
+    client, org_and_key, carrier, session_factory, monkeypatch
+) -> None:
+    decided: list[str] = []
+    monkeypatch.setattr(
+        verification_decisions, "notify_verification_decided", decided.append
+    )
+    _, _, key = org_and_key
+    created = (await _create(client, key)).json()  # sent to the carrier at once
+    vid = created["id"]
+    assert created["state"] == "submitted"
+    carrier.remote_status = ProviderStatus(state="approved")
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = carrier.status
+
+    async def held(refs):
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return await original(refs)
+
+    carrier.status = held
+    restore = _per_request_sessions(session_factory)
+    try:
+        first = asyncio.create_task(
+            client.get(f"/verifications/{vid}", headers=_auth(key))
+        )
+        await asyncio.wait_for(entered.wait(), 5)
+        # The first poll holds the row: the second skips the carrier call.
+        second = await asyncio.wait_for(
+            client.get(f"/verifications/{vid}", headers=_auth(key)), 5
+        )
+        assert second.status_code == 200, second.text
+        release.set()
+        assert (await first).json()["state"] == "approved"
+    finally:
+        release.set()
+        restore()
+    assert decided == [vid]
 
 
 @pytest.mark.usefixtures("us_number")
