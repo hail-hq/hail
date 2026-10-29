@@ -38,10 +38,14 @@ def _posted(api, path):
     return [c.args[1] for c in api.post.await_args_list if c.args[0] == path]
 
 
+def _all_pending() -> list:
+    return [t for tasks in transfer_call._pending.values() for t in tasks]
+
+
 async def _settled() -> None:
     """Wait for the background dial, text and email to finish."""
-    while transfer_call._pending:
-        await asyncio.gather(*list(transfer_call._pending))
+    while _all_pending():
+        await asyncio.gather(*_all_pending())
 
 
 def _ctx(api_reply, outcome=None):
@@ -170,7 +174,8 @@ async def test_cancelled_dial_is_recorded_without_a_prompt() -> None:
     ctx.prompt.assert_not_awaited()
 
 
-async def test_second_transfer_while_ringing_is_refused() -> None:
+async def test_second_transfer_while_ringing_is_refused(monkeypatch) -> None:
+    monkeypatch.setattr(transfer_call, "_RING_END_WAIT_SECONDS", 0.05)
     spec = transfer_call.bind(META)
     ctx, _, _ = _ctx(ROUTE)
     ring = asyncio.Event()
@@ -349,18 +354,29 @@ async def test_caller_hears_the_no_answer_before_the_bookkeeping() -> None:
     assert order[0] == "prompt"
 
 
-async def test_two_transfers_in_one_turn_dial_once() -> None:
+async def test_two_transfers_in_one_turn_dial_once(monkeypatch) -> None:
+    monkeypatch.setattr(transfer_call, "_RING_END_WAIT_SECONDS", 0.05)
     spec = transfer_call.bind(META)
-    ctx, api, bridge = _ctx(ROUTE, BridgeOutcome("no_answer", 480, 1))
+    ctx, api, _ = _ctx(ROUTE)
+    ring = asyncio.Event()
+    dials: list[str] = []
+
+    async def bridge(route):
+        dials.append(route.name)
+        await ring.wait()
+        return BridgeOutcome("no_answer", 480, 1)
+
+    ctx.bridge = bridge
     first, second = await asyncio.gather(
         spec.execute(ctx, {"contact": "Sam"}), spec.execute(ctx, {"contact": "Sam"})
     )
+    ring.set()
     await _settled()
     assert first is None
     assert second == (
         "Sam is still ringing. To try someone else, call cancel_transfer first."
     )
-    assert bridge.await_count == 1
+    assert dials == ["Sam"]
     assert (
         len([c for c in api.post.await_args_list if c.args[0].endswith("/handover")])
         == 1
@@ -521,7 +537,7 @@ async def test_slow_notice_is_pending_after_the_wait(monkeypatch) -> None:
     await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     await _settled()
     assert _posted(api, RESULT_PATH)[0]["sms"] == "pending"
-    assert len(_posted(api, SMS_PATH)) == 1 and not transfer_call._pending
+    assert len(_posted(api, SMS_PATH)) == 1 and not _all_pending()
 
 
 async def test_no_notice_when_the_api_refuses_the_handover() -> None:
@@ -569,15 +585,60 @@ async def test_finish_pending_waits_for_the_background_posts() -> None:
     ctx, api, _ = _ctx(ROUTE)
     ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 1))
     await spec.execute(ctx, {"contact": "Sam"})
-    await transfer_call.finish_pending(1.0)
+    await transfer_call.finish_pending(ctx.call_id, 1.0)
     assert _posted(api, RESULT_PATH)
     await _settled()
 
 
 async def test_finish_pending_gives_up_after_the_timeout() -> None:
     blocked = asyncio.Event()
-    task = transfer_call._hold(asyncio.create_task(blocked.wait()))
-    await transfer_call.finish_pending(0.01)
+    task = transfer_call._hold("call-a", asyncio.create_task(blocked.wait()))
+    await transfer_call.finish_pending("call-a", 0.01)
     assert not task.done()
     blocked.set()
     await _settled()
+
+
+async def test_finish_pending_waits_only_for_its_own_call() -> None:
+    other = asyncio.Event()
+    task = transfer_call._hold("call-b", asyncio.create_task(other.wait()))
+    await asyncio.wait_for(transfer_call.finish_pending("call-a", 5.0), timeout=1)
+    assert not task.done()
+    other.set()
+    await _settled()
+
+
+async def test_transfer_in_the_same_turn_as_a_cancel_waits_for_the_ring_to_end():
+    """'Never mind, get Bob': the cancel ends the first ring a moment later,
+    and the second transfer goes ahead instead of answering 'still ringing'."""
+    meta = {
+        "handover_targets": [
+            {"contact_id": CID, "label": "Sam", "note": "x"},
+            {"contact_id": str(uuid.uuid4()), "label": "Bob", "note": "y"},
+        ]
+    }
+    spec = transfer_call.bind(meta)
+    ctx, _, _ = _ctx(ROUTE)
+    stop = asyncio.Event()
+
+    async def bridge(route):
+        if route.name == "Sam":
+            await stop.wait()
+            return BridgeOutcome("cancelled", None, 1)
+        return BridgeOutcome("no_answer", 480, 1)
+
+    ctx.bridge = bridge
+    await spec.execute(ctx, {"contact": "Sam"})
+
+    async def cancel_soon():
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    asyncio.ensure_future(cancel_soon())
+    assert await spec.execute(ctx, {"contact": "Bob"}) is None
+    await _settled()
+
+
+def test_cancel_cannot_be_cut_short_or_wait_for_speech() -> None:
+    assert transfer_call.CANCEL_SPEC.uninterruptible is True
+    assert transfer_call.CANCEL_SPEC.waits_for_speech is False

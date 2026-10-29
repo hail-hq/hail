@@ -14,6 +14,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
+- Agent texts and emails are no longer limited to 5 per call; each is billed as usual.
 - **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
@@ -23,7 +24,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
-- Handover is a plain forward: the agent says nothing to the contact, the caller can stop the ring, a silent line or a carrier message gives the caller back, and `call.transferred` fires once the contact's side speaks and stays on.
+- Handover: the agent connects the caller and says nothing to the contact.
+- Handover: the caller can say stop while it rings.
+- Handover: a silent line or a carrier message gives the caller back.
+- `call.transferred` fires once the contact's side speaks and stays on.
 
 ## [0.31.0] (2026-10-23)
 

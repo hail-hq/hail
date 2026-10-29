@@ -41,6 +41,9 @@ _log = logging.getLogger("hailhq.core.agent_tools")
 _UNAVAILABLE = "I can't connect you to anyone right now."
 # Instruction to the agent when the dial ends without a connect.
 _NO_ANSWER = "{name} could not pick up. Tell the caller and offer to take a message."
+# How long a new transfer waits for a ring that is ending (a cancel in the
+# same turn) before it answers "still ringing".
+_RING_END_WAIT_SECONDS = 3.0
 # The tool's answer while another dial still rings.
 _STILL_RINGING = (
     "{name} is still ringing. To try someone else, call cancel_transfer first."
@@ -76,22 +79,31 @@ SPEC = ToolSpec(
 )
 
 
-# Text, email and dial tasks still running when the tool returns: held so
-# they are not garbage collected before they finish.
-_pending: set[asyncio.Task] = set()
+# Text, email and dial tasks still running when the tool returns, per call:
+# held so they are not garbage collected before they finish, and so a call's
+# shutdown waits only for its own.
+_pending: dict[Any, set[asyncio.Task]] = {}
 
 
-def _hold(task: asyncio.Task) -> asyncio.Task:
-    _pending.add(task)
-    task.add_done_callback(_pending.discard)
+def _hold(call_id: Any, task: asyncio.Task) -> asyncio.Task:
+    tasks = _pending.setdefault(call_id, set())
+    tasks.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        tasks.discard(t)
+        if not tasks:
+            _pending.pop(call_id, None)
+
+    task.add_done_callback(_done)
     return task
 
 
-async def finish_pending(timeout: float) -> None:
-    """At job shutdown, give the background dial, result and notice posts up
-    to ``timeout`` seconds before the API client closes."""
-    if _pending:
-        await asyncio.wait(set(_pending), timeout=timeout)
+async def finish_pending(call_id: Any, timeout: float) -> None:
+    """At job shutdown, give this call's background dial, result and notice
+    posts up to ``timeout`` seconds before the API client closes."""
+    tasks = _pending.get(call_id)
+    if tasks:
+        await asyncio.wait(set(tasks), timeout=timeout)
 
 
 async def _notify_contact(ctx: ToolContext, channel: str, body: dict[str, Any]) -> str:
@@ -150,8 +162,11 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
 
     menu = "; ".join(_entry(t) for t in targets)
     # The label of this call's dial while it rings (set before the first
-    # await, so a second call in the same turn sees it), else None.
+    # await, so a second call in the same turn sees it), else None; set
+    # when the ring is over.
     ringing: list[str | None] = [None]
+    ring_over = asyncio.Event()
+    ring_over.set()
 
     async def execute(ctx: ToolContext, args: dict[str, Any]) -> str | None:
         if ctx.api is None or ctx.bridge is None:
@@ -163,12 +178,21 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         if label in on_call:
             return ON_CALL_LINE.format(name=_spoken(label))
         if ringing[0] is not None:
+            # "Never mind, get Bob": a cancel_transfer in the same turn ends
+            # the ring in a moment.
+            try:
+                await asyncio.wait_for(ring_over.wait(), _RING_END_WAIT_SECONDS)
+            except TimeoutError:
+                pass
+        if ringing[0] is not None:
             return _STILL_RINGING.format(name=_spoken(ringing[0]))
         ringing[0] = label
+        ring_over.clear()
         try:
             return await _start(ctx, args, label, contact_id)
         except BaseException:
             ringing[0] = None
+            ring_over.set()
             raise
 
     async def _start(
@@ -217,7 +241,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             # and it lifts the call's time limit. The notices follow.
             body = _result("answered", None, ring_ms)
             await _post_answered(ctx, body)
-            _hold(asyncio.create_task(_settle_notices(body)))
+            _hold(ctx.call_id, asyncio.create_task(_settle_notices(body)))
 
         def on_answered(ring_ms: int) -> Awaitable[None]:
             # Called once someone on the contact's side speaks; the bridge
@@ -233,6 +257,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         )
         if not route.get("ok"):
             ringing[0] = None
+            ring_over.set()
             return str(route.get("spoken") or SPOKEN_FALLBACK)
         notice = {
             "tool_invocation_id": invocation_id,
@@ -240,8 +265,12 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             "contact_id": contact_id,
             "reason": reason,
         }
-        sms = _hold(asyncio.create_task(_notify_contact(ctx, "sms", notice)))
-        email = _hold(asyncio.create_task(_notify_contact(ctx, "email", notice)))
+        sms = _hold(
+            ctx.call_id, asyncio.create_task(_notify_contact(ctx, "sms", notice))
+        )
+        email = _hold(
+            ctx.call_id, asyncio.create_task(_notify_contact(ctx, "email", notice))
+        )
         bridge = ctx.bridge
 
         async def _dial() -> None:
@@ -262,6 +291,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
             finally:
                 # The ring is over: a new transfer may start.
                 ringing[0] = None
+                ring_over.set()
             if outcome.outcome == "answered" and answer_reported:
                 return
             if outcome.outcome not in ("answered", "cancelled") and ctx.prompt:
@@ -279,7 +309,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 _log.exception("handover result post failed")
             await _settle_notices(body)
 
-        _hold(asyncio.create_task(_dial()))
+        _hold(ctx.call_id, asyncio.create_task(_dial()))
         # None: no reply turn. The agent already told the caller it is
         # connecting them and that it is still here while it rings.
         return None
@@ -338,8 +368,10 @@ CANCEL_SPEC = ToolSpec(
     is_available=_always,
     execute=_cancel,
     # Stop at once, not after the agent's "okay, stopping": the phone keeps
-    # ringing while the agent speaks, and the contact could pick up.
+    # ringing while the agent speaks, and the contact could pick up. And
+    # "stop, stop" over that sentence must not cut the stop short.
     waits_for_speech=False,
+    uninterruptible=True,
 )
 
 __all__ = ["CANCEL_SPEC", "MAX_REASON_CHARS", "SPEC", "bind", "finish_pending"]

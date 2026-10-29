@@ -2337,8 +2337,6 @@ async def test_cancel_drops_a_leg_that_joins_after_a_failed_remove() -> None:
 
     async def remove(req):
         removals.append(req.identity)
-        if len(removals) <= 2:
-            raise RuntimeError("not found")  # not in the room yet
         ctx.room.remote_participants.pop(req.identity, None)
 
     ctx.api.room.remove_participant.side_effect = remove
@@ -2359,7 +2357,9 @@ async def test_cancel_drops_a_leg_that_joins_after_a_failed_remove() -> None:
     ctx.room.emit("participant_connected", FakeParticipant(old, 0))
     (late,) = state["late_leg_tasks"]
     await asyncio.wait_for(late, timeout=3)
-    assert removals[-1] == old and old not in ctx.room.remote_participants
+    # Not in the room at the cancel (INVITE not accepted): removed on join.
+    assert removals == [old] and old not in ctx.room.remote_participants
+    assert not state.get("stray_legs")
     assert f"human-{CALL_ID}-2" in ctx.room.remote_participants
 
 

@@ -91,8 +91,7 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   the agent says goodbye and the call ends for both people. Either person
   can hang up sooner.
 - Billed as one call at the normal voice rate. The text and the email to the
-  contact are billed as a normal SMS and email, and each counts toward the
-  agent's 5 sends per call.
+  contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
   contact's side has spoken and stayed on the line for 10 seconds.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.

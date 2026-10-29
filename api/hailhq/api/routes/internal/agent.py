@@ -84,7 +84,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -94,11 +94,8 @@ router = APIRouter(
     dependencies=[Depends(verify_internal_request)],
 )
 
-AGENT_SEND_CAP = 5  # total agent-initiated sends (sms + email) per call
-
 _SPOKEN_CALL_UNAVAILABLE = "This call can no longer send messages."
 _SPOKEN_NOT_ALLOWED = "I'm not able to send that message."
-_SPOKEN_CAP = "I've reached the limit of messages I can send on this call."
 _SPOKEN_SMS_SENT = "Text message sent to the number on this call."
 _SPOKEN_SMS_FAILED = "I couldn't send the text message."
 _SPOKEN_SMS_UNCONFIGURED = "Text messaging isn't set up for this account."
@@ -138,9 +135,9 @@ def _meta(req: AgentSendBase) -> dict[str, str]:
 
 async def _load_call_for_update(db: AsyncSession, call_id: UUID) -> Call | None:
     # FOR UPDATE on the call row serializes concurrent agent sends for one
-    # call: the dedupe SELECT and the cap COUNT both run under this lock, so
-    # a timeout-retry racing the original can't double-send or blow past
-    # AGENT_SEND_CAP. The commit that releases the lock also publishes the
+    # call: the dedupe SELECT runs under this lock, so a timeout-retry
+    # racing the original can't double-send. The commit that releases the
+    # lock also publishes the
     # row the next request's dedupe will see; never hold the lock across
     # deliver_* — the Sms/Email INSERT + commit happens before the slow
     # provider send.
@@ -175,32 +172,6 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
 def _other_party(call: Call) -> str | None:
     """The person on the line: the caller on inbound, the callee on outbound."""
     return call.from_e164 if call.direction == "inbound" else call.to_e164
-
-
-async def _sends_this_call(db: AsyncSession, org_id: UUID, call_id: UUID) -> int:
-    key = str(call_id)
-    email_count = (
-        select(func.count())
-        .select_from(Email)
-        .where(
-            Email.organization_id == org_id,
-            Email.metadata_["call_id"].astext == key,
-        )
-        .scalar_subquery()
-    )
-    sms_count = (
-        select(func.count())
-        .select_from(Sms)
-        .where(
-            Sms.organization_id == org_id,
-            Sms.metadata_["call_id"].astext == key,
-        )
-        .scalar_subquery()
-    )
-    # One round trip: two scalar subqueries summed in a single SELECT,
-    # instead of two sequential COUNT queries.
-    total = (await db.execute(select(email_count + sms_count))).scalar_one()
-    return int(total)
 
 
 async def _prior_send(
@@ -251,14 +222,13 @@ async def _deny(
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
-    """Cap + funds checks shared by both send routes.
+    """The funds check shared by the send routes. Sends are not capped per
+    call: each is billed like any text or email.
 
     Returns ``(spoken, audit_reason)`` on denial or None when the send may
     proceed. The audit reason distinguishes which gate fired; the spoken
     text stays vague for the callee.
     """
-    if await _sends_this_call(db, call.organization_id, call.id) >= AGENT_SEND_CAP:
-        return _SPOKEN_CAP, "send_cap"
     if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
         db, call.organization_id
     ):
@@ -1239,4 +1209,4 @@ async def agent_handover_result(
     return {"ok": True}
 
 
-__all__ = ["AGENT_SEND_CAP", "router"]
+__all__ = ["router"]
