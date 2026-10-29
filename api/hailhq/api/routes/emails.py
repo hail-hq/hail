@@ -3,6 +3,8 @@
 POST /emails - send an outbound message through SES.
 GET /emails/{id} - read a single email (org-scoped).
 GET /emails - cursor-paginated list (org-scoped).
+GET /emails/suppressions - the org's suppressed addresses.
+DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
 
@@ -51,6 +53,10 @@ from hailhq.api.ratelimit import (
     merge_rate_limited_responses,
 )
 from hailhq.api.route_prefixes import request_mount_prefix
+from hailhq.api.suppressions import (
+    delete_channel_suppression,
+    list_channel_suppressions,
+)
 from hailhq.api.routes.email_domains import (
     compose_hail_mail_address,
     first_pending_custom,
@@ -91,6 +97,7 @@ from hailhq.core.schemas import (
     EmailStatsResponse,
     EmailStatus,
     EmailSummary,
+    SuppressionListResponse,
 )
 from hailhq.core.telemetry_identity import tag_outbound_email
 from hailhq.core.unsubscribe import build_unsubscribe_url
@@ -843,6 +850,61 @@ async def get_email_stats(
         totals=totals,
         rates=rates,
         series=list(buckets.values()),  # inserted in ascending bucket order
+    )
+
+
+# --------------------------------------------------------------------------- #
+# GET /emails/suppressions, DELETE /emails/suppressions/{address}
+#
+# MUST be registered above GET /{email_id}, for the same reason as /stats.
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/suppressions",
+    response_model=SuppressionListResponse,
+)
+async def list_email_suppressions(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
+) -> SuppressionListResponse:
+    """List email addresses suppressed from receiving mail, newest first.
+
+    Cursor-paginated. A suppressed address blocks POST /v1/emails sends to it
+    with a 403 until removed via DELETE /v1/emails/suppressions/{address}.
+    """
+    return await list_channel_suppressions(
+        db,
+        organization_id=principal.organization_id,
+        channel="email",
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.delete(
+    "/suppressions/{address}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
+async def delete_email_suppression(
+    address: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Remove one address from the email suppression list, re-allowing sends to it.
+
+    The address match ignores case. Does not itself constitute renewed
+    consent: the caller is responsible for having a lawful basis (e.g. a
+    fresh opt-in) before sending again. Returns 404 if the address was not
+    suppressed.
+    """
+    await delete_channel_suppression(
+        db,
+        organization_id=principal.organization_id,
+        recipient=address,
+        channel="email",
     )
 
 
