@@ -9,11 +9,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
-- Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
+- Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
 - Hail Cloud emails the organization's owners when a verification is approved or rejected.
 
 ### Changed
 
+- Agent texts and emails are no longer limited to 5 per call; each is billed as usual.
 - **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
@@ -23,9 +24,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
-- Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
-- Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.
-- Handover: the agent's intro to the contact now reads "Reason given: …", and the agent writes no extra reply after the two people are connected.
+- Handover: the agent connects the caller and says nothing to the contact.
+- Handover: the caller can say stop while it rings.
+- Handover: a silent line or a carrier message gives the caller back.
+- `call.transferred` fires once the contact's side speaks and stays on.
 
 ## [0.31.0] (2026-10-23)
 
