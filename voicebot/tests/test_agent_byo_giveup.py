@@ -25,12 +25,12 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import (
-    BYO_LLM_FAILURE_ANNOUNCEMENT,
     BYO_LLM_FAILURE_END_REASON,
     MAX_CONSECUTIVE_LLM_ERRORS,
     arm_byo_llm_giveup,
     entrypoint,
 )
+from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit.agents.llm import ChatMessage, LLMError
 from livekit.agents.stt import STTError
 from livekit.agents.voice.events import ConversationItemAddedEvent, ErrorEvent
@@ -231,7 +231,7 @@ async def test_three_consecutive_errors_hangs_up_exactly_once() -> None:
         session.emit("error", _llm_error())
     await _drain(tasks)
 
-    assert session.say_calls == [(BYO_LLM_FAILURE_ANNOUNCEMENT, False)]
+    assert session.say_calls == [(SPOKEN_LINES["en"].llm_failure, False)]
     # The caller must actually hear the goodbye before the line drops.
     assert session.last_handle is not None
     assert session.last_handle.played_out is True
@@ -386,7 +386,7 @@ async def test_mode_b_call_arms_the_giveup(
     for _ in range(5):
         await asyncio.sleep(0)
 
-    assert (BYO_LLM_FAILURE_ANNOUNCEMENT, False) in session.say_calls
+    assert (SPOKEN_LINES["en"].llm_failure, False) in session.say_calls
     assert ctx.shutdown_calls == [BYO_LLM_FAILURE_END_REASON]
 
     for cb in ctx.shutdown_callbacks:
@@ -412,7 +412,7 @@ async def test_mode_a_call_does_not_arm_the_giveup(
     for _ in range(5):
         await asyncio.sleep(0)
 
-    assert BYO_LLM_FAILURE_ANNOUNCEMENT not in [t for t, _ in session.say_calls]
+    assert SPOKEN_LINES["en"].llm_failure not in [t for t, _ in session.say_calls]
     assert ctx.shutdown_calls == []
 
 
@@ -431,7 +431,7 @@ async def test_mode_c_call_does_not_arm_the_giveup(
     for _ in range(5):
         await asyncio.sleep(0)
 
-    assert BYO_LLM_FAILURE_ANNOUNCEMENT not in [t for t, _ in session.say_calls]
+    assert SPOKEN_LINES["en"].llm_failure not in [t for t, _ in session.say_calls]
     assert ctx.shutdown_calls == []
 
 

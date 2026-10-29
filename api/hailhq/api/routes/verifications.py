@@ -43,7 +43,10 @@ from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
-from hailhq.core.internal_webhook import notify_sms_registration_changed
+from hailhq.core.internal_webhook import (
+    notify_sms_registration_changed,
+    rate_sms_registration,
+)
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -64,10 +67,9 @@ from hailhq.core.providers.verification import (
     VerificationProvider,
     VerificationProviderError,
     VerificationRequirements,
-    default_verification_provider_name,
     get_verification_provider,
+    length_problems,
 )
-from hailhq.core.providers.verification.base import NOT_ACCEPTED
 from hailhq.core.schemas import VerificationResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, select, text, update
@@ -105,12 +107,6 @@ Registry = Callable[[str, str], VerificationProvider | None]
 def get_verification_registry() -> Registry:
     """Dependency so tests can swap in a fake carrier."""
     return get_verification_provider
-
-
-def get_default_sms_provider_name() -> str | None:
-    """First configured US SMS registration carrier. Dependency so tests can
-    swap it."""
-    return default_verification_provider_name("sms")
 
 
 def _quote_required(where: str) -> HTTPException:
@@ -258,7 +254,11 @@ def _log_carrier_refusal(
 
 async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
     """US texting filings of the last day with no ledger row yet: the
-    website's rater charges each one shortly after it is saved."""
+    website's rater charges each one shortly after it is saved. A filing is
+    settled by its submission debit, or by the one-time debit of a filing
+    made before fees were charged per step. Exact refs, so the ref index
+    is used."""
+    ref = func.concat("sms_registration:", func.cast(CarrierVerification.id, String))
     return (
         await db.execute(
             select(func.count())
@@ -270,13 +270,7 @@ async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int
                 ~select(AccountCredit.id)
                 .where(
                     AccountCredit.organization_id == organization_id,
-                    AccountCredit.ref.like(
-                        func.concat(
-                            "sms_registration:",
-                            func.cast(CarrierVerification.id, String),
-                            "%",
-                        )
-                    ),
+                    AccountCredit.ref.in_([ref, func.concat(ref, ":submission")]),
                 )
                 .exists(),
             )
@@ -323,7 +317,7 @@ async def _record_billed_refusal(
         actor_user_id=None,
         actor_kind="system",
     )
-    notify_sms_registration_changed(str(row.id))
+    _notify_billing([row])
 
 
 def _problems_422(
@@ -335,17 +329,19 @@ def _problems_422(
     """422 with one entry per problem: the field as ``loc`` and Hail's own
     wording as ``msg``. The carrier's text is neither returned nor logged."""
     _log_carrier_refusal(problems, organization_id, verification_id, carrier)
-    return HTTPException(
-        status_code=422,
-        detail=[
-            {
-                "loc": ["body", *(p.field.split(".") if p.field else [])],
-                "msg": p.message,
-                "type": "verification_problem",
-            }
-            for p in problems
-        ],
-    )
+    return HTTPException(status_code=422, detail=_problem_details(problems))
+
+
+def _problem_details(problems: list[Problem]) -> list[dict]:
+    """The 422 ``detail``: one entry per problem, the field as ``loc``."""
+    return [
+        {
+            "loc": ["body", *(p.field.split(".") if p.field else [])],
+            "msg": p.message,
+            "type": "verification_problem",
+        }
+        for p in problems
+    ]
 
 
 async def _requirements(
@@ -494,10 +490,46 @@ async def _poll_and_apply(
 
 def _notify_billing(rows: list[CarrierVerification]) -> None:
     """Tell the website's fee rater about US texting rows that changed and
-    are committed (a campaign sent for review is a billed step)."""
+    are committed (a new filing and a campaign sent for review are billed
+    steps). Call it after every commit that changes a row's state or refs;
+    the rater is idempotent."""
     for row in rows:
         if row.purpose == "sms":
             notify_sms_registration_changed(str(row.id))
+
+
+BillingView = tuple[str, dict]
+
+
+def _billing_view(row: CarrierVerification) -> BillingView:
+    """What the fee rater reads of a row: its state and refs (a copy)."""
+    return row.state, copy.deepcopy(row.provider_refs)
+
+
+def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> None:
+    """``_notify_billing`` for a committed row whose state or refs differ
+    from ``before`` (its ``_billing_view`` before the change). ``before``
+    None means a new row: always told."""
+    if before is None or _billing_view(row) != before:
+        _notify_billing([row])
+
+
+async def _rate_before_wipe(
+    db: AsyncSession, row: CarrierVerification, provider: object
+) -> None:
+    """Before ``provider_refs`` is emptied: the rater charges the carrier
+    review by the campaign id in the refs, so let it read them first. A
+    campaign's ping when it was filed can be lost; once the id is gone,
+    neither a ping nor the rater's sweep can charge it. Awaited, not
+    fire-and-forget, so the rater reads before the wipe is committed.
+
+    Commits first. Never call it while holding the organization's lock
+    (``org_lock``): the rater takes the same lock."""
+    key = getattr(provider, "campaign_ref", None)
+    if row.purpose != "sms" or not key or not (row.provider_refs or {}).get(key):
+        return
+    await db.commit()
+    await rate_sms_registration(str(row.id))
 
 
 async def _audit_carrier_rejection(
@@ -1030,15 +1062,11 @@ async def create_verification(
     # The name the customer typed, as the plug-in reads it from this form.
     # Some plug-ins read it from a document's fields; none reads the files,
     # so they are not read yet. Stored on the row; never logged.
-    subject_name = provider.subject_name(
-        requirements,
-        sub.fields,
-        sub.address,
-        {
-            slot: DocumentInput(option=value.option, fields=value.fields)
-            for slot, value in sub.documents.items()
-        },
-    )
+    typed = {
+        slot: DocumentInput(option=value.option, fields=value.fields)
+        for slot, value in sub.documents.items()
+    }
+    subject_name = provider.subject_name(requirements, sub.fields, sub.address, typed)
 
     # Every 409 comes before the uploads are checked and copied, and before
     # any filing with the carrier. Number: several live verifications per
@@ -1072,6 +1100,12 @@ async def create_verification(
                 else f"a verification already exists ({existing.state}); id {existing.id}"
             ),
         )
+
+    # Hail's own check of the form's limits (max_length), for every carrier:
+    # some plug-ins check nothing. Before any file is read or anything filed.
+    too_long = length_problems(requirements, sub.fields, typed)
+    if too_long:
+        raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
     documents: dict[str, DocumentInput] = {}
     for slot, value in sub.documents.items():
@@ -1128,17 +1162,6 @@ async def create_verification(
             **draft_kwargs,
         )
     except VerificationProviderError as exc:
-        if exc.billed_refs:
-            await _record_billed_refusal(
-                db,
-                principal,
-                provider_name,
-                sub,
-                subject_name,
-                exc.billed_refs,
-                NOT_ACCEPTED,
-                requirements.version,
-            )
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
@@ -1196,15 +1219,15 @@ async def create_verification(
     await db.refresh(row)
     # No human gate: the draft goes to the carrier now. If the carrier is
     # down, the row stays 'awaiting_review' and the sweeper retries it.
+    # A new row: _submit_row pings the fee rater whatever the outcome.
     await _submit_row(
         db,
         row,
         provider,
+        before=None,
         actor=actor_of(principal),
         action="verification.submit",
     )
-    if row.purpose == "sms":
-        notify_sms_registration_changed(str(row.id))
     return _out(row, registry)
 
 
@@ -1213,6 +1236,7 @@ async def _submit_row(
     row: CarrierVerification,
     provider: VerificationProvider,
     *,
+    before: BillingView | None,
     actor: tuple[UUID | None, str],
     action: str,
     extra: dict | None = None,
@@ -1229,7 +1253,12 @@ async def _submit_row(
     The row is saved as 'submitting' before the carrier call so a crash in
     between cannot submit twice; _refresh settles a stuck 'submitting' row.
     approved_by names the superadmin who approved, or nobody for the
-    automatic submits."""
+    automatic submits.
+
+    ``before`` is the row's ``_billing_view`` before the caller touched it
+    (None for a new row). An exit pings the fee rater only when the row's
+    state or refs differ from it: a retry that found the carrier down
+    changed nothing and is not told."""
     actor_user_id, actor_kind = actor
     approved_by = actor_user_id if actor_kind == "superadmin" else None
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
@@ -1240,13 +1269,14 @@ async def _submit_row(
     except SubmitRefused as exc:
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
-        await _refuse_row(db, row, provider, exc.problems)
+        await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
         await db.refresh(row)
         if row.state != "rejected":
             # The discard failed: wait for the next try, as when it is down.
             row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
             row.approved_by = None
             await db.commit()
+            _notify_if_changed(row, before)
         elif raise_refused:
             raise
         return False
@@ -1255,10 +1285,12 @@ async def _submit_row(
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
         row.approved_by = None
         await db.commit()
+        _notify_if_changed(row, before)
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
     await db.commit()
+    _notify_if_changed(row, before)
     await write_audit_log(
         row.organization_id,
         None,
@@ -1307,6 +1339,7 @@ async def _retry_submit(
     if provider is None:
         await db.rollback()
         return False
+    before = _billing_view(row)
     try:
         problems = await provider.check(row.provider_refs)
     except Exception:
@@ -1317,7 +1350,12 @@ async def _retry_submit(
         await _refuse_row(db, row, provider, problems)
         return False
     return await _submit_row(
-        db, row, provider, actor=(None, "system"), action="verification.submit"
+        db,
+        row,
+        provider,
+        before=before,
+        actor=(None, "system"),
+        action="verification.submit",
     )
 
 
@@ -1353,6 +1391,7 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row is left as it was and tried again next tick; the sweeper never dies
     on carrier trouble."""
+    await _rate_before_wipe(db, row, provider)
     try:
         await provider.discard(row.provider_refs)
     except Exception:
@@ -1363,6 +1402,7 @@ async def _reject_row(
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    _notify_billing([row])
     await write_audit_log(
         row.organization_id,
         None,
@@ -1526,6 +1566,8 @@ async def cancel_verification(
             detail=f"cannot cancel a verification that is {row.state}",
         )
     provider = registry(row.provider, row.purpose)
+    # Before org_lock: the rater takes the same lock.
+    await _rate_before_wipe(db, row, provider)
     if approved_sms:
         # Serialize with purchases, routing and releases: they attach and
         # detach numbers too.
@@ -1537,6 +1579,7 @@ async def cancel_verification(
     row.state, row.provider_refs = "cancelled", {}
     row.updated_at = row.cancelled_at = now
     await db.commit()
+    _notify_billing([row])
     if approved_sms:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -1741,6 +1784,7 @@ async def admin_approve(
     """Submit the draft to the carrier for its review."""
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
+    before = _billing_view(row)
     try:
         problems = await provider.check(row.provider_refs)
     except Exception as exc:
@@ -1758,6 +1802,7 @@ async def admin_approve(
             db,
             row,
             provider,
+            before=before,
             actor=actor_of(admin),
             action="verification.approve",
             raise_refused=True,
@@ -1784,11 +1829,13 @@ async def admin_reject(
 ) -> AdminVerification:
     row = await _admin_row(db, verification_id)
     provider = registry(row.provider, row.purpose)
+    await _rate_before_wipe(db, row, provider)
     if provider is not None:
         await provider.discard(row.provider_refs)
     row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    _notify_billing([row])
     actor_user_id, actor_kind = actor_of(admin)
     await write_audit_log(
         row.organization_id,

@@ -15,7 +15,11 @@ from hailhq.core.providers.verification.base import (
     Requirements,
     SubjectType,
 )
-from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.forms import (
+    cut_text,
+    display_name,
+    text_length,
+)
 
 _BUSINESS_TYPES = (
     FieldOption(key="PRIVATE_PROFIT", label="Private company"),
@@ -52,9 +56,24 @@ _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"
 # Carrier maximums, in characters: campaign description and each sample.
 _DESCRIPTION_MAX = 4096
 _SAMPLE_MAX = 1024
-# The opt-in text shares the carrier's 2048 (_FLOW_MAX) with the fixed
-# consent lines and links (at most 1187, see _URL_MAX), so 861 are left.
-_OPT_IN_MAX = 861
+_FLOW_MAX = 2048  # carrier maximum for the opt-in description
+_URL_MAX = 512  # per link
+_DISCLOSURES = (
+    "Consent is not a condition of purchase. Message frequency varies. "
+    "Message and data rates may apply. Reply STOP to opt out, HELP for help."
+)
+
+
+def _fixed_flow(privacy_policy_url: str, terms_url: str) -> str:
+    """What campaign_text puts after the customer's opt-in text. No
+    punctuation right after a link: a reviewer who copies it must not get a
+    trailing dot."""
+    return f" {_DISCLOSURES} Privacy policy: {privacy_policy_url} Terms: {terms_url}"
+
+
+# The opt-in text shares the carrier's 2048 with the fixed text at its
+# longest (both links at _URL_MAX), so it always fits whole.
+_OPT_IN_MAX = _FLOW_MAX - text_length(_fixed_flow("x" * _URL_MAX, "x" * _URL_MAX))
 
 _BUSINESS_FIELDS = (
     FieldSpec(name="legal_name", label="Legal company name"),
@@ -74,6 +93,7 @@ _BUSINESS_FIELDS = (
         name="website",
         label="Website",
         kind="url",
+        max_length=_URL_MAX,
         help="The carrier checks that the site names your company.",
     ),
     FieldSpec(name="rep_name", label="Contact person name"),
@@ -158,6 +178,7 @@ _CAMPAIGN_FIELDS = (
         name="privacy_policy_url",
         label="Privacy policy link",
         kind="url",
+        max_length=_URL_MAX,
         help=(
             "Public page that says mobile numbers and texting consent are not "
             "shared with third parties for marketing."
@@ -167,14 +188,36 @@ _CAMPAIGN_FIELDS = (
         name="terms_url",
         label="Terms of service link",
         kind="url",
+        max_length=_URL_MAX,
         help="Public page with your terms of service.",
     ),
     FieldSpec(name="has_links", label="Do your texts contain links?", options=_YES_NO),
 )
 
 
+# Telnyx brand maximums, in characters. Telnyx files the person's first and
+# last name together as the brand name, under the same 100.
+_TELNYX_MAX = {
+    "legal_name": 100,
+    "website": 100,
+    "rep_email": 100,
+    "first_name": 100,
+    "last_name": 100,
+    "email": 100,
+}
+
+
 def _fields_for(provider: str, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
+    if provider == "telnyx":
+        subject = tuple(
+            (
+                f.model_copy(update={"max_length": _TELNYX_MAX[f.name]})
+                if f.name in _TELNYX_MAX
+                else f
+            )
+            for f in subject
+        )
     types = (_text_types_field(subject_type),) if provider == "telnyx" else ()
     return subject + _CAMPAIGN_FIELDS[:1] + types + _CAMPAIGN_FIELDS[1:]
 
@@ -208,29 +251,23 @@ def sms_subject_name(
 def field_problems(
     provider: str, fields: dict[str, str], subject_type: SubjectType
 ) -> list[Problem]:
-    """The fields of ``provider``'s form: required values are present and every link is an http(s) URL with a
-    host, at most _URL_MAX characters. Both carrier plug-ins run this before
-    anything is sent: the links are only filed later, with the campaign, where
-    a carrier error is retried forever instead of shown to the customer."""
+    """The fields of ``provider``'s form: required values are present, the
+    choices are allowed, and every link is an http(s) URL with a host. Both
+    carrier plug-ins run this before anything is sent: the links are only
+    filed later, with the campaign, where a carrier error is retried forever
+    instead of shown to the customer. Lengths (``max_length``, links
+    included) are checked by the API for every carrier
+    (``forms.length_problems``)."""
     problems: list[Problem] = []
     for spec in _fields_for(provider, subject_type):
         value = (fields.get(spec.name) or "").strip()
         if not value:
             if spec.required:
                 problems.append(Problem(field=spec.name, message="This is required."))
-        elif spec.max_length and len(value) > spec.max_length:
-            problems.append(
-                Problem(
-                    field=spec.name,
-                    message=f"Use at most {spec.max_length} characters.",
-                )
-            )
         elif spec.kind == "choices":
             problem = _choices_problem(spec, value)
             if problem:
                 problems.append(Problem(field=spec.name, message=problem))
-        elif spec.kind == "url" and len(value) > _URL_MAX:
-            problems.append(Problem(field=spec.name, message="Use a shorter link."))
         elif spec.kind == "url" and not _is_http_url(value):
             problems.append(
                 Problem(
@@ -280,15 +317,6 @@ class CampaignText:
 
 
 _OPT_OUT = " Reply STOP to opt out, HELP for help."
-_FLOW_MAX = 2048  # carrier maximum for the opt-in description
-# Per link. The fixed part of the flow is at most 1 + 137 (disclosures) + 17
-# + _URL_MAX + 8 + _URL_MAX = 1187 characters, so the customer's own text
-# always keeps at least 861 of the 2048.
-_URL_MAX = 512
-_DISCLOSURES = (
-    "Consent is not a condition of purchase. Message frequency varies. "
-    "Message and data rates may apply. Reply STOP to opt out, HELP for help."
-)
 
 
 def _at_least(text: str, n: int, pad: str) -> str:
@@ -307,10 +335,15 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     terms_url = fields["terms_url"].strip()
     # Reviewers reject a filing that lacks the consent disclosures and the
     # policy links, so they go on every filing after the customer's own text.
-    # No punctuation right after a link: a reviewer who copies it must not get
-    # a trailing dot.
-    fixed = f" {_DISCLOSURES} Privacy policy: {privacy_policy_url} Terms: {terms_url}"
-    own = fields["opt_in_description"].strip()[: _FLOW_MAX - len(fixed)]
+    # The API caps the opt-in text at _OPT_IN_MAX and each link at _URL_MAX
+    # (forms.length_problems), so a checked form is never cut here (tested);
+    # the cut only guards a caller that skipped the check. Counted as the
+    # carrier counts: UTF-16 code units.
+    fixed = _fixed_flow(privacy_policy_url, terms_url)
+    own = cut_text(
+        fields["opt_in_description"].strip(),
+        max(0, _FLOW_MAX - text_length(fixed)),
+    )
     flow = (own + fixed).strip()
     samples = [
         _at_least(fields["sample_1"], 20, _OPT_OUT),

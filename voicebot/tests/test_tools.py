@@ -177,7 +177,7 @@ async def test_bind_shapes_transfer_call(db) -> None:
     )
     try:
         names = [t.info.name for t in tools]
-        assert "transfer_call" in names
+        assert "transfer_call" in names and "cancel_transfer" in names
         (tool,) = [t for t in tools if t.info.name == "transfer_call"]
         assert "Sam (Billing)" in tool.info.raw_schema["description"]
     finally:
@@ -195,19 +195,47 @@ async def test_transfer_call_hidden_without_targets(db) -> None:
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
     )
     try:
-        assert "transfer_call" not in [t.info.name for t in tools]
+        names = [t.info.name for t in tools]
+        assert "transfer_call" not in names and "cancel_transfer" not in names
     finally:
         if api is not None:
             await api.aclose()
 
 
-async def test_uninterruptible_tool_disallows_interruptions():
-    import dataclasses
+async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
+    """A `tools` list names transfer_call only; cancel_transfer comes with it."""
+    meta = {
+        "organization_id": str(uuid.uuid4()),
+        "tools": ["transfer_call"],
+        "handover_targets": [
+            {"contact_id": str(uuid.uuid4()), "label": "Sam", "note": "Billing"}
+        ],
+    }
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
+    )
+    try:
+        assert sorted(t.info.name for t in tools) == [
+            "cancel_transfer",
+            "transfer_call",
+        ]
+    finally:
+        if api is not None:
+            await api.aclose()
 
-    spec = dataclasses.replace(_spec(tier="session_control"), uninterruptible=True)
+
+async def test_session_tool_that_must_not_wait_runs_at_once():
+    """cancel_transfer stops the ring at once, not after the agent's
+    sentence, which may take seconds while the contact can pick up."""
+    from hailhq.core.agent_tools import transfer_call
+
+    assert transfer_call.CANCEL_SPEC.waits_for_speech is False
     rc = FakeRunContext()
-    await _make_handler(spec, _tctx())({}, rc)
-    assert rc.interruptions_allowed is False
+    await _make_handler(transfer_call.CANCEL_SPEC, _tctx())({}, rc)
+    assert rc.waited is False
+    rc = FakeRunContext()
+    await _make_handler(_spec(tier="session_control"), _tctx())({}, rc)
+    assert rc.waited is True
 
 
 async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():

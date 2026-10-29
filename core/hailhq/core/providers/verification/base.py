@@ -47,14 +47,7 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 
 class VerificationProviderError(Exception):
-    """The carrier failed in a way the customer cannot fix (outage, auth).
-
-    ``billed_refs`` names what the carrier made and bills although the
-    filing failed (a registered brand), so Hail can keep a record of it."""
-
-    def __init__(self, *args, billed_refs: dict | None = None) -> None:
-        super().__init__(*args)
-        self.billed_refs = billed_refs or {}
+    """The carrier failed in a way the customer cannot fix (outage, auth)."""
 
 
 class SubmitRefused(VerificationProviderError):
@@ -120,9 +113,10 @@ class FieldSpec(BaseModel):
     max_length: int | None = Field(
         default=None,
         description=(
-            "The most characters the value may hold, when known. A form can "
-            "show a field allowed more than about 100 characters as a box "
-            "that wraps."
+            "The most characters the value may hold, when known, counted in "
+            "UTF-16 code units (an emoji counts as 2). Enforced: a longer "
+            "value gets 422. A form can show a field allowed more than about "
+            "100 characters as a box that wraps."
         ),
     )
 

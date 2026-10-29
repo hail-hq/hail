@@ -734,3 +734,33 @@ def test_default_provider_stays_twilio_when_both_are_configured(monkeypatch) -> 
     monkeypatch.setattr(settings, "twilio_auth_token", "tok")
     monkeypatch.setattr(settings, "telnyx_api_key", "key")
     assert registry.default_verification_provider_name() == "twilio"
+
+
+@pytest.mark.parametrize(
+    "value,limit", [(150, 150), (True, None), (0, None), ("150", None), (None, None)]
+)
+def test_max_length_takes_only_a_positive_whole_number(value, limit) -> None:
+    from hailhq.core.providers.verification.telnyx import _max_length
+
+    assert _max_length({"max_length": value}) == limit
+
+
+async def test_create_draft_refuses_a_value_over_the_carrier_limit() -> None:
+    fake = Telnyx(rules_answer("local"))
+    p = provider(fake)
+    req = await p.requirements("SE", "local", "business")
+    email = next(f for f in req.fields if "Email" in f.label)
+    fields, address, docs = _inputs("local")
+    fields[email.name] = "a" * 141 + "@acme.test"
+    result = await p.create_draft(
+        organization_id=ORG,
+        contact_email="ops@hail.test",
+        requirements=req,
+        fields=fields,
+        address=address,
+        documents=docs,
+    )
+    assert [(pr.field, pr.message) for pr in result.problems] == [
+        (email.name, "Use at most 150 characters.")
+    ]
+    assert len(fake.calls) == 1  # only the requirements lookup

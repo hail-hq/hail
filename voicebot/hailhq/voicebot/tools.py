@@ -17,6 +17,7 @@ import time
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
@@ -72,15 +73,15 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
     async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
             if spec.uninterruptible:
-                # The caller talking while a dial rings must not cancel this
-                # tool: that would leave the contact leg half-dialed.
+                # "Okay, thanks" over "I'm connecting you" must not cancel
+                # the transfer before it dials.
                 context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
             # Someone who starts talking during the goodbye is not done: keep
             # the call. Only end_call: DTMF and transfers run over IVR menus
             # and "okay"s, so speech must not cancel them.
-            if spec.risk_tier == "session_control":
+            if spec.risk_tier == "session_control" and spec.waits_for_speech:
                 started = time.monotonic()
                 await context.wait_for_playout()
                 if (
@@ -92,7 +93,7 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
                     return STILL_TALKING
-            # None (a connected handover) means no reply turn.
+            # None means no reply turn (a transfer that started ringing).
             return await spec.execute(tctx, raw_arguments)
         except Exception:
             logger.exception(
@@ -123,6 +124,8 @@ async def build_agent_tools(
     send_dtmf,
     bridge=None,
     spoke_since=None,
+    cancel_bridge=None,
+    prompt=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -165,6 +168,10 @@ async def build_agent_tools(
                 continue
             s = bound
         specs.append(s)
+        if s.name == transfer_call.SPEC.name:
+            # Its dial runs in the background: cancel_transfer stops the ring.
+            # It comes with transfer_call, so a `tools` list never names it.
+            specs.append(transfer_call.CANCEL_SPEC)
     if not specs:
         return [], None
 
@@ -180,6 +187,8 @@ async def build_agent_tools(
         send_dtmf=send_dtmf,
         bridge=bridge,
         spoke_since=spoke_since,
+        cancel_bridge=cancel_bridge,
+        prompt=prompt,
     )
 
     available: list[ToolSpec] = []

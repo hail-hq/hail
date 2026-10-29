@@ -190,6 +190,16 @@ def notify_sms_registration_changed(verification_id: str) -> None:
     _fire("/api/internal/sms-registrations/rate", {"verification_id": verification_id})
 
 
+async def rate_sms_registration(verification_id: str) -> None:
+    """The same kick, awaited: returns once the rater answered, failed or
+    timed out (``_TIMEOUT_SECONDS``). For a caller about to remove what the
+    rater reads. The rater takes the organization's lock (``org_lock``):
+    never await this while holding it."""
+    await _post(
+        "/api/internal/sms-registrations/rate", {"verification_id": verification_id}
+    )
+
+
 def notify_verification_decided(verification_id: str) -> None:
     """Fire-and-forget kick to the website, which emails the org's owners
     that a verification was approved or rejected. Call it after the commit
