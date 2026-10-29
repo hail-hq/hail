@@ -7,7 +7,7 @@ Hail gives your AI agent a voice, a real phone number, and an inbox — place AI
 - [MCP clients](./mcp.md) — connect Claude.ai, ChatGPT, Cursor, or any MCP client. Paste a URL, click Allow, done.
 - [Agents](./agents.md) — save an agent once; numbers answer calls and texts with it, and `POST /v1/calls` can place calls with it.
 - [Webhooks](./webhooks.md) — signed JSON events for inbound mail, SMS, delivery reports, and call outcomes.
-- [Email delivery](./email.md) — what Hail does so mail reaches the inbox: signed domains, one-click unsubscribe, bounce and complaint suppression, events and stats.
+- [Email delivery](./email.md): what Hail does so mail reaches the inbox: signed domains, one-click unsubscribe, bounce and complaint suppression, events and stats.
 - [react-email](./react-email.md) — render a react-email template and send it through `POST /v1/emails`.
 - [Bring your own LLM](./byo-llm.md) — point voice calls at your own OpenAI-compatible endpoint.
 - [CLI reference](./cli.md) — the `hail` binary's email and webhooks surface.

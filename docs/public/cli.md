@@ -107,7 +107,7 @@ hail email list --direction outbound --status failed
 hail email get 1a2b
 
 # Send (subject + at least one body flag required)
-hail email send --to alice@example.com --subject "Hi" --body "Hello"
+hail email send --to alice@example.com --subject "Hi" --body "Hello" --recipient-consent
 ```
 
 `hail email list` flags: `--direction` (`inbound|outbound`), `--status` (`queued|sent|failed|bounced|complained|received`), `--limit` (default 50), `--cursor`, `--all` (walk every page). Alias: `hail email ls`.

@@ -3,7 +3,7 @@
 Send an email, then read what happened to it:
 
 ```bash
-hail email send --to ada@example.com --subject "Hi" --body "Hello"
+hail email send --to ada@example.com --subject "Hi" --body "Hello" --recipient-consent
 hail email events <email-id>
 ```
 
@@ -16,12 +16,16 @@ curl -X POST "$HAIL_API_URL/v1/emails" \
   -d '{"to": ["ada@example.com"], "subject": "Hi", "body_text": "Hello", "recipient_consent": true}'
 ```
 
-## What Hail does on every send
+## What Hail does when you send
+
+These apply to mail you send with `POST /v1/emails` or through an agent. Forwarded mail and Hail's own notices follow other rules ([architecture](./architecture.md#bounces-and-complaints)).
 
 - **Your domain signs the mail.** A custom domain gets DKIM and a MAIL FROM on `send.<domain>`, so SPF and DKIM align with your `From`. `hail email domain dns-check <id>` checks DKIM, MAIL FROM and DMARC, and gives a DMARC record to publish if you have none.
-- **One-click unsubscribe.** Every email carries `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). Gmail and Yahoo require both for bulk senders. A click on the link, or the Unsubscribe button in Gmail or Yahoo, adds the address to your suppression list.
-- **Hard bounces and spam complaints stop future sends.** The address is added to your suppression list. A soft bounce (mailbox full, server busy) is recorded as an event only, and Hail keeps sending.
+- **One-click unsubscribe.** An email with exactly one recipient carries `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). The link works for one year. A click on it, or the Unsubscribe button in Gmail or Yahoo, adds the address to your suppression list. An email with two or more recipients carries no unsubscribe header.
+- **Hard bounces and spam complaints stop future sends.** The addresses named in the bounce or complaint are added to your suppression list. A soft bounce (mailbox full, server busy) is recorded as an event only.
 - **Send limits.** Each organization has an hourly and a daily send cap. Over the cap, `POST /v1/emails` returns `403`.
+
+The suppression list belongs to your organization. Another organization on Hail can still send to that address.
 
 ## Blocked sends
 
@@ -31,11 +35,18 @@ A send to a suppressed address returns `403` with the reason:
 { "detail": "recipient 'bob@example.com' is suppressed (hard_bounce)" }
 ```
 
-Reasons: `recipient_unsubscribed`, `hard_bounce`, `spam_complaint`. One suppressed recipient in `to`, `cc` or `bcc` blocks the whole send. To remove an address from your list, write to hi@hail.so. Self-hosted: delete its row in `suppressions`.
+Reasons: `recipient_unsubscribed`, `hard_bounce`, `spam_complaint`. One suppressed recipient in `to`, `cc` or `bcc` blocks the whole send.
+
+List your suppressions, and remove an address:
+
+```bash
+hail email suppressions list
+hail email suppressions delete bob@example.com
+```
 
 ## Events and stats
 
-Each email has a timeline: `delivered`, `delivery_delayed`, `bounced`, `complained`, `opened`, `clicked`. Open and click tracking needs `body_html`. Get pushed events with a [webhook](./webhooks.md) (`email.bounced`, `email.complained`, ...).
+Each email has a timeline of events: `sent`, `delivered`, `delivery_delayed`, `bounced`, `complained`, `rejected`, `opened`, `clicked`. Open and click tracking needs `body_html`. Get events pushed to you with a [webhook](./webhooks.md) (`email.delivered`, `email.bounced`, `email.complained`, ...).
 
 Totals and rates for a time range:
 
