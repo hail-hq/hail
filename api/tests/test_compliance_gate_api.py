@@ -214,6 +214,46 @@ async def test_unsubscribe_then_send_is_blocked(
     assert send_resp.status_code == 403
 
 
+async def test_unsubscribe_one_click_post_suppresses_recipient(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gmail's and Yahoo's unsubscribe button POSTs the RFC 8058 body to
+    the List-Unsubscribe URL; it must record the opt-out, not 405."""
+    monkeypatch.setattr(settings, "hail_unsubscribe_secret", "test-secret")
+    org_id, _, _ = org_and_key
+    url = build_unsubscribe_url("carol@example.com", org_id)
+    token = url.split("token=", 1)[1]
+
+    resp = await client.post(
+        f"/unsubscribe?token={token}",
+        content="List-Unsubscribe=One-Click",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 200
+
+    row = (
+        await async_session.execute(
+            select(Suppression).where(Suppression.recipient == "carol@example.com")
+        )
+    ).scalar_one()
+    assert row.organization_id == org_id
+    assert row.source == "unsubscribe_link"
+
+
+async def test_unsubscribe_post_rejects_invalid_token(
+    client: httpx.AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/unsubscribe?token=not-a-real-token",
+        content="List-Unsubscribe=One-Click",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert resp.status_code == 400
+
+
 async def test_unsubscribe_rejects_invalid_token(client: httpx.AsyncClient) -> None:
     resp = await client.get("/unsubscribe?token=not-a-real-token")
     assert resp.status_code == 400

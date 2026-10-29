@@ -20,6 +20,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Email: the unsubscribe button in Gmail and Yahoo now works. Hail accepted only a click on the link before.
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).

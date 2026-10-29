@@ -1,10 +1,14 @@
-"""GET /unsubscribe — public, unauthenticated one-click email opt-out.
+"""GET and POST /unsubscribe — public, unauthenticated one-click email opt-out.
 
 Every outbound email carries a per-send signed link (List-Unsubscribe /
 List-Unsubscribe-Post headers — see ``create_email`` in emails.py). No
 auth: the HMAC-signed ``token`` query param *is* the credential. Anyone
 holding a valid token for an address can suppress it, which is the point
 of one-click unsubscribe (RFC 8058).
+
+``GET`` is a person clicking the link. ``POST`` is the mailbox provider's
+own unsubscribe button (Gmail, Yahoo): RFC 8058 has it POST
+``List-Unsubscribe=One-Click`` to the same URL, token in the query string.
 """
 
 from __future__ import annotations
@@ -25,15 +29,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["unsubscribe"])
 
 
-@router.get(
-    "/unsubscribe",
-    response_class=HTMLResponse,
-)
+@router.get("/unsubscribe", response_class=HTMLResponse)
+@router.post("/unsubscribe", response_class=HTMLResponse)
 async def unsubscribe(
     db: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str, Query()],
 ) -> HTMLResponse:
-    """One-click email opt-out (RFC 8058), reached by clicking a link in a sent email.
+    """One-click email opt-out (RFC 8058), reached by clicking a link in a sent
+    email (GET) or by the mailbox provider's unsubscribe button (POST).
 
     Public and unauthenticated — the signed token query param is the sole
     credential, proving the caller holds a link Hail sent to that address.
