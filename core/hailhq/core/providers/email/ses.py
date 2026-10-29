@@ -170,20 +170,15 @@ def _build_raw_mime(
     return msg.as_bytes()
 
 
-def _org_tags(organization_id: UUID) -> list[dict[str, str]]:
-    """Message tags naming the sending org.
+def _feedback_id_tags(organization_id: UUID) -> list[dict[str, str]]:
+    """The SES message tag that names the sending org in ``Feedback-ID``.
 
-    ``org_id`` rides on every SES event for this message.
-    ``ses:feedback-id-a`` becomes the first part of the ``Feedback-ID``
-    header SES adds, so Gmail Postmaster Tools reports spam rate per org
-    (Gmail sends no complaints back to SES). Tag values allow letters,
-    digits, ``_`` and ``-``: a UUID's string form fits.
+    SES puts the ``ses:feedback-id-a`` value in the first part of the
+    ``Feedback-ID`` header it adds, which Gmail Postmaster Tools groups
+    spam rate by. Tag values allow letters, digits, ``_`` and ``-``: a
+    UUID's string form fits.
     """
-    value = str(organization_id)
-    return [
-        {"Name": "org_id", "Value": value},
-        {"Name": "ses:feedback-id-a", "Value": value},
-    ]
+    return [{"Name": "ses:feedback-id-a", "Value": str(organization_id)}]
 
 
 class SesEmailProvider(EmailProvider):
@@ -206,7 +201,7 @@ class SesEmailProvider(EmailProvider):
         reply_to: str | None = None,
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
-        organization_id: UUID | None = None,
+        organization_id: UUID,
     ) -> ProviderSendResult:
         if not to_addresses:
             raise ValueError("send_email requires at least one recipient")
@@ -230,6 +225,14 @@ class SesEmailProvider(EmailProvider):
             "Body": body,
         }
 
+        # Set the same way on the raw and the simple path.
+        shared: dict[str, Any] = {
+            "Destination": destination,
+            "EmailTags": _feedback_id_tags(organization_id),
+        }
+        if settings.hail_ses_configuration_set:
+            shared["ConfigurationSetName"] = settings.hail_ses_configuration_set
+
         if attachments:
             # Serialization base64-encodes every attachment (pure-Python
             # CPU work, up to tens of MB) — keep it off the event loop.
@@ -246,16 +249,12 @@ class SesEmailProvider(EmailProvider):
                 headers={k: v for k, v in (headers or {}).items() if v},
                 attachments=attachments,
             )
-            kwargs: dict[str, Any] = {
-                "FromEmailAddress": from_address,
-                "Destination": destination,
-                "Content": {"Raw": {"Data": raw}},
-            }
-            if settings.hail_ses_configuration_set:
-                kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
-            if organization_id is not None:
-                kwargs["EmailTags"] = _org_tags(organization_id)
-            response = await asyncio.to_thread(self._client.send_email, **kwargs)
+            response = await asyncio.to_thread(
+                self._client.send_email,
+                **shared,
+                FromEmailAddress=from_address,
+                Content={"Raw": {"Data": raw}},
+            )
             return ProviderSendResult(provider_message_id=response["MessageId"])
 
         if headers:
@@ -263,19 +262,15 @@ class SesEmailProvider(EmailProvider):
                 {"Name": k, "Value": v} for k, v in headers.items() if v
             ]
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
+            **shared,
             # SESv2 accepts a friendly-from here ("Name <addr>");
             # _friendly_from quotes specials and RFC-2047-encodes non-ASCII.
             "FromEmailAddress": _friendly_from(from_name, from_address),
-            "Destination": destination,
             "Content": {"Simple": message},
         }
         if reply_to:
             kwargs["ReplyToAddresses"] = [reply_to]
-        if settings.hail_ses_configuration_set:
-            kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
-        if organization_id is not None:
-            kwargs["EmailTags"] = _org_tags(organization_id)
 
         response = await asyncio.to_thread(self._client.send_email, **kwargs)
         return ProviderSendResult(provider_message_id=response["MessageId"])

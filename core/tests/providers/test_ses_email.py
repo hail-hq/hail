@@ -23,6 +23,8 @@ from hailhq.core.providers.email.base import (
 )
 
 FULL_DOCUMENT_HTML = "<!DOCTYPE html><html><head></head><body><p>x</p></body></html>"
+ORG_ID = UUID("6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b")
+ORG_TAGS = [{"Name": "ses:feedback-id-a", "Value": str(ORG_ID)}]
 
 
 @pytest.fixture()
@@ -74,11 +76,13 @@ async def test_send_email_text_only(ses_client, stub: Stubber) -> None:
                     "Body": {"Text": {"Data": "body", "Charset": "UTF-8"}},
                 }
             },
+            "EmailTags": ORG_TAGS,
         },
     )
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         to_addresses=["alice@example.com"],
         subject="hi",
@@ -114,11 +118,13 @@ async def test_send_email_html_and_text_with_cc_bcc_reply_to(
                 }
             },
             "ReplyToAddresses": ["replyto@acme.com"],
+            "EmailTags": ORG_TAGS,
         },
     )
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         to_addresses=["alice@example.com"],
         subject="hi",
@@ -151,11 +157,13 @@ async def test_send_email_with_headers_uses_simple_headers(
                     ],
                 }
             },
+            "EmailTags": ORG_TAGS,
         },
     )
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: hi",
@@ -171,6 +179,7 @@ async def test_send_email_with_attachments_uses_raw_mime() -> None:
     fake = FakeClient("m-2")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
@@ -201,6 +210,7 @@ async def test_send_email_full_document_html_byte_identical_simple_path() -> Non
     fake = FakeClient("m-doc-simple")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         to_addresses=["alice@example.com"],
         subject="hi",
@@ -221,6 +231,7 @@ async def test_send_email_full_document_html_byte_identical_raw_path() -> None:
     fake = FakeClient("m-doc-raw")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="hi",
@@ -264,11 +275,13 @@ async def test_send_email_simple_path_with_from_name(ses_client, stub: Stubber) 
                     "Body": {"Text": {"Data": "body", "Charset": "UTF-8"}},
                 }
             },
+            "EmailTags": ORG_TAGS,
         },
     )
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         from_name="Acme Billing",
         to_addresses=["alice@example.com"],
@@ -287,6 +300,7 @@ async def test_send_email_simple_path_splits_long_non_ascii_from_name() -> None:
     fake = FakeClient("m-name-long")
     provider = SesEmailProvider(client=fake)
     await provider.send_email(
+        organization_id=ORG_ID,
         from_address="a@b.co",
         from_name=(
             "Café Réservations München Support Team — "
@@ -311,6 +325,7 @@ async def test_send_email_raw_path_with_from_name() -> None:
     fake = FakeClient("m-name-raw")
     provider = SesEmailProvider(client=fake)
     await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         from_name="Acme Billing",
         to_addresses=["ops@example.com"],
@@ -338,6 +353,7 @@ async def test_send_email_raw_path_encodes_non_ascii_from_name() -> None:
     fake = FakeClient("m-name-utf8")
     provider = SesEmailProvider(client=fake)
     await provider.send_email(
+        organization_id=ORG_ID,
         from_address="alerts@acme.com",
         from_name="Café Réservations",
         to_addresses=["ops@example.com"],
@@ -365,6 +381,7 @@ async def test_send_email_requires_recipients(ses_client) -> None:
     provider = SesEmailProvider(client=ses_client)
     with pytest.raises(ValueError, match="at least one recipient"):
         await provider.send_email(
+            organization_id=ORG_ID,
             from_address="alerts@acme.com",
             to_addresses=[],
             subject="hi",
@@ -377,6 +394,7 @@ async def test_send_email_requires_a_body(ses_client) -> None:
     provider = SesEmailProvider(client=ses_client)
     with pytest.raises(ValueError, match="body_text or body_html"):
         await provider.send_email(
+            organization_id=ORG_ID,
             from_address="alerts@acme.com",
             to_addresses=["alice@example.com"],
             subject="hi",
@@ -404,11 +422,13 @@ async def test_send_email_simple_path_with_configuration_set(
                 }
             },
             "ConfigurationSetName": "hail-events",
+            "EmailTags": ORG_TAGS,
         },
     )
 
     provider = SesEmailProvider(client=ses_client)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="a@b.com",
         to_addresses=["c@d.com"],
         subject="s",
@@ -427,6 +447,7 @@ async def test_send_email_raw_path_with_configuration_set(monkeypatch) -> None:
     fake = FakeClient("m-attach")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
@@ -455,6 +476,7 @@ async def test_send_email_without_configuration_set_simple_path(monkeypatch) -> 
     fake = FakeClient("mid-no-config")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="a@b.com",
         to_addresses=["c@d.com"],
         subject="s",
@@ -474,6 +496,7 @@ async def test_send_email_without_configuration_set_raw_path(monkeypatch) -> Non
     fake = FakeClient("m-no-config")
     provider = SesEmailProvider(client=fake)
     result = await provider.send_email(
+        organization_id=ORG_ID,
         from_address="noreply+acme@mail.hail.so",
         to_addresses=["ops@example.com"],
         subject="Fwd: invoice",
@@ -724,47 +747,56 @@ async def test_delete_identity_happy_path(ses_client, stub: Stubber) -> None:
     stub.assert_no_pending_responses()
 
 
-async def test_send_email_tags_the_org_on_simple_and_raw_paths() -> None:
-    org_id = UUID("6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b")
-    expected = [
-        {"Name": "org_id", "Value": str(org_id)},
-        {"Name": "ses:feedback-id-a", "Value": str(org_id)},
-    ]
-    provider_kwargs = {
-        "from_address": "alerts@acme.com",
-        "to_addresses": ["alice@example.com"],
-        "subject": "hi",
-        "body_text": "x",
-        "body_html": None,
-        "organization_id": org_id,
-    }
-
-    simple = FakeClient("m-tag-simple")
-    await SesEmailProvider(client=simple).send_email(**provider_kwargs)
-    assert simple.kwargs is not None
-    assert simple.kwargs["EmailTags"] == expected
-
-    raw = FakeClient("m-tag-raw")
-    await SesEmailProvider(client=raw).send_email(
-        **provider_kwargs,
-        attachments=[
-            ProviderAttachment(
-                filename="a.txt", content_type="text/plain", payload=b"a"
-            )
-        ],
+async def test_send_email_simple_path_sends_the_feedback_id_tag(
+    ses_client, stub: Stubber
+) -> None:
+    """Stubber validates ``EmailTags`` against the real SESv2 model."""
+    org_id = UUID("0b6e1a2c-7d3f-4c8e-a1b2-c3d4e5f60718")
+    stub.add_response(
+        "send_email",
+        {"MessageId": "m-tag-simple"},
+        {
+            "FromEmailAddress": "alerts@acme.com",
+            "Destination": {"ToAddresses": ["alice@example.com"]},
+            "Content": {
+                "Simple": {
+                    "Subject": {"Data": "hi", "Charset": "UTF-8"},
+                    "Body": {"Text": {"Data": "x", "Charset": "UTF-8"}},
+                }
+            },
+            "EmailTags": [{"Name": "ses:feedback-id-a", "Value": str(org_id)}],
+        },
     )
-    assert raw.kwargs is not None
-    assert raw.kwargs["EmailTags"] == expected
+
+    result = await SesEmailProvider(client=ses_client).send_email(
+        from_address="alerts@acme.com",
+        to_addresses=["alice@example.com"],
+        subject="hi",
+        body_text="x",
+        body_html=None,
+        organization_id=org_id,
+    )
+    assert result.provider_message_id == "m-tag-simple"
+    stub.assert_no_pending_responses()
 
 
-async def test_send_email_without_org_sends_no_tags() -> None:
-    fake = FakeClient("m-no-tag")
+async def test_send_email_raw_path_sends_the_feedback_id_tag() -> None:
+    org_id = UUID("0b6e1a2c-7d3f-4c8e-a1b2-c3d4e5f60718")
+    fake = FakeClient("m-tag-raw")
     await SesEmailProvider(client=fake).send_email(
         from_address="alerts@acme.com",
         to_addresses=["alice@example.com"],
         subject="hi",
         body_text="x",
         body_html=None,
+        attachments=[
+            ProviderAttachment(
+                filename="a.txt", content_type="text/plain", payload=b"a"
+            )
+        ],
+        organization_id=org_id,
     )
     assert fake.kwargs is not None
-    assert "EmailTags" not in fake.kwargs
+    assert fake.kwargs["EmailTags"] == [
+        {"Name": "ses:feedback-id-a", "Value": str(org_id)}
+    ]

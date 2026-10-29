@@ -108,15 +108,15 @@ class EmailProvider(ABC):
         reply_to: str | None = None,
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
-        organization_id: UUID | None = None,
+        organization_id: UUID,
     ) -> ProviderSendResult:
         """Send one message. Implementations must raise on provider error.
 
         ``headers`` carries extra top-level headers (loop-prevention,
         Auto-Submitted, References). ``attachments`` force the raw-MIME
         path on providers whose simple-content API can't carry files.
-        ``organization_id`` labels the message in the provider's own
-        reporting, so bounce and complaint rates can be read per org.
+        ``organization_id`` is the sending org; providers label the
+        message with it in their own reporting.
         """
 
     @abstractmethod
