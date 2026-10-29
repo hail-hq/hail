@@ -6,9 +6,9 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Email suppressions: list them with `GET /v1/emails/suppressions` and remove one with `DELETE /v1/emails/suppressions/{address}`. CLI: `hail email suppressions list` and `hail email suppressions delete <address>`.
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
+- Email suppressions: list them with `GET /v1/emails/suppressions` and remove one with `DELETE /v1/emails/suppressions/{address}`. CLI: `hail email suppressions list` and `hail email suppressions delete <address>`.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
 - Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
 - Hail Cloud emails the organization's owners when a verification is approved or rejected.
