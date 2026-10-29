@@ -98,6 +98,9 @@ class ToolSpec:
     # session_control tools first let the agent's own sentence finish
     # playing (end_call must not cut off the goodbye). False runs at once.
     waits_for_speech: bool = True
+    # True when the caller talking over the agent's sentence must not cancel
+    # the tool: transfer_call would never start the dial.
+    uninterruptible: bool = False
 
 
 __all__ = [

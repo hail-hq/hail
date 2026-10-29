@@ -57,7 +57,6 @@ from hailhq.core.handover import (
     ON_CALL_LINE,
     HandoverPerson,
     country_of,
-    handover_email,
     handover_sms_text,
     has_answered_handover,
     load_handover,
@@ -736,8 +735,9 @@ class AgentHandoverResponse(BaseModel):
 
 
 class AgentHandoverResultRequest(BaseModel):
-    # Unknown fields are ignored, not refused: during a rollback an older API
-    # still records results from a newer voicebot.
+    # Unknown fields are ignored, not refused, so a later rollback to this
+    # version still records results from a newer voicebot. Versions before
+    # it refuse unknown fields: roll back api and voicebot together.
     model_config = ConfigDict(extra="ignore")
     tool_invocation_id: UUID
     call_id: UUID
@@ -811,7 +811,9 @@ async def _linked_person(
         return None
     for row in (await load_handover(db, [call.agent_id])).get(call.agent_id, []):
         if row["contact_id"] == wire_id:
-            return HandoverPerson(wire_id, row["name"], row["phone_e164"])
+            return HandoverPerson(
+                wire_id, row["name"], row["phone_e164"], row.get("email")
+            )
     return None
 
 
@@ -1093,9 +1095,9 @@ async def agent_handover_email(
     start = await _notice_start(db, body, Email, ("failed", "bounced"), "emailed")
     if isinstance(start, str):
         return AgentHandoverEmailResponse(email=start)
-    call, _ = start
+    call, contact = start
     org = call.organization_id
-    to = await handover_email(db, org, body.contact_id)
+    to = contact.email
     if not to:
         return AgentHandoverEmailResponse(email="skipped:no_email")
     try:

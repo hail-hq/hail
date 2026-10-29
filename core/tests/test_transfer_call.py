@@ -562,3 +562,22 @@ async def test_cancel_without_a_handle() -> None:
     assert await transfer_call.CANCEL_SPEC.execute(ctx, {}) == (
         "I can't connect you to anyone right now."
     )
+
+
+async def test_finish_pending_waits_for_the_background_posts() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 1))
+    await spec.execute(ctx, {"contact": "Sam"})
+    await transfer_call.finish_pending(1.0)
+    assert _posted(api, RESULT_PATH)
+    await _settled()
+
+
+async def test_finish_pending_gives_up_after_the_timeout() -> None:
+    blocked = asyncio.Event()
+    task = transfer_call._hold(asyncio.create_task(blocked.wait()))
+    await transfer_call.finish_pending(0.01)
+    assert not task.done()
+    blocked.set()
+    await _settled()

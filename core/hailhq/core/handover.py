@@ -142,6 +142,8 @@ class HandoverPerson:
     contact_id: str  # wire id
     name: str
     phone_e164: str | None
+    # Where the handover email goes: a contact's email, a member's login.
+    email: str | None = None
 
 
 class HandoverInvalid(ValueError):
@@ -322,16 +324,21 @@ async def prune_departed_members(db: AsyncSession, agent_id: UUID) -> None:
 
 async def _member_links(
     db: AsyncSession, agent_ids: list[UUID]
-) -> list[tuple[AgentHandoverContact, str, str | None]]:
+) -> list[tuple[AgentHandoverContact, str, str | None, str | None]]:
     """Member links whose user is still a member of the agent's org. Empty
     when the member tables are missing (pure self-host)."""
     try:
         async with db.begin_nested():
             return [
-                (link, name, phone)
-                for link, name, phone in (
+                (link, name, phone, email)
+                for link, name, phone, email in (
                     await db.execute(
-                        select(AgentHandoverContact, User.name, User.phone_number)
+                        select(
+                            AgentHandoverContact,
+                            User.name,
+                            User.phone_number,
+                            User.email,
+                        )
                         .join(Agent, Agent.id == AgentHandoverContact.agent_id)
                         .join(User, User.id == AgentHandoverContact.user_id)
                         .where(
@@ -350,36 +357,6 @@ async def _member_links(
         return []
 
 
-async def handover_email(db: AsyncSession, org_id: UUID, wire_id: str) -> str | None:
-    """The email of the handover person behind ``wire_id`` in ``org_id``: a
-    contact's email, or a member's login email. None when there is none."""
-    kind, value = parse_contact_id(wire_id)
-    if kind != "member":
-        return (
-            await db.execute(
-                select(Contact.email).where(
-                    Contact.id == value, Contact.organization_id == org_id
-                )
-            )
-        ).scalar_one_or_none()
-    try:
-        async with db.begin_nested():
-            return (
-                await db.execute(
-                    select(User.email).where(
-                        User.id == value,
-                        exists().where(
-                            OrganizationMember.user_id == User.id,
-                            OrganizationMember.organization_id == org_id,
-                        ),
-                    )
-                )
-            ).scalar_one_or_none()
-    except ProgrammingError as exc:
-        _reraise_unless_no_member_tables(exc)
-        return None
-
-
 async def load_handover(
     db: AsyncSession, agent_ids: list[UUID]
 ) -> dict[UUID, list[dict]]:
@@ -388,8 +365,8 @@ async def load_handover(
     out."""
     if not agent_ids:
         return {}
-    rows: list[tuple[AgentHandoverContact, str, str, str | None]] = [
-        (link, str(contact.id), contact.name, contact.phone_e164)
+    rows: list[tuple[AgentHandoverContact, str, str, str | None, str | None]] = [
+        (link, str(contact.id), contact.name, contact.phone_e164, contact.email)
         for link, contact in (
             await db.execute(
                 select(AgentHandoverContact, Contact)
@@ -414,14 +391,20 @@ async def load_handover(
     ).first() is not None
     if has_member_links:
         rows += [
-            (link, contact_wire_id("member", link.user_id), name, phone)
-            for link, name, phone in await _member_links(db, agent_ids)
+            (link, contact_wire_id("member", link.user_id), name, phone, email)
+            for link, name, phone, email in await _member_links(db, agent_ids)
         ]
     rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
-    for link, wire, name, phone in rows:
+    for link, wire, name, phone, email in rows:
         out.setdefault(link.agent_id, []).append(
-            {"contact_id": wire, "name": name, "phone_e164": phone, "note": link.note}
+            {
+                "contact_id": wire,
+                "name": name,
+                "phone_e164": phone,
+                "email": email,
+                "note": link.note,
+            }
         )
     return out
 

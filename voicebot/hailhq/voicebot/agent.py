@@ -36,6 +36,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
@@ -457,6 +458,10 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
 
 # How long the handover contact's phone rings before the dial gives up.
 HANDOVER_RING_SECONDS = 30
+# A contact leg that hangs up this soon after its first sound was a carrier
+# message or a phone menu, not a person: the agent takes the caller back.
+# The handover counts as answered only after it.
+HANDOVER_SETTLE_SECONDS = 10.0
 # How long nobody on the contact's side may stay silent after pickup before
 # the agent takes the caller back. A person speaks well within it (the
 # slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
@@ -468,9 +473,15 @@ _SIP_BUSY = frozenset({486, 600, 603})
 _SIP_NO_ANSWER = frozenset({408, 480, 487})
 
 
-def human_identity(call_id: UUID) -> str:
-    """Room identity of the handover contact's SIP leg."""
-    return f"human-{call_id}"
+def human_identity(call_id: UUID, attempt: int = 1) -> str:
+    """Room identity of the handover contact's SIP leg: one per dial, so a
+    cancelled leg that rings on is never taken for a later dial's."""
+    return f"human-{call_id}-{attempt}"
+
+
+def is_handover_leg(identity: str, call_id: UUID) -> bool:
+    """True for any handover dial's leg on this call."""
+    return identity.startswith(f"human-{call_id}-")
 
 
 async def _remove_handover_leg(ctx: JobContext, identity: str, call_id: UUID) -> bool:
@@ -571,13 +582,8 @@ def make_agent_bridge(
             # identity is fixed, so a second dial would collide with the first.
             logger.info("call_id=%s handover already in progress", call_id)
             return BridgeOutcome("failed", None, 0)
-        late = bridge_state.get("late_leg_task")
-        if late is not None and not late.done():
-            # A cancelled leg may still ring on and pick up under the same
-            # identity: a new dial would take it for its own contact.
-            logger.info("call_id=%s cancelled leg still watched", call_id)
-            return BridgeOutcome("failed", None, 0)
-        identity = human_identity(call_id)
+        bridge_state["attempt"] = bridge_state.get("attempt", 0) + 1
+        identity = human_identity(call_id, bridge_state["attempt"])
         bridge_state["human"] = identity
         bridge_state.pop("cancelled", None)
         started = time.monotonic()
@@ -585,12 +591,15 @@ def make_agent_bridge(
         def _ring_ms() -> int:
             return int((time.monotonic() - started) * 1000)
 
-        def _gone(outcome: str, code: int | None = None) -> BridgeOutcome:
+        def _gone(
+            outcome: str, code: int | None = None, *, stuck: bool = False
+        ) -> BridgeOutcome:
             bridge_state["human"] = None
+            bridge_state.pop("picked_up", None)
             # A dial that ends after the caller asked to stop ended because
-            # of it, except a leg that could not be dropped: that stays
-            # "failed" so the event shows it.
-            if bridge_state.pop("cancelled", False) and outcome != "failed":
+            # of it, whatever the error, except a leg that could not be
+            # dropped: that stays "failed" so the event shows it.
+            if bridge_state.pop("cancelled", False) and not stuck:
                 outcome = "cancelled"
             return BridgeOutcome(outcome, code, _ring_ms())  # type: ignore[arg-type]
 
@@ -637,19 +646,24 @@ def make_agent_bridge(
         ring_ms = _ring_ms()
         # Picked up: the two people hear each other now. The agent stops
         # listening and speaking; every outcome short of connected undoes it.
+        bridge_state["picked_up"] = True
         session.input.set_audio_enabled(False)
         session.output.set_audio_enabled(False)
 
+        def _unmute() -> None:
+            session.input.set_audio_enabled(True)
+            session.output.set_audio_enabled(True)
+
         async def _give_back(outcome: str) -> BridgeOutcome:
-            if not await _remove_handover_leg(ctx, identity, call_id):
+            stuck = not await _remove_handover_leg(ctx, identity, call_id)
+            if stuck:
                 # The leg would stay on the call: end it instead.
                 bridge_state["ending"] = True
                 await _drop_room(ctx, call_id)
                 ctx.shutdown(reason="handover_leg_stuck")
                 outcome = "failed"
-            session.input.set_audio_enabled(True)
-            session.output.set_audio_enabled(True)
-            return _gone(outcome)
+            _unmute()
+            return _gone(outcome, stuck=stuck)
 
         if bridge_state.get("cancelled"):
             # The caller asked to stop just as the phone picked up.
@@ -665,13 +679,30 @@ def make_agent_bridge(
             # The contact hung up before speaking; the disconnect handler
             # ignores a leg that never connected.
             logger.info("call_id=%s handover contact left before connecting", call_id)
-            session.input.set_audio_enabled(True)
-            session.output.set_audio_enabled(True)
+            _unmute()
             return _gone("no_answer")
         if not spoke:
             logger.info("call_id=%s handover contact line silent, dropping", call_id)
             return await _give_back("no_answer")
+        # Connected, but a leg that hangs up within HANDOVER_SETTLE_SECONDS
+        # was a recording: the disconnect handler leaves it to this handle.
         bridge_state["connected"] = True
+        bridge_state["settling"] = True
+        try:
+            loop = asyncio.get_running_loop()
+            until = loop.time() + HANDOVER_SETTLE_SECONDS
+            while loop.time() < until and identity in ctx.room.remote_participants:
+                await asyncio.sleep(0.25)
+        finally:
+            bridge_state.pop("settling", None)
+        if bridge_state.get("ending"):
+            # The caller hung up meanwhile; the call is ending.
+            return BridgeOutcome("no_answer", None, ring_ms)
+        if identity not in ctx.room.remote_participants:
+            logger.info("call_id=%s handover leg hung up at once", call_id)
+            bridge_state["connected"] = False
+            _unmute()
+            return _gone("no_answer")
         logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
         # The contact answered: max_duration_seconds no longer applies. The
         # handover limit counts from now. A cap that already fired
@@ -728,25 +759,35 @@ def make_bridge_cancel(
     pending dial request is cancelled too, and the bridge reports
     ``cancelled``. A pickup that races the cancel is dropped by the bridge.
     When the ringing leg cannot be removed (not in the room yet, or the API
-    failed twice), it is removed if it joins later, so a contact who picks
-    up after the cancel never lands in the call unnoticed.
+    failed twice), it is removed when it joins, so a contact who picks up
+    after the cancel never lands in the call unnoticed. Each dial has its
+    own identity, so a new dial may start meanwhile.
     """
 
-    async def _drop_late_leg(identity: str) -> None:
-        # No new dial starts while this runs (the bridge refuses), so any
-        # leg under this identity is the cancelled one.
-        loop = asyncio.get_running_loop()
-        until = loop.time() + LATE_LEG_WATCH_SECONDS
-        while loop.time() < until:
-            if identity in ctx.room.remote_participants:
-                logger.info("call_id=%s dropping a leg that rang on", call_id)
-                if not await _remove_handover_leg(ctx, identity, call_id):
-                    # The contact would hear the caller: end the call.
-                    bridge_state["ending"] = True
-                    await _drop_room(ctx, call_id)
-                    ctx.shutdown(reason="handover_leg_stuck")
-                return
-            await asyncio.sleep(0.5)
+    async def _drop(identity: str) -> None:
+        logger.info("call_id=%s dropping a leg that rang on", call_id)
+        if not await _remove_handover_leg(ctx, identity, call_id):
+            # The contact would hear the caller: end the call.
+            bridge_state["ending"] = True
+            await _drop_room(ctx, call_id)
+            ctx.shutdown(reason="handover_leg_stuck")
+
+    async def _drop_when_it_joins(identity: str) -> None:
+        joined = asyncio.Event()
+
+        def _on_join(participant: rtc.RemoteParticipant) -> None:
+            if participant.identity == identity:
+                joined.set()
+
+        ctx.room.on("participant_connected", _on_join)
+        try:
+            if identity not in ctx.room.remote_participants:
+                await asyncio.wait_for(joined.wait(), LATE_LEG_WATCH_SECONDS)
+            await _drop(identity)
+        except TimeoutError:
+            pass
+        finally:
+            ctx.room.off("participant_connected", _on_join)
 
     async def _cancel() -> bool:
         identity = bridge_state.get("human")
@@ -767,9 +808,10 @@ def make_bridge_cancel(
                 logger.info("call_id=%s could not remove the ringing leg", call_id)
         dial.cancel()
         if not removed:
-            bridge_state["late_leg_task"] = asyncio.create_task(
-                _drop_late_leg(identity)
-            )
+            task = asyncio.create_task(_drop_when_it_joins(identity))
+            late = bridge_state.setdefault("late_leg_tasks", set())
+            late.add(task)
+            task.add_done_callback(late.discard)
         return True
 
     return _cancel
@@ -1293,10 +1335,12 @@ def handle_sip_disconnect(
     normal hangup deletes the room and shuts down at once.
 
     With a handover there are two SIP legs. The contact's leg is identified
-    only by ``human-{call_id}`` (an inbound caller's identity is assigned by
-    LiveKit, so everything else SIP is the caller):
+    only by ``human-{call_id}-{attempt}`` (an inbound caller's identity is
+    assigned by LiveKit, so everything else SIP is the caller):
 
-    * contact leaves while ringing → nothing; the bridge handle reports it.
+    * contact leaves while ringing, or within the settle window after
+      connecting, or an earlier dial's leg leaves → nothing; the bridge
+      handle reports it.
     * contact hangs up after connecting → normal hangup; end the call.
     * caller leaves → today's mapping, then delete the room so the contact's
       leg (ringing or connected) is dropped too, then shut down.
@@ -1312,8 +1356,14 @@ def handle_sip_disconnect(
     # Match the contact's leg by its fixed identity, not by
     # bridge_state["human"]: the handle clears that on a failed dial, and
     # the leg's own disconnect can arrive after it.
-    if participant.identity == human_identity(call_id):
-        if not bridge_state.get("connected"):
+    if is_handover_leg(participant.identity, call_id):
+        if (
+            participant.identity != bridge_state.get("human")
+            or not bridge_state.get("connected")
+            or bridge_state.get("settling")
+        ):
+            # A cancelled or earlier leg, one that never connected, or one
+            # the bridge is still settling: the bridge handle reports it.
             return
         logger.info("call_id=%s handover contact hung up, ending call", call_id)
         if captured["end_reason"] is None:
@@ -2524,7 +2574,9 @@ async def _run_call(
         can_recover=lambda: (
             not shutting_down
             and captured["end_reason"] is None
-            and not bridge_state.get("human")
+            # While it rings the agent still talks with the caller; once the
+            # phone picks up the agent is muted.
+            and not bridge_state.get("picked_up")
             and not bridge_state.get("connected")
         ),
         call_id=call_id,
@@ -2554,6 +2606,11 @@ async def _run_call(
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
             await finish_answer_post(bridge_state, call_id)
+            # The background handover dial, result and notice posts use
+            # agent_api: give them a moment before it closes.
+            await transfer_call.finish_pending(ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+            for task in list(bridge_state.get("late_leg_tasks", ())):
+                task.cancel()
             if text_watch_task is not None and not text_watch_task.done():
                 text_watch_task.cancel()
                 await asyncio.gather(text_watch_task, return_exceptions=True)

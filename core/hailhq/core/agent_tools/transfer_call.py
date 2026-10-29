@@ -72,6 +72,7 @@ SPEC = ToolSpec(
     risk_tier="session_control",
     is_available=_always,
     execute=_unbound,
+    uninterruptible=True,
 )
 
 
@@ -84,6 +85,13 @@ def _hold(task: asyncio.Task) -> asyncio.Task:
     _pending.add(task)
     task.add_done_callback(_pending.discard)
     return task
+
+
+async def finish_pending(timeout: float) -> None:
+    """At job shutdown, give the background dial, result and notice posts up
+    to ``timeout`` seconds before the API client closes."""
+    if _pending:
+        await asyncio.wait(set(_pending), timeout=timeout)
 
 
 async def _notify_contact(ctx: ToolContext, channel: str, body: dict[str, Any]) -> str:
@@ -334,4 +342,4 @@ CANCEL_SPEC = ToolSpec(
     waits_for_speech=False,
 )
 
-__all__ = ["CANCEL_SPEC", "MAX_REASON_CHARS", "SPEC", "bind"]
+__all__ = ["CANCEL_SPEC", "MAX_REASON_CHARS", "SPEC", "bind", "finish_pending"]

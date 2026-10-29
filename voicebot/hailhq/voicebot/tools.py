@@ -72,6 +72,10 @@ class SpeechTracker:
 def _make_handler(spec: ToolSpec, tctx: ToolContext):
     async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
+            if spec.uninterruptible:
+                # "Okay, thanks" over "I'm connecting you" must not cancel
+                # the transfer before it dials.
+                context.disallow_interruptions()
             # session_control tools (end_call) must not cut off the agent's
             # own goodbye: wait for the pre-tool speech to finish playing.
             # Someone who starts talking during the goodbye is not done: keep
