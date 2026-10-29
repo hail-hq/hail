@@ -161,12 +161,12 @@ async def test_add_suppression_normalizes_email_case(async_session):
 
 @pytest.mark.parametrize("org_id", [uuid.uuid4(), None], ids=["org", "platform"])
 async def test_add_suppression_twice_keeps_one_row(async_session, org_id):
-    kwargs = dict(
-        organization_id=org_id,
-        recipient=f"dup-{uuid.uuid4().hex[:8]}@example.com",
-        channel="email",
-        source="unsubscribe_link",
-    )
+    kwargs = {
+        "organization_id": org_id,
+        "recipient": f"dup-{uuid.uuid4().hex[:8]}@example.com",
+        "channel": "email",
+        "source": "unsubscribe_link",
+    }
     assert await add_suppression(async_session, reason="first", **kwargs) is True
     await async_session.commit()
     assert await add_suppression(async_session, reason="second", **kwargs) is False
