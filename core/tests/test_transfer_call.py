@@ -11,22 +11,25 @@ META = {"handover_targets": [{"contact_id": CID, "label": "Sam", "note": "Billin
 
 RESULT_PATH = "/internal/agent/handover-result"
 SMS_PATH = "/internal/agent/handover-sms"
+EMAIL_PATH = "/internal/agent/handover-email"
 
 
-def _post_by_path(route_reply, result_replies=None, sms_reply=None):
-    """``api.post`` by path: the route reply, the text reply, then
+def _post_by_path(route_reply, result_replies=None, sms_reply=None, email_reply=None):
+    """``api.post`` by path: the route reply, the text and email replies, then
     ``result_replies`` in order for the result posts (then ``{"ok": True}``)."""
     results = list(result_replies or [])
 
     async def post(path, body):
         if path == "/internal/agent/handover":
             return route_reply
-        reply = sms_reply if path == SMS_PATH else None
+        reply = {SMS_PATH: sms_reply, EMAIL_PATH: email_reply}.get(path)
         if path == RESULT_PATH:
             reply = results.pop(0) if results else None
         if isinstance(reply, Exception):
             raise reply
-        return reply if reply is not None else {"ok": True, "sms": "sent"}
+        return (
+            reply if reply is not None else {"ok": True, "sms": "sent", "email": "sent"}
+        )
 
     return post
 
@@ -86,7 +89,7 @@ async def test_answered() -> None:
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "an invoice"})
     assert said is None  # no reply turn: the two people are talking
     route = bridge.await_args.args[0]
-    assert route.to_e164 == "+14155550120" and route.reason == "an invoice"
+    assert route.to_e164 == "+14155550120" and route.name == "Sam"
     assert api.post.await_args_list[0].args == (
         "/internal/agent/handover",
         {"call_id": str(ctx.call_id), "contact_id": CID},
@@ -114,16 +117,6 @@ async def test_person_on_the_call_is_listed_but_never_dialed() -> None:
     assert await spec.execute(ctx, {"contact": "Sam", "reason": "x"}) == line
     api.post.assert_not_awaited()
     bridge.assert_not_awaited()
-
-
-async def test_no_answer_posts_the_pickup_verdict() -> None:
-    """A voicemail the check caught: the verdict reaches the result post."""
-    spec = transfer_call.bind(META)
-    ctx, api, _ = _ctx(ROUTE, BridgeOutcome("no_answer", None, 24000, "machine-vm"))
-    await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
-    result = _posted(api, RESULT_PATH)[0]
-    assert result["outcome"] == "no_answer"
-    assert result["picked_up_by"] == "machine-vm"
 
 
 async def test_no_answer_comes_back() -> None:
@@ -187,13 +180,6 @@ def test_bind_ignores_malformed_targets() -> None:
     assert spec.parameters["properties"]["contact"]["enum"] == ["Sam"]
 
 
-async def test_reason_whitespace_collapsed() -> None:
-    spec = transfer_call.bind(META)
-    ctx, _, bridge = _ctx(ROUTE, BridgeOutcome("answered", None, 1))
-    await spec.execute(ctx, {"contact": "Sam", "reason": " an \n  invoice "})
-    assert bridge.await_args.args[0].reason == "an invoice"
-
-
 def test_bind_wiring() -> None:
     assert transfer_call.SPEC.bind is transfer_call.bind
     assert transfer_call.bind(META).bind is None
@@ -201,12 +187,12 @@ def test_bind_wiring() -> None:
 
 def _answering_bridge(order: list[str], ring_ms: int = 9000):
     """A bridge that reports the answer through ``on_answered`` and then
-    plays the intro, like the voicebot's."""
+    mutes the agent, like the voicebot's."""
 
     async def bridge(route):
-        await route.on_answered(ring_ms, "human")
-        order.append("intro")
-        return BridgeOutcome("answered", None, ring_ms, "human")
+        await route.on_answered(ring_ms)
+        order.append("muted")
+        return BridgeOutcome("answered", None, ring_ms)
 
     return bridge
 
@@ -217,8 +203,8 @@ async def test_answered_posted_once_before_the_bridge_returns() -> None:
     ctx, api, _ = _ctx(ROUTE)
 
     async def post(path, body):
-        if path == SMS_PATH:
-            return {"sms": "sent"}
+        if path in (SMS_PATH, EMAIL_PATH):
+            return {"sms": "sent", "email": "sent"}
         order.append(body.get("outcome") or "route")
         return ROUTE if path.endswith("/handover") else {"ok": True}
 
@@ -226,10 +212,10 @@ async def test_answered_posted_once_before_the_bridge_returns() -> None:
     ctx.bridge = _answering_bridge(order)
     said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     assert said is None
-    assert order == ["route", "answered", "intro"]
+    assert order == ["route", "answered", "muted"]
     result = _posted(api, RESULT_PATH)[0]
     assert result["ring_ms"] == 9000 and result["contact_id"] == CID
-    assert result["picked_up_by"] == "human"
+    assert "picked_up_by" not in result
 
 
 async def test_answered_post_retries(monkeypatch) -> None:
@@ -273,14 +259,30 @@ async def test_texts_the_contact_while_dialing() -> None:
     ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 30000))
     await spec.execute(ctx, {"contact": "Sam", "reason": " a  leak "})
     [text] = _posted(api, SMS_PATH)
+    [mail] = _posted(api, EMAIL_PATH)
     [result] = _posted(api, RESULT_PATH)
-    assert text == {
-        "tool_invocation_id": result["tool_invocation_id"],
-        "call_id": str(ctx.call_id),
-        "contact_id": CID,
-        "reason": "a leak",
-    }
-    assert result["sms"] == "sent"
+    assert (
+        text
+        == mail
+        == {
+            "tool_invocation_id": result["tool_invocation_id"],
+            "call_id": str(ctx.call_id),
+            "contact_id": CID,
+            "reason": "a leak",
+        }
+    )
+    assert result["sms"] == "sent" and result["email"] == "sent"
+
+
+async def test_email_failure_never_stops_the_dial() -> None:
+    spec = transfer_call.bind(META)
+    ctx, api, _ = _ctx(ROUTE)
+    api.post.side_effect = _post_by_path(ROUTE, email_reply=RuntimeError("api down"))
+    ctx.bridge = _slow_bridge(BridgeOutcome("no_answer", 480, 30000))
+    said = await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
+    assert "could not pick up" in said
+    result = _posted(api, RESULT_PATH)[0]
+    assert result["email"] == "failed" and result["sms"] == "sent"
 
 
 async def test_blocked_text_is_recorded_and_the_dial_goes_on() -> None:
@@ -311,6 +313,7 @@ async def test_text_still_running_is_pending_and_finishes() -> None:
     assert _posted(api, RESULT_PATH)[0]["sms"] == "pending"
     await _texts_done()
     assert len(_posted(api, SMS_PATH)) == 1 and not transfer_call._texting
+    assert len(_posted(api, EMAIL_PATH)) == 1
 
 
 async def test_no_text_when_the_api_refuses_the_handover() -> None:
@@ -318,7 +321,7 @@ async def test_no_text_when_the_api_refuses_the_handover() -> None:
     ctx, api, _ = _ctx({"ok": False, "spoken": "no"})
     await spec.execute(ctx, {"contact": "Sam", "reason": "x"})
     await _texts_done()
-    assert _posted(api, SMS_PATH) == []
+    assert _posted(api, SMS_PATH) == [] and _posted(api, EMAIL_PATH) == []
 
 
 async def test_cancelled_text_is_reported_failed() -> None:

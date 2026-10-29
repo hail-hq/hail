@@ -5,8 +5,8 @@ sees names and notes (dispatch metadata ``handover_targets``); the API
 resolves and re-checks the number (``/internal/agent/handover``), the
 voicebot's ``bridge`` handle dials it into the room, and the API records
 the outcome (``/internal/agent/handover-result``). While it dials, the API
-texts the person the caller's number and the reason
-(``/internal/agent/handover-sms``).
+texts and emails the person the caller's number and the reason
+(``/internal/agent/handover-sms``, ``/internal/agent/handover-email``).
 """
 
 from __future__ import annotations
@@ -60,19 +60,20 @@ SPEC = ToolSpec(
 )
 
 
-# Text tasks still running when the tool returns: held so they are not
-# garbage collected before the text is sent.
+# Text and email tasks still running when the tool returns: held so they are
+# not garbage collected before the message is sent.
 _texting: set[asyncio.Task] = set()
 
 
-async def _text_contact(ctx: ToolContext, body: dict[str, Any]) -> str:
-    """Ask the API to text the contact; what became of it, never raises."""
+async def _notify_contact(ctx: ToolContext, channel: str, body: dict[str, Any]) -> str:
+    """Ask the API to text (``sms``) or email (``email``) the contact; what
+    became of it, never raises."""
     try:
-        reply = await ctx.api.post("/internal/agent/handover-sms", body)
+        reply = await ctx.api.post(f"/internal/agent/handover-{channel}", body)
     except Exception:
-        _log.exception("handover text post failed")
+        _log.exception("handover %s post failed", channel)
         return "failed"
-    return str(reply.get("sms") or "failed")
+    return str(reply.get(channel) or "failed")
 
 
 def _sms_state(task: asyncio.Task[str]) -> str:
@@ -131,13 +132,9 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         invocation_id = str(uuid.uuid4())
 
         sms: asyncio.Task[str] | None = None
+        email: asyncio.Task[str] | None = None
 
-        def _result(
-            outcome: str,
-            sip_status: int | None,
-            ring_ms: int,
-            picked_up_by: str | None = None,
-        ) -> dict:
+        def _result(outcome: str, sip_status: int | None, ring_ms: int) -> dict:
             return {
                 "tool_invocation_id": invocation_id,
                 "call_id": str(ctx.call_id),
@@ -145,19 +142,19 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                 "outcome": outcome,
                 "sip_status": sip_status,
                 "ring_ms": ring_ms,
-                "picked_up_by": picked_up_by,
                 "sms": _sms_state(sms) if sms is not None else None,
+                "email": _sms_state(email) if email is not None else None,
             }
 
         answer_reported = False
 
-        def on_answered(ring_ms: int, picked_up_by: str | None) -> Awaitable[None]:
-            # Called once the contact replied after the intro; the bridge
-            # runs the returned post in the background. The flag is
-            # set here, synchronously, so the result is never posted twice.
+        def on_answered(ring_ms: int) -> Awaitable[None]:
+            # Called once the contact picks up; the bridge runs the returned
+            # post in the background. The flag is set here, synchronously,
+            # so the result is never posted twice.
             nonlocal answer_reported
             answer_reported = True
-            return _post_answered(ctx, _result("answered", None, ring_ms, picked_up_by))
+            return _post_answered(ctx, _result("answered", None, ring_ms))
 
         route = await ctx.api.post(
             "/internal/agent/handover",
@@ -165,19 +162,17 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         )
         if not route.get("ok"):
             return str(route.get("spoken") or SPOKEN_FALLBACK)
-        sms = asyncio.create_task(
-            _text_contact(
-                ctx,
-                {
-                    "tool_invocation_id": invocation_id,
-                    "call_id": str(ctx.call_id),
-                    "contact_id": contact_id,
-                    "reason": reason,
-                },
-            )
-        )
-        _texting.add(sms)
-        sms.add_done_callback(_texting.discard)
+        notice = {
+            "tool_invocation_id": invocation_id,
+            "call_id": str(ctx.call_id),
+            "contact_id": contact_id,
+            "reason": reason,
+        }
+        sms = asyncio.create_task(_notify_contact(ctx, "sms", notice))
+        email = asyncio.create_task(_notify_contact(ctx, "email", notice))
+        for task in (sms, email):
+            _texting.add(task)
+            task.add_done_callback(_texting.discard)
         try:
             outcome = await ctx.bridge(
                 BridgeRoute(
@@ -186,7 +181,6 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                     trunk_id=route["trunk_id"],
                     headers=route.get("headers"),
                     name=label,
-                    reason=reason,
                     on_answered=on_answered,
                 )
             )
@@ -200,12 +194,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
         try:
             await ctx.api.post(
                 "/internal/agent/handover-result",
-                _result(
-                    outcome.outcome,
-                    outcome.sip_status,
-                    outcome.ring_ms,
-                    outcome.picked_up_by,
-                ),
+                _result(outcome.outcome, outcome.sip_status, outcome.ring_ms),
             )
         except Exception:
             _log.exception("handover result post failed")
@@ -226,8 +215,8 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                     "type": "string",
                     "description": (
                         "What the caller needs, as a short phrase the person "
-                        "hears, e.g. 'an invoice question'. Leave it out when "
-                        "the caller only asked for a person."
+                        "reads in a text and email, e.g. 'an invoice question'. "
+                        "Leave it out when the caller only asked for a person."
                     ),
                 },
             },

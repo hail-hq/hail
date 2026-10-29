@@ -72,8 +72,8 @@ def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -
     """The text a handover contact gets while the agent dials them: who is
     calling, the caller's number to call back, and the reason. The reason is
     LLM-written and a caller can steer it, so it is attributed ("Reason
-    given: ...") as in the spoken intro, kept short, and links, emails and
-    phone numbers are removed."""
+    given: ..."), kept short, and links, emails and phone numbers are
+    removed. The email to the contact uses the same words."""
     who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
     text = f"{agent_name} (AI agent) is calling you now to connect {who}."
     said = " ".join(_strip_links(reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
@@ -348,6 +348,36 @@ async def _member_links(
     except ProgrammingError as exc:
         _reraise_unless_no_member_tables(exc)
         return []
+
+
+async def handover_email(db: AsyncSession, org_id: UUID, wire_id: str) -> str | None:
+    """The email of the handover person behind ``wire_id`` in ``org_id``: a
+    contact's email, or a member's login email. None when there is none."""
+    kind, value = parse_contact_id(wire_id)
+    if kind != "member":
+        return (
+            await db.execute(
+                select(Contact.email).where(
+                    Contact.id == value, Contact.organization_id == org_id
+                )
+            )
+        ).scalar_one_or_none()
+    try:
+        async with db.begin_nested():
+            return (
+                await db.execute(
+                    select(User.email).where(
+                        User.id == value,
+                        exists().where(
+                            OrganizationMember.user_id == User.id,
+                            OrganizationMember.organization_id == org_id,
+                        ),
+                    )
+                )
+            ).scalar_one_or_none()
+    except ProgrammingError as exc:
+        _reraise_unless_no_member_tables(exc)
+        return None
 
 
 async def load_handover(

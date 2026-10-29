@@ -57,6 +57,7 @@ from hailhq.core.handover import (
     ON_CALL_LINE,
     HandoverPerson,
     country_of,
+    handover_email,
     handover_sms_text,
     has_answered_handover,
     load_handover,
@@ -742,10 +743,14 @@ class AgentHandoverResultRequest(BaseModel):
     outcome: Literal["answered", "no_answer", "busy", "failed"]
     sip_status: int | None = None
     ring_ms: int = Field(ge=0)
-    # The voicebot's pickup check verdict (handover_screen), for debugging.
+    # Sent by voicebots from before the plain forward (their pickup check's
+    # verdict). Accepted so a rolling deploy never refuses their result;
+    # not stored.
     picked_up_by: str | None = Field(default=None, max_length=32)
     # What became of the text to the contact (``/handover-sms``'s ``sms``).
     sms: str | None = Field(default=None, max_length=48)
+    # What became of the email to the contact (``/handover-email``).
+    email: str | None = Field(default=None, max_length=48)
 
 
 class AgentHandoverSmsRequest(BaseModel):
@@ -759,6 +764,15 @@ class AgentHandoverSmsRequest(BaseModel):
 class AgentHandoverSmsResponse(BaseModel):
     # sent | failed | blocked:<why> | skipped:<why>
     sms: str
+
+
+class AgentHandoverEmailResponse(BaseModel):
+    # sent | failed | blocked:<why> | skipped:<why>
+    email: str
+
+
+# Subject of the email a handover contact gets while the agent dials them.
+HANDOVER_EMAIL_SUBJECT = "{agent} is calling you to connect a caller"
 
 
 async def _handover_result_recorded(
@@ -1014,6 +1028,131 @@ async def agent_handover_sms(
     return AgentHandoverSmsResponse(sms="sent")
 
 
+@router.post("/handover-email", response_model=AgentHandoverEmailResponse)
+async def agent_handover_email(
+    body: AgentHandoverSmsRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+    email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
+) -> AgentHandoverEmailResponse:
+    """Email the handover contact while the voicebot dials them, with the
+    same words as the text (``/handover-sms``). Never blocks the dial: the
+    voicebot posts this in parallel and records ``email`` on the handover
+    event."""
+    call = await _load_call_for_update(db, body.call_id)
+    await _tag_call(db, call)
+    if call is None:
+        return AgentHandoverEmailResponse(email="skipped:no_call")
+    org = call.organization_id
+    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
+    if prior is not None:
+        failed = prior.status in ("failed", "bounced")
+        return AgentHandoverEmailResponse(email="failed" if failed else "sent")
+    if call.status != "in_progress":
+        return AgentHandoverEmailResponse(email="skipped:call_ended")
+    contact = await _linked_person(db, call, body.contact_id)
+    if contact is None:
+        return AgentHandoverEmailResponse(email="skipped:no_contact")
+    to = await handover_email(db, org, body.contact_id)
+    if not to:
+        return AgentHandoverEmailResponse(email="skipped:no_email")
+    if await has_answered_handover(db, call.id):
+        return AgentHandoverEmailResponse(email="skipped:already_connected")
+    # One email per contact per call, as with the text.
+    emailed = (
+        await db.execute(
+            select(Email.id)
+            .where(
+                Email.organization_id == org,
+                Email.metadata_["call_id"].astext == str(call.id),
+                Email.metadata_["handover_contact_id"].astext == body.contact_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    if emailed is not None:
+        return AgentHandoverEmailResponse(email="skipped:already_emailed")
+
+    async def _blocked(reason: str, **extra: Any) -> AgentHandoverEmailResponse:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.email_blocked",
+            resource_type="call",
+            resource_id=call.id,
+            payload={"contact_id": body.contact_id, "reason": reason, **extra},
+            actor_kind="system",
+        )
+        return AgentHandoverEmailResponse(email=f"blocked:{reason}")
+
+    denial = await _shared_denial(db, call)
+    if denial is not None:
+        return await _blocked(denial[1])
+    gate = await check_email_allowed(db, org, [to])
+    if not gate.allowed:
+        return await _blocked("compliance", detail=gate.reason, checks=gate.checks)
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(to)]
+    )
+    if cap_denial is not None:
+        return await _blocked("agent_caps", detail=cap_denial.reason)
+    try:
+        # As in /send-email: a voice agent cannot pick a sending domain.
+        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+    except HTTPException:
+        return AgentHandoverEmailResponse(email="skipped:no_sender")
+
+    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
+    agent_name = agent.name if agent else "Your agent"
+    caller = _other_party(call)
+    email = Email(
+        organization_id=org,
+        email_domain_id=sd.id,
+        from_address=from_address_for(sd, None),
+        to_addresses=[to],
+        subject=HANDOVER_EMAIL_SUBJECT.format(agent=agent_name),
+        body_text=handover_sms_text(
+            agent_name, caller if is_e164(caller) else None, body.reason
+        ),
+        status="queued",
+        provider="ses",
+        metadata_={
+            "call_id": str(call.id),
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "handover_contact_id": body.contact_id,
+        },
+    )
+    db.add(email)
+    await db.commit()
+    await db.refresh(email)
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.handover.email",
+        resource_type="email",
+        resource_id=email.id,
+        payload={
+            "call_id": str(call.id),
+            "contact_id": body.contact_id,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+    err = await deliver_email(db, email_provider, email)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.handover.email_failed",
+            resource_type="email",
+            resource_id=email.id,
+            payload={"call_id": str(call.id), "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentHandoverEmailResponse(email="failed")
+    return AgentHandoverEmailResponse(email="sent")
+
+
 @router.post("/handover-result")
 async def agent_handover_result(
     body: AgentHandoverResultRequest,
@@ -1044,8 +1183,8 @@ async def agent_handover_result(
                 "outcome": body.outcome,
                 "sip_status": body.sip_status,
                 "ring_ms": body.ring_ms,
-                "picked_up_by": body.picked_up_by,
                 "sms": body.sms,
+                "email": body.email,
             },
         )
     )

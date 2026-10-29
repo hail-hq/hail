@@ -69,29 +69,26 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - The contact sees your Hail number as caller ID.
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message.
-- While the phone rings, the contact gets a text from your Hail number with
-  the caller's number and the reason (links, emails and phone numbers
-  removed), once per call. A text from a US number to a US number
+- While the phone rings, the contact gets a text from your Hail number and
+  an email with the caller's number and the reason (links, emails and phone
+  numbers removed), once per call. A text from a US number to a US number
   needs an approved US SMS registration; without one the call still rings,
-  with no text.
-- The agent stops listening when it dials. When the phone picks up, it
-  listens to the contact. If voicemail, a phone menu or a carrier message
-  answers, it hangs up that line and comes back the same way. If the
-  contact speaks, the two people talk; the agent says nothing. Code: [`handover_screen.py`](../../voicebot/hailhq/voicebot/handover_screen.py).
-- If nobody speaks within 5 seconds, the agent says who is calling and why.
-  If the contact says nothing during that intro or within 8 seconds after
-  it, or a voicemail greeting starts, the agent hangs up their line and
-  comes back to the caller. Once connected, if either side hangs up, the
-  call ends.
+  with no text. The email needs a verified email domain and an email on the
+  contact (a team member's login email); without one, no email.
+- A plain forward: when the phone picks up, the two people are connected
+  and the agent stays silent. It says nothing to the contact. If voicemail
+  answers, the caller hears it and can leave a message. Once connected, if
+  either side hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
   can hang up sooner.
-- Billed as one call at the normal voice rate. The text to the contact is
-  billed as a normal SMS and counts toward the agent's 5 sends per call.
-- Sends a [`call.transferred`](webhooks.md) webhook when the contact answers
-  and speaks.
+- Billed as one call at the normal voice rate. The text and the email to the
+  contact are billed as a normal SMS and email, and each counts toward the
+  agent's 5 sends per call.
+- Sends a [`call.transferred`](webhooks.md) webhook when the contact's phone
+  picks up.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call
