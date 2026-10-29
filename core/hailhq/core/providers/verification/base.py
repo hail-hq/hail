@@ -445,10 +445,21 @@ class SmsRegistrationProvider(VerificationProvider):
         follow the campaign description."""
         return ()
 
+    def campaign_filed(self, refs: dict | None) -> bool:
+        """True when the refs hold a filed campaign: a non-empty string
+        under ``campaign_ref``, or ``campaign_filed_at`` (which the API
+        writes). The billing service reads the same rule."""
+        refs = refs or {}
+        return any(
+            isinstance(refs.get(k), str) and refs[k] != ""
+            for k in (self.campaign_ref, "campaign_filed_at")
+            if k
+        )
+
     def in_review(self, refs: dict) -> bool:
         """True while the carriers review the filing: the campaign is filed
-        (``campaign_ref``). A plug-in can add other review steps."""
-        return bool(self.campaign_ref and refs.get(self.campaign_ref))
+        (``campaign_filed``). A plug-in can add other review steps."""
+        return self.campaign_filed(refs)
 
     def step(self, refs: dict) -> str | None:
         """Where a filing still in progress is: 'confirm_identity' while the

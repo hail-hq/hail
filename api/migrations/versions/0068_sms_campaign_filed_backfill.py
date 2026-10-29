@@ -6,13 +6,16 @@
    already hold a campaign (``campaign_id`` or ``campaign_sid``, a non-empty
    string) and lack it, to ``submitted_at`` (else ``updated_at``).
 2. ``rejection_reason`` of ``purpose = 'sms'`` rows that hold Hail's old
-   brand or campaign wording ("The carrier rejected ...") gets the new
-   wording, the same text new rejections get.
+   wording gets the new text, the same text new rejections get: the whole
+   brand or campaign reason ("The carrier rejected ..."), and the refusal
+   sentences inside a reason ("The carrier refused a detail. ...",
+   "The carrier did not accept this value.", also after "field: ").
 
 Tables checked (no new table, no new column): ``carrier_verifications``
 already holds both values.
 
-Idempotent: a row that has the key, or the new wording, is skipped.
+Idempotent: a row that has the key, or the new wording, is skipped. A key
+that is empty or not a string counts as missing, as the API reads it.
 Downgrade puts the old wording back. It keeps ``campaign_filed_at``: the
 key is harmless to older code, which never reads it.
 """
@@ -43,6 +46,10 @@ NEW_CAMPAIGN_REJECTED = (
     "The registration was rejected in review. Check the use case, "
     "description, sample messages and links, and start again."
 )
+OLD_REFUSED = "The carrier refused a detail. Check your entries and try again."
+NEW_REFUSED = "The 10DLC registry refused a detail. Check your entries and try again."
+OLD_VALUE_REFUSED = "The carrier did not accept this value."
+NEW_VALUE_REFUSED = "The 10DLC registry did not accept this value."
 _CAMPAIGN_KEYS = ("campaign_id", "campaign_sid")
 
 
@@ -63,6 +70,19 @@ def _reword(old: str, new: str) -> None:
     )
 
 
+def _replace(old: str, new: str) -> None:
+    """``old`` as a sentence inside a reason, which joins problems with
+    '; ' and may prefix a field name."""
+    op.get_bind().execute(
+        sa.text(
+            "UPDATE carrier_verifications "
+            "SET rejection_reason = replace(rejection_reason, :old, :new) "
+            "WHERE purpose = 'sms' AND strpos(rejection_reason, :old) > 0"
+        ),
+        {"old": old, "new": new},
+    )
+
+
 def upgrade() -> None:
     filed = " OR ".join(_filed(k) for k in _CAMPAIGN_KEYS)
     # A timestamptz in jsonb is an ISO 8601 string, as the API writes it.
@@ -71,12 +91,16 @@ def upgrade() -> None:
         "jsonb_build_object('campaign_filed_at', "
         "COALESCE(submitted_at, updated_at)) "
         f"WHERE purpose = 'sms' AND ({filed}) "
-        "AND provider_refs->'campaign_filed_at' IS NULL"
+        f"AND NOT COALESCE({_filed('campaign_filed_at')}, false)"
     )
     _reword(OLD_BRAND_REJECTED, NEW_BRAND_REJECTED)
     _reword(OLD_CAMPAIGN_REJECTED, NEW_CAMPAIGN_REJECTED)
+    _replace(OLD_REFUSED, NEW_REFUSED)
+    _replace(OLD_VALUE_REFUSED, NEW_VALUE_REFUSED)
 
 
 def downgrade() -> None:
     _reword(NEW_BRAND_REJECTED, OLD_BRAND_REJECTED)
     _reword(NEW_CAMPAIGN_REJECTED, OLD_CAMPAIGN_REJECTED)
+    _replace(NEW_REFUSED, OLD_REFUSED)
+    _replace(NEW_VALUE_REFUSED, OLD_VALUE_REFUSED)

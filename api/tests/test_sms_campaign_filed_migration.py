@@ -24,6 +24,8 @@ spec.loader.exec_module(migration)
 def test_new_wording_matches_the_code() -> None:
     assert migration.NEW_BRAND_REJECTED == base.BRAND_REJECTED
     assert migration.NEW_CAMPAIGN_REJECTED == base.CAMPAIGN_REJECTED
+    assert migration.NEW_REFUSED == base.SMS_REFUSED
+    assert migration.NEW_VALUE_REFUSED == base.SMS_VALUE_REFUSED
 
 
 async def _run(db, step) -> None:
@@ -64,6 +66,7 @@ async def test_upgrade_marks_filed_campaigns_and_rewords(
     stamped = _row(
         org, provider_refs={"campaign_id": "C2", "campaign_filed_at": "kept"}
     )
+    blank = _row(org, provider_refs={"campaign_id": "C3", "campaign_filed_at": ""})
     brand_only = _row(org, provider_refs={"brand_id": "B1"})
     empty_id = _row(org, provider_refs={"campaign_id": ""})
     number = _row(
@@ -76,8 +79,21 @@ async def test_upgrade_marks_filed_campaigns_and_rewords(
         org, state="rejected", rejection_reason=migration.OLD_CAMPAIGN_REJECTED
     )
     other_no = _row(org, state="rejected", rejection_reason="Superadmin text")
-    rows = [telnyx, twilio, stamped, brand_only, empty_id, number]
-    rows += [brand_no, campaign_no, other_no]
+    refused = _row(
+        org,
+        state="rejected",
+        rejection_reason=f"website: {migration.OLD_VALUE_REFUSED}; "
+        f"{migration.OLD_REFUSED}",
+    )
+    number_refused = _row(
+        org,
+        purpose="number",
+        provider="twilio",
+        state="rejected",
+        rejection_reason=migration.OLD_VALUE_REFUSED,
+    )
+    rows = [telnyx, twilio, stamped, blank, brand_only, empty_id, number]
+    rows += [brand_no, campaign_no, other_no, refused, number_refused]
     async_session.add_all(rows)
     await async_session.commit()
 
@@ -101,13 +117,22 @@ async def test_upgrade_marks_filed_campaigns_and_rewords(
     assert filed == at
     assert datetime.fromisoformat(got[twilio.id][0]["campaign_filed_at"])
     assert got[stamped.id][0]["campaign_filed_at"] == "kept"
+    assert datetime.fromisoformat(got[blank.id][0]["campaign_filed_at"])
     for row in (brand_only, empty_id, number):
         assert "campaign_filed_at" not in got[row.id][0]
     assert got[brand_no.id][1] == base.BRAND_REJECTED
     assert got[campaign_no.id][1] == base.CAMPAIGN_REJECTED
     assert got[other_no.id][1] == "Superadmin text"
+    assert got[refused.id][1] == (
+        f"website: {base.SMS_VALUE_REFUSED}; {base.SMS_REFUSED}"
+    )
+    # Number verification keeps its own wording.
+    assert got[number_refused.id][1] == migration.OLD_VALUE_REFUSED
 
     await _run(db, migration.downgrade)
     got = await read()
     assert got[brand_no.id][1] == migration.OLD_BRAND_REJECTED
     assert got[campaign_no.id][1] == migration.OLD_CAMPAIGN_REJECTED
+    assert got[refused.id][1] == (
+        f"website: {migration.OLD_VALUE_REFUSED}; {migration.OLD_REFUSED}"
+    )

@@ -491,18 +491,11 @@ async def _poll_and_apply(
 
 
 def _campaign_filed(provider: object, refs: dict | None) -> bool:
-    """True when the refs hold a filed US texting campaign: a non-empty
-    string under the plug-in's ``campaign_ref``, or ``campaign_filed_at``.
-    The billing service reads the same rule."""
-    refs = refs or {}
-    key = (
-        provider.campaign_ref if isinstance(provider, SmsRegistrationProvider) else None
-    )
-    return any(
-        isinstance(refs.get(k), str) and refs[k] != ""
-        for k in (key, "campaign_filed_at")
-        if k
-    )
+    """``SmsRegistrationProvider.campaign_filed``; False for any other
+    plug-in, or none."""
+    if not isinstance(provider, SmsRegistrationProvider):
+        return False
+    return provider.campaign_filed(refs)
 
 
 def _stamp_campaign_filed(provider: object, refs: dict) -> None:
@@ -515,13 +508,13 @@ def _stamp_campaign_filed(provider: object, refs: dict) -> None:
         refs["campaign_filed_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _keep_refs(row: CarrierVerification, provider: object, before: dict) -> None:
-    """After a plug-in call that may write into ``row.provider_refs`` in
-    place: stamp a filed campaign, and mark the column changed so the next
-    commit saves it (JSONB does not track in-place changes)."""
+def _keep_refs(row: CarrierVerification, provider: object) -> None:
+    """After plug-in calls that may write into ``row.provider_refs`` in
+    place (check, submit): stamp a filed campaign, and mark the column
+    changed so the next commit saves it (JSONB does not track in-place
+    changes)."""
     _stamp_campaign_filed(provider, row.provider_refs)
-    if row.provider_refs != before:
-        flag_modified(row, "provider_refs")
+    flag_modified(row, "provider_refs")
 
 
 def _notify_billing(rows: list[CarrierVerification]) -> None:
@@ -564,8 +557,7 @@ async def _rate_before_wipe(
     if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
         return
     # Saved with the stamp, so the rater reads a campaign filed just now.
-    _stamp_campaign_filed(provider, row.provider_refs)
-    flag_modified(row, "provider_refs")
+    _keep_refs(row, provider)
     await db.commit()
     await rate_sms_registration(str(row.id))
 
@@ -1305,12 +1297,13 @@ async def _submit_row(
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
     row.approved_by = approved_by
     await db.commit()
-    refs_before = copy.deepcopy(row.provider_refs)
     try:
         await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
-        # Kept even on a refusal: a campaign filed before it is billed.
-        _keep_refs(row, provider, refs_before)
+        # Saved before the refusal is handled: a failed discard rolls back,
+        # and the ids submit() wrote (a campaign is billed) must survive it.
+        _keep_refs(row, provider)
+        await db.commit()
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
@@ -1326,7 +1319,7 @@ async def _submit_row(
         return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
-        _keep_refs(row, provider, refs_before)
+        _keep_refs(row, provider)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
         row.approved_by = None
         await db.commit()
@@ -1334,7 +1327,7 @@ async def _submit_row(
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
-    _keep_refs(row, provider, refs_before)
+    _keep_refs(row, provider)
     await db.commit()
     _notify_if_changed(row, before)
     await write_audit_log(

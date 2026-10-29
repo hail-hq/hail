@@ -2242,6 +2242,30 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_billed_refusal_with_a_campaign_carries_the_marker(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    """A carrier that files and bills a campaign at create, then refuses:
+    the saved row says the campaign was filed, so its review is charged."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    sms_carrier.campaign_key = "campaign_xyz"
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "campaign_xyz": "C7"}
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    row = (
+        await async_session.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
+            )
+        )
+    ).scalar_one()
+    assert row.state == "rejected" and row.provider_refs["campaign_xyz"] == "C7"
+    assert row.provider_refs["campaign_filed_at"]
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_a_refusal_before_any_brand_keeps_nothing(
     client, org_and_key, sms_carrier, async_session
 ) -> None:
@@ -3634,10 +3658,10 @@ def test_campaign_filed_at_is_stamped_once_from_the_carrier_key() -> None:
     assert "campaign_filed_at" not in refs
     # Only a non-empty string is a campaign, as the billing service reads it.
     for value in (7, True, ""):
-        verifications_routes._stamp_campaign_filed(carrier, {"campaign_xyz": value})
-        assert not verifications_routes._campaign_filed(
-            carrier, {"campaign_xyz": value}
-        )
+        odd = {"campaign_xyz": value}
+        verifications_routes._stamp_campaign_filed(carrier, odd)
+        assert "campaign_filed_at" not in odd
+        assert not verifications_routes._campaign_filed(carrier, odd)
     refs["campaign_xyz"] = "C1"
     verifications_routes._stamp_campaign_filed(carrier, refs)
     first = refs["campaign_filed_at"]
