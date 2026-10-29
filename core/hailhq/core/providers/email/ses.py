@@ -16,6 +16,7 @@ import asyncio
 from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any
+from uuid import UUID
 
 import boto3
 from botocore.exceptions import ClientError
@@ -169,6 +170,22 @@ def _build_raw_mime(
     return msg.as_bytes()
 
 
+def _org_tags(organization_id: UUID) -> list[dict[str, str]]:
+    """Message tags naming the sending org.
+
+    ``org_id`` rides on every SES event for this message.
+    ``ses:feedback-id-a`` becomes the first part of the ``Feedback-ID``
+    header SES adds, so Gmail Postmaster Tools reports spam rate per org
+    (Gmail sends no complaints back to SES). Tag values allow letters,
+    digits, ``_`` and ``-``: a UUID's string form fits.
+    """
+    value = str(organization_id)
+    return [
+        {"Name": "org_id", "Value": value},
+        {"Name": "ses:feedback-id-a", "Value": value},
+    ]
+
+
 class SesEmailProvider(EmailProvider):
     """SESv2-backed adapter."""
 
@@ -189,6 +206,7 @@ class SesEmailProvider(EmailProvider):
         reply_to: str | None = None,
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
+        organization_id: UUID | None = None,
     ) -> ProviderSendResult:
         if not to_addresses:
             raise ValueError("send_email requires at least one recipient")
@@ -235,6 +253,8 @@ class SesEmailProvider(EmailProvider):
             }
             if settings.hail_ses_configuration_set:
                 kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
+            if organization_id is not None:
+                kwargs["EmailTags"] = _org_tags(organization_id)
             response = await asyncio.to_thread(self._client.send_email, **kwargs)
             return ProviderSendResult(provider_message_id=response["MessageId"])
 
@@ -254,6 +274,8 @@ class SesEmailProvider(EmailProvider):
             kwargs["ReplyToAddresses"] = [reply_to]
         if settings.hail_ses_configuration_set:
             kwargs["ConfigurationSetName"] = settings.hail_ses_configuration_set
+        if organization_id is not None:
+            kwargs["EmailTags"] = _org_tags(organization_id)
 
         response = await asyncio.to_thread(self._client.send_email, **kwargs)
         return ProviderSendResult(provider_message_id=response["MessageId"])

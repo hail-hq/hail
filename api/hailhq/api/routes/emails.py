@@ -356,6 +356,7 @@ async def deliver_email(
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             },
             attachments=provider_attachments or None,
+            organization_id=email.organization_id,
         )
     except Exception as exc:
         logger.warning(

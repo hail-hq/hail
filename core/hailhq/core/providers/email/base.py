@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -107,12 +108,15 @@ class EmailProvider(ABC):
         reply_to: str | None = None,
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
+        organization_id: UUID | None = None,
     ) -> ProviderSendResult:
         """Send one message. Implementations must raise on provider error.
 
         ``headers`` carries extra top-level headers (loop-prevention,
         Auto-Submitted, References). ``attachments`` force the raw-MIME
         path on providers whose simple-content API can't carry files.
+        ``organization_id`` labels the message in the provider's own
+        reporting, so bounce and complaint rates can be read per org.
         """
 
     @abstractmethod

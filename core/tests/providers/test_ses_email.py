@@ -9,6 +9,7 @@ break the same way real usage would.
 from __future__ import annotations
 
 import email as email_lib
+from uuid import UUID
 
 import boto3
 import pytest
@@ -721,3 +722,49 @@ async def test_delete_identity_happy_path(ses_client, stub: Stubber) -> None:
     provider = SesEmailProvider(client=ses_client)
     await provider.delete_identity("acme.com")
     stub.assert_no_pending_responses()
+
+
+async def test_send_email_tags_the_org_on_simple_and_raw_paths() -> None:
+    org_id = UUID("6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b")
+    expected = [
+        {"Name": "org_id", "Value": str(org_id)},
+        {"Name": "ses:feedback-id-a", "Value": str(org_id)},
+    ]
+    provider_kwargs = {
+        "from_address": "alerts@acme.com",
+        "to_addresses": ["alice@example.com"],
+        "subject": "hi",
+        "body_text": "x",
+        "body_html": None,
+        "organization_id": org_id,
+    }
+
+    simple = FakeClient("m-tag-simple")
+    await SesEmailProvider(client=simple).send_email(**provider_kwargs)
+    assert simple.kwargs is not None
+    assert simple.kwargs["EmailTags"] == expected
+
+    raw = FakeClient("m-tag-raw")
+    await SesEmailProvider(client=raw).send_email(
+        **provider_kwargs,
+        attachments=[
+            ProviderAttachment(
+                filename="a.txt", content_type="text/plain", payload=b"a"
+            )
+        ],
+    )
+    assert raw.kwargs is not None
+    assert raw.kwargs["EmailTags"] == expected
+
+
+async def test_send_email_without_org_sends_no_tags() -> None:
+    fake = FakeClient("m-no-tag")
+    await SesEmailProvider(client=fake).send_email(
+        from_address="alerts@acme.com",
+        to_addresses=["alice@example.com"],
+        subject="hi",
+        body_text="x",
+        body_html=None,
+    )
+    assert fake.kwargs is not None
+    assert "EmailTags" not in fake.kwargs
