@@ -259,7 +259,22 @@ def test_long_fields_carry_their_carrier_limits() -> None:
     assert fields["campaign_description"].max_length == 4096
     assert fields["sample_1"].max_length == fields["sample_2"].max_length == 1024
     assert fields["opt_in_description"].max_length == 861
-    assert fields["first_name"].max_length is None
+    assert fields["mobile_phone_number"].max_length is None
+
+
+def test_telnyx_caps_brand_fields_at_100() -> None:
+    for subject, names in (
+        ("person", {"first_name", "last_name", "email"}),
+        ("business", {"legal_name", "website", "rep_email"}),
+    ):
+        telnyx = {
+            f.name: f.max_length for f in sms_requirements("telnyx", subject).fields
+        }
+        twilio = {
+            f.name: f.max_length for f in sms_requirements("twilio", subject).fields
+        }
+        assert {n: telnyx[n] for n in names} == dict.fromkeys(names, 100)
+        assert all(twilio[n] != 100 for n in names)
 
 
 def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
@@ -350,7 +365,7 @@ def test_links_carry_their_limit() -> None:
     for subject in ("person", "business"):
         fields = sms_requirements("telnyx", subject).fields
         assert {f.name: f.max_length for f in fields if f.kind == "url"} == {
-            **({"website": 512} if subject == "business" else {}),
+            **({"website": 100} if subject == "business" else {}),
             "privacy_policy_url": 512,
             "terms_url": 512,
         }

@@ -195,8 +195,29 @@ _CAMPAIGN_FIELDS = (
 )
 
 
+# Telnyx brand maximums, in characters. Telnyx files the person's first and
+# last name together as the brand name, under the same 100.
+_TELNYX_MAX = {
+    "legal_name": 100,
+    "website": 100,
+    "rep_email": 100,
+    "first_name": 100,
+    "last_name": 100,
+    "email": 100,
+}
+
+
 def _fields_for(provider: str, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
+    if provider == "telnyx":
+        subject = tuple(
+            (
+                f.model_copy(update={"max_length": _TELNYX_MAX[f.name]})
+                if f.name in _TELNYX_MAX
+                else f
+            )
+            for f in subject
+        )
     types = (_text_types_field(subject_type),) if provider == "telnyx" else ()
     return subject + _CAMPAIGN_FIELDS[:1] + types + _CAMPAIGN_FIELDS[1:]
 
