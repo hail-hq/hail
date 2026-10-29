@@ -3156,12 +3156,14 @@ paths:
         - unsubscribe
       summary: Unsubscribe
       description:
-        "One-click email opt-out (RFC 8058), reached by clicking a link\
-        \ in a sent\nemail (GET) or by the mailbox provider's unsubscribe button (POST).\n\
-        \nPublic and unauthenticated \u2014 the signed token query param is the sole\n\
-        credential, proving the caller holds a link Hail sent to that address.\nOn\
-        \ success, the address is added to the org's suppression list and all\nfuture\
-        \ outbound email to it is blocked. Returns an HTML page, not JSON."
+        "One-click email opt-out (RFC 8058).\n\n``GET`` is a person clicking\
+        \ the link in a sent email. ``POST`` is the\nmailbox provider's unsubscribe\
+        \ button (Gmail, Yahoo), which sends the\nbody ``List-Unsubscribe=One-Click``.\
+        \ The body is optional.\n\nPublic and unauthenticated \u2014 the signed token\
+        \ query param is the sole\ncredential, proving the caller holds a link Hail\
+        \ sent to that address.\nOn success, the address is added to the org's suppression\
+        \ list and all\nfuture outbound email to it is blocked. Returns an HTML page,\
+        \ not JSON."
       operationId: unsubscribe_v1_unsubscribe_post
       parameters:
         - name: token
@@ -3177,23 +3179,42 @@ paths:
             text/html:
               schema:
                 type: string
+        "400":
+          description: The token is invalid or has expired.
+          content:
+            text/html:
+              schema:
+                type: string
         "422":
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                List-Unsubscribe:
+                  type: string
+                  enum:
+                    - One-Click
     get:
       tags:
         - unsubscribe
       summary: Unsubscribe
       description:
-        "One-click email opt-out (RFC 8058), reached by clicking a link\
-        \ in a sent\nemail (GET) or by the mailbox provider's unsubscribe button (POST).\n\
-        \nPublic and unauthenticated \u2014 the signed token query param is the sole\n\
-        credential, proving the caller holds a link Hail sent to that address.\nOn\
-        \ success, the address is added to the org's suppression list and all\nfuture\
-        \ outbound email to it is blocked. Returns an HTML page, not JSON."
+        "One-click email opt-out (RFC 8058).\n\n``GET`` is a person clicking\
+        \ the link in a sent email. ``POST`` is the\nmailbox provider's unsubscribe\
+        \ button (Gmail, Yahoo), which sends the\nbody ``List-Unsubscribe=One-Click``.\
+        \ The body is optional.\n\nPublic and unauthenticated \u2014 the signed token\
+        \ query param is the sole\ncredential, proving the caller holds a link Hail\
+        \ sent to that address.\nOn success, the address is added to the org's suppression\
+        \ list and all\nfuture outbound email to it is blocked. Returns an HTML page,\
+        \ not JSON."
       operationId: unsubscribe_v1_unsubscribe_get
       parameters:
         - name: token
@@ -3205,6 +3226,12 @@ paths:
       responses:
         "200":
           description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: The token is invalid or has expired.
           content:
             text/html:
               schema:
