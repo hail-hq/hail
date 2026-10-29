@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import pytest
 from hailhq.core.compliance_gate import add_suppression, check_email_allowed
 from hailhq.core.email_delivery_events import apply_delivery_event
 from hailhq.core.models import (
@@ -454,12 +455,19 @@ async def _suppressions(session: AsyncSession, org_id: UUID) -> list[Suppression
     )
 
 
-async def test_hard_bounce_suppresses_recipient_and_blocks_next_send(async_session):
+@pytest.mark.parametrize("sub_type", [None, "General", "Suppressed"])
+async def test_hard_bounce_suppresses_recipient_and_blocks_next_send(
+    async_session, sub_type
+):
     email = await _mk_email(async_session, status="sent")
     ev = _ev(
         email.provider_message_id,
         "bounced",
-        detail={"hard": True, "recipients": ["Bob@Example.com"]},
+        detail={
+            "hard": True,
+            "bounce_sub_type": sub_type,
+            "recipients": ["Bob@Example.com"],
+        },
     )
     fanout = AsyncMock(return_value=0)
     await apply_delivery_event(async_session, ev, fanout=fanout)
@@ -525,6 +533,36 @@ async def test_soft_bounce_and_unnamed_recipients_suppress_nobody(async_session)
         fanout=fanout,
     )
     await async_session.commit()
+    assert await _suppressions(async_session, email.organization_id) == []
+
+
+async def test_bounce_from_ses_account_suppression_list_suppresses_nobody(
+    async_session,
+):
+    # Another org's complaint can put the address on the shared SES list;
+    # SES then "bounces" this org's send without trying to deliver it.
+    email = await _mk_email(async_session, status="sent")
+    fanout = AsyncMock(return_value=0)
+    res = await apply_delivery_event(
+        async_session,
+        _ev(
+            email.provider_message_id,
+            "bounced",
+            detail={
+                "hard": True,
+                "bounce_type": "Permanent",
+                "bounce_sub_type": "OnAccountSuppressionList",
+                "recipients": ["bob@example.com"],
+            },
+        ),
+        fanout=fanout,
+    )
+    await async_session.commit()
+
+    assert res.inserted and res.status_changed
+    await async_session.refresh(email)
+    assert email.status == "bounced"
+    assert fanout.await_args.kwargs["event_type"] == "email.bounced"
     assert await _suppressions(async_session, email.organization_id) == []
 
 

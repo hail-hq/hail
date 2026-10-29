@@ -301,6 +301,23 @@ class Suppression(Base):
             name="suppressions_channel_check",
         ),
         Index("suppressions_recipient_channel_idx", "recipient", "channel"),
+        # One row per (org, recipient, channel). NULLs are distinct in a
+        # plain unique index, so platform-wide rows get their own.
+        Index(
+            "suppressions_org_recipient_channel_uniq",
+            "organization_id",
+            "recipient",
+            "channel",
+            unique=True,
+            postgresql_where=text("organization_id IS NOT NULL"),
+        ),
+        Index(
+            "suppressions_platform_recipient_channel_uniq",
+            "recipient",
+            "channel",
+            unique=True,
+            postgresql_where=text("organization_id IS NULL"),
+        ),
     )
 
 
