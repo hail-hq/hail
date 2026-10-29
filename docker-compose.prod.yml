@@ -77,6 +77,28 @@ services:
     ports: !override
       - "127.0.0.1:8081:8081"
 
+  # Internal operations only. Opt in with COMPOSE_PROFILES=activity-digest.
+  # Reuse the API image and network. No website request or GitHub cron runs it.
+  activity-digest:
+    profiles: [activity-digest]
+    image: ghcr.io/hail-hq/hail-api:latest
+    command: [python, -m, hailhq.api.activity_digest]
+    restart: unless-stopped
+    logging: *bounded-logging
+    stop_grace_period: 130s
+    mem_limit: 256m
+    cpus: 0.25
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      HAIL_ACTIVITY_DIGEST_ENABLED: ${HAIL_ACTIVITY_DIGEST_ENABLED:-false}
+      HAIL_ACTIVITY_DIGEST_API_URL: http://api:8080/v1
+      HAIL_ACTIVITY_DIGEST_API_KEY: ${HAIL_ACTIVITY_DIGEST_API_KEY:-}
+      HAIL_ACTIVITY_DIGEST_FROM: ${HAIL_ACTIVITY_DIGEST_FROM:-}
+      HAIL_ACTIVITY_DIGEST_TO: ${HAIL_ACTIVITY_DIGEST_TO:-}
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   caddy-data:
   caddy-config:

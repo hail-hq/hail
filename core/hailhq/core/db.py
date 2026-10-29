@@ -41,6 +41,8 @@ _SCHEME_ALIASES = (
 # Heroku) commonly carry these. ``sslmode`` accepts the same string values
 # ('disable', 'prefer', 'require', ...) under asyncpg's ``ssl`` kwarg.
 _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
+    # Better Auth/Prisma's client hint is not an asyncpg connection option.
+    "pgbouncer": None,
     "sslmode": "ssl",
     "channel_binding": None,
     "gssencmode": None,

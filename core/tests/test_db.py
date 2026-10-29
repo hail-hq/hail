@@ -50,6 +50,17 @@ def test_to_async_url_preserves_unknown_params():
     assert qs == {"prepared_statement_cache_size": ["0"]}
 
 
+def test_to_async_url_drops_pgbouncer_client_flag():
+    # Better Auth URLs use this flag. asyncpg.connect rejects it.
+    rewritten = to_async_url(
+        "postgres://u:p@h/db?pgbouncer=true&sslmode=require&prepared_statement_cache_size=0"
+    )
+    assert parse_qs(urlsplit(rewritten).query) == {
+        "ssl": ["require"],
+        "prepared_statement_cache_size": ["0"],
+    }
+
+
 def test_to_async_url_no_query_unchanged_apart_from_scheme():
     assert to_async_url("postgres://u:p@h/db") == "postgresql+asyncpg://u:p@h/db"
 

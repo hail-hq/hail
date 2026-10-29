@@ -164,14 +164,15 @@ jobs:
             # diverge. A mismatch exits non-zero and fails the deploy red.
             assert_fresh() {
               svc="$1"
-              docker pull -q "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA"
+              image_service="${3:-$svc}"
+              docker pull -q "ghcr.io/hail-hq/hail-$image_service:sha-$DEPLOY_GITHUB_SHA"
               # The voicebot passes its new container: old ones may still be
               # draining on the previous image.
               cid="${2:-$($COMPOSE ps -q "$svc")}"
               [ -n "$cid" ] || { echo "::error::$svc has no running container"; exit 1; }
               running="$(docker inspect --format '{{.Image}}' "$cid")"
               expected="$(docker image inspect --format '{{.Id}}' \
-                "ghcr.io/hail-hq/hail-$svc:sha-$DEPLOY_GITHUB_SHA")"
+                "ghcr.io/hail-hq/hail-$image_service:sha-$DEPLOY_GITHUB_SHA")"
               if [ "$running" != "$expected" ]; then
                 echo "::error::$svc is stale: running $running, expected $expected (sha-$DEPLOY_GITHUB_SHA)"
                 exit 1
@@ -181,6 +182,9 @@ jobs:
             assert_fresh api
             assert_fresh mcp
             assert_fresh voicebot "$new_voicebot"
+            if $COMPOSE config --services | grep -qx activity-digest; then
+              assert_fresh activity-digest "" api
+            fi
 
             $COMPOSE ps
 
