@@ -1068,6 +1068,142 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/emails/suppressions:
+    get:
+      tags:
+        - emails
+      summary: List Email Suppressions
+      description:
+        "List email addresses suppressed from receiving mail, newest first.
+
+
+        Cursor-paginated. A suppressed address blocks POST /v1/emails sends to it
+
+        with a 403 until removed via DELETE /v1/emails/suppressions/{address}."
+      operationId: list_email_suppressions_v1_emails_suppressions_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/emails/suppressions/{address}:
+    delete:
+      tags:
+        - emails
+      summary: Delete Email Suppression
+      description:
+        "Remove one address from the email suppression list, re-allowing
+        sends to it.
+
+
+        The address match ignores case. Does not itself constitute renewed
+
+        consent: the caller is responsible for having a lawful basis (e.g. a
+
+        fresh opt-in) before sending again. Returns 404 if the address was not
+
+        suppressed."
+      operationId: delete_email_suppression_v1_emails_suppressions__address__delete
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Address
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/emails/{email_id}:
     get:
       tags:
@@ -3151,15 +3287,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
   /v1/unsubscribe:
+    post:
+      tags:
+        - unsubscribe
+      summary: Unsubscribe
+      description:
+        "One-click email opt-out (RFC 8058).\n\n``GET`` is a person clicking\
+        \ the link in a sent email. ``POST`` is the\nmailbox provider's unsubscribe\
+        \ button (Gmail, Yahoo), which sends the\nbody ``List-Unsubscribe=One-Click``.\
+        \ The body is optional.\n\nPublic and unauthenticated \u2014 the signed token\
+        \ query param is the sole\ncredential, proving the caller holds a link Hail\
+        \ sent to that address.\nOn success, the address is added to the org's suppression\
+        \ list and all\nfuture outbound email to it is blocked. Returns an HTML page,\
+        \ not JSON."
+      operationId: unsubscribe_v1_unsubscribe_post
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: The token is invalid or has expired.
+          content:
+            text/html:
+              schema:
+                type: string
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                List-Unsubscribe:
+                  type: string
+                  enum:
+                    - One-Click
     get:
       tags:
         - unsubscribe
       summary: Unsubscribe
       description:
-        "One-click email opt-out (RFC 8058), reached by clicking a link\
-        \ in a sent email.\n\nPublic and unauthenticated \u2014 the signed token query\
-        \ param is the sole\ncredential, proving the caller holds a link Hail sent\
-        \ to that address.\nOn success, the address is added to the org's suppression\
+        "One-click email opt-out (RFC 8058).\n\n``GET`` is a person clicking\
+        \ the link in a sent email. ``POST`` is the\nmailbox provider's unsubscribe\
+        \ button (Gmail, Yahoo), which sends the\nbody ``List-Unsubscribe=One-Click``.\
+        \ The body is optional.\n\nPublic and unauthenticated \u2014 the signed token\
+        \ query param is the sole\ncredential, proving the caller holds a link Hail\
+        \ sent to that address.\nOn success, the address is added to the org's suppression\
         \ list and all\nfuture outbound email to it is blocked. Returns an HTML page,\
         \ not JSON."
       operationId: unsubscribe_v1_unsubscribe_get
@@ -3173,6 +3362,12 @@ paths:
       responses:
         "200":
           description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: The token is invalid or has expired.
           content:
             text/html:
               schema:

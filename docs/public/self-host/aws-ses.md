@@ -319,6 +319,20 @@ Click events to SNS. The ingest Lambda relays them to
 `POST /internal/ses-events`, which records them in `email_events`,
 advances `emails.status`, and fans out webhooks.
 
+Every send also carries the SES message tag `ses:feedback-id-a`, set to the
+sending org's id. SES puts it in the `Feedback-ID` header, and
+[Google Postmaster Tools](https://postmaster.google.com) shows spam rate per
+Feedback-ID. Gmail sends no complaints back to SES. Two limits:
+
+- Postmaster Tools shows this data only for mail signed (DKIM) by a domain you
+  verified there. You see it for mail from your `HAIL_MAIL_BASE_DOMAIN`, not
+  for orgs that send from their own domain.
+- Gmail shows an id only when it has enough daily volume, so small orgs may
+  not appear.
+
+Code:
+[`core/hailhq/core/providers/email/ses.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/providers/email/ses.py).
+
 Check a single email's timeline:
 
 ```bash
