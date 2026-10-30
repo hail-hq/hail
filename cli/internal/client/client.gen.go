@@ -1350,6 +1350,21 @@ func (e ListSmsV1SmsGetParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe.
+const (
+	OneClick UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe = "One-Click"
+)
+
+// Valid indicates whether the value is a known member of the UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe enum.
+func (e UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe) Valid() bool {
+	switch e {
+	case OneClick:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetVerificationRequirementsParamsSubjectType.
 const (
 	Business GetVerificationRequirementsParamsSubjectType = "business"
@@ -3738,6 +3753,19 @@ type UnsubscribeV1UnsubscribeGetParams struct {
 	Token string `form:"token" json:"token"`
 }
 
+// UnsubscribeV1UnsubscribePostFormdataBody defines parameters for UnsubscribeV1UnsubscribePost.
+type UnsubscribeV1UnsubscribePostFormdataBody struct {
+	ListUnsubscribe *UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe `form:"List-Unsubscribe,omitempty" json:"List-Unsubscribe,omitempty"`
+}
+
+// UnsubscribeV1UnsubscribePostParams defines parameters for UnsubscribeV1UnsubscribePost.
+type UnsubscribeV1UnsubscribePostParams struct {
+	Token string `form:"token" json:"token"`
+}
+
+// UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe defines parameters for UnsubscribeV1UnsubscribePost.
+type UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe string
+
 // ListVerificationsParams defines parameters for ListVerifications.
 type ListVerificationsParams struct {
 	Purpose       *string `form:"purpose,omitempty" json:"purpose,omitempty"`
@@ -3889,6 +3917,9 @@ type CreateSmsV1SmsPostJSONRequestBody = SmsCreate
 
 // PatchSenderIdV1SmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdV1SmsSenderIdPatch for application/json ContentType.
 type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
+
+// UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
+type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
 
 // ConfirmVerificationJSONRequestBody defines body for ConfirmVerification for application/json ContentType.
 type ConfirmVerificationJSONRequestBody = ConfirmRequest
@@ -4469,6 +4500,11 @@ type ClientInterface interface {
 
 	// UnsubscribeV1UnsubscribeGet request
 	UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UnsubscribeV1UnsubscribePostWithBody request with any body
+	UnsubscribeV1UnsubscribePostWithBody(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UnsubscribeV1UnsubscribePostWithFormdataBody(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVerifications request
 	ListVerifications(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5403,6 +5439,30 @@ func (c *Client) GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UU
 
 func (c *Client) UnsubscribeV1UnsubscribeGet(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUnsubscribeV1UnsubscribeGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UnsubscribeV1UnsubscribePostWithBody(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnsubscribeV1UnsubscribePostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UnsubscribeV1UnsubscribePostWithFormdataBody(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnsubscribeV1UnsubscribePostRequestWithFormdataBody(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9065,6 +9125,64 @@ func NewUnsubscribeV1UnsubscribeGetRequest(server string, params *UnsubscribeV1U
 	return req, nil
 }
 
+// NewUnsubscribeV1UnsubscribePostRequestWithFormdataBody calls the generic UnsubscribeV1UnsubscribePost builder with application/x-www-form-urlencoded body
+func NewUnsubscribeV1UnsubscribePostRequestWithFormdataBody(server string, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	bodyStr, err := runtime.MarshalForm(body, nil)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = strings.NewReader(bodyStr.Encode())
+	return NewUnsubscribeV1UnsubscribePostRequestWithBody(server, params, "application/x-www-form-urlencoded", bodyReader)
+}
+
+// NewUnsubscribeV1UnsubscribePostRequestWithBody generates requests for UnsubscribeV1UnsubscribePost with any type of body
+func NewUnsubscribeV1UnsubscribePostRequestWithBody(server string, params *UnsubscribeV1UnsubscribePostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/unsubscribe")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "token", params.Token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListVerificationsRequest generates requests for ListVerifications
 func NewListVerificationsRequest(server string, params *ListVerificationsParams) (*http.Request, error) {
 	var err error
@@ -10282,6 +10400,11 @@ type ClientWithResponsesInterface interface {
 
 	// UnsubscribeV1UnsubscribeGetWithResponse request
 	UnsubscribeV1UnsubscribeGetWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribeGetParams, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribeGetResponse, error)
+
+	// UnsubscribeV1UnsubscribePostWithBodyWithResponse request with any body
+	UnsubscribeV1UnsubscribePostWithBodyWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribePostResponse, error)
+
+	UnsubscribeV1UnsubscribePostWithFormdataBodyWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribePostResponse, error)
 
 	// ListVerificationsWithResponse request
 	ListVerificationsWithResponse(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*ListVerificationsResponse, error)
@@ -11637,6 +11760,28 @@ func (r UnsubscribeV1UnsubscribeGetResponse) StatusCode() int {
 	return 0
 }
 
+type UnsubscribeV1UnsubscribePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UnsubscribeV1UnsubscribePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnsubscribeV1UnsubscribePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListVerificationsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12650,6 +12795,23 @@ func (c *ClientWithResponses) UnsubscribeV1UnsubscribeGetWithResponse(ctx contex
 		return nil, err
 	}
 	return ParseUnsubscribeV1UnsubscribeGetResponse(rsp)
+}
+
+// UnsubscribeV1UnsubscribePostWithBodyWithResponse request with arbitrary body returning *UnsubscribeV1UnsubscribePostResponse
+func (c *ClientWithResponses) UnsubscribeV1UnsubscribePostWithBodyWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribePostResponse, error) {
+	rsp, err := c.UnsubscribeV1UnsubscribePostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnsubscribeV1UnsubscribePostResponse(rsp)
+}
+
+func (c *ClientWithResponses) UnsubscribeV1UnsubscribePostWithFormdataBodyWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribePostResponse, error) {
+	rsp, err := c.UnsubscribeV1UnsubscribePostWithFormdataBody(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnsubscribeV1UnsubscribePostResponse(rsp)
 }
 
 // ListVerificationsWithResponse request returning *ListVerificationsResponse
@@ -14600,6 +14762,32 @@ func ParseUnsubscribeV1UnsubscribeGetResponse(rsp *http.Response) (*UnsubscribeV
 	}
 
 	response := &UnsubscribeV1UnsubscribeGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUnsubscribeV1UnsubscribePostResponse parses an HTTP response from a UnsubscribeV1UnsubscribePostWithResponse call
+func ParseUnsubscribeV1UnsubscribePostResponse(rsp *http.Response) (*UnsubscribeV1UnsubscribePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnsubscribeV1UnsubscribePostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
