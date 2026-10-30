@@ -504,7 +504,10 @@ def _stamp_campaign_filed(provider: object, refs: dict) -> None:
     service charges the carriers' review on this one key, so a new carrier
     needs nothing more than its ``campaign_ref``. Call it after every
     plug-in call that can file a campaign, before the commit."""
-    if not refs.get("campaign_filed_at") and _campaign_filed(provider, refs):
+    filed_at = refs.get("campaign_filed_at")
+    # Missing unless a non-empty string: the rule campaign_filed and the
+    # billing service read.
+    if not (isinstance(filed_at, str) and filed_at) and _campaign_filed(provider, refs):
         refs["campaign_filed_at"] = datetime.now(timezone.utc).isoformat()
 
 
@@ -1296,14 +1299,11 @@ async def _submit_row(
     approved_by = actor_user_id if actor_kind == "superadmin" else None
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
     row.approved_by = approved_by
+    _keep_refs(row, provider)  # what check() wrote just before
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
-        # Saved before the refusal is handled: a failed discard rolls back,
-        # and the ids submit() wrote (a campaign is billed) must survive it.
-        _keep_refs(row, provider)
-        await db.commit()
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
@@ -1431,11 +1431,18 @@ async def _reject_row(
     row is left as it was and tried again next tick; the sweeper never dies
     on carrier trouble."""
     await _rate_before_wipe(db, row, provider)
+    refs = copy.deepcopy(row.provider_refs)
     try:
         await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
         await db.rollback()
+        # The rollback drops what check() or submit() wrote into the refs in
+        # place (a filed campaign is billed): save it for the next try.
+        await db.refresh(row)
+        row.provider_refs = refs
+        _keep_refs(row, provider)
+        await db.commit()
         return
     row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
     row.approved_by = None

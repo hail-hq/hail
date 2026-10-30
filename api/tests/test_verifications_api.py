@@ -2078,6 +2078,34 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     ).scalar_one_or_none() is None
 
 
+async def test_a_failed_discard_keeps_the_ids_check_wrote(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def check(refs):
+        # A plug-in may file (and be billed) inside check(), in place.
+        refs["filed_id"] = "F1"
+        return [Problem(field="", message="document unreadable")]
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.check, carrier.discard = check, boom
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
 async def test_response_carries_purpose_number_by_default(
     client, org_and_key, carrier
 ) -> None:
