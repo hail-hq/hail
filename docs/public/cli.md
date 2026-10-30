@@ -106,6 +106,10 @@ hail email list --direction outbound --status failed
 # Fetch one email (full UUID or 4+ char prefix)
 hail email get 1a2b
 
+# Suppressions
+hail email suppressions list                       # addresses Hail will not send to
+hail email suppressions delete alice@example.com   # allow sends to this address again
+
 # Send (subject + at least one body flag required)
 hail email send --to alice@example.com --subject "Hi" --body "Hello"
 ```
@@ -116,7 +120,9 @@ hail email send --to alice@example.com --subject "Hi" --body "Hello"
 
 `hail email send` flags: `--to` (repeatable / comma-separated), `--cc`, `--bcc`, `--from`, `--from-name`, `--reply-to`, `--subject` (required), `--body`, `--body-html`, `--body-file`, `--body-html-file` (`-` reads stdin), `--idempotency-key`.
 
-More email subcommands: `tail <id>`, `raw <id>`, `events <id>`, `stats`, `attachment`, `attachment-upload`. Run `hail email --help` for the list.
+`hail email suppressions list` takes `--limit` (default 50) and `--cursor`. Each row shows the address, reason, and source. `delete <address>` ignores case and returns not found for an address that is not on your list. Only use it when the person has agreed to get mail again.
+
+More email subcommands: `tail <id>`, `raw <id>`, `events <id>`, `stats`, `suppressions`, `attachment`, `attachment-upload`. Run `hail email --help` for the list.
 
 ### Email domains
 

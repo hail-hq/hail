@@ -59,6 +59,7 @@ deliverability up across your whole account.`,
 	cmd.AddCommand(newEmailTailCmd(opts))
 	cmd.AddCommand(newEmailEventsCmd(opts))
 	cmd.AddCommand(newEmailStatsCmd(opts))
+	cmd.AddCommand(newEmailSuppressionsCmd(opts))
 	cmd.AddCommand(newEmailRawCmd(opts))
 	cmd.AddCommand(newEmailAttachmentCmd(opts))
 	cmd.AddCommand(newEmailAttachmentUploadCmd(opts))

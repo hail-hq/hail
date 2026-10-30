@@ -1068,6 +1068,142 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/emails/suppressions:
+    get:
+      tags:
+        - emails
+      summary: List Email Suppressions
+      description:
+        "List email addresses suppressed from receiving mail, newest first.
+
+
+        Cursor-paginated. A suppressed address blocks POST /v1/emails sends to it
+
+        with a 403 until removed via DELETE /v1/emails/suppressions/{address}."
+      operationId: list_email_suppressions_v1_emails_suppressions_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/emails/suppressions/{address}:
+    delete:
+      tags:
+        - emails
+      summary: Delete Email Suppression
+      description:
+        "Remove one address from the email suppression list, re-allowing
+        sends to it.
+
+
+        The address match ignores case. Does not itself constitute renewed
+
+        consent: the caller is responsible for having a lawful basis (e.g. a
+
+        fresh opt-in) before sending again. Returns 404 if the address was not
+
+        suppressed."
+      operationId: delete_email_suppression_v1_emails_suppressions__address__delete
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Address
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/emails/{email_id}:
     get:
       tags:

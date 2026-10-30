@@ -3584,6 +3584,18 @@ type GetEmailStatsV1EmailsStatsGetParams struct {
 // GetEmailStatsV1EmailsStatsGetParamsBucket defines parameters for GetEmailStatsV1EmailsStatsGet.
 type GetEmailStatsV1EmailsStatsGetParamsBucket string
 
+// ListEmailSuppressionsV1EmailsSuppressionsGetParams defines parameters for ListEmailSuppressionsV1EmailsSuppressionsGet.
+type ListEmailSuppressionsV1EmailsSuppressionsGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams defines parameters for DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete.
+type DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // GetEmailV1EmailsEmailIdGetParams defines parameters for GetEmailV1EmailsEmailIdGet.
 type GetEmailV1EmailsEmailIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4393,6 +4405,12 @@ type ClientInterface interface {
 	// GetEmailStatsV1EmailsStatsGet request
 	GetEmailStatsV1EmailsStatsGet(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListEmailSuppressionsV1EmailsSuppressionsGet request
+	ListEmailSuppressionsV1EmailsSuppressionsGet(ctx context.Context, params *ListEmailSuppressionsV1EmailsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete request
+	DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete(ctx context.Context, address string, params *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetEmailV1EmailsEmailIdGet request
 	GetEmailV1EmailsEmailIdGet(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4971,6 +4989,30 @@ func (c *Client) CreateEmailV1EmailsPost(ctx context.Context, params *CreateEmai
 
 func (c *Client) GetEmailStatsV1EmailsStatsGet(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetEmailStatsV1EmailsStatsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListEmailSuppressionsV1EmailsSuppressionsGet(ctx context.Context, params *ListEmailSuppressionsV1EmailsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListEmailSuppressionsV1EmailsSuppressionsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete(ctx context.Context, address string, params *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteRequest(c.Server, address, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7314,6 +7356,135 @@ func NewGetEmailStatsV1EmailsStatsGetRequest(server string, params *GetEmailStat
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewListEmailSuppressionsV1EmailsSuppressionsGetRequest generates requests for ListEmailSuppressionsV1EmailsSuppressionsGet
+func NewListEmailSuppressionsV1EmailsSuppressionsGetRequest(server string, params *ListEmailSuppressionsV1EmailsSuppressionsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/emails/suppressions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteRequest generates requests for DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete
+func NewDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteRequest(server string, address string, params *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "address", address, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/emails/suppressions/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10293,6 +10464,12 @@ type ClientWithResponsesInterface interface {
 	// GetEmailStatsV1EmailsStatsGetWithResponse request
 	GetEmailStatsV1EmailsStatsGetWithResponse(ctx context.Context, params *GetEmailStatsV1EmailsStatsGetParams, reqEditors ...RequestEditorFn) (*GetEmailStatsV1EmailsStatsGetResponse, error)
 
+	// ListEmailSuppressionsV1EmailsSuppressionsGetWithResponse request
+	ListEmailSuppressionsV1EmailsSuppressionsGetWithResponse(ctx context.Context, params *ListEmailSuppressionsV1EmailsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListEmailSuppressionsV1EmailsSuppressionsGetResponse, error)
+
+	// DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteWithResponse request
+	DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteWithResponse(ctx context.Context, address string, params *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse, error)
+
 	// GetEmailV1EmailsEmailIdGetWithResponse request
 	GetEmailV1EmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailV1EmailsEmailIdGetResponse, error)
 
@@ -11071,6 +11248,51 @@ func (r GetEmailStatsV1EmailsStatsGetResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetEmailStatsV1EmailsStatsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListEmailSuppressionsV1EmailsSuppressionsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SuppressionListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListEmailSuppressionsV1EmailsSuppressionsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListEmailSuppressionsV1EmailsSuppressionsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -12455,6 +12677,24 @@ func (c *ClientWithResponses) GetEmailStatsV1EmailsStatsGetWithResponse(ctx cont
 	return ParseGetEmailStatsV1EmailsStatsGetResponse(rsp)
 }
 
+// ListEmailSuppressionsV1EmailsSuppressionsGetWithResponse request returning *ListEmailSuppressionsV1EmailsSuppressionsGetResponse
+func (c *ClientWithResponses) ListEmailSuppressionsV1EmailsSuppressionsGetWithResponse(ctx context.Context, params *ListEmailSuppressionsV1EmailsSuppressionsGetParams, reqEditors ...RequestEditorFn) (*ListEmailSuppressionsV1EmailsSuppressionsGetResponse, error) {
+	rsp, err := c.ListEmailSuppressionsV1EmailsSuppressionsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListEmailSuppressionsV1EmailsSuppressionsGetResponse(rsp)
+}
+
+// DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteWithResponse request returning *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse
+func (c *ClientWithResponses) DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteWithResponse(ctx context.Context, address string, params *DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteParams, reqEditors ...RequestEditorFn) (*DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse, error) {
+	rsp, err := c.DeleteEmailSuppressionV1EmailsSuppressionsAddressDelete(ctx, address, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse(rsp)
+}
+
 // GetEmailV1EmailsEmailIdGetWithResponse request returning *GetEmailV1EmailsEmailIdGetResponse
 func (c *ClientWithResponses) GetEmailV1EmailsEmailIdGetWithResponse(ctx context.Context, emailId openapi_types.UUID, params *GetEmailV1EmailsEmailIdGetParams, reqEditors ...RequestEditorFn) (*GetEmailV1EmailsEmailIdGetResponse, error) {
 	rsp, err := c.GetEmailV1EmailsEmailIdGet(ctx, emailId, params, reqEditors...)
@@ -13826,6 +14066,65 @@ func ParseGetEmailStatsV1EmailsStatsGetResponse(rsp *http.Response) (*GetEmailSt
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListEmailSuppressionsV1EmailsSuppressionsGetResponse parses an HTTP response from a ListEmailSuppressionsV1EmailsSuppressionsGetWithResponse call
+func ParseListEmailSuppressionsV1EmailsSuppressionsGetResponse(rsp *http.Response) (*ListEmailSuppressionsV1EmailsSuppressionsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListEmailSuppressionsV1EmailsSuppressionsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SuppressionListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse parses an HTTP response from a DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteWithResponse call
+func ParseDeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse(rsp *http.Response) (*DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteEmailSuppressionV1EmailsSuppressionsAddressDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
