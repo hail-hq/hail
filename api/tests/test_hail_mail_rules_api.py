@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
@@ -12,7 +13,8 @@ from hailhq.api.routes.emails import resolve_sender
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.models import EmailDomain
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key
@@ -332,3 +334,41 @@ async def test_pending_custom_domain_does_not_replace_hail_mail(
     assert listed.json()["default_from"] == "alice+acme@mail.hail.so"
     rows = await async_session.execute(select(EmailDomain.kind))
     assert sorted(rows.scalars()) == ["custom", "hail_mail"]
+
+
+async def test_claim_waits_for_a_release_of_the_same_head(db) -> None:
+    """The claim must see the retirement record of a release in flight."""
+    holder = uuid.uuid4()
+    insert = text(
+        "INSERT INTO email_domains (organization_id, kind, domain, "
+        "local_prefix_user, local_prefix_org, verification_status) "
+        "VALUES (:org, 'hail_mail', :domain, 'alice', 'acme', 'verified')"
+    )
+
+    async def claim() -> None:
+        async with db.begin() as connection:
+            await connection.execute(
+                insert, {"org": uuid.uuid4(), "domain": "alice+acme@mail.hail.so"}
+            )
+
+    async with db.begin() as connection:
+        await connection.execute(
+            insert, {"org": holder, "domain": "alice+acme@mail.hail.so"}
+        )
+
+    async with db.begin() as release:
+        await release.execute(
+            text(
+                "UPDATE email_domains SET local_prefix_user = 'bob', "
+                "domain = 'bob+acme@mail.hail.so' WHERE organization_id = :org"
+            ),
+            {"org": holder},
+        )
+        claiming = asyncio.create_task(claim())
+        await asyncio.sleep(0.2)
+        assert not claiming.done()
+
+    with pytest.raises(IntegrityError) as refused:
+        await asyncio.wait_for(claiming, timeout=5)
+    assert refused.value.orig.sqlstate == "23505"
+    assert "is retired" in str(refused.value.orig)

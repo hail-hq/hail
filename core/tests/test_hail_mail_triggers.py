@@ -1,6 +1,7 @@
 """Rules the database holds for every hail-mail writer."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core.hail_mail import ROLE_MAILBOXES
@@ -149,6 +150,54 @@ async def test_org_that_held_a_head_may_return_to_it(async_session) -> None:
 
     await _set_head(async_session, keeper_id, "bob")
     await _set_head(async_session, keeper_id, "alice")
+
+
+@pytest.mark.asyncio
+async def test_org_that_is_not_the_last_holder_cannot_return(async_session) -> None:
+    """B gave the head up, A held it and gave it up: only A may take it back."""
+    first_holder = uuid.uuid4()
+    last_holder = uuid.uuid4()
+    held = await _add(async_session, _row(first_holder))
+    await _set_head(async_session, held.id, "bob")
+    # The rule stops any org from taking the head, so the second holder's
+    # record is seeded: only a migration rename can produce this history.
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="newer",
+            organization_id=last_holder,
+            retired_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    await async_session.commit()
+
+    with pytest.raises(IntegrityError) as refused:
+        await _add(async_session, _row(first_holder))
+    assert _sqlstate(refused) == "23505"
+    await async_session.rollback()
+
+    await _add(async_session, _row(last_holder))
+
+
+@pytest.mark.asyncio
+async def test_retiring_a_pair_again_makes_it_the_newest_record(async_session) -> None:
+    org = uuid.uuid4()
+    row = await _add(async_session, _row(org))
+    row_id = row.id
+    await _set_head(async_session, row_id, "bob")
+    first = await async_session.scalar(select(RetiredHailMailAddress.retired_at))
+    await _set_head(async_session, row_id, "alice")
+    await async_session.execute(
+        update(EmailDomain)
+        .where(EmailDomain.id == row_id)
+        .values(local_prefix_org="acme", domain="alice+acme@mail.hail.so")
+    )
+    await async_session.commit()
+    await _set_head(async_session, row_id, "carol")
+
+    async_session.expire_all()
+    second = await async_session.scalar(select(RetiredHailMailAddress.retired_at))
+    assert second > first
 
 
 @pytest.mark.asyncio

@@ -1252,7 +1252,20 @@ class RetiredHailMailAddress(Base):
 _ROLE_MAILBOXES_SQL = ", ".join(f"'{name}'" for name in sorted(ROLE_MAILBOXES))
 EMAIL_DOMAINS_GUARD_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION email_domains_guard_hail_mail_head() RETURNS trigger AS $$
+DECLARE
+    newest_org uuid;
 BEGIN
+    -- Claiming a head and releasing it must run one after the other. Otherwise
+    -- a claim can read no retirement record, then commit just after the release
+    -- and take the head. The lock is taken here, before the row changes: taken
+    -- only after the change, a release and a claim would deadlock on the unique
+    -- index. Heads are locked in sorted order for the same reason.
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.kind = 'hail_mail' THEN
+            PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+        END IF;
+        RETURN OLD;
+    END IF;
     IF NEW.kind <> 'hail_mail'
        OR (TG_OP = 'UPDATE'
            AND NEW.local_prefix_user IS NOT DISTINCT FROM OLD.local_prefix_user) THEN
@@ -1262,14 +1275,18 @@ BEGIN
         RAISE EXCEPTION USING ERRCODE = '23514',
             MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is reserved';
     END IF;
-    IF EXISTS (
-           SELECT 1 FROM retired_hail_mail_addresses r
-            WHERE r.local_prefix_user = NEW.local_prefix_user
-              AND r.organization_id <> NEW.organization_id)
-       AND NOT EXISTS (
-           SELECT 1 FROM retired_hail_mail_addresses r
-            WHERE r.local_prefix_user = NEW.local_prefix_user
-              AND r.organization_id = NEW.organization_id) THEN
+    PERFORM pg_advisory_xact_lock(hashtext(head))
+       FROM (SELECT DISTINCT head
+               FROM unnest(ARRAY[OLD.local_prefix_user, NEW.local_prefix_user]) AS head
+              WHERE head IS NOT NULL
+              ORDER BY head) AS heads;
+    -- Only the org that gave the head up last may take it back.
+    SELECT r.organization_id INTO newest_org
+      FROM retired_hail_mail_addresses r
+     WHERE r.local_prefix_user = NEW.local_prefix_user
+     ORDER BY r.retired_at DESC, r.organization_id
+     LIMIT 1;
+    IF FOUND AND newest_org <> NEW.organization_id THEN
         RAISE EXCEPTION USING ERRCODE = '23505',
             MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is retired';
     END IF;
@@ -1279,7 +1296,7 @@ $$ LANGUAGE plpgsql
 """
 EMAIL_DOMAINS_GUARD_TRIGGER = """
 CREATE OR REPLACE TRIGGER email_domains_guard_hail_mail_head
-BEFORE INSERT OR UPDATE ON email_domains
+BEFORE INSERT OR UPDATE OR DELETE ON email_domains
 FOR EACH ROW EXECUTE FUNCTION email_domains_guard_hail_mail_head()
 """
 EMAIL_DOMAINS_RETIRE_FUNCTION = """
@@ -1288,10 +1305,17 @@ BEGIN
     IF OLD.kind = 'hail_mail'
        AND (TG_OP = 'DELETE'
             OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user) THEN
+        -- The guard already holds this lock on any normal path. It stays here
+        -- so a release can never run unserialized, even with the guard disabled.
+        PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+        -- clock_timestamp, not now(): two rewrites in one transaction need an
+        -- order, and the newest record decides who may take the head back.
         INSERT INTO retired_hail_mail_addresses
-            (local_prefix_user, local_prefix_org, organization_id)
-        VALUES (OLD.local_prefix_user, OLD.local_prefix_org, OLD.organization_id)
-        ON CONFLICT DO NOTHING;
+            (local_prefix_user, local_prefix_org, organization_id, retired_at)
+        VALUES (OLD.local_prefix_user, OLD.local_prefix_org, OLD.organization_id,
+                clock_timestamp())
+        ON CONFLICT (local_prefix_user, local_prefix_org, organization_id)
+        DO UPDATE SET retired_at = EXCLUDED.retired_at;
     END IF;
     RETURN NULL;
 END
