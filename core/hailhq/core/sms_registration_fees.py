@@ -29,8 +29,10 @@ def providers() -> list[str]:
     return list(_load())
 
 
-def filing_fee_cents(provider: str, subject_type: str) -> int:
-    """The carrier's one-time cost of a filing: brand plus campaign vetting.
-    Raises KeyError for a carrier with no SMS registration."""
+def filing_fee_cents(provider: str, subject_type: str, brand_kept: bool = False) -> int:
+    """The carrier's one-time cost of a filing: brand plus campaign vetting,
+    or vetting alone for a filing with a kept brand. Raises KeyError for a
+    carrier with no SMS registration."""
     row = _load()[provider][subject_type]
-    return _cents(row["brand_usd"]) + _cents(row["campaign_vetting_usd"])
+    vetting = _cents(row["campaign_vetting_usd"])
+    return vetting if brand_kept else _cents(row["brand_usd"]) + vetting

@@ -433,6 +433,11 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
+    def keeps_brand(self, refs: dict) -> bool:
+        """True when dismissing this rejected filing leaves its brand at the
+        carrier for the next filing (``discard_rejected``)."""
+        return False
+
     async def discard_rejected(self, refs: dict) -> dict:
         """``discard`` for a rejected filing the customer dismisses. Returns
         what the organization's next filing may reuse: refs to keep on the

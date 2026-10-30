@@ -2288,6 +2288,9 @@ async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
     monkeypatch.setattr(sms_carrier, "discard_rejected", keep)
     vid = (await _post_sms(client, key)).json()["id"]
     await _set_refs(async_session, vid, "rejected", {"brand_reused": True})
+    monkeypatch.setattr(sms_carrier, "keeps_brand", lambda refs: True, raising=False)
+    before = await client.get("/verifications", headers=_auth(key))
+    assert [v["identity_confirmed"] for v in before.json()] == [True]
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
     async_session.expire_all()
@@ -2296,8 +2299,12 @@ async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
     assert row.provider_refs == {"brand_reused": True, "kept_brand_id": "B9"}
     listed = await client.get("/verifications", headers=_auth(key))
     assert [v["identity_confirmed"] for v in listed.json()] == [True]
+    # A kept brand costs nothing: the filing needs the campaign review alone.
+    review = sms_registration_fees.filing_fee_cents("fake", "business", brand_kept=True)
+    await _set_balance(async_session, org_id, review)
     second = await _post_sms(client, key)
     assert second.status_code == 201
+    await _set_balance(async_session, org_id, 20_000)
     assert sms_carrier.drafts[-1]["kept_brand_id"] == "B9"
     # The newer filing owns the brand now: a later one does not get it.
     await _set_refs(async_session, second.json()["id"], "rejected", {})

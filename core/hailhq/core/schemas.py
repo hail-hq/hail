@@ -2746,8 +2746,9 @@ class VerificationResponse(BaseModel):
         default=False,
         description=(
             "True on a person's newest US texting registration when it is "
-            "cancelled and the person stays confirmed: the next filing with the "
-            "same first name, last name, email and mobile needs no code and has "
-            "no submission fee. Ignore it on older registrations."
+            "cancelled, or rejected and not yet dismissed, and the person stays "
+            "confirmed: the next filing with the same first name, last name, "
+            "email and mobile needs no code and has no submission fee. Dismiss "
+            "a rejected registration first. Ignore it on older registrations."
         ),
     )

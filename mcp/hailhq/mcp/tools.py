@@ -2735,8 +2735,8 @@ def register_tools(
         "step", "identity_confirmed"}]}``. ``step`` says where a US texting
         filing in progress is: ``confirm_identity``, ``filing`` or
         ``carrier_review``. ``identity_confirmed`` on a person's newest
-        filing, when cancelled: the next one with the same person needs no
-        code.
+        filing, when cancelled or rejected: the next one with the same person
+        needs no code. Dismiss a rejected filing first.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
         submission already exists before submitting again. ``confirmation``

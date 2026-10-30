@@ -717,12 +717,19 @@ def _out(
 ) -> VerificationResponse:
     """The response for a row, with ``confirmation``, ``step`` and
     ``identity_confirmed`` filled in."""
+    refs = row.provider_refs or {}
+    identity_confirmed = bool(refs.get("kept_brand_id"))
+    if row.purpose == "sms" and row.state == "rejected":
+        provider = registry(row.provider, "sms")
+        identity_confirmed = isinstance(
+            provider, SmsRegistrationProvider
+        ) and provider.keeps_brand(refs)
     confirmation, step = _sms_progress(row, registry)
     return model.model_validate(row).model_copy(
         update={
             "confirmation": confirmation,
             "step": step,
-            "identity_confirmed": bool((row.provider_refs or {}).get("kept_brand_id")),
+            "identity_confirmed": identity_confirmed,
         }
     )
 
@@ -1200,9 +1207,14 @@ async def create_verification(
         # Hail Cloud charges each step of the filing from prepaid credit (the
         # website prices it; this repo holds no prices). The carrier's own
         # cost is the floor the balance must cover before anything is filed.
+        kept_brand_id = await _kept_brand(
+            db, principal.organization_id, provider_name, sub.subject_type
+        )
+        if kept_brand_id:
+            draft_kwargs["kept_brand_id"] = kept_brand_id
         try:
             floor_cents = sms_registration_fees.filing_fee_cents(
-                provider_name, sub.subject_type
+                provider_name, sub.subject_type, brand_kept=bool(kept_brand_id)
             )
         except KeyError:
             raise HTTPException(
@@ -1225,11 +1237,6 @@ async def create_verification(
                 db, principal.organization_id, provider_name
             )
         )
-        kept_brand_id = await _kept_brand(
-            db, principal.organization_id, provider_name, sub.subject_type
-        )
-        if kept_brand_id:
-            draft_kwargs["kept_brand_id"] = kept_brand_id
 
     try:
         draft = await provider.create_draft(

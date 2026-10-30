@@ -375,19 +375,22 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
 
-    async def discard_rejected(self, refs) -> dict:
+    def keeps_brand(self, refs) -> bool:
         """A person's confirmed brand stays at Telnyx when a campaign was
         filed: it is paid for, and the campaign is what the carriers refused.
         The next filing with the same details reuses it, with no new brand
         fee and no new PIN. A failed brand has no ``identity_verified``
         (``status``), and with no campaign the brand itself failed."""
-        brand_id = refs.get("brand_id")
-        if (
-            brand_id
+        return bool(
+            refs.get("brand_id")
             and refs.get("campaign_id")
             and refs.get("subject_type") == "person"
             and refs.get("identity_verified") is True
-        ):
+        )
+
+    async def discard_rejected(self, refs) -> dict:
+        if self.keeps_brand(refs):
+            brand_id = refs["brand_id"]
             await self.discard({k: v for k, v in refs.items() if k != "brand_id"})
             return {"kept_brand_id": brand_id}
         await self.discard(refs)
