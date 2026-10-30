@@ -4997,11 +4997,13 @@ paths:
       description:
         "Withdraw a verification that has not been sent for review, or dismiss
 
-        a rejected one. The draft is discarded either way. One that is under
+        a rejected one. The draft is discarded either way, except a person's
 
-        review cannot be cancelled: wait for the result; if it is rejected,
+        confirmed brand on a rejected US SMS registration: it stays at the
 
-        dismiss it.
+        carrier for the next filing. One that is under review cannot be
+
+        cancelled: wait for the result; if it is rejected, dismiss it.
 
 
         An approved US SMS registration (`purpose=sms`) can be cancelled too:
@@ -9225,6 +9227,15 @@ components:
             'confirm_identity' while the person must confirm (see `confirmation`),
             'filing' while Hail files the details with the carriers, 'carrier_review'
             once the carriers are reviewing them (1 to 7 business days). Null otherwise."
+        identity_confirmed:
+          type: boolean
+          title: Identity Confirmed
+          description: "True on a person's newest US texting registration when
+            it is cancelled, or rejected and not yet dismissed, and the person
+            stays confirmed: the next filing with the same first name, last name,
+            email and mobile needs no code and has no submission fee. Dismiss
+            a rejected registration first. Ignore it on older registrations."
+          default: false
       type: object
       required:
         - id

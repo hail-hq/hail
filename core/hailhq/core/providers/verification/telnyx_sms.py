@@ -301,6 +301,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         address,
         documents,
         messaging_service_sid=None,
+        kept_brand_id=None,
     ) -> DraftResult:
         subject_type = requirements.subject_type
         problems = self._validate(fields, address, subject_type)
@@ -331,6 +332,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     type(exc).__name__,
                 )
         try:
+            if (
+                subject_type == "person"
+                and kept_brand_id
+                and await self._reuse_brand(refs, fields, kept_brand_id)
+            ):
+                return DraftResult(refs=refs)
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
             refused = _refused(exc)
@@ -367,6 +374,62 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             await self.discard(refs)
             return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
+
+    def keeps_brand(self, refs) -> bool:
+        """A person's confirmed brand stays at Telnyx when a campaign was
+        filed: it is paid for, and the campaign is what the carriers refused.
+        The next filing with the same details reuses it, with no new brand
+        fee and no new PIN. A failed brand has no ``identity_verified``
+        (``status``), and with no campaign the brand itself failed."""
+        return bool(
+            refs.get("brand_id")
+            and refs.get("campaign_id")
+            and refs.get("subject_type") == "person"
+            and refs.get("identity_verified") is True
+        )
+
+    async def discard_rejected(self, refs) -> dict:
+        if self.keeps_brand(refs):
+            brand_id = refs["brand_id"]
+            await self.discard({k: v for k, v in refs.items() if k != "brand_id"})
+            return {"kept_brand_id": brand_id}
+        await self.discard(refs)
+        return {}
+
+    async def _reuse_brand(self, refs, fields, brand_id) -> bool:
+        """Put the kept brand in refs when Telnyx still holds it, confirmed,
+        for the same person, with no campaign. False files a new brand
+        instead. A sole proprietor brand takes one campaign, and ``status``
+        would adopt one still listed (a failed campaign delete). A brand
+        that does not fit stays at Telnyx, which refuses to delete a brand
+        for 3 months after its campaign."""
+        try:
+            brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
+            if (
+                not _same_person(brand, fields)
+                or brand.get("status") != "OK"
+                or brand.get("failureReasons")
+                or brand.get("identityStatus") not in _VERIFIED
+            ):
+                return False
+            found = await self._api.request(
+                "GET", "/10dlc/campaign", params={"brandId": brand_id}
+            )
+        except httpx.HTTPStatusError as exc:
+            # The lookup is optional: a refusal must not block the filing.
+            # An outage or 429 raises: retrying beats paying for a new brand.
+            status = exc.response.status_code
+            if status < 500 and status != 429:
+                logger.warning("10DLC kept brand lookup failed: status=%s", status)
+                return False
+            raise
+        if found.get("records"):
+            return False
+        refs["brand_id"] = brand_id
+        refs["identity_verified"] = True
+        # The fee rater bills no submission for a reused brand.
+        refs["brand_reused"] = True
+        return True
 
     async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
         """File the brand, wait for Telnyx to register it, then send the
@@ -557,6 +620,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 brand.get("failureReasons")
                 or brand.get("status") == "REGISTRATION_FAILED"
             ):
+                # A failed brand is not kept, even with a campaign filed.
+                refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
                     reason=BRAND_REJECTED,
@@ -841,6 +906,28 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     )
             except Exception:
                 logger.warning("10DLC discard failed: step=%s", key)
+
+
+def _same_person(brand: dict, fields: dict) -> bool:
+    """The brand names the person on the form. Case, spacing and the format
+    of the mobile do not count."""
+
+    def text(value: str | None) -> str:
+        return (value or "").strip().casefold()
+
+    def digits(value: str | None) -> str:
+        return re.sub(r"\D", "", value or "")
+
+    return digits(brand.get("mobilePhone")) == digits(
+        fields.get("mobile_phone_number")
+    ) and all(
+        text(brand.get(key)) == text(fields.get(field))
+        for key, field in (
+            ("firstName", "first_name"),
+            ("lastName", "last_name"),
+            ("email", "email"),
+        )
+    )
 
 
 def _refused(exc: Exception) -> bool:

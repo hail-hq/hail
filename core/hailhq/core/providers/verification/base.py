@@ -393,7 +393,9 @@ class SmsRegistrationProvider(VerificationProvider):
     lifecycle as number verification. ``purpose`` is 'sms'.
 
     ``create_draft`` takes one extra keyword: the organization's messaging
-    service (Twilio) or messaging profile (Telnyx) id, when one exists.
+    service (Twilio) or messaging profile (Telnyx) id, when one exists. A
+    plug-in whose ``discard_rejected`` returns ``kept_brand_id`` also takes
+    that keyword, when the organization's last filing left a brand.
     ``status`` creates the campaign once the brand is approved and reports
     'approved' only when the campaign is approved. ``attach_number`` puts
     one of the organization's US long codes on the approved campaign;
@@ -430,6 +432,18 @@ class SmsRegistrationProvider(VerificationProvider):
         'code' (type a code into Hail), 'reply' (answer the carrier's
         text), or None (no confirmation pending)."""
         return None
+
+    def keeps_brand(self, refs: dict) -> bool:
+        """True when dismissing this rejected filing leaves its brand at the
+        carrier for the next filing (``discard_rejected``)."""
+        return False
+
+    async def discard_rejected(self, refs: dict) -> dict:
+        """``discard`` for a rejected filing the customer dismisses. Returns
+        what the organization's next filing may reuse: refs to keep on the
+        cancelled row. A plug-in may leave that part at the carrier."""
+        await self.discard(refs)
+        return {}
 
     # The refs key that holds the campaign once it is filed. Required, as a
     # class attribute: the API marks a filing as sent for review

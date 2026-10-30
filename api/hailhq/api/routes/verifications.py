@@ -252,12 +252,46 @@ def _log_carrier_refusal(
         )
 
 
+def _wiped_refs(row: CarrierVerification) -> dict:
+    """``provider_refs`` once emptied. A filing that reused a brand keeps the
+    mark: the fee rater reads it on every sweep, and without it would bill
+    the submission."""
+    return (
+        {"brand_reused": True} if (row.provider_refs or {}).get("brand_reused") else {}
+    )
+
+
+async def _kept_brand(
+    db: AsyncSession, organization_id: UUID, provider_name: str, subject_type: str
+) -> str | None:
+    """The brand the organization's last filing left at the carrier for the
+    next one (``discard_rejected``). Only the last filing counts: once a
+    newer filing exists, an older kept brand may be in use or gone."""
+    row = (
+        await db.execute(
+            select(CarrierVerification.state, CarrierVerification.provider_refs)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.provider == provider_name,
+                CarrierVerification.purpose == "sms",
+                CarrierVerification.subject_type == subject_type,
+            )
+            .order_by(CarrierVerification.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None or row.state != "cancelled":
+        return None
+    return (row.provider_refs or {}).get("kept_brand_id")
+
+
 async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
     """US texting filings of the last day with no ledger row yet: the
     website's rater charges each one shortly after it is saved. A filing is
     settled by its submission debit, or by the one-time debit of a filing
-    made before fees were charged per step. Exact refs, so the ref index
-    is used."""
+    made before fees were charged per step. A filing that reused a brand
+    is never charged a submission, so it does not count. Exact refs, so the
+    ref index is used."""
     ref = func.concat("sms_registration:", func.cast(CarrierVerification.id, String))
     return (
         await db.execute(
@@ -267,6 +301,9 @@ async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int
                 CarrierVerification.organization_id == organization_id,
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.created_at > func.now() - text("interval '1 day'"),
+                CarrierVerification.provider_refs[
+                    "brand_reused"
+                ].astext.is_distinct_from("true"),
                 ~select(AccountCredit.id)
                 .where(
                     AccountCredit.organization_id == organization_id,
@@ -678,10 +715,22 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """The response for a row, with ``confirmation`` and ``step`` filled in."""
+    """The response for a row, with ``confirmation``, ``step`` and
+    ``identity_confirmed`` filled in."""
+    refs = row.provider_refs or {}
+    identity_confirmed = bool(refs.get("kept_brand_id"))
+    if row.purpose == "sms" and row.state == "rejected":
+        provider = registry(row.provider, "sms")
+        identity_confirmed = isinstance(
+            provider, SmsRegistrationProvider
+        ) and provider.keeps_brand(refs)
     confirmation, step = _sms_progress(row, registry)
     return model.model_validate(row).model_copy(
-        update={"confirmation": confirmation, "step": step}
+        update={
+            "confirmation": confirmation,
+            "step": step,
+            "identity_confirmed": identity_confirmed,
+        }
     )
 
 
@@ -1158,8 +1207,16 @@ async def create_verification(
         # Hail Cloud charges each step of the filing from prepaid credit (the
         # website prices it; this repo holds no prices). The carrier's own
         # cost is the floor the balance must cover before anything is filed.
+        kept_brand_id = await _kept_brand(
+            db, principal.organization_id, provider_name, sub.subject_type
+        )
+        if kept_brand_id:
+            draft_kwargs["kept_brand_id"] = kept_brand_id
         try:
             floor_cents = sms_registration_fees.filing_fee_cents(
+                provider_name, sub.subject_type, brand_kept=bool(kept_brand_id)
+            )
+            full_cents = sms_registration_fees.filing_fee_cents(
                 provider_name, sub.subject_type
             )
         except KeyError:
@@ -1173,7 +1230,7 @@ async def create_verification(
             # later) count too, or an account could file again and again on
             # the same credit.
             unsettled = await _unsettled_sms_filings(db, principal.organization_id)
-            if balance < floor_cents * (1 + unsettled):
+            if balance < floor_cents + full_cents * unsettled:
                 raise HTTPException(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                     detail="not enough credit to file; add credit first",
@@ -1241,7 +1298,10 @@ async def create_verification(
         # The carrier record exists but the row does not: remove it, or it
         # would be left behind with the customer's details.
         await db.rollback()
-        await provider.discard(draft.refs)
+        # Not a reused brand: this request did not make it, and a filing that
+        # won the race may be using it.
+        if not draft.refs.get("brand_reused"):
+            await provider.discard(draft.refs)
         if isinstance(exc, IntegrityError):
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
@@ -1444,7 +1504,8 @@ async def _reject_row(
         _keep_refs(row, provider)
         await db.commit()
         return
-    row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.state, row.rejection_reason = "rejected", reason
+    row.provider_refs = _wiped_refs(row)
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -1588,9 +1649,10 @@ async def cancel_verification(
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> VerificationResponse:
     """Withdraw a verification that has not been sent for review, or dismiss
-    a rejected one. The draft is discarded either way. One that is under
-    review cannot be cancelled: wait for the result; if it is rejected,
-    dismiss it.
+    a rejected one. The draft is discarded either way, except a person's
+    confirmed brand on a rejected US SMS registration: it stays at the
+    carrier for the next filing. One that is under review cannot be
+    cancelled: wait for the result; if it is rejected, dismiss it.
 
     An approved US SMS registration (`purpose=sms`) can be cancelled too:
     its numbers leave the campaign, the campaign is deleted at the carrier,
@@ -1619,10 +1681,13 @@ async def cancel_verification(
         # detach numbers too.
         await org_lock(db, row.organization_id)
         await _detach_registration(db, row, provider)
-    if provider is not None:
+    kept: dict = {}
+    if isinstance(provider, SmsRegistrationProvider) and row.state == "rejected":
+        kept = await provider.discard_rejected(row.provider_refs)
+    elif provider is not None:
         await provider.discard(row.provider_refs)
     now = datetime.now(timezone.utc)
-    row.state, row.provider_refs = "cancelled", {}
+    row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
     await db.commit()
     _notify_billing([row])
@@ -1878,7 +1943,8 @@ async def admin_reject(
     await _rate_before_wipe(db, row, provider)
     if provider is not None:
         await provider.discard(row.provider_refs)
-    row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}
+    row.state, row.rejection_reason = "rejected", body.reason
+    row.provider_refs = _wiped_refs(row)
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     _notify_billing([row])

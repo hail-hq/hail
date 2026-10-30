@@ -536,6 +536,187 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert "5550100" not in repr(refs)
 
 
+def _kept_brand_handler(calls, brand, campaigns=()):
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            if brand is None:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=brand)
+        if req.method == "DELETE":
+            return httpx.Response(204)
+        if req.url.path.endswith("/10dlc/campaign"):
+            return httpx.Response(200, json={"records": list(campaigns)})
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/smsOtp"):
+            return httpx.Response(200, json={"brandId": "B1", "referenceId": "R1"})
+        return httpx.Response(404)
+
+    return handler
+
+
+KEPT_BRAND = {
+    "status": "OK",
+    "identityStatus": "VERIFIED",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "email": "ADA@example.com",
+    "mobilePhone": "+15125550100",
+}
+
+
+async def _kept_draft(p):
+    req = await p.requirements("US", "local", "person")
+    return await p.create_draft(
+        organization_id="org1",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=PERSON_FIELDS,
+        address=ADDRESS,
+        documents={},
+        kept_brand_id="B9",
+    )
+
+
+async def test_person_reuses_the_kept_brand_with_no_pin() -> None:
+    calls: list = []
+    p = _provider(_kept_brand_handler(calls, KEPT_BRAND))
+    draft = await _kept_draft(p)
+    assert draft.problems == []
+    assert [c for c in calls if "/10dlc/brand" in c[1]] == [
+        ("GET", "/v2/10dlc/brand/B9")
+    ]
+    refs = draft.refs
+    assert refs["brand_id"] == "B9" and refs["brand_reused"] is True
+    assert refs["identity_verified"] is True and "otp_sent_at" not in refs
+    assert p.confirmation(refs) is None
+
+
+@pytest.mark.parametrize(
+    "brand",
+    [
+        None,
+        {**KEPT_BRAND, "mobilePhone": "+15125550199"},
+        {**KEPT_BRAND, "lastName": "Byron"},
+        {**KEPT_BRAND, "identityStatus": "UNVERIFIED"},
+        {**KEPT_BRAND, "status": "REGISTRATION_FAILED"},
+    ],
+)
+async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
+    calls: list = []
+    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+    assert ("POST", "/v2/10dlc/brand") in calls
+    assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
+    # Telnyx refuses the delete, and a typo must not cost the brand.
+    assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
+    # The brand read decides it: no call to list its campaigns.
+    assert not [c for c in calls if c[0] == "GET" and "/10dlc/campaign" in c[1]]
+
+
+async def test_a_kept_brand_matches_a_mobile_in_any_format() -> None:
+    calls: list = []
+    brand = {**KEPT_BRAND, "mobilePhone": "+1 512 555 0100"}
+    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    assert draft.refs["brand_id"] == "B9" and draft.refs["brand_reused"] is True
+
+
+async def _lookup_answering(status: int):
+    calls: list = []
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append(("GET", req.url.path))
+            return httpx.Response(status, json={})
+        return _kept_brand_handler(calls, KEPT_BRAND)(req)
+
+    return await _kept_draft(_provider(handler))
+
+
+async def test_a_refused_lookup_files_a_new_brand() -> None:
+    draft = await _lookup_answering(400)
+    assert draft.problems == []
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+
+
+@pytest.mark.parametrize("status", [429, 500])
+async def test_a_failed_lookup_does_not_pay_for_a_new_brand(status) -> None:
+    with pytest.raises(VerificationProviderError):
+        await _lookup_answering(status)
+
+
+async def test_a_kept_brand_with_a_campaign_is_left_alone() -> None:
+    calls: list = []
+    handler = _kept_brand_handler(calls, KEPT_BRAND, [{"campaignId": "OLD"}])
+    draft = await _kept_draft(_provider(handler))
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+    assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
+
+
+async def test_a_brand_that_fails_after_its_campaign_is_not_kept() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={"failureReasons": "Identity mismatch"})
+
+    p = _provider(handler)
+    refs = {
+        "brand_id": "B1",
+        "campaign_id": "C1",
+        "subject_type": "person",
+        "identity_verified": True,
+    }
+    assert (await p.status(refs)).reason == BRAND_REJECTED
+    calls.clear()
+    assert await p.discard_rejected(refs) == {}
+    assert ("DELETE", "/v2/10dlc/brand/B1") in calls
+
+
+async def test_discard_rejected_keeps_a_confirmed_persons_brand() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={})
+
+    p = _provider(handler)
+    kept = await p.discard_rejected(
+        {
+            "brand_id": "B1",
+            "campaign_id": "C1",
+            "subject_type": "person",
+            "identity_verified": True,
+        }
+    )
+    assert kept == {"kept_brand_id": "B1"}
+    assert calls == [("DELETE", "/v2/10dlc/campaign/C1")]
+
+
+@pytest.mark.parametrize(
+    "refs",
+    [
+        {"subject_type": "business", "identity_verified": True},
+        {"subject_type": "person"},
+        # No campaign: the brand itself failed.
+        {"subject_type": "person", "identity_verified": True},
+    ],
+)
+async def test_discard_rejected_deletes_any_other_brand(refs) -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={})
+
+    p = _provider(handler)
+    assert await p.discard_rejected({"brand_id": "B1", **refs}) == {}
+    assert calls == [("DELETE", "/v2/10dlc/brand/B1")]
+
+
 async def test_person_mobile_must_be_us_or_canadian() -> None:
     calls = []
 
