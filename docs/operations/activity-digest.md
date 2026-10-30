@@ -2,15 +2,17 @@
 
 ## Ownership
 
-The `activity-digest` service runs inside the Hail production Compose stack.
-It reuses the API image with this command: `python -m hailhq.api.activity_digest`.
+The `activity-digest` service belongs to the base `docker-compose.yml` stack.
+The base and local stacks build it from the API source.
+The production override selects the published API image and adds restart and bounded logging settings.
+All stacks use this command: `python -m hailhq.api.activity_digest`.
 It runs separately from the API process. The website and GitHub Actions do not schedule or render it.
 GitHub still builds and deploys the normal API image when the owner merges a release.
 
 The service has no public ports or persistent volume.
 Its environment contains the database connection and dedicated sending credentials only.
 It does not inherit carrier keys, AWS credentials, or the website's internal secret.
-It has bounded logs, a restart policy, and resource limits.
+It has resource limits. The production override adds bounded logs and a restart policy.
 
 This is an internal platform report. It needs the platform database's organization, member, user, and activity tables.
 It stays disabled for ordinary self-host installations.
