@@ -162,6 +162,25 @@ async def test_restart_uses_the_durable_receipt_and_does_not_send_again(setup):
     assert not any(r.url.path.endswith("/email-domains") for r in requests)
 
 
+async def test_worker_rechecks_a_fresh_queued_receipt_until_it_goes_stale(setup):
+    config, repository = setup
+    repository.snapshot.return_value = (Receipt(EMAIL_ID, "queued", NOW), None)
+    requests = []
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport_handler(requests))
+    ) as http:
+        service = DigestService(config, repository, DigestClient(config, http))
+        worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
+        task = asyncio.create_task(worker.run_forever())
+        async with asyncio.timeout(1):
+            while repository.snapshot.await_count < 2:
+                await asyncio.sleep(0.001)
+        await worker.stop()
+        await asyncio.wait_for(task, timeout=1)
+    assert worker.handled_date is None
+    assert not any(r.method == "POST" for r in requests)
+
+
 @pytest.mark.parametrize("status", ["failed", "bounced", "complained", "queued"])
 async def test_failed_or_stale_receipts_require_review(setup, status):
     config, repository = setup

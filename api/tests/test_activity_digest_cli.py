@@ -1,8 +1,9 @@
+import asyncio
 import json
 import stat
 
 from hailhq.api.activity_digest import __main__ as command
-from hailhq.api.activity_digest.worker import Result
+from hailhq.api.activity_digest.worker import Result, ReviewRequired
 
 
 def test_disabled_one_shot_does_not_require_database_or_network(monkeypatch, capsys):
@@ -27,6 +28,29 @@ def test_invalid_config_logs_the_error_kind_without_the_secret(monkeypatch, capl
     assert "command_failed" in caplog.text
     assert "do-not-log-this-key" not in caplog.text
     assert "not-a-url" not in caplog.text
+
+
+def test_one_shot_keeps_default_signal_handling(monkeypatch):
+    handlers = []
+    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "false")
+    monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
+    monkeypatch.setattr(
+        asyncio.SelectorEventLoop,
+        "add_signal_handler",
+        lambda self, *args: handlers.append(args),
+    )
+    assert command.main() == 0
+    assert handlers == []
+
+
+def test_one_shot_logs_the_review_code(monkeypatch, caplog):
+    async def needs_review(args):
+        raise ReviewRequired("sender_not_verified")
+
+    monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
+    monkeypatch.setattr(command, "execute", needs_review)
+    assert command.main() == 1
+    assert "requires_review code=sender_not_verified" in caplog.text
 
 
 def test_private_preview_files_are_not_readable_by_other_users(tmp_path):

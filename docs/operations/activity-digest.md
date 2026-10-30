@@ -110,6 +110,7 @@ Receipts and API idempotency are workspace-scoped. Changing workspaces can resen
 No migration or separate job-state table is needed.
 
 A queued, sent, or delivered receipt prevents another submission.
+A newer queued receipt is checked again each minute.
 A receipt queued for more than 15 minutes requires review.
 Failed, bounced, or complained receipts also require review.
 An ambiguous send is not retried inside the same run.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import logging
 import re
@@ -14,6 +13,7 @@ from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 import httpx
+from hailhq.api.auth import hash_key
 from hailhq.core.schemas import EmailCreate
 from hailhq.core.urls import canonical_url, join_url
 from pydantic import Field, SecretStr, field_validator
@@ -153,13 +153,7 @@ class DigestService:
         if window is None:
             return Result("before_schedule")
         raw_key = self.config.api_key.get_secret_value()
-        reporter_hash = (
-            base64.urlsafe_b64encode(hashlib.sha256(raw_key.encode()).digest())
-            .rstrip(b"=")
-            .decode()
-            if raw_key
-            else None
-        )
+        reporter_hash = hash_key(raw_key) if raw_key else None
         suffix = hashlib.sha256(self.config.to_address.lower().encode()).hexdigest()[
             :20
         ]
@@ -172,11 +166,12 @@ class DigestService:
             window, reporter_hash, org_id, key
         )
         if receipt:
-            stale = (
-                receipt.status == "queued"
-                and (now - receipt.requested_at).total_seconds() > 900
-            )
-            if stale or receipt.status not in ("queued", "sent", "delivered"):
+            age = (now - receipt.requested_at).total_seconds()
+            if receipt.status == "queued" and age <= 900:
+                # Not final yet. The worker keeps checking until the send
+                # finishes or the stale limit below asks for review.
+                return Result("pending", window.date, receipt.id)
+            if receipt.status not in ("sent", "delivered"):
                 raise ReviewRequired("previous_delivery_failed_or_stale")
             return Result("already_submitted", window.date, receipt.id)
         text = format_report(data, window)

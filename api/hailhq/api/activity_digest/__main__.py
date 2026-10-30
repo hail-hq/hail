@@ -13,9 +13,16 @@ from pathlib import Path
 import httpx
 from hailhq.core.db import to_async_url
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from .queries import Repository
-from .worker import DigestClient, DigestService, DigestSettings, DigestWorker
+from .worker import (
+    DigestClient,
+    DigestService,
+    DigestSettings,
+    DigestWorker,
+    ReviewRequired,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,24 +38,26 @@ def write_preview(directory: Path, result):
 
 async def execute(args):
     config = DigestSettings()
+    one_shot = args.once or args.preview
     stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
+    if not one_shot:
+        # Only the long-running worker checks this event. A one-shot run
+        # keeps the default handlers, so Ctrl-C and SIGTERM stop it.
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, stop.set)
     if not config.enabled and not args.preview:
         print(json.dumps({"status": "disabled"}), flush=True)
-        if not args.once:
+        if not one_shot:
             await stop.wait()
         return 0
     if not config.database_url.get_secret_value():
         raise ValueError("database_url_missing")
     if not args.preview:
         config.validate_send()
+    # A pooled connection would sit idle all day and hold a database slot.
     engine = create_async_engine(
-        to_async_url(config.database_url.get_secret_value()),
-        pool_size=1,
-        max_overflow=0,
-        pool_pre_ping=True,
+        to_async_url(config.database_url.get_secret_value()), poolclass=NullPool
     )
     try:
         async with httpx.AsyncClient(follow_redirects=False) as http:
@@ -56,7 +65,7 @@ async def execute(args):
                 config, Repository(engine), DigestClient(config, http)
             )
             worker = DigestWorker(service, stop_event=stop)
-            if args.once or args.preview:
+            if one_shot:
                 async with asyncio.timeout(120):
                     result = await service.run_once(
                         worker.clock(), preview=args.preview
@@ -95,6 +104,9 @@ def main():
     )
     try:
         return asyncio.run(execute(args))
+    except ReviewRequired as error:
+        logger.error("activity_digest requires_review code=%s", error)
+        return 1
     except Exception as error:
         # Never print exception reprs with SQL parameters, URLs, or headers.
         logger.error("activity_digest command_failed type=%s", type(error).__name__)

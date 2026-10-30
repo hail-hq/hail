@@ -182,9 +182,11 @@ jobs:
             assert_fresh api
             assert_fresh mcp
             assert_fresh voicebot "$new_voicebot"
-            if $COMPOSE config --services | grep -qx activity-digest; then
-              assert_fresh activity-digest "" api
-            fi
+            # Match the saved list. A `compose config | grep -q` pipe can fail
+            # under pipefail when grep exits first, which would skip this check.
+            case " $(echo $services) " in
+              *" activity-digest "*) assert_fresh activity-digest "" api ;;
+            esac
 
             $COMPOSE ps
 
