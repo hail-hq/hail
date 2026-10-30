@@ -60,7 +60,7 @@ from hailhq.core.dns_lookup import (
     resolve_zone_ns,
     ses_inbound_host,
 )
-from hailhq.core.email_sender import from_address_for
+from hailhq.core.email_sender import from_address_for, head_retired_by_other_org
 from hailhq.core.forward_targets import (
     MAX_PENDING_TARGETS,
     ConfirmBudgetExceeded,
@@ -69,7 +69,7 @@ from hailhq.core.forward_targets import (
     sync_targets,
 )
 from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
-from hailhq.core.models import Email, EmailDomain, RetiredHailMailAddress
+from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
@@ -311,7 +311,7 @@ async def preview_default_from(db: AsyncSession, organization_id: UUID) -> str |
     """The address a ``from``-less send would use right now, or ``None``.
 
     ``None`` means "a ``from``-less send will not go out": the org owns
-    several verified identities and must name one (``resolve_sender``
+    several verified custom domains and must name one (``resolve_sender``
     raises 422), it owns none that can send yet, or the hail-mail address
     it would mint belongs to another tenant (409). Mirrors
     ``resolve_sender`` case for case — the two must not drift, which is
@@ -356,20 +356,7 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
     ).scalar_one_or_none()
     if owner is not None and owner != organization_id:
         return None
-    # The same rule as the email_domains guard trigger: only the org that gave
-    # a head up last may take it back.
-    last_holder = (
-        await db.execute(
-            select(RetiredHailMailAddress.organization_id)
-            .where(RetiredHailMailAddress.local_prefix_user == user_prefix)
-            .order_by(
-                RetiredHailMailAddress.retired_at.desc(),
-                RetiredHailMailAddress.organization_id,
-            )
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if last_holder is not None and last_holder != organization_id:
+    if await head_retired_by_other_org(db, user_prefix, organization_id):
         return None
     return address
 
@@ -834,6 +821,7 @@ async def patch_email_domain(
                 loc=["body", "local_prefix_user"],
             )
         new_user = body.local_prefix_user or sd.local_prefix_user
+        head_changed = new_user != sd.local_prefix_user
         new_org = body.local_prefix_org or sd.local_prefix_org
         assert new_user is not None and new_org is not None
         new_address = compose_hail_mail_address(new_user, new_org)
@@ -908,7 +896,12 @@ async def patch_email_domain(
         if "local_prefix_user" in updates:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=taken_user_prefix_detail(updates["local_prefix_user"]),
+                detail=(
+                    taken_user_prefix_detail(updates["local_prefix_user"])
+                    if head_changed
+                    else f"hail-mail address {updates['domain']!r} is already "
+                    "taken; choose a different local_prefix_org"
+                ),
             ) from exc
         raise unprocessable("patch violates a domain check constraint") from exc
 

@@ -666,6 +666,46 @@ async def test_patch_hail_mail_taken_head_returns_409(
     )
 
 
+async def test_patch_hail_mail_tail_cannot_claim_a_retired_address(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "acme",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert created.status_code == 201, created.text
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="globex",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"local_prefix_org": "globex"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == (
+        "hail-mail address 'alice+globex@mail.hail.so' is already taken; "
+        "choose a different local_prefix_org"
+    )
+
+
 async def test_patch_hail_mail_tail_only_keeps_the_head(
     client: httpx.AsyncClient,
     org_and_key: tuple,

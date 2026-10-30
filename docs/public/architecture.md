@@ -105,8 +105,8 @@ Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1â€
 `POST /emails` picks a sender in this order:
 
 1. An explicit `from` â€” it must match a `verified` row that the caller's org owns.
-2. The org's single verified domain. With two or more, there is no default: the request returns `422` listing them, and the caller must pass `from`.
-3. An auto-minted hail-mail row with the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
+2. The org's single verified custom domain, which wins over the hail-mail address. With two or more, there is no default: the request returns `422` listing them, and the caller must pass `from`.
+3. The org's hail-mail address, auto-minted with the configured prefixes if the org has none and `HAIL_MAIL_BASE_DOMAIN` is set.
 
 If none of those resolve, the request returns `503` with instructions on how to register a domain.
 

@@ -1704,14 +1704,15 @@ class EmailDomainListResponse(BaseModel):
         description="Opaque cursor for the next page. Null when there are no more results.",
     )
     # The address a send with no ``from`` goes out as. ``None`` when such a
-    # send would be rejected: several verified identities (name one), or
+    # send would be rejected: several verified custom domains (name one), or
     # none that can send yet. Computed across the whole org, not the page.
     default_from: str | None = Field(
         default=None,
         description=(
-            "The From address used when a send omits 'from'. Null when no "
-            "such default can be resolved (e.g. multiple verified "
-            "identities, or none that can send yet). Computed across the "
+            "The From address used when a send omits 'from'. A verified "
+            "custom domain wins over the hail-mail address. Null when no "
+            "such default can be resolved (e.g. multiple verified custom "
+            "domains, or none that can send yet). Computed across the "
             "whole organization, not just this page."
         ),
     )

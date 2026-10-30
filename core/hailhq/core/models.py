@@ -1246,14 +1246,15 @@ class RetiredHailMailAddress(Base):
     )
 
 
-# Rules on a NEW head only, so an older row with a role-name head keeps working
-# when its other columns change. A CHECK would run on every update of that row.
+# Rules on a NEW head or tail only, so an older row with a role-name head keeps
+# working when its other columns change. A CHECK would run on every update of that row.
 # Error codes are the ones callers already handle: 23505 means "taken".
 _ROLE_MAILBOXES_SQL = ", ".join(f"'{name}'" for name in sorted(ROLE_MAILBOXES))
 EMAIL_DOMAINS_GUARD_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION email_domains_guard_hail_mail_head() RETURNS trigger AS $$
 DECLARE
     newest_org uuid;
+    head_changed boolean;
 BEGIN
     -- Claiming a head and releasing it must run one after the other. Otherwise
     -- a claim can read no retirement record, then commit just after the release
@@ -1268,10 +1269,13 @@ BEGIN
     END IF;
     IF NEW.kind <> 'hail_mail'
        OR (TG_OP = 'UPDATE'
-           AND NEW.local_prefix_user IS NOT DISTINCT FROM OLD.local_prefix_user) THEN
+           AND NEW.local_prefix_user IS NOT DISTINCT FROM OLD.local_prefix_user
+           AND NEW.local_prefix_org IS NOT DISTINCT FROM OLD.local_prefix_org) THEN
         RETURN NEW;
     END IF;
-    IF NEW.local_prefix_user = ANY (ARRAY[{_ROLE_MAILBOXES_SQL}]) THEN
+    head_changed := TG_OP = 'INSERT'
+        OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user;
+    IF head_changed AND NEW.local_prefix_user = ANY (ARRAY[{_ROLE_MAILBOXES_SQL}]) THEN
         RAISE EXCEPTION USING ERRCODE = '23514',
             MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is reserved';
     END IF;
@@ -1281,14 +1285,27 @@ BEGIN
               WHERE head IS NOT NULL
               ORDER BY head) AS heads;
     -- Only the org that gave the head up last may take it back.
-    SELECT r.organization_id INTO newest_org
-      FROM retired_hail_mail_addresses r
-     WHERE r.local_prefix_user = NEW.local_prefix_user
-     ORDER BY r.retired_at DESC, r.organization_id
-     LIMIT 1;
-    IF FOUND AND newest_org <> NEW.organization_id THEN
+    IF head_changed THEN
+        SELECT r.organization_id INTO newest_org
+          FROM retired_hail_mail_addresses r
+         WHERE r.local_prefix_user = NEW.local_prefix_user
+         ORDER BY r.retired_at DESC, r.organization_id
+         LIMIT 1;
+        IF FOUND AND newest_org <> NEW.organization_id THEN
+            RAISE EXCEPTION USING ERRCODE = '23505',
+                MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is retired';
+        END IF;
+    END IF;
+    -- A new tail must not claim the exact address another org gave up: ingest
+    -- would then hold mail that was meant for that org.
+    IF EXISTS (
+           SELECT 1 FROM retired_hail_mail_addresses r
+            WHERE r.local_prefix_user = NEW.local_prefix_user
+              AND r.local_prefix_org = NEW.local_prefix_org
+              AND r.organization_id <> NEW.organization_id) THEN
         RAISE EXCEPTION USING ERRCODE = '23505',
-            MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is retired';
+            MESSAGE = 'hail-mail address ' || NEW.local_prefix_user || '+'
+                || NEW.local_prefix_org || ' is retired';
     END IF;
     RETURN NEW;
 END

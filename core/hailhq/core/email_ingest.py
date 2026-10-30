@@ -111,9 +111,8 @@ async def _find_domain_for_recipient(
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
         if row is not None:
-            # An alias can carry its own ``+``: compare alice+globex+promo as
-            # alice+globex. The holder's live tail is never another org's mail.
-            tail = classified.tail.partition("+")[0]
+            # The holder's live tail is never another org's mail.
+            tail = classified.tail
             if (
                 tail
                 and tail != row.local_prefix_org

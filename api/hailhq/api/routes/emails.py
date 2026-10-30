@@ -8,10 +8,10 @@ DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
 
-  explicit ``from`` → the org's one verified domain →
-  freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
+  explicit ``from`` → the org's one verified custom domain → its hail-mail
+  address → freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
 
-An org with several verified domains has no default: a ``from``-less
+An org with several verified custom domains has no default: a ``from``-less
 send returns 422 listing the choices. ``GET /email-domains`` exposes the
 same decision up front as ``default_from``.
 
@@ -58,6 +58,7 @@ from hailhq.api.routes.email_domains import (
     first_pending_custom,
     get_email_provider,
     resolve_hail_mail_prefixes,
+    taken_user_prefix_detail,
     verified_senders,
 )
 from hailhq.api.suppressions import (
@@ -186,7 +187,7 @@ async def resolve_sender(
             loc=["body", "from"],
         )
 
-    # No explicit `from`. One verified identity is unambiguous; several
+    # No explicit `from`. One candidate is unambiguous; several
     # are not — see the docstring for why we refuse to guess.
     verified = await verified_senders(db, organization_id)
     if len(verified) == 1 or (verified and allow_ambiguous):
@@ -255,12 +256,7 @@ async def resolve_sender(
         if existing is None:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=(
-                    f"hail-mail user prefix {user_prefix!r} is already taken "
-                    "by another organization; register an explicit address "
-                    "via POST /email-domains with a different "
-                    "local_prefix_user"
-                ),
+                detail=taken_user_prefix_detail(user_prefix),
             )
         return existing
     # Populate server-defaulted timestamps so any future read of this row

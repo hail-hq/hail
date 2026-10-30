@@ -36,7 +36,7 @@ def test_address_without_plus_routes_on_the_head():
 
 
 def test_any_tail_routes_on_the_head():
-    for tail in ("sales", "a.b_c", "x" * 40, "a+b", ""):
+    for tail in ("sales", "a.b_c", "x" * 40, ""):
         r = classify_hail_mail_recipient(f"alice+{tail}@mail.hail.so", "mail.hail.so")
         assert r == HailMailRecipient(
             user_prefix="alice", tail=tail, base_domain="mail.hail.so"
@@ -54,6 +54,18 @@ def test_bare_role_name_returns_none(role):
     )
     # An empty tail is the same as no tail.
     assert classify_hail_mail_recipient(f"{role}+@mail.hail.so", "mail.hail.so") is None
+
+
+def test_tail_stops_at_the_next_plus():
+    r = classify_hail_mail_recipient("alice+globex+promo@mail.hail.so", "mail.hail.so")
+    assert r.tail == "globex"
+
+
+def test_empty_tail_before_a_second_plus_is_bare():
+    r = classify_hail_mail_recipient("alice++b@mail.hail.so", "mail.hail.so")
+    assert r.tail == ""
+    assert classify_hail_mail_recipient("admin++@mail.hail.so", "mail.hail.so") is None
+    assert classify_hail_mail_recipient("admin++b@mail.hail.so", "mail.hail.so") is None
 
 
 def test_role_name_with_a_tail_is_a_tenant_alias():

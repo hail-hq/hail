@@ -30,7 +30,7 @@ _PREFIX_RE = re.compile(HAIL_MAIL_PREFIX_PATTERN)
 @dataclass(frozen=True)
 class HailMailRecipient:
     user_prefix: str
-    # Empty for ``<head>@<base>`` and ``<head>+@<base>``.
+    # The text up to the next ``+``. Empty for a bare address.
     tail: str
     base_domain: str
 
@@ -47,7 +47,9 @@ def classify_hail_mail_recipient(
     # Local-part case-insensitivity is safe here because these are our
     # own addresses, not arbitrary third-party mailboxes.
     local = local.lower()
-    user, _, tail = local.partition("+")
+    user, _, rest = local.partition("+")
+    # alice+globex+promo is alice+globex, and admin++ is a bare admin.
+    tail = rest.partition("+")[0]
     if not _PREFIX_RE.match(user):
         return None
     if not tail and user in ROLE_MAILBOXES:

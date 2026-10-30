@@ -176,7 +176,7 @@ async def test_org_that_is_not_the_last_holder_cannot_return(async_session) -> N
     assert _sqlstate(refused) == "23505"
     await async_session.rollback()
 
-    await _add(async_session, _row(last_holder))
+    await _add(async_session, _row(last_holder, tail="fresh"))
 
 
 @pytest.mark.asyncio
@@ -198,6 +198,91 @@ async def test_retiring_a_pair_again_makes_it_the_newest_record(async_session) -
     async_session.expire_all()
     second = await async_session.scalar(select(RetiredHailMailAddress.retired_at))
     assert second > first
+
+
+async def _retire(session, tail="globex", org=None) -> None:
+    session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org=tail,
+            organization_id=org or uuid.uuid4(),
+        )
+    )
+    await session.commit()
+
+
+async def _set_tail(session, row_id, tail) -> None:
+    await session.execute(
+        update(EmailDomain)
+        .where(EmailDomain.id == row_id)
+        .values(local_prefix_org=tail, domain=f"alice+{tail}@mail.hail.so")
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_tail_cannot_claim_an_address_another_org_retired(async_session) -> None:
+    org = uuid.uuid4()
+    row = await _add(async_session, _row(org))
+    row_id = row.id
+    await _retire(async_session)
+
+    with pytest.raises(IntegrityError) as refused:
+        await _set_tail(async_session, row_id, "globex")
+    assert _sqlstate(refused) == "23505"
+    assert "alice+globex is retired" in str(refused.value.orig)
+    await async_session.rollback()
+
+    await _set_tail(async_session, row_id, "sales")
+
+
+@pytest.mark.asyncio
+async def test_insert_cannot_claim_an_address_another_org_retired(
+    async_session,
+) -> None:
+    # This org gave the head up last, so only the exact address is refused.
+    org = uuid.uuid4()
+    await _retire(async_session)
+    await _retire(async_session, tail="own", org=org)
+    await async_session.execute(
+        update(RetiredHailMailAddress)
+        .where(RetiredHailMailAddress.organization_id == org)
+        .values(retired_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    )
+    await async_session.commit()
+
+    with pytest.raises(IntegrityError) as refused:
+        await _add(async_session, _row(org, tail="globex"))
+    assert _sqlstate(refused) == "23505"
+    await async_session.rollback()
+
+    await _add(async_session, _row(org, tail="fresh"))
+
+
+@pytest.mark.asyncio
+async def test_unchanged_tail_keeps_working_after_another_org_retired_it(
+    async_session,
+) -> None:
+    row = await _add(async_session, _row(uuid.uuid4()))
+    row_id = row.id
+    await _retire(async_session, tail="acme")
+
+    await async_session.execute(
+        update(EmailDomain)
+        .where(EmailDomain.id == row_id)
+        .values(forward_rate_per_hour=5, local_prefix_org="acme")
+    )
+    await async_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_org_may_return_to_its_own_retired_tail(async_session) -> None:
+    org = uuid.uuid4()
+    row = await _add(async_session, _row(org))
+    row_id = row.id
+    await _retire(async_session, tail="old", org=org)
+
+    await _set_tail(async_session, row_id, "old")
 
 
 @pytest.mark.asyncio

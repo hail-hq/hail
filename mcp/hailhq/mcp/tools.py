@@ -1547,15 +1547,17 @@ def register_tools(
         how/where consent was obtained) — leave as the default
         ``"informational"`` for transactional/service email.
 
-        ``from_`` is optional only while the workspace has one verified
-        sender identity. With several, omitting it returns 422 listing
-        them — call ``list_email_domains`` and pass one. With none, the
-        server auto-mints a per-org hail-mail address of the form
-        ``<user>+<org>@<base>`` if the operator configured
+        ``from_`` is optional while the workspace has one verified custom
+        domain, which wins over the hail-mail address, or only a hail-mail
+        address. With several verified custom domains, omitting it returns
+        422 listing them — call ``list_email_domains`` and pass one. With no
+        verified sender, the server auto-mints a per-org hail-mail address
+        of the form ``<user>+<org>@<base>`` if the operator configured
         ``HAIL_MAIL_BASE_DOMAIN`` (the ``<org>`` part is derived from your
-        organization id; the ``<user>`` part comes from ``HAIL_MAIL_FROM``
-        / ``HAIL_MAIL_DEFAULT_USER_PREFIX``, or an explicit row created
-        via ``POST /email-domains``). When supplied, ``from_`` must match
+        organization id; the ``<user>`` part comes from ``HAIL_MAIL_FROM``,
+        from ``HAIL_MAIL_DEFAULT_USER_PREFIX`` plus a per-organization
+        token, or from an explicit row created via
+        ``POST /email-domains``). When supplied, ``from_`` must match
         a verified row already in ``email_domains`` (register one with
         the website console or ``POST /email-domains``).
 
@@ -3091,8 +3093,9 @@ def register_tools(
         item's ``domain`` is already a full address.
 
         ``default_from`` is the address a ``send_email`` with no ``from_``
-        goes out as. It is null when the workspace has several verified
-        identities — then ``send_email`` rejects a missing ``from_`` and you
+        goes out as. A verified custom domain wins over the hail-mail
+        address. It is null when the workspace has several verified custom
+        domains — then ``send_email`` rejects a missing ``from_`` and you
         must pass one from ``items``.
 
         Example:

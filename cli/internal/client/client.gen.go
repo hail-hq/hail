@@ -2006,7 +2006,7 @@ type EmailDomainDnsCheckKind string
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
-	// DefaultFrom The From address used when a send omits 'from'. Null when no such default can be resolved (e.g. multiple verified identities, or none that can send yet). Computed across the whole organization, not just this page.
+	// DefaultFrom The From address used when a send omits 'from'. A verified custom domain wins over the hail-mail address. Null when no such default can be resolved (e.g. multiple verified custom domains, or none that can send yet). Computed across the whole organization, not just this page.
 	DefaultFrom *string `json:"default_from,omitempty"`
 
 	// Items Email domains in this page.

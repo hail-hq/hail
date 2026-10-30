@@ -1832,7 +1832,10 @@ async def _older_row_with_role_head(session, org_id):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("recipient", ["admin@mail.hail.so", "admin+@mail.hail.so"])
+@pytest.mark.parametrize(
+    "recipient",
+    ["admin@mail.hail.so", "admin+@mail.hail.so", "admin++@mail.hail.so"],
+)
 async def test_bare_role_name_skips_a_tenant_with_that_head(async_session, recipient):
     await _older_row_with_role_head(async_session, uuid.uuid4())
 

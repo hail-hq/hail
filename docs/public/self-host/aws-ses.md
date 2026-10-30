@@ -165,12 +165,12 @@ curl -X POST $HAIL_API_URL/v1/emails \
 The `from` field is optional. Resolution order:
 
 1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org.
-2. The org's single verified domain. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
-3. The auto-minted hail-mail row, if `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
+2. The org's single verified custom domain, which wins over the hail-mail address. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
+3. The org's hail-mail address. Hail mints it on the first send if the org has none and `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
 
 If none of these resolve, the call returns `503` with instructions to register a domain.
 
-To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified identities.
+To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified custom domains.
 
 The optional `from_name` field sets a display name on the `From:` header (`"Acme Billing" <billing@acme.com>`). Non-ASCII names are RFC-2047-encoded automatically; control characters are rejected with `422`.
 

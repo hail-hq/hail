@@ -474,7 +474,7 @@ func printEmailDomainList(opts *Options, body *client.EmailDomainListResponse) e
 	if body.DefaultFrom != nil && *body.DefaultFrom != "" {
 		fmt.Fprintf(opts.Stdout, "\nSends with no --from go out as: %s\n", *body.DefaultFrom)
 	} else if len(body.Items) > 0 {
-		// Covers both "several verified identities, pick one" and "nothing
+		// Covers both "several verified custom domains, pick one" and "nothing
 		// verified yet, so no --from is valid either" — the API returns a
 		// null default_from for each, and only the first is fixable by
 		// passing --from.

@@ -177,7 +177,10 @@ async def test_first_send_with_a_retired_pinned_head_returns_409(
     )
 
     assert resp.status_code == 409, resp.text
-    assert "'team' is already taken" in resp.text
+    assert resp.json()["detail"] == (
+        "hail-mail user prefix 'team' is already taken; "
+        "choose a different local_prefix_user"
+    )
     email_mock.send_email.assert_not_awaited()
 
 
