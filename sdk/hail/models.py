@@ -205,8 +205,9 @@ class SmsListResponse(BaseModel):
 
 
 class SuppressionResponse(BaseModel):
-    """Shape returned by ``GET /sms/suppressions`` items — one opted-out
-    recipient. Mirrors ``core/hailhq/core/schemas.py:SuppressionResponse``.
+    """Shape returned by ``GET /sms/suppressions`` and
+    ``GET /emails/suppressions`` items — one suppressed recipient.
+    Mirrors ``core/hailhq/core/schemas.py:SuppressionResponse``.
     """
 
     model_config = ConfigDict(from_attributes=True)
