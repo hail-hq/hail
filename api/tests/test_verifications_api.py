@@ -2078,6 +2078,34 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     ).scalar_one_or_none() is None
 
 
+async def test_a_failed_discard_keeps_the_ids_check_wrote(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def check(refs):
+        # A plug-in may file (and be billed) inside check(), in place.
+        refs["filed_id"] = "F1"
+        return [Problem(field="", message="document unreadable")]
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    carrier.check, carrier.discard = check, boom
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
 async def test_response_carries_purpose_number_by_default(
     client, org_and_key, carrier
 ) -> None:
@@ -2129,7 +2157,7 @@ async def test_an_sms_link_over_512_characters_is_refused(
     from hailhq.core.providers.verification.sms_form import sms_requirements
 
     async def requirements(country_code, number_type, subject_type):
-        return sms_requirements("fake", subject_type)
+        return sms_requirements(sms_carrier, subject_type)
 
     monkeypatch.setattr(sms_carrier, "requirements", requirements)
     org_id, _, key = org_and_key
@@ -2239,6 +2267,30 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     sms_carrier.problems = []
     sms_carrier.billed_refs = {}
     assert (await _post_sms(client, key)).status_code == 201
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_billed_refusal_with_a_campaign_carries_the_marker(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    """A carrier that files and bills a campaign at create, then refuses:
+    the saved row says the campaign was filed, so its review is charged."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    sms_carrier.campaign_key = "campaign_xyz"
+    sms_carrier.problems = [Problem(field="rep_phone", message="Use another one.")]
+    sms_carrier.billed_refs = {"brand_id": "B7", "campaign_xyz": "C7"}
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 422, resp.text
+    row = (
+        await async_session.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
+            )
+        )
+    ).scalar_one()
+    assert row.state == "rejected" and row.provider_refs["campaign_xyz"] == "C7"
+    assert row.provider_refs["campaign_filed_at"]
 
 
 @pytest.mark.usefixtures("us_number")
@@ -2691,12 +2743,17 @@ async def test_campaign_id_written_during_a_poll_is_saved(
     sms_carrier.campaign_key = campaign_key
     sms_carrier.remote_status = ProviderStatus(state="pending")
     url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    stamps = []
     for _ in range(2):
         verifications_routes._last_polled.clear()
         resp = await client.get(url, headers=_auth(key))
         assert resp.status_code == 200, resp.text
-        assert (await _stored_refs(async_session, vid))[campaign_key] == "QE1"
+        refs = await _stored_refs(async_session, vid)
+        assert refs[campaign_key] == "QE1"
+        stamps.append(refs["campaign_filed_at"])
     assert sms_carrier.campaigns_created == 1
+    # One key for billing whatever the carrier's own key, set once.
+    assert stamps[0] and stamps[0] == stamps[1]
     # A new campaign id is not a decision: nobody is emailed.
     assert decided == []
 
@@ -3619,3 +3676,73 @@ async def test_a_telnyx_outage_after_the_brand_keeps_the_filing(
     assert pinged == [body["id"], body["id"]]
     if subject_type == "person":
         assert got.json()["confirmation"] == "code"
+
+
+def test_campaign_filed_at_is_stamped_once_from_the_carrier_key() -> None:
+    carrier = FakeSmsCarrier()
+    carrier.campaign_key = "campaign_xyz"
+    refs: dict = {"brand_id": "B1"}
+    verifications_routes._stamp_campaign_filed(carrier, refs)
+    assert "campaign_filed_at" not in refs
+    # Only a non-empty string is a campaign, as the billing service reads it.
+    for value in (7, True, ""):
+        odd = {"campaign_xyz": value}
+        verifications_routes._stamp_campaign_filed(carrier, odd)
+        assert "campaign_filed_at" not in odd
+        assert not verifications_routes._campaign_filed(carrier, odd)
+    refs["campaign_xyz"] = "C1"
+    verifications_routes._stamp_campaign_filed(carrier, refs)
+    first = refs["campaign_filed_at"]
+    verifications_routes._stamp_campaign_filed(carrier, refs)
+    assert first and refs["campaign_filed_at"] == first
+    # A number plug-in or no plug-in never stamps.
+    bare: dict = {"campaign_xyz": "C1"}
+    verifications_routes._stamp_campaign_filed(None, bare)
+    verifications_routes._stamp_campaign_filed(FakeCarrier(), bare)
+    assert "campaign_filed_at" not in bare
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_campaign_filed_by_a_refused_submit_is_rated_before_the_wipe(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    """A carrier that files its campaign inside submit() and then refuses:
+    the campaign and its marker reach the rater before the refs are wiped."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_xyz"
+
+    async def file_then_refuse(refs):
+        refs["campaign_xyz"] = "C9"
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    sms_carrier.submit = file_then_refuse
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert len(rated) == 1 and rated[0][0] == vid
+    assert rated[0][1]["campaign_xyz"] == "C9"
+    assert rated[0][1]["campaign_filed_at"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_campaign_filed_by_a_failed_submit_is_kept(
+    client, org_and_key, sms_carrier, async_session, session_factory
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_xyz"
+
+    async def file_then_fail(refs):
+        refs["campaign_xyz"] = "C9"
+        raise RuntimeError("carrier down after filing")
+
+    sms_carrier.submit = file_then_fail
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    async with session_factory() as other:
+        row = await other.get(CarrierVerification, uuid.UUID(vid))
+    assert row.state == "awaiting_review"
+    assert row.provider_refs["campaign_xyz"] == "C9"
+    assert row.provider_refs["campaign_filed_at"]

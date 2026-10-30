@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 
 import httpx
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
@@ -19,8 +20,10 @@ from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
-    VALUE_NOT_ACCEPTED,
+    SMS_REFUSED,
+    SMS_VALUE_REFUSED,
     DraftResult,
+    FieldSpec,
     Problem,
     ProviderStatus,
     Requirements,
@@ -33,6 +36,7 @@ from hailhq.core.providers.verification.sms_form import (
     field_problems,
     sms_requirements,
     sms_subject_name,
+    text_types_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,7 +81,6 @@ _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
 _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
-_REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
 # Sub use cases for a campaign filed before the form asked for them
 # (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
@@ -232,6 +235,18 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # Telnyx brand maximums. The person's first and last name are also
+    # filed together as the brand name, under the same 100 (``_validate``).
+    field_limits = MappingProxyType(
+        {
+            "legal_name": 100,
+            "website": 100,
+            "rep_email": 100,
+            "first_name": 100,
+            "last_name": 100,
+            "email": 100,
+        }
+    )
 
     def __init__(self, api_key=None, client=None) -> None:
         self._api = TelnyxClient(api_key, client)
@@ -239,10 +254,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
-        return sms_requirements(self.name, subject_type)
+        return sms_requirements(self, subject_type)
+
+    def extra_fields(self, subject_type) -> tuple[FieldSpec, ...]:
+        return (text_types_field(subject_type),)
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self.name, fields, subject_type)
+        problems = field_problems(self, fields, subject_type)
         mobile = (fields.get("mobile_phone_number") or "").strip()
         if subject_type == "person" and mobile and not mobile.startswith("+1"):
             problems.append(
@@ -889,7 +907,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
-                Problem(field=field, message=VALUE_NOT_ACCEPTED, raw=_detail(e))
+                Problem(field=field, message=SMS_VALUE_REFUSED, raw=_detail(e))
             )
     return problems or [Problem(field="", message=_safe_message(response))]
 
@@ -907,11 +925,11 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             field = names.get(name)
             if not field or any(p.field == field for p in problems):
                 continue
-            message = VALUE_NOT_ACCEPTED
+            message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
             problems.append(Problem(field=field, message=message, raw=text or None))
-    return problems or [Problem(field="", message=_REFUSED)]
+    return problems or [Problem(field="", message=SMS_REFUSED)]
 
 
 def _safe_message(response: httpx.Response) -> str:
@@ -927,4 +945,4 @@ def _safe_message(response: httpx.Response) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return _REFUSED
+    return SMS_REFUSED
