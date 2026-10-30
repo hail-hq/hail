@@ -1216,6 +1216,9 @@ async def create_verification(
             floor_cents = sms_registration_fees.filing_fee_cents(
                 provider_name, sub.subject_type, brand_kept=bool(kept_brand_id)
             )
+            full_cents = sms_registration_fees.filing_fee_cents(
+                provider_name, sub.subject_type
+            )
         except KeyError:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -1227,7 +1230,7 @@ async def create_verification(
             # later) count too, or an account could file again and again on
             # the same credit.
             unsettled = await _unsettled_sms_filings(db, principal.organization_id)
-            if balance < floor_cents * (1 + unsettled):
+            if balance < floor_cents + full_cents * unsettled:
                 raise HTTPException(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                     detail="not enough credit to file; add credit first",
