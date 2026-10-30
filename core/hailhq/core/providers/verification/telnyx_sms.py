@@ -375,38 +375,30 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def _reuse_brand(self, refs, fields, brand_id) -> bool:
         """Put the kept brand in refs when Telnyx still holds it, confirmed,
         for the same person, with no campaign. False files a new brand
-        instead. A brand that does not fit is deleted, so nothing of the
-        customer's stays at the carrier. A sole proprietor brand takes one
-        campaign, and ``status`` would adopt one still listed, so a brand
-        with a campaign is left alone (a failed campaign delete)."""
+        instead. A sole proprietor brand takes one campaign, and ``status``
+        would adopt one still listed (a failed campaign delete). A brand
+        that does not fit stays at Telnyx, which refuses to delete a brand
+        for 3 months after its campaign."""
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
+            found = await self._api.request(
+                "GET", "/10dlc/campaign", params={"brandId": brand_id}
+            )
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            # The lookup is optional: a refusal must not block the filing.
+            # An outage or 429 raises: retrying beats paying for a new brand.
+            status = exc.response.status_code
+            if status < 500 and status != 429:
+                logger.warning("10DLC kept brand lookup failed: status=%s", status)
                 return False
             raise
-        found = await self._api.request(
-            "GET", "/10dlc/campaign", params={"brandId": brand_id}
-        )
-        if found.get("records"):
-            return False
-        same_person = all(
-            (brand.get(key) or "").strip().casefold()
-            == (fields.get(field) or "").strip().casefold()
-            for key, field in (
-                ("firstName", "first_name"),
-                ("lastName", "last_name"),
-                ("email", "email"),
-                ("mobilePhone", "mobile_phone_number"),
-            )
-        )
         if (
-            not same_person
+            found.get("records")
+            or not _same_person(brand, fields)
             or brand.get("status") != "OK"
             or brand.get("failureReasons")
             or brand.get("identityStatus") not in _VERIFIED
         ):
-            await self.discard({"brand_id": brand_id})
             return False
         refs["brand_id"] = brand_id
         refs["identity_verified"] = True
@@ -887,6 +879,28 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     )
             except Exception:
                 logger.warning("10DLC discard failed: step=%s", key)
+
+
+def _same_person(brand: dict, fields: dict) -> bool:
+    """The brand names the person on the form. Case, spacing and the format
+    of the mobile do not count."""
+
+    def text(value: str | None) -> str:
+        return (value or "").strip().casefold()
+
+    def digits(value: str | None) -> str:
+        return re.sub(r"\D", "", value or "")
+
+    return digits(brand.get("mobilePhone")) == digits(
+        fields.get("mobile_phone_number")
+    ) and all(
+        text(brand.get(key)) == text(fields.get(field))
+        for key, field in (
+            ("firstName", "first_name"),
+            ("lastName", "last_name"),
+            ("email", "email"),
+        )
+    )
 
 
 def _refused(exc: Exception) -> bool:

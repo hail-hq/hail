@@ -2276,6 +2276,46 @@ async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_reused_brand_is_not_an_unsettled_filing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    floor = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _set_balance(async_session, org_id, floor + 1)
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _set_refs(async_session, vid, "rejected", {"brand_reused": True})
+    # The balance covers one filing: the reused one owes no submission.
+    assert (await _post_sms(client, key)).status_code == 201
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_lost_race_leaves_a_reused_brand_alone(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    winner = await _post_sms(client, key)
+    assert winner.status_code == 201
+    live = await async_session.get(CarrierVerification, uuid.UUID(winner.json()["id"]))
+    live.state = "rejected"
+    await async_session.commit()
+    original = sms_carrier.create_draft
+
+    async def racing(**kwargs):
+        draft = await original(**kwargs)
+        draft.refs["brand_reused"] = True
+        # The other request commits while this one is at the carrier.
+        live.state = "submitted"
+        await async_session.commit()
+        return draft
+
+    monkeypatch.setattr(sms_carrier, "create_draft", racing)
+    sms_carrier.discarded.clear()
+    assert (await _post_sms(client, key)).status_code == 409
+    assert sms_carrier.discarded == []
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_cancelling_an_unsent_filing_keeps_no_brand(
     client, org_and_key, sms_carrier, async_session
 ) -> None:

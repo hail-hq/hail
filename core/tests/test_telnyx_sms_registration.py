@@ -611,8 +611,39 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
     assert ("POST", "/v2/10dlc/brand") in calls
     assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
-    # A brand that no longer fits does not stay at the carrier.
-    assert (("DELETE", "/v2/10dlc/brand/B9") in calls) is (brand is not None)
+    # Telnyx refuses the delete, and a typo must not cost the brand.
+    assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
+
+
+async def test_a_kept_brand_matches_a_mobile_in_any_format() -> None:
+    calls: list = []
+    brand = {**KEPT_BRAND, "mobilePhone": "+1 512 555 0100"}
+    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    assert draft.refs["brand_id"] == "B9" and draft.refs["brand_reused"] is True
+
+
+async def _lookup_answering(status: int):
+    calls: list = []
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append(("GET", req.url.path))
+            return httpx.Response(status, json={})
+        return _kept_brand_handler(calls, KEPT_BRAND)(req)
+
+    return await _kept_draft(_provider(handler))
+
+
+async def test_a_refused_lookup_files_a_new_brand() -> None:
+    draft = await _lookup_answering(400)
+    assert draft.problems == []
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+
+
+@pytest.mark.parametrize("status", [429, 500])
+async def test_a_failed_lookup_does_not_pay_for_a_new_brand(status) -> None:
+    with pytest.raises(VerificationProviderError):
+        await _lookup_answering(status)
 
 
 async def test_a_kept_brand_with_a_campaign_is_left_alone() -> None:

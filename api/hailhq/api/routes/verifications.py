@@ -289,8 +289,9 @@ async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int
     """US texting filings of the last day with no ledger row yet: the
     website's rater charges each one shortly after it is saved. A filing is
     settled by its submission debit, or by the one-time debit of a filing
-    made before fees were charged per step. Exact refs, so the ref index
-    is used."""
+    made before fees were charged per step. A filing that reused a brand
+    is never charged a submission, so it does not count. Exact refs, so the
+    ref index is used."""
     ref = func.concat("sms_registration:", func.cast(CarrierVerification.id, String))
     return (
         await db.execute(
@@ -300,6 +301,9 @@ async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int
                 CarrierVerification.organization_id == organization_id,
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.created_at > func.now() - text("interval '1 day'"),
+                CarrierVerification.provider_refs[
+                    "brand_reused"
+                ].astext.is_distinct_from("true"),
                 ~select(AccountCredit.id)
                 .where(
                     AccountCredit.organization_id == organization_id,
@@ -1243,7 +1247,10 @@ async def create_verification(
         # The carrier record exists but the row does not: remove it, or it
         # would be left behind with the customer's details.
         await db.rollback()
-        await provider.discard(draft.refs)
+        # Not a reused brand: this request did not make it, and a filing that
+        # won the race may be using it.
+        if not draft.refs.get("brand_reused"):
+            await provider.discard(draft.refs)
         if isinstance(exc, IntegrityError):
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
