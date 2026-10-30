@@ -22,11 +22,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
 - The time-limit goodbye and the goodbye when a call's own LLM keeps failing are spoken in the call's language.
-- Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.
-
-### Changed
-
 - The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
+- Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.
 
 ### Fixed
 
