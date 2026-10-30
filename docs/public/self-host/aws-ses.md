@@ -97,9 +97,11 @@ AWS_REGION=us-east-1
 
 Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` — for example `alice+acme@mail.hail.so`. Hail validates both `<user>` and `<org>` against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 characters, lowercase alphanumeric plus hyphens, no leading or trailing hyphen).
 
+`<user>` is the mailbox. One organization only may hold it. A taken `<user>` returns 409. `<org>` is an alias, so `alice@mail.hail.so` and `alice+anything@mail.hail.so` reach the same organization. Bare role names, such as `admin@mail.hail.so` and `postmaster@mail.hail.so`, stay with the operator: Hail never routes them to an organization.
+
 Precedence at send time (highest wins):
 
-- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX`.
+- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX` plus a per-organization token (for example `admin-j3bv6cw2`).
 - **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. The org prefix is never a deploy-wide constant — that constant would make every org collide on one address.
 
 ### Self-host vs managed

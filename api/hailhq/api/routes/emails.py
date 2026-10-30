@@ -212,9 +212,9 @@ async def resolve_sender(
             loc=["body", "from"],
         )
 
-    # Last resort: mint a hail-mail row. The org prefix is derived per-org
-    # from the organization id, so each tenant auto-mints its OWN distinct
-    # address instead of colliding on one deployment-wide default. Either
+    # Last resort: mint a hail-mail row. The default prefixes are derived
+    # per-org from the organization id, so each tenant auto-mints its OWN
+    # distinct address instead of colliding on one deployment-wide default. Either
     # helper still bubbles a 503 if the base domain / user prefix is
     # unconfigured — the right response for a tenant who hasn't set up mail.
     user_prefix, org_prefix = resolve_hail_mail_prefixes(None, None, organization_id)
@@ -235,24 +235,23 @@ async def resolve_sender(
     try:
         await db.flush()
     except IntegrityError:
-        # Another row already holds this hail-mail prefix pair. Two cases:
+        # Another row already holds this hail-mail user prefix. Two cases:
         #
         # * Same org — concurrent first-send race; another request just
         #   minted the row. Benign: pick up the winner and send through it.
-        # * Another org — the global hail-mail unique index (one prefix
-        #   pair per deployment) blocked us. Surface an actionable 409;
+        # * Another org — the global hail-mail unique index (one user
+        #   prefix per deployment) blocked us. Surface an actionable 409;
         #   silently sending through env-var defaults another tenant owns
         #   would let them intercept our replies.
         #
         # Look up WITHOUT org scoping: the global index guarantees exactly
-        # one hail_mail row for this prefix pair.
+        # one hail_mail row for this user prefix.
         await db.rollback()
         existing = (
             await db.execute(
                 select(EmailDomain).where(
                     EmailDomain.kind == "hail_mail",
                     EmailDomain.local_prefix_user == user_prefix,
-                    EmailDomain.local_prefix_org == org_prefix,
                 )
             )
         ).scalar_one()
@@ -260,10 +259,10 @@ async def resolve_sender(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    f"hail-mail address {address!r} is already claimed by "
-                    "another organization; register an explicit address via "
-                    "POST /email-domains with distinct local_prefix_user/"
-                    "local_prefix_org"
+                    f"hail-mail user prefix {user_prefix!r} is already taken "
+                    "by another organization; register an explicit address "
+                    "via POST /email-domains with a different "
+                    "local_prefix_user"
                 ),
             )
         return existing

@@ -68,7 +68,7 @@ from hailhq.core.forward_targets import (
     PendingLimitExceeded,
     sync_targets,
 )
-from hailhq.core.hail_mail import org_prefix_from_id
+from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
@@ -195,7 +195,9 @@ def resolve_hail_mail_prefixes(
 
     1. Explicit ``body_user`` (the POST body's ``local_prefix_user``).
     2. ``HAIL_MAIL_FROM`` env var (single-shot ``<user>+<org>@<base>``).
-    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var.
+    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var, plus a per-org token: one
+       row per deployment may hold a user prefix, so a shared value would
+       409 every org after the first.
 
     Org-prefix precedence:
 
@@ -214,7 +216,8 @@ def resolve_hail_mail_prefixes(
     if settings.hail_mail_from:
         env_user, env_org = _parse_hail_mail_from(settings.hail_mail_from)
 
-    user = body_user or env_user or settings.hail_mail_default_user_prefix
+    default = settings.hail_mail_default_user_prefix
+    user = body_user or env_user or default
     org = body_org or env_org or org_prefix_from_id(organization_id)
     if user in RESERVED_USER_PREFIXES:
         raise unprocessable(
@@ -230,7 +233,17 @@ def resolve_hail_mail_prefixes(
                 "HAIL_MAIL_DEFAULT_USER_PREFIX)"
             ),
         )
+    if not body_user and not env_user:
+        user = default_user_prefix(default, organization_id)
     return user, org
+
+
+def taken_user_prefix_detail(user_prefix: str) -> str:
+    """409 text for a user prefix another hail-mail row already holds."""
+    return (
+        f"hail-mail user prefix {user_prefix!r} is already taken; "
+        "choose a different local_prefix_user"
+    )
 
 
 def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
@@ -316,8 +329,8 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         # hail-mail. Not an error for a read; there simply is no default.
         return None
 
-    # The hail-mail prefix pair is unique across the whole deployment, not
-    # per org. ``HAIL_MAIL_FROM`` pins one pair for every tenant, so on a
+    # The hail-mail user prefix is unique across the whole deployment, not
+    # per org. ``HAIL_MAIL_FROM`` pins one for every tenant, so on a
     # multi-tenant deployment the first org to send claims it and the mint
     # 409s for everyone else (emails.py, the IntegrityError branch). Report
     # no default rather than an address the send would refuse.
@@ -326,7 +339,6 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
             select(EmailDomain.organization_id).where(
                 EmailDomain.kind == "hail_mail",
                 EmailDomain.local_prefix_user == user_prefix,
-                EmailDomain.local_prefix_org == org_prefix,
             )
         )
     ).scalar_one_or_none()
@@ -391,7 +403,7 @@ async def create_email_domain(
             await db.rollback()
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=f"hail-mail address {address!r} is already registered",
+                detail=taken_user_prefix_detail(user_prefix),
             ) from exc
         await db.refresh(sd)
         actor_user_id, actor_kind = actor_of(principal)
@@ -859,9 +871,7 @@ async def patch_email_domain(
         if "local_prefix_user" in updates:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=(
-                    f"hail-mail address {updates.get('domain')!r} is already registered"
-                ),
+                detail=taken_user_prefix_detail(updates["local_prefix_user"]),
             ) from exc
         raise unprocessable("patch violates a domain check constraint") from exc
 

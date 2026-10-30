@@ -1089,7 +1089,9 @@ class EmailDomain(Base):
       source of truth; ``domain`` is the computed full address kept in
       sync at write time. The parent base domain is pre-verified by the
       operator out-of-band, so these rows land at ``verified`` immediately
-      and ``dns_records`` stays empty.
+      and ``dns_records`` stays empty. ``local_prefix_user`` is the mailbox
+      and ``local_prefix_org`` an alias: inbound mail routes on the user
+      prefix alone.
     * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
       ``acme.com``). The prefix columns are both NULL.
       ``verification_status`` starts at ``pending`` and ``dns_records``
@@ -1200,15 +1202,14 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'custom'"),
         ),
-        # Hail-mail addresses route inbound mail by (user, org) prefix with
-        # no org scoping at lookup time (email_ingest matches the prefix
-        # pair, not the domain column) — the pair must be globally unique or
-        # org B could register org A's prefixes and intercept mail, even if
+        # Hail-mail addresses route inbound mail by the user prefix alone,
+        # with no org scoping at lookup time (email_ingest does not match the
+        # domain column) — the prefix must be globally unique or org B could
+        # register org A's prefix and intercept mail, even if
         # HAIL_MAIL_BASE_DOMAIN changed between the two registrations.
         Index(
-            "email_domains_hail_mail_prefix_uq",
+            "email_domains_hail_mail_head_uq",
             "local_prefix_user",
-            "local_prefix_org",
             unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
         ),

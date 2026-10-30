@@ -86,7 +86,6 @@ async def _find_domain_for_recipient(
             select(EmailDomain)
             .where(EmailDomain.kind == "hail_mail")
             .where(EmailDomain.local_prefix_user == classified.user_prefix)
-            .where(EmailDomain.local_prefix_org == classified.org_prefix)
             .limit(1)
         )
         row = (await db.execute(stmt)).scalar_one_or_none()

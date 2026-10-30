@@ -15,8 +15,8 @@ async def _seed_domain(
     domain = EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
-        domain=f"alice+{suffix}@mail.hail.so",
-        local_prefix_user="alice",
+        domain=f"alice-{suffix}+{suffix}@mail.hail.so",
+        local_prefix_user=f"alice-{suffix}",
         local_prefix_org=suffix,
         verification_status="verified",
         provider="ses",

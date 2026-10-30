@@ -6497,9 +6497,10 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            User-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX
-            if omitted.
+            User-chosen local-part prefix for a hail_mail address. One organization
+            only may hold it; a taken prefix returns 409. Only valid for kind='hail_mail'.
+            Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization
+            token if omitted.
         local_prefix_org:
           anyOf:
             - type: string
@@ -6507,8 +6508,8 @@ components:
           title: Local Prefix Org
           description:
             Org-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX
-            if omitted.
+            valid for kind='hail_mail'. Falls back to a prefix derived from
+            the organization id if omitted.
       additionalProperties: false
       type: object
       required:
@@ -6628,8 +6629,9 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            New user local-part prefix. Only valid on kind='hail_mail'
-            rows. Omit to leave unchanged.
+            New user local-part prefix. One organization only may hold it;
+            a taken prefix returns 409. Only valid on kind='hail_mail' rows.
+            Omit to leave unchanged.
         local_prefix_org:
           anyOf:
             - type: string

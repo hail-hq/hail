@@ -60,7 +60,7 @@ func newEmailDomainRegisterCmd(opts *Options) *cobra.Command {
 		Long: `hail email domain register — register a hail_mail or custom domain.
 
 Examples:
-  # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_*_PREFIX):
+  # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_USER_PREFIX):
   hail email domain register --kind hail_mail
 
   # Hail-mail with explicit prefixes:
@@ -77,8 +77,8 @@ Examples:
 	}
 	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom")
 	cmd.Flags().StringVar(&f.domain, "domain", "", "DNS domain — required if --kind=custom; omit for --kind=hail_mail")
-	cmd.Flags().StringVar(&f.userPrefix, "local-prefix-user", "", "User-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX)")
-	cmd.Flags().StringVar(&f.orgPrefix, "local-prefix-org", "", "Org-side local part for kind=hail_mail (falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX)")
+	cmd.Flags().StringVar(&f.userPrefix, "local-prefix-user", "", "User-side local part for kind=hail_mail, held by one organization only (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token)")
+	cmd.Flags().StringVar(&f.orgPrefix, "local-prefix-org", "", "Org-side local part for kind=hail_mail (falls back to a value derived from the organization id)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.MarkFlagRequired("kind")
 	return cmd

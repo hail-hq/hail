@@ -1750,3 +1750,64 @@ async def test_forward_skips_stopped_target_but_sends_verified_sibling(async_ses
     )
     assert [c["to"] for c in captured] == ["ok@example.com"]
     assert result.suppressed_reasons == ["forward_target_stopped"]
+
+
+async def _ingest_to(session, key, *recipients):
+    msg = InboundMessage(
+        provider_message_id=key,
+        envelope_from="x@example.com",
+        envelope_recipients=list(recipients),
+        raw_s3_bucket="b",
+        raw_s3_key=f"raw/{key}",
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+    return await ingest_inbound(
+        session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        org_rate_per_hour=10_000,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "recipient",
+    [
+        "alice+acme@mail.hail.so",
+        "alice+sales@mail.hail.so",
+        "alice@mail.hail.so",
+    ],
+)
+async def test_any_alias_reaches_the_org_that_holds_the_head(async_session, recipient):
+    async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
+    await async_session.commit()
+
+    result = await _ingest_to(async_session, "alias1", recipient)
+
+    assert result.skipped_recipients == []
+    assert len(result.email_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_aliases_of_one_org_make_one_row(async_session):
+    async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
+    await async_session.commit()
+
+    result = await _ingest_to(
+        async_session, "alias2", "alice+a@mail.hail.so", "alice+b@mail.hail.so"
+    )
+
+    assert len(result.email_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_bare_role_name_skips_a_tenant_with_that_head(async_session):
+    async_session.add(_make_inbound_domain(uuid.uuid4(), "admin", "acme"))
+    await async_session.commit()
+
+    result = await _ingest_to(async_session, "role1", "admin@mail.hail.so")
+
+    assert result.email_ids == []
+    assert result.skipped_recipients == ["admin@mail.hail.so"]

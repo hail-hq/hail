@@ -1308,9 +1308,11 @@ class EmailDomainCreate(BaseModel):
     local_prefix_user: str | None = Field(
         default=None,
         description=(
-            "User-chosen local-part prefix for a hail_mail address. Only "
+            "User-chosen local-part prefix for a hail_mail address. One "
+            "organization only may hold it; a taken prefix returns 409. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_USER_PREFIX if omitted."
+            "HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if "
+            "omitted."
         ),
     )
     local_prefix_org: str | None = Field(
@@ -1318,7 +1320,7 @@ class EmailDomainCreate(BaseModel):
         description=(
             "Org-chosen local-part prefix for a hail_mail address. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted."
+            "a prefix derived from the organization id if omitted."
         ),
     )
 
@@ -1409,7 +1411,7 @@ class EmailDomainPatch(BaseModel):
 
     local_prefix_user: str | None = Field(
         default=None,
-        description="New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+        description="New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
     )
     local_prefix_org: str | None = Field(
         default=None,

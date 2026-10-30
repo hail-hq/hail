@@ -93,7 +93,7 @@ The two surfaces differ in the source of the prefixes and in the place where you
 | Auth                  | Shared `HAIL_API_KEY`; one sentinel "Self-hosted" org                                                                    | Per-user `hl_live_*` keys via the website's auth backend                                            |
 | Org concept           | None — single sentinel org                                                                                               | Real orgs with members                                                                              |
 | Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                                              | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                                     |
-| Hail-mail prefixes    | User prefix from `HAIL_MAIL_FROM` / `HAIL_MAIL_DEFAULT_USER_PREFIX` (`.env`); org prefix derived per-org from the org id | Same: user prefix from env, org prefix derived per-org; org admins override per-org via the console |
+| Hail-mail prefixes    | User prefix from `HAIL_MAIL_FROM` / `HAIL_MAIL_DEFAULT_USER_PREFIX` (`.env`); org prefix derived per-org from the org id | Same: user prefix from env plus a per-org token, org prefix derived per-org; org admins override per-org via the console |
 | Where edits land      | Restart with new `.env` values                                                                                           | `PATCH /email-domains/{id}` (console writes this)                                                   |
 | SES production access | Operator's AWS account                                                                                                   | Operator's AWS account                                                                              |
 | Billing               | Off — `usage_events` accumulates as raw analytics                                                                        | Cloud rater applies cents/unit, debits `account_credits`                                            |
@@ -125,7 +125,7 @@ The Terraform provisions an S3 bucket, an SES Receipt Rule + Rule Set,
 and a small Lambda. The Lambda signs SES events and forwards them to
 Hail's `POST /internal/ses-events` endpoint. The API parses the raw MIME
 from S3 and routes the message to the owning org by the hail-mail
-local-part (`<user>+<org>@mail.hail.so`). It persists an `Email` row
+local-part: `<user>` before the plus names the mailbox, and any `+<alias>` is ignored. It persists an `Email` row
 with `direction='inbound'`. The background delivery worker fans out
 events to per-domain webhooks and org-wide subscriptions.
 
