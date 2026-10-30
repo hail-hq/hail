@@ -679,6 +679,8 @@ async def test_discard_rejected_keeps_a_confirmed_persons_brand() -> None:
     [
         {"subject_type": "business", "identity_verified": True},
         {"subject_type": "person"},
+        # No campaign: the brand itself failed.
+        {"subject_type": "person", "identity_verified": True},
     ],
 )
 async def test_discard_rejected_deletes_any_other_brand(refs) -> None:

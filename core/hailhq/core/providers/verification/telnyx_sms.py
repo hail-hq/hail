@@ -358,12 +358,14 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         return DraftResult(refs=refs)
 
     async def discard_rejected(self, refs) -> dict:
-        """A person's confirmed brand stays at Telnyx: it is paid for, and
-        the campaign is what the carriers refused. The next filing with the
-        same details reuses it, with no new brand fee and no new PIN."""
+        """A person's confirmed brand stays at Telnyx when a campaign was
+        filed: it is paid for, and the campaign is what the carriers refused.
+        The next filing with the same details reuses it, with no new brand
+        fee and no new PIN. With no campaign, the brand itself failed."""
         brand_id = refs.get("brand_id")
         if (
             brand_id
+            and refs.get("campaign_id")
             and refs.get("subject_type") == "person"
             and refs.get("identity_verified") is True
         ):

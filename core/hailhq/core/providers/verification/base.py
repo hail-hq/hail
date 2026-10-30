@@ -385,7 +385,9 @@ class SmsRegistrationProvider(VerificationProvider):
     lifecycle as number verification. ``purpose`` is 'sms'.
 
     ``create_draft`` takes one extra keyword: the organization's messaging
-    service (Twilio) or messaging profile (Telnyx) id, when one exists.
+    service (Twilio) or messaging profile (Telnyx) id, when one exists. A
+    plug-in whose ``discard_rejected`` returns ``kept_brand_id`` also takes
+    that keyword, when the organization's last filing left a brand.
     ``status`` creates the campaign once the brand is approved and reports
     'approved' only when the campaign is approved. ``attach_number`` puts
     one of the organization's US long codes on the approved campaign;
