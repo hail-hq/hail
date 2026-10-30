@@ -536,6 +536,118 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert "5550100" not in repr(refs)
 
 
+def _kept_brand_handler(calls, brand):
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            if brand is None:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=brand)
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/smsOtp"):
+            return httpx.Response(200, json={"brandId": "B1", "referenceId": "R1"})
+        return httpx.Response(404)
+
+    return handler
+
+
+KEPT_BRAND = {
+    "status": "OK",
+    "identityStatus": "VERIFIED",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "email": "ADA@example.com",
+    "mobilePhone": "+15125550100",
+}
+
+
+async def _kept_draft(p):
+    req = await p.requirements("US", "local", "person")
+    return await p.create_draft(
+        organization_id="org1",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=PERSON_FIELDS,
+        address=ADDRESS,
+        documents={},
+        kept_brand_id="B9",
+    )
+
+
+async def test_person_reuses_the_kept_brand_with_no_pin() -> None:
+    calls: list = []
+    p = _provider(_kept_brand_handler(calls, KEPT_BRAND))
+    draft = await _kept_draft(p)
+    assert draft.problems == []
+    assert [c for c in calls if "/10dlc/brand" in c[1]] == [
+        ("GET", "/v2/10dlc/brand/B9")
+    ]
+    refs = draft.refs
+    assert refs["brand_id"] == "B9" and refs["brand_reused"] is True
+    assert refs["identity_verified"] is True and "otp_sent_at" not in refs
+    assert p.confirmation(refs) is None
+
+
+@pytest.mark.parametrize(
+    "brand",
+    [
+        None,
+        {**KEPT_BRAND, "mobilePhone": "+15125550199"},
+        {**KEPT_BRAND, "lastName": "Byron"},
+        {**KEPT_BRAND, "identityStatus": "UNVERIFIED"},
+        {**KEPT_BRAND, "status": "REGISTRATION_FAILED"},
+    ],
+)
+async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
+    calls: list = []
+    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+    assert ("POST", "/v2/10dlc/brand") in calls
+    assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
+
+
+async def test_discard_rejected_keeps_a_confirmed_persons_brand() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={})
+
+    p = _provider(handler)
+    kept = await p.discard_rejected(
+        {
+            "brand_id": "B1",
+            "campaign_id": "C1",
+            "subject_type": "person",
+            "identity_verified": True,
+        }
+    )
+    assert kept == {"kept_brand_id": "B1"}
+    assert calls == [("DELETE", "/v2/10dlc/campaign/C1")]
+
+
+@pytest.mark.parametrize(
+    "refs",
+    [
+        {"subject_type": "business", "identity_verified": True},
+        {"subject_type": "person"},
+    ],
+)
+async def test_discard_rejected_deletes_any_other_brand(refs) -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={})
+
+    p = _provider(handler)
+    assert await p.discard_rejected({"brand_id": "B1", **refs}) == {}
+    assert calls == [("DELETE", "/v2/10dlc/brand/B1")]
+
+
 async def test_person_mobile_must_be_us_or_canadian() -> None:
     calls = []
 

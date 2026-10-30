@@ -136,7 +136,7 @@ Same flow as above with `purpose=sms`: each organization registers its own US A2
 `DELETE /verifications/{id}`:
 
 - `awaiting_review` → `cancelled`, draft discarded at the carrier.
-- `rejected` → `cancelled` (dismiss), draft discarded.
+- `rejected` → `cancelled` (dismiss), draft discarded. Exception for a Telnyx person (`purpose=sms`) whose PIN was confirmed: only the campaign is deleted, the brand stays at Telnyx, and the cancelled row holds `provider_refs.kept_brand_id`. The next filing reuses that brand when Telnyx still shows it confirmed and first name, last name, email and mobile match: no new brand, no PIN, `provider_refs.brand_reused`, no submission fee. Otherwise it files a new brand.
 - `submitting`, `submitted` → **409** `this verification is under review; wait for the result`. The carrier keeps a draft it is reviewing, so cancelling would leave the customer's documents at the carrier with nothing pointing at them.
 - `approved` with `purpose=sms` → `cancelled`. Each number on it (`phone_numbers.sms_registration_id`) leaves the campaign (Telnyx unlink; a person's Twilio number leaves the person's service and is set up in the org's service again), then the campaign, brand, bundle and profile are discarded. `cancelled_at` is set; the website rater bills the monthly fee through that month. Telnyx bills at least 3 monthly fees from approval, so for Telnyx the rater bills through the later of the cancel month and the approval month + 2 (`minimum_months` in `costs/sms-registration.json`). Audit row `verification.cancel`.
 - `approved` with `purpose=number`, `cancelled` → 409.

@@ -2241,6 +2241,50 @@ async def test_a_brand_billed_then_refused_is_kept_as_rejected(
     assert (await _post_sms(client, key)).status_code == 201
 
 
+async def _set_refs(async_session, vid: str, state: str, refs: dict) -> None:
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state, row.provider_refs = state, refs
+    await async_session.commit()
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+
+    async def keep(refs):
+        return {"kept_brand_id": "B9"}
+
+    monkeypatch.setattr(sms_carrier, "discard_rejected", keep)
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _set_refs(async_session, vid, "rejected", {"brand_reused": True})
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
+    async_session.expire_all()
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    # The rater still reads the mark after the wipe.
+    assert row.provider_refs == {"brand_reused": True, "kept_brand_id": "B9"}
+    assert (await _post_sms(client, key)).status_code == 201
+    assert sms_carrier.drafts[-1]["kept_brand_id"] == "B9"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_cancelling_an_unsent_filing_keeps_no_brand(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _set_refs(async_session, vid, "awaiting_review", {"brand_sid": "BN1"})
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200
+    assert sms_carrier.discarded == [{"brand_sid": "BN1"}]
+    assert (await _post_sms(client, key)).status_code == 201
+    assert "kept_brand_id" not in sms_carrier.drafts[-1]
+
+
 @pytest.mark.usefixtures("us_number")
 async def test_a_refusal_before_any_brand_keeps_nothing(
     client, org_and_key, sms_carrier, async_session

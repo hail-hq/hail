@@ -252,6 +252,37 @@ def _log_carrier_refusal(
         )
 
 
+def _wiped_refs(row: CarrierVerification) -> dict:
+    """``provider_refs`` once emptied. A filing that reused a brand keeps the
+    mark: the fee rater reads it on every sweep, and without it would bill
+    the submission."""
+    return (
+        {"brand_reused": True} if (row.provider_refs or {}).get("brand_reused") else {}
+    )
+
+
+async def _kept_brand(
+    db: AsyncSession, organization_id: UUID, provider_name: str, subject_type: str
+) -> str | None:
+    """The brand the organization's last cancelled filing left at the carrier
+    for the next one (``discard_rejected``)."""
+    refs = (
+        await db.execute(
+            select(CarrierVerification.provider_refs)
+            .where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.provider == provider_name,
+                CarrierVerification.purpose == "sms",
+                CarrierVerification.subject_type == subject_type,
+                CarrierVerification.state == "cancelled",
+            )
+            .order_by(CarrierVerification.cancelled_at.desc().nulls_last())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return (refs or {}).get("kept_brand_id")
+
+
 async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
     """US texting filings of the last day with no ledger row yet: the
     website's rater charges each one shortly after it is saved. A filing is
@@ -1150,6 +1181,11 @@ async def create_verification(
                 db, principal.organization_id, provider_name
             )
         )
+        kept_brand_id = await _kept_brand(
+            db, principal.organization_id, provider_name, sub.subject_type
+        )
+        if kept_brand_id:
+            draft_kwargs["kept_brand_id"] = kept_brand_id
 
     try:
         draft = await provider.create_draft(
@@ -1398,7 +1434,8 @@ async def _reject_row(
         logger.exception("verification discard failed for %s", row.id)
         await db.rollback()
         return
-    row.state, row.rejection_reason, row.provider_refs = "rejected", reason, {}
+    row.state, row.rejection_reason = "rejected", reason
+    row.provider_refs = _wiped_refs(row)
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -1573,10 +1610,13 @@ async def cancel_verification(
         # detach numbers too.
         await org_lock(db, row.organization_id)
         await _detach_registration(db, row, provider)
-    if provider is not None:
+    kept: dict = {}
+    if isinstance(provider, SmsRegistrationProvider) and row.state == "rejected":
+        kept = await provider.discard_rejected(row.provider_refs)
+    elif provider is not None:
         await provider.discard(row.provider_refs)
     now = datetime.now(timezone.utc)
-    row.state, row.provider_refs = "cancelled", {}
+    row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
     await db.commit()
     _notify_billing([row])
@@ -1832,7 +1872,8 @@ async def admin_reject(
     await _rate_before_wipe(db, row, provider)
     if provider is not None:
         await provider.discard(row.provider_refs)
-    row.state, row.rejection_reason, row.provider_refs = "rejected", body.reason, {}
+    row.state, row.rejection_reason = "rejected", body.reason
+    row.provider_refs = _wiped_refs(row)
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     _notify_billing([row])

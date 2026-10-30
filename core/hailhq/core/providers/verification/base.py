@@ -423,6 +423,13 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
+    async def discard_rejected(self, refs: dict) -> dict:
+        """``discard`` for a rejected filing the customer dismisses. Returns
+        what the organization's next filing may reuse: refs to keep on the
+        cancelled row. A plug-in may leave that part at the carrier."""
+        await self.discard(refs)
+        return {}
+
     # The refs key that holds the campaign once it is filed.
     campaign_ref: str | None = None
 
