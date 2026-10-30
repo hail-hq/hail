@@ -312,6 +312,7 @@ async def test_send_email_happy_path_stamps_call_id(
     assert len(rows) == 1
     assert rows[0].to_addresses == ["sarah@a.test"]
     assert rows[0].metadata["call_id"] == str(call.id)
+    assert email_mock.send_email.await_args.kwargs["organization_id"] == org
 
 
 async def test_send_sms_concurrent_same_invocation_sends_once(

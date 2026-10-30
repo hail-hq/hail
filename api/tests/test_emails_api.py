@@ -101,7 +101,7 @@ async def test_post_emails_with_attachment_ids_attaches_and_lists(
     async_session: AsyncSession,
     s3_mail_mock: AsyncMock,
 ) -> None:
-    _, _, plain = org_and_key
+    org_id, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
     att_id = await _upload_attachment(client, headers)
@@ -124,6 +124,7 @@ async def test_post_emails_with_attachment_ids_attaches_and_lists(
     call_kwargs = email_mock.send_email.call_args.kwargs
     assert len(call_kwargs["attachments"]) == 1
     assert call_kwargs["attachments"][0].filename == "invoice.pdf"
+    assert call_kwargs["organization_id"] == org_id
 
     get_resp = await client.get(f"/emails/{email_id}", headers=headers)
     assert get_resp.status_code == 200
