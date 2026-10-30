@@ -83,6 +83,7 @@ def make_suppression_response(
     *,
     suppression_id: UUID | None = None,
     recipient: str = "+15555550123",
+    channel: str = "sms",
     reason: str = "stop_keyword",
     source: str = "inbound_sms",
 ) -> dict:
@@ -90,7 +91,7 @@ def make_suppression_response(
     return {
         "id": str(suppression_id or uuid4()),
         "recipient": recipient,
-        "channel": "sms",
+        "channel": channel,
         "reason": reason,
         "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),

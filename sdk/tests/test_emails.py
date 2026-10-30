@@ -8,9 +8,9 @@ from uuid import UUID
 import httpx
 import pytest
 import respx
-from hail import Client, EmailCreate
+from hail import Client, EmailCreate, HailNotFoundError
 
-from tests.conftest import make_email_response
+from tests.conftest import make_email_response, make_suppression_response
 
 # --------------------------------------------------------------------------- #
 # emails.create
@@ -250,6 +250,90 @@ async def test_emails_stats_accepts_datetime_args(base_url: str, api_key: str) -
         await c.emails.stats(from_=dt)
     req = route.calls.last.request
     assert req.url.params["from"] == dt.isoformat()
+
+
+# --------------------------------------------------------------------------- #
+# emails.list_suppressions / emails.delete_suppression
+# --------------------------------------------------------------------------- #
+
+
+def _email_suppression() -> dict:
+    return make_suppression_response(
+        recipient="bob@example.com",
+        channel="email",
+        reason="hard_bounce",
+        source="bounce",
+    )
+
+
+@respx.mock
+async def test_emails_list_suppressions_happy_path(base_url: str, api_key: str) -> None:
+    payload = {"items": [_email_suppression()], "next_cursor": None}
+    route = respx.get(f"{base_url}/emails/suppressions").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.emails.list_suppressions()
+    assert result.items[0].recipient == "bob@example.com"
+    assert result.items[0].reason == "hard_bounce"
+    req = route.calls.last.request
+    assert req.headers["Authorization"] == f"Bearer {api_key}"
+    assert dict(req.url.params) == {"limit": "50"}
+
+
+@respx.mock
+async def test_emails_list_suppressions_with_cursor(
+    base_url: str, api_key: str
+) -> None:
+    payload = {"items": [_email_suppression()], "next_cursor": "next-page"}
+    route = respx.get(f"{base_url}/emails/suppressions").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.emails.list_suppressions(cursor="cursorX", limit=10)
+    assert result.next_cursor == "next-page"
+    qp = dict(route.calls.last.request.url.params)
+    assert qp == {"cursor": "cursorX", "limit": "10"}
+
+
+@respx.mock
+async def test_emails_delete_suppression_happy_path(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.delete(f"{base_url}/emails/suppressions/bob@example.com").mock(
+        return_value=httpx.Response(204)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        result = await c.emails.delete_suppression("bob@example.com")
+    assert result is None
+    assert route.calls.last.request.headers["Authorization"] == f"Bearer {api_key}"
+
+
+@respx.mock
+async def test_emails_delete_suppression_encodes_plus_and_slash(
+    base_url: str, api_key: str
+) -> None:
+    route = respx.delete(url__regex=r".*/emails/suppressions/.*").mock(
+        return_value=httpx.Response(204)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        await c.emails.delete_suppression("bob+a/b@example.com")
+    assert route.calls.last.request.url.raw_path.endswith(
+        b"/emails/suppressions/bob%2Ba%2Fb@example.com"
+    )
+
+
+@respx.mock
+async def test_emails_delete_suppression_not_found_raises(
+    base_url: str, api_key: str
+) -> None:
+    respx.delete(f"{base_url}/emails/suppressions/bob@example.com").mock(
+        return_value=httpx.Response(404, json={"detail": "suppression not found"})
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        with pytest.raises(HailNotFoundError) as exc:
+            await c.emails.delete_suppression("bob@example.com")
+    assert "suppression not found" in str(exc.value)
 
 
 # --------------------------------------------------------------------------- #
