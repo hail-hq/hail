@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.32.0] (2026-10-30)
+
+Email stops sending to addresses that hard bounce, complain or unsubscribe,
+and the Gmail and Yahoo unsubscribe button now works. Verifications carry a
+name, and US texting registration is charged per step.
+
+Component versions cut alongside this release:
+**`cli-v0.31.0`** (Homebrew + GitHub Releases) and **`sdk-v0.22.0`** (PyPI).
+Database migrations run on deploy.
+
 ### Added
 
 - Email: every send carries the sending organization in its `Feedback-ID` header, so Google Postmaster Tools can show spam rate per organization for mail from the Hail mail domain.
