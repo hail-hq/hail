@@ -28,7 +28,12 @@ from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
 from hailhq.core.forward_limiter import ForwardLimiter
 from hailhq.core.forward_targets import normalize_address, statuses_for
-from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    RetiredHailMailAddress,
+)
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.system_email import noreply_address
@@ -77,6 +82,20 @@ def _suppress_reason(message: InboundMessage) -> str | None:
     return None
 
 
+async def _retired_by_other_org(
+    db: AsyncSession, head: str, tail: str, organization_id: UUID
+) -> bool:
+    """Did another org retire exactly this address? Its mail is not for this org."""
+    stmt = (
+        select(RetiredHailMailAddress.organization_id)
+        .where(RetiredHailMailAddress.local_prefix_user == head)
+        .where(RetiredHailMailAddress.local_prefix_org == tail)
+        .where(RetiredHailMailAddress.organization_id != organization_id)
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
 async def _find_domain_for_recipient(
     db: AsyncSession, recipient: str, base_domain: str
 ) -> EmailDomain | None:
@@ -90,6 +109,10 @@ async def _find_domain_for_recipient(
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
         if row is not None:
+            if classified.tail and await _retired_by_other_org(
+                db, classified.user_prefix, classified.tail, row.organization_id
+            ):
+                return None
             return row
 
     # Custom domains: match any local-part at a verified, inbound-enabled

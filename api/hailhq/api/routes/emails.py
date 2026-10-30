@@ -137,10 +137,11 @@ async def resolve_sender(
     1. Explicit ``from``: look up by full address (hail-mail row's
        ``domain`` is the full address; custom row's ``domain`` is the
        parent so we match by suffix).
-    2. No ``from``, exactly one verified org-owned domain: that one.
-    3. No ``from``, several verified domains: 422 listing them. Picking
-       one for the caller means the sending identity changes silently
-       when domains are added or deleted, so the caller names it.
+    2. No ``from``: a verified custom domain wins over the hail-mail
+       address (``verified_senders``). Exactly one candidate: that one.
+    3. No ``from``, several candidates: 422 listing them. Picking one for
+       the caller means the sending identity changes silently when domains
+       are added or deleted, so the caller names it.
     4. Mint a fresh hail-mail row on the fly if ``HAIL_MAIL_BASE_DOMAIN``
        is configured.
 
@@ -235,27 +236,23 @@ async def resolve_sender(
     try:
         await db.flush()
     except IntegrityError:
-        # Another row already holds this hail-mail user prefix. Two cases:
+        # A unique rule blocked the mint. Two cases:
         #
-        # * Same org — concurrent first-send race; another request just
-        #   minted the row. Benign: pick up the winner and send through it.
-        # * Another org — the global hail-mail unique index (one user
-        #   prefix per deployment) blocked us. Surface an actionable 409;
-        #   silently sending through env-var defaults another tenant owns
-        #   would let them intercept our replies.
-        #
-        # Look up WITHOUT org scoping: the global index guarantees exactly
-        # one hail_mail row for this user prefix.
+        # * This org holds a row — concurrent first-send race, or the website
+        #   provisioned one. Benign: pick up the winner and send through it.
+        # * It does not — another org holds or retired this user prefix.
+        #   Surface an actionable 409; silently sending through env-var
+        #   defaults another tenant owns would let them intercept our replies.
         await db.rollback()
         existing = (
             await db.execute(
                 select(EmailDomain).where(
                     EmailDomain.kind == "hail_mail",
-                    EmailDomain.local_prefix_user == user_prefix,
+                    EmailDomain.organization_id == organization_id,
                 )
             )
-        ).scalar_one()
-        if existing.organization_id != organization_id:
+        ).scalar_one_or_none()
+        if existing is None:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(

@@ -28,6 +28,44 @@ _ORG_PREFIX_BYTES = 5
 # Longest prefix the LOCAL_PREFIX rule accepts.
 _PREFIX_MAX_LEN = 20
 
+# Mailbox names that belong to the operator of the base domain, never a
+# tenant. RFC 2142 keeps some of them, and certificate authorities prove
+# control of a domain by mailing others. No new row may use one as a head,
+# and a bare ``<name>@<base>`` is never routed. An older row keeps its head
+# and receives ``<name>+<tail>@<base>`` only.
+ROLE_MAILBOXES = frozenset(
+    {
+        "abuse",
+        "admin",
+        "administrator",
+        "ftp",
+        "hostmaster",
+        "info",
+        "is",
+        "it",
+        "mailer-daemon",
+        "marketing",
+        "mis",
+        "news",
+        "noc",
+        "postmaster",
+        "root",
+        "sales",
+        "security",
+        "ssl-admin",
+        "ssl-administrator",
+        "ssladmin",
+        "ssladministrator",
+        "sslwebmaster",
+        "support",
+        "sysadmin",
+        "usenet",
+        "uucp",
+        "webmaster",
+        "www",
+    }
+)
+
 
 def org_prefix_from_id(org_id: uuid.UUID | str) -> str:
     """Derive a stable 8-char base32 org prefix from an organization id."""

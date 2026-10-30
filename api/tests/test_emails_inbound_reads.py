@@ -85,10 +85,8 @@ async def _make_inbound_pair(
 async def _make_outbound(async_session: AsyncSession, org_id: uuid.UUID) -> Email:
     domain = EmailDomain(
         organization_id=org_id,
-        kind="hail_mail",
-        domain="bob+globex@mail.hail.so",
-        local_prefix_user="bob",
-        local_prefix_org="globex",
+        kind="custom",
+        domain="globex.example.com",
         verification_status="verified",
         provider="ses",
         verified_at=datetime.now(timezone.utc),

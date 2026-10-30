@@ -834,11 +834,11 @@ async def test_default_from_is_null_when_another_org_owns_the_hail_mail_address(
     so the preview must go quiet in exactly the case the send path rejects.
     """
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
-    monkeypatch.setattr(settings, "hail_mail_from", "admin+shared@mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
     _, _, plain_a = org_and_key
     _, _, plain_b = await insert_org_and_key(async_session)
 
-    # Org A sends first and claims admin+shared@mail.hail.so.
+    # Org A sends first and claims team+shared@mail.hail.so.
     claimed = await client.post(
         "/emails",
         json={
@@ -850,7 +850,7 @@ async def test_default_from_is_null_when_another_org_owns_the_hail_mail_address(
         headers={"Authorization": f"Bearer {plain_a}"},
     )
     assert claimed.status_code == 201, claimed.text
-    assert claimed.json()["from_address"] == "admin+shared@mail.hail.so"
+    assert claimed.json()["from_address"] == "team+shared@mail.hail.so"
 
     headers_b = {"Authorization": f"Bearer {plain_b}"}
     listed = await client.get("/email-domains", headers=headers_b)
@@ -1252,42 +1252,6 @@ async def test_email_domain_custom_create_writes_audit_log(
 
 
 @pytest.mark.asyncio
-async def test_patch_duplicate_prefix_returns_409(
-    client: httpx.AsyncClient,
-    org_and_key: tuple,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
-    _, _, plain = org_and_key
-    headers = {"Authorization": f"Bearer {plain}"}
-    r1 = await client.post(
-        "/email-domains",
-        json={
-            "kind": "hail_mail",
-            "local_prefix_user": "a",
-            "local_prefix_org": "acme",
-        },
-        headers=headers,
-    )
-    r2 = await client.post(
-        "/email-domains",
-        json={
-            "kind": "hail_mail",
-            "local_prefix_user": "b",
-            "local_prefix_org": "acme",
-        },
-        headers=headers,
-    )
-    assert r1.status_code == 201 and r2.status_code == 201
-
-    resp = await client.patch(
-        f"/email-domains/{r2.json()['id']}",
-        json={"local_prefix_user": "a"},  # collides with r1's address
-        headers=headers,
-    )
-    assert resp.status_code == 409
-
-
 async def test_duplicate_custom_domain_direct_insert_raises_integrity_error(
     client: httpx.AsyncClient,
     org_and_key: tuple,

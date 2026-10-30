@@ -9,6 +9,7 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
@@ -1217,8 +1218,9 @@ LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 # User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
 # of every forward and system mail; ``forwarder`` was its old name. Org
 # prefixes are free text, so without this another org could own the
-# address a tenant's forwards come from and receive its bounces.
-RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"})
+# address a tenant's forwards come from and receive its bounces. Role names
+# belong to the operator of the base domain.
+RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"}) | ROLE_MAILBOXES
 
 
 def _normalize_domain(addr: str) -> str:
@@ -1353,9 +1355,7 @@ class EmailDomainCreate(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @model_validator(mode="after")
@@ -1454,9 +1454,7 @@ class EmailDomainPatch(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @field_validator("forward_to")

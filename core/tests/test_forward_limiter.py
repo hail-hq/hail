@@ -190,7 +190,15 @@ async def test_cap_is_scoped_per_domain(async_session):
     """
     org_id = uuid.uuid4()
     dom_a = await _seed_domain(async_session, org_id, suffix="alpha")
-    dom_b = await _seed_domain(async_session, org_id, suffix="beta")
+    dom_b = EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain="beta.example.com",
+        verification_status="verified",
+        provider="ses",
+    )
+    async_session.add(dom_b)
+    await async_session.commit()
     limiter = ForwardLimiter(default_per_hour=1)
 
     # Seed one forwarded outbound row attributed to domain A.

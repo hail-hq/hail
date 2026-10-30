@@ -1,4 +1,4 @@
-"""0070: one hail-mail head per deployment."""
+"""0070: one hail-mail address per org, one head per deployment."""
 
 import hashlib
 import importlib.util
@@ -9,6 +9,12 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from hailhq.core.models import (
+    EMAIL_DOMAINS_GUARD_FUNCTION,
+    EMAIL_DOMAINS_GUARD_TRIGGER,
+    EMAIL_DOMAINS_RETIRE_FUNCTION,
+    EMAIL_DOMAINS_RETIRE_TRIGGER,
+)
 from hailhq.core.schemas import LOCAL_PREFIX
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -37,7 +43,7 @@ def _hash(domain_id: uuid.UUID) -> str:
     return hashlib.md5(str(domain_id).encode()).hexdigest()[:8]
 
 
-async def _row(db, head, tail, *, minutes=0) -> uuid.UUID:
+async def _row(db, head, tail, *, minutes=0, org=None) -> uuid.UUID:
     domain_id = uuid.uuid4()
     async with db.begin() as connection:
         await connection.execute(
@@ -49,7 +55,7 @@ async def _row(db, head, tail, *, minutes=0) -> uuid.UUID:
             ),
             {
                 "id": domain_id,
-                "org": uuid.uuid4(),
+                "org": org or uuid.uuid4(),
                 "domain": f"{head}+{tail}@mail.example.com",
                 "head": head,
                 "tail": tail,
@@ -132,3 +138,60 @@ async def test_unique_rule_and_downgrade(db) -> None:
     with pytest.raises(IntegrityError):
         await _row(db, "alice", "b")
     await _run(db, migration.upgrade)
+
+
+async def _retired(db) -> list[tuple]:
+    async with db.begin() as connection:
+        rows = await connection.execute(
+            text(
+                "SELECT local_prefix_user, local_prefix_org, organization_id "
+                "FROM retired_hail_mail_addresses"
+            )
+        )
+        return [tuple(r) for r in rows]
+
+
+async def test_rewrite_records_the_old_address(db) -> None:
+    await _run(db, migration.downgrade)
+    await _row(db, "alice", "a")
+    org = uuid.uuid4()
+    await _row(db, "alice", "b", minutes=5, org=org)
+
+    await _run(db, migration.upgrade)
+
+    assert await _retired(db) == [("alice", "b", org)]
+
+
+async def test_org_with_several_rows_keeps_the_busiest(db) -> None:
+    await _run(db, migration.downgrade)
+    org = uuid.uuid4()
+    oldest = await _row(db, "alice", "a", org=org)
+    busiest = await _row(db, "bob", "b", minutes=5, org=org)
+    await _email(db, busiest)
+    await _email(db, oldest)
+    await _email(db, busiest)
+
+    await _run(db, migration.upgrade)
+
+    async with db.begin() as connection:
+        rows = await connection.execute(text("SELECT id FROM email_domains"))
+        assert [r[0] for r in rows] == [busiest]
+        moved = await connection.execute(
+            text("SELECT count(*) FROM emails WHERE email_domain_id = :id"),
+            {"id": busiest},
+        )
+        assert moved.scalar_one() == 3
+    assert await _retired(db) == [("alice", "a", org)]
+    with pytest.raises(IntegrityError):
+        await _row(db, "carol", "c", org=org)
+
+
+def test_function_text_matches_the_code() -> None:
+    assert _squash(migration.GUARD_FUNCTION) == _squash(EMAIL_DOMAINS_GUARD_FUNCTION)
+    assert _squash(migration.RETIRE_FUNCTION) == _squash(EMAIL_DOMAINS_RETIRE_FUNCTION)
+    assert _squash(migration.GUARD_TRIGGER) == _squash(EMAIL_DOMAINS_GUARD_TRIGGER)
+    assert _squash(migration.RETIRE_TRIGGER) == _squash(EMAIL_DOMAINS_RETIRE_TRIGGER)
+
+
+def _squash(sql: str) -> str:
+    return "".join(sql.split())

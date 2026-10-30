@@ -6,11 +6,14 @@ from hailhq.core.email_routing import (
     HailMailRecipient,
     classify_hail_mail_recipient,
 )
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 
 
 def test_classify_full_address():
     r = classify_hail_mail_recipient("alice+acme@mail.hail.so", "mail.hail.so")
-    assert r == HailMailRecipient(user_prefix="alice", base_domain="mail.hail.so")
+    assert r == HailMailRecipient(
+        user_prefix="alice", tail="acme", base_domain="mail.hail.so"
+    )
 
 
 def test_classify_case_insensitive_domain():
@@ -27,30 +30,20 @@ def test_unknown_domain_returns_none():
 
 def test_address_without_plus_routes_on_the_head():
     r = classify_hail_mail_recipient("alice@mail.hail.so", "mail.hail.so")
-    assert r == HailMailRecipient(user_prefix="alice", base_domain="mail.hail.so")
+    assert r == HailMailRecipient(
+        user_prefix="alice", tail="", base_domain="mail.hail.so"
+    )
 
 
 def test_any_tail_routes_on_the_head():
     for tail in ("sales", "a.b_c", "x" * 40, "a+b", ""):
         r = classify_hail_mail_recipient(f"alice+{tail}@mail.hail.so", "mail.hail.so")
-        assert r == HailMailRecipient(user_prefix="alice", base_domain="mail.hail.so")
+        assert r == HailMailRecipient(
+            user_prefix="alice", tail=tail, base_domain="mail.hail.so"
+        )
 
 
-@pytest.mark.parametrize(
-    "role",
-    [
-        "abuse",
-        "admin",
-        "administrator",
-        "hostmaster",
-        "mailer-daemon",
-        "noc",
-        "postmaster",
-        "root",
-        "security",
-        "webmaster",
-    ],
-)
+@pytest.mark.parametrize("role", sorted(ROLE_MAILBOXES))
 def test_bare_role_name_returns_none(role):
     # A certificate authority can validate the base domain through these
     # names, so they must never reach a tenant that holds the same head.
@@ -59,11 +52,15 @@ def test_bare_role_name_returns_none(role):
         classify_hail_mail_recipient(f"{role.upper()}@mail.hail.so", "mail.hail.so")
         is None
     )
+    # An empty tail is the same as no tail.
+    assert classify_hail_mail_recipient(f"{role}+@mail.hail.so", "mail.hail.so") is None
 
 
 def test_role_name_with_a_tail_is_a_tenant_alias():
     r = classify_hail_mail_recipient("admin+acme@mail.hail.so", "mail.hail.so")
-    assert r == HailMailRecipient(user_prefix="admin", base_domain="mail.hail.so")
+    assert r == HailMailRecipient(
+        user_prefix="admin", tail="acme", base_domain="mail.hail.so"
+    )
 
 
 def test_invalid_prefix_returns_none():

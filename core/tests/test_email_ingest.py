@@ -9,9 +9,15 @@ from hailhq.core.email_ingest import (
     _persist_one,
     ingest_inbound,
 )
-from hailhq.core.models import Email, EmailAttachment, EmailDomain, EmailForwardTarget
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    EmailForwardTarget,
+    RetiredHailMailAddress,
+)
 from hailhq.core.providers.email.inbound.base import InboundMessage
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 FIX = Path(__file__).parent / "fixtures" / "inbound"
 
@@ -1802,12 +1808,85 @@ async def test_two_aliases_of_one_org_make_one_row(async_session):
     assert len(result.email_ids) == 1
 
 
-@pytest.mark.asyncio
-async def test_bare_role_name_skips_a_tenant_with_that_head(async_session):
-    async_session.add(_make_inbound_domain(uuid.uuid4(), "admin", "acme"))
-    await async_session.commit()
+async def _older_row_with_role_head(session, org_id):
+    """A row from before role names were refused as heads."""
+    await session.execute(
+        text(
+            "ALTER TABLE email_domains "
+            "DISABLE TRIGGER email_domains_guard_hail_mail_head"
+        )
+    )
+    domain = _make_inbound_domain(org_id, "admin", "acme")
+    session.add(domain)
+    await session.flush()
+    await session.execute(
+        text(
+            "ALTER TABLE email_domains "
+            "ENABLE TRIGGER email_domains_guard_hail_mail_head"
+        )
+    )
+    await session.commit()
+    return domain
 
-    result = await _ingest_to(async_session, "role1", "admin@mail.hail.so")
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", ["admin@mail.hail.so", "admin+@mail.hail.so"])
+async def test_bare_role_name_skips_a_tenant_with_that_head(async_session, recipient):
+    await _older_row_with_role_head(async_session, uuid.uuid4())
+
+    result = await _ingest_to(async_session, "role1", recipient)
 
     assert result.email_ids == []
-    assert result.skipped_recipients == ["admin@mail.hail.so"]
+    assert result.skipped_recipients == [recipient]
+
+
+@pytest.mark.asyncio
+async def test_older_row_with_a_role_head_keeps_working(async_session):
+    domain = await _older_row_with_role_head(async_session, uuid.uuid4())
+
+    result = await _ingest_to(async_session, "role2", "admin+acme@mail.hail.so")
+    assert len(result.email_ids) == 1
+
+    # A CHECK would refuse this update of an unrelated column.
+    domain.forward_rate_per_hour = 5
+    await async_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_mail_to_an_address_another_org_retired_is_dropped(async_session):
+    keeper = uuid.uuid4()
+    renamed = uuid.uuid4()
+    async_session.add(_make_inbound_domain(keeper, "alice", "acme"))
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="globex",
+            organization_id=renamed,
+        )
+    )
+    await async_session.commit()
+
+    dropped = await _ingest_to(async_session, "gone", "alice+globex@mail.hail.so")
+    assert dropped.email_ids == []
+    assert dropped.skipped_recipients == ["alice+globex@mail.hail.so"]
+
+    # The keeper's own aliases still arrive.
+    kept = await _ingest_to(async_session, "kept", "alice+sales@mail.hail.so")
+    assert len(kept.email_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_mail_to_an_address_the_same_org_retired_arrives(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(_make_inbound_domain(org_id, "alice", "acme"))
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="old",
+            organization_id=org_id,
+        )
+    )
+    await async_session.commit()
+
+    result = await _ingest_to(async_session, "own", "alice+old@mail.hail.so")
+    assert len(result.email_ids) == 1

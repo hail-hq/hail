@@ -217,11 +217,15 @@ def resolve_hail_mail_prefixes(
         env_user, env_org = _parse_hail_mail_from(settings.hail_mail_from)
 
     default = settings.hail_mail_default_user_prefix
-    user = body_user or env_user or default
+    user = (
+        body_user
+        or env_user
+        or (default and default_user_prefix(default, organization_id))
+    )
     org = body_org or env_org or org_prefix_from_id(organization_id)
     if user in RESERVED_USER_PREFIXES:
         raise unprocessable(
-            f"user prefix {user!r} is reserved for Hail's own sender address",
+            f"user prefix {user!r} is reserved",
             loc=["body", "local_prefix_user"],
         )
     if not user:
@@ -233,9 +237,13 @@ def resolve_hail_mail_prefixes(
                 "HAIL_MAIL_DEFAULT_USER_PREFIX)"
             ),
         )
-    if not body_user and not env_user:
-        user = default_user_prefix(default, organization_id)
     return user, org
+
+
+HAIL_MAIL_EXISTS_DETAIL = (
+    "this organization already has a hail-mail address; "
+    "change it with PATCH /email-domains/{id}"
+)
 
 
 def taken_user_prefix_detail(user_prefix: str) -> str:
@@ -269,10 +277,13 @@ def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
 async def verified_senders(
     db: AsyncSession, organization_id: UUID
 ) -> list[EmailDomain]:
-    """Every verified identity the org can send through, oldest first.
+    """The verified identities a ``from``-less send picks from, oldest first.
 
-    Ordered by ``created_at`` so a single-identity org resolves the same
-    row on every retry.
+    A verified custom domain wins: every org holds a hail-mail address by
+    default, so an org that verified its own domain means to send from it.
+    The hail-mail address is a candidate only with no verified custom domain,
+    and stays available through an explicit ``from``. Ordered by ``created_at``
+    so a single-identity org resolves the same row on every retry.
     """
     stmt = (
         select(EmailDomain)
@@ -280,7 +291,8 @@ async def verified_senders(
         .where(EmailDomain.verification_status == "verified")
         .order_by(EmailDomain.created_at.asc())
     )
-    return list((await db.execute(stmt)).scalars().all())
+    verified = list((await db.execute(stmt)).scalars().all())
+    return [sd for sd in verified if sd.kind == "custom"] or verified
 
 
 async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str | None:
@@ -401,9 +413,19 @@ async def create_email_domain(
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
+            existing = await db.execute(
+                select(EmailDomain.id).where(
+                    EmailDomain.organization_id == principal.organization_id,
+                    EmailDomain.kind == "hail_mail",
+                )
+            )
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=taken_user_prefix_detail(user_prefix),
+                detail=(
+                    HAIL_MAIL_EXISTS_DETAIL
+                    if existing.first() is not None
+                    else taken_user_prefix_detail(user_prefix)
+                ),
             ) from exc
         await db.refresh(sd)
         actor_user_id, actor_kind = actor_of(principal)

@@ -274,11 +274,22 @@ async def test_inbound_meters_one_usage_event_per_created_row(
 ):
     from unittest.mock import patch
 
-    from hailhq.core.models import UsageEvent
+    from hailhq.core.models import AccountCredit, UsageEvent
     from sqlalchemy import func
 
     # Insert an org + hail_mail domain routing "smoke+acme@mail.hail.so".
     org_id = await _insert_inbound_domain(async_session, user="smoke", org="acme")
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="credit",
+            channel="credit",
+            amount_cents=100,
+            source="test.fixture",
+            ref="meter-funds",
+        )
+    )
+    await async_session.commit()
     body = json.dumps(
         _payload(message_id="meter-1", recipient="smoke+acme@mail.hail.so")
     ).encode()
@@ -303,6 +314,38 @@ async def test_inbound_meters_one_usage_event_per_created_row(
         )
     ).scalar_one()
     assert count == 1  # first delivery metered; replay not metered
+
+
+@pytest.mark.asyncio
+async def test_inbound_is_stored_and_not_charged_at_zero_balance(
+    client, async_session, inbound_enabled, override_internal_deps
+):
+    from unittest.mock import patch
+
+    from hailhq.core.models import Email, UsageEvent
+    from sqlalchemy import func
+
+    org_id = await _insert_inbound_domain(async_session, user="free", org="acme")
+    body = json.dumps(
+        _payload(message_id="free-1", recipient="free+acme@mail.hail.so")
+    ).encode()
+
+    with patch("hailhq.api.usage.notify_usage_event_recorded"):
+        resp = await client.post(
+            "/internal/ses-events", content=body, headers=_signed(body)
+        )
+
+    assert resp.status_code == 200, resp.text
+    stored = await async_session.execute(
+        select(func.count()).select_from(Email).where(Email.organization_id == org_id)
+    )
+    assert stored.scalar_one() == 1
+    charged = await async_session.execute(
+        select(func.count())
+        .select_from(UsageEvent)
+        .where(UsageEvent.organization_id == org_id)
+    )
+    assert charged.scalar_one() == 0
 
 
 @pytest.mark.asyncio
