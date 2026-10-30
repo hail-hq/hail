@@ -23,8 +23,8 @@ key is harmless to older code, which never reads it.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0068"
-down_revision = "0067"
+revision = "0069"
+down_revision = "0068"
 branch_labels = None
 depends_on = None
 

@@ -1,4 +1,4 @@
-"""0068: US texting rows that hold a campaign get ``campaign_filed_at``, and
+"""0069: US texting rows that hold a campaign get ``campaign_filed_at``, and
 Hail's old brand and campaign rejection wording gets the new text."""
 
 import importlib.util
@@ -15,7 +15,7 @@ from sqlalchemy import select
 spec = importlib.util.spec_from_file_location(
     "sms_campaign_filed_backfill",
     Path(__file__).parents[1]
-    / "migrations/versions/0068_sms_campaign_filed_backfill.py",
+    / "migrations/versions/0069_sms_campaign_filed_backfill.py",
 )
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)

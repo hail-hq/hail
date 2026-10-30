@@ -21,7 +21,7 @@ spec.loader.exec_module(migration)
 _reword_spec = importlib.util.spec_from_file_location(
     "sms_campaign_filed_backfill",
     Path(__file__).parents[1]
-    / "migrations/versions/0068_sms_campaign_filed_backfill.py",
+    / "migrations/versions/0069_sms_campaign_filed_backfill.py",
 )
 reword = importlib.util.module_from_spec(_reword_spec)
 _reword_spec.loader.exec_module(reword)
@@ -29,7 +29,7 @@ _reword_spec.loader.exec_module(reword)
 
 def test_wording_matches_the_code() -> None:
     assert migration.DETAILS_REJECTED == base.DETAILS_REJECTED
-    # 0068 later moved the US texting wording on; it keeps the old text.
+    # 0069 later moved the US texting wording on; it keeps the old text.
     assert migration.BRAND_REJECTED == reword.OLD_BRAND_REJECTED
     assert migration.CAMPAIGN_REJECTED == reword.OLD_CAMPAIGN_REJECTED
     assert migration.NOT_ACCEPTED == base.NOT_ACCEPTED
