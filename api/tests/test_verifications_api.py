@@ -2266,8 +2266,13 @@ async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     # The rater still reads the mark after the wipe.
     assert row.provider_refs == {"brand_reused": True, "kept_brand_id": "B9"}
-    assert (await _post_sms(client, key)).status_code == 201
+    second = await _post_sms(client, key)
+    assert second.status_code == 201
     assert sms_carrier.drafts[-1]["kept_brand_id"] == "B9"
+    # The newer filing owns the brand now: a later one does not get it.
+    await _set_refs(async_session, second.json()["id"], "rejected", {})
+    assert (await _post_sms(client, key)).status_code == 201
+    assert "kept_brand_id" not in sms_carrier.drafts[-1]
 
 
 @pytest.mark.usefixtures("us_number")

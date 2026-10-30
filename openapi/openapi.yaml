@@ -4997,11 +4997,13 @@ paths:
       description:
         "Withdraw a verification that has not been sent for review, or dismiss
 
-        a rejected one. The draft is discarded either way. One that is under
+        a rejected one. The draft is discarded either way, except a person's
 
-        review cannot be cancelled: wait for the result; if it is rejected,
+        confirmed brand on a rejected US SMS registration: it stays at the
 
-        dismiss it.
+        carrier for the next filing. One that is under review cannot be
+
+        cancelled: wait for the result; if it is rejected, dismiss it.
 
 
         An approved US SMS registration (`purpose=sms`) can be cancelled too:

@@ -264,23 +264,25 @@ def _wiped_refs(row: CarrierVerification) -> dict:
 async def _kept_brand(
     db: AsyncSession, organization_id: UUID, provider_name: str, subject_type: str
 ) -> str | None:
-    """The brand the organization's last cancelled filing left at the carrier
-    for the next one (``discard_rejected``)."""
-    refs = (
+    """The brand the organization's last filing left at the carrier for the
+    next one (``discard_rejected``). Only the last filing counts: once a
+    newer filing exists, an older kept brand may be in use or gone."""
+    row = (
         await db.execute(
-            select(CarrierVerification.provider_refs)
+            select(CarrierVerification.state, CarrierVerification.provider_refs)
             .where(
                 CarrierVerification.organization_id == organization_id,
                 CarrierVerification.provider == provider_name,
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.subject_type == subject_type,
-                CarrierVerification.state == "cancelled",
             )
-            .order_by(CarrierVerification.cancelled_at.desc().nulls_last())
+            .order_by(CarrierVerification.created_at.desc())
             .limit(1)
         )
-    ).scalar_one_or_none()
-    return (refs or {}).get("kept_brand_id")
+    ).first()
+    if row is None or row.state != "cancelled":
+        return None
+    return (row.provider_refs or {}).get("kept_brand_id")
 
 
 async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
@@ -1579,9 +1581,10 @@ async def cancel_verification(
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> VerificationResponse:
     """Withdraw a verification that has not been sent for review, or dismiss
-    a rejected one. The draft is discarded either way. One that is under
-    review cannot be cancelled: wait for the result; if it is rejected,
-    dismiss it.
+    a rejected one. The draft is discarded either way, except a person's
+    confirmed brand on a rejected US SMS registration: it stays at the
+    carrier for the next filing. One that is under review cannot be
+    cancelled: wait for the result; if it is rejected, dismiss it.
 
     An approved US SMS registration (`purpose=sms`) can be cancelled too:
     its numbers leave the campaign, the campaign is deleted at the carrier,

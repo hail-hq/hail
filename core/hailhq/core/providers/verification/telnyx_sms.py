@@ -374,13 +374,22 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def _reuse_brand(self, refs, fields, brand_id) -> bool:
         """Put the kept brand in refs when Telnyx still holds it, confirmed,
-        for the same person. False files a new brand instead."""
+        for the same person, with no campaign. False files a new brand
+        instead. A brand that does not fit is deleted, so nothing of the
+        customer's stays at the carrier. A sole proprietor brand takes one
+        campaign, and ``status`` would adopt one still listed, so a brand
+        with a campaign is left alone (a failed campaign delete)."""
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return False
             raise
+        found = await self._api.request(
+            "GET", "/10dlc/campaign", params={"brandId": brand_id}
+        )
+        if found.get("records"):
+            return False
         same_person = all(
             (brand.get(key) or "").strip().casefold()
             == (fields.get(field) or "").strip().casefold()
@@ -397,6 +406,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             or brand.get("failureReasons")
             or brand.get("identityStatus") not in _VERIFIED
         ):
+            await self.discard({"brand_id": brand_id})
             return False
         refs["brand_id"] = brand_id
         refs["identity_verified"] = True

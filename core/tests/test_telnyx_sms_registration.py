@@ -536,13 +536,17 @@ async def test_person_draft_creates_sole_proprietor_brand_and_sends_pin() -> Non
     assert "5550100" not in repr(refs)
 
 
-def _kept_brand_handler(calls, brand):
+def _kept_brand_handler(calls, brand, campaigns=()):
     def handler(req: httpx.Request):
         calls.append((req.method, req.url.path))
         if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
             if brand is None:
                 return httpx.Response(404, json={})
             return httpx.Response(200, json=brand)
+        if req.method == "DELETE":
+            return httpx.Response(204)
+        if req.url.path.endswith("/10dlc/campaign"):
+            return httpx.Response(200, json={"records": list(campaigns)})
         if req.url.path.endswith("/10dlc/brand"):
             return httpx.Response(200, json={"brandId": "B1"})
         if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
@@ -607,6 +611,16 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
     assert ("POST", "/v2/10dlc/brand") in calls
     assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
+    # A brand that no longer fits does not stay at the carrier.
+    assert (("DELETE", "/v2/10dlc/brand/B9") in calls) is (brand is not None)
+
+
+async def test_a_kept_brand_with_a_campaign_is_left_alone() -> None:
+    calls: list = []
+    handler = _kept_brand_handler(calls, KEPT_BRAND, [{"campaignId": "OLD"}])
+    draft = await _kept_draft(_provider(handler))
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+    assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
 
 
 async def test_discard_rejected_keeps_a_confirmed_persons_brand() -> None:
