@@ -3197,7 +3197,7 @@ type VerificationResponse struct {
 	// Id Unique identifier for this verification.
 	Id openapi_types.UUID `json:"id"`
 
-	// IdentityConfirmed True on a cancelled US texting registration when the person stays confirmed: the next filing with the same first name, last name, email and mobile needs no code and has no submission fee.
+	// IdentityConfirmed True on a person's newest US texting registration when it is cancelled and the person stays confirmed: the next filing with the same first name, last name, email and mobile needs no code and has no submission fee. Ignore it on older registrations.
 	IdentityConfirmed *bool `json:"identity_confirmed,omitempty"`
 
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.

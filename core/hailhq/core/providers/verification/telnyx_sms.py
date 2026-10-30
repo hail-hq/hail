@@ -361,7 +361,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         """A person's confirmed brand stays at Telnyx when a campaign was
         filed: it is paid for, and the campaign is what the carriers refused.
         The next filing with the same details reuses it, with no new brand
-        fee and no new PIN. With no campaign, the brand itself failed."""
+        fee and no new PIN. A failed brand has no ``identity_verified``
+        (``status``), and with no campaign the brand itself failed."""
         brand_id = refs.get("brand_id")
         if (
             brand_id
@@ -598,6 +599,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 brand.get("failureReasons")
                 or brand.get("status") == "REGISTRATION_FAILED"
             ):
+                # A failed brand is not kept, even with a campaign filed.
+                refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
                     reason=BRAND_REJECTED,

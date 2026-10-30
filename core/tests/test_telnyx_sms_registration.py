@@ -656,6 +656,26 @@ async def test_a_kept_brand_with_a_campaign_is_left_alone() -> None:
     assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
 
 
+async def test_a_brand_that_fails_after_its_campaign_is_not_kept() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={"failureReasons": "Identity mismatch"})
+
+    p = _provider(handler)
+    refs = {
+        "brand_id": "B1",
+        "campaign_id": "C1",
+        "subject_type": "person",
+        "identity_verified": True,
+    }
+    assert (await p.status(refs)).reason == BRAND_REJECTED
+    calls.clear()
+    assert await p.discard_rejected(refs) == {}
+    assert ("DELETE", "/v2/10dlc/brand/B1") in calls
+
+
 async def test_discard_rejected_keeps_a_confirmed_persons_brand() -> None:
     calls = []
 
