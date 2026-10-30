@@ -6,7 +6,7 @@ keyed on ``settings.hail_unsubscribe_secret`` — a dedicated secret,
 deliberately not ``hail_internal_secret`` (that one signs internal
 API<->website calls, a different concern).
 
-``GET /unsubscribe?token=...`` (see
+``GET`` or ``POST /unsubscribe?token=...`` (see
 ``api/hailhq/api/routes/unsubscribe.py``) verifies the token and calls
 ``hailhq.core.compliance_gate.add_suppression``.
 """
@@ -29,8 +29,8 @@ __all__ = [
     "verify_unsubscribe_token",
 ]
 
-# 30 days — long enough that a message read weeks later still unsubscribes.
-_DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60
+# 365 days: a message read months later still unsubscribes.
+_DEFAULT_TTL_SECONDS = 365 * 24 * 60 * 60
 
 
 class InvalidUnsubscribeToken(Exception):

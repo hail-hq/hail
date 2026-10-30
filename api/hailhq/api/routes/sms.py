@@ -40,16 +40,19 @@ from hailhq.api.ratelimit import (
     merge_rate_limited_responses,
 )
 from hailhq.api.route_prefixes import request_mount_prefix
+from hailhq.api.suppressions import (
+    delete_channel_suppression,
+    list_channel_suppressions,
+)
 from hailhq.api.usage import write_usage_event
 from hailhq.core.carrier_routing import sms_route, sms_status_path
-from hailhq.core.compliance_gate import check_sms_allowed, remove_suppression
+from hailhq.core.compliance_gate import check_sms_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.models import (
     Sms,
     SmsEvent,
     SmsSenderIdentity,
-    Suppression,
 )
 from hailhq.core.pricing_tier import classify_pricing_tier
 from hailhq.core.schemas import (
@@ -60,7 +63,6 @@ from hailhq.core.schemas import (
     SmsResponse,
     SmsStatus,
     SuppressionListResponse,
-    SuppressionResponse,
 )
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID, resolve_sender
 from hailhq.core.sms_registration_gate import (
@@ -461,22 +463,12 @@ async def list_sms_suppressions(
     Cursor-paginated. A suppressed number blocks POST /v1/sms sends to it
     with a 403 until removed via DELETE /v1/sms/suppressions/{number}.
     """
-    stmt = select(Suppression).where(
-        Suppression.organization_id == principal.organization_id,
-        Suppression.channel == "sms",
-    )
-    rows, next_cursor = await fetch_cursor_page(
+    return await list_channel_suppressions(
         db,
-        stmt,
-        Suppression.created_at,
-        Suppression.id,
+        organization_id=principal.organization_id,
+        channel="sms",
         cursor=cursor,
         limit=limit,
-        newest_first=True,
-    )
-    return SuppressionListResponse(
-        items=[SuppressionResponse.model_validate(r) for r in rows],
-        next_cursor=next_cursor,
     )
 
 
@@ -495,14 +487,9 @@ async def delete_sms_suppression(
     for having a lawful basis (e.g. a fresh opt-in) before sending again.
     Returns 404 if the number was not suppressed.
     """
-    removed = await remove_suppression(
+    await delete_channel_suppression(
         db, organization_id=principal.organization_id, recipient=number, channel="sms"
     )
-    if not removed:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND, detail="suppression not found"
-        )
-    await db.commit()
 
 
 @router.get(

@@ -91,6 +91,7 @@ async def test_tick_sends_queued_forward_and_marks_sent(async_session):
     assert refreshed.provider_message_id == "ses-1"
     kwargs = provider.send_email.await_args.kwargs
     assert kwargs["headers"]["X-Hail-Forward-Hops"] == "1"
+    assert kwargs["organization_id"] == org_id
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 """Integration tests for the pre-send compliance gate wired into
-POST /calls, POST /emails, and GET /unsubscribe.
+POST /calls, POST /emails, and GET/POST /unsubscribe.
 """
 
 from __future__ import annotations
@@ -169,8 +169,47 @@ async def test_post_emails_succeeds_carries_unsubscribe_headers(
     assert audit.payload["compliance"]["suppression_hit"] is False
 
 
+@pytest.mark.parametrize(
+    "recipients",
+    [
+        pytest.param({"to": ["bob@example.com", "dan@example.com"]}, id="two-to"),
+        pytest.param(
+            {"to": ["bob@example.com"], "cc": ["dan@example.com"]}, id="to-and-cc"
+        ),
+    ],
+)
+async def test_post_emails_multi_recipient_has_no_unsubscribe_headers(
+    client: httpx.AsyncClient,
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
+    email_mock,
+    recipients: dict,
+) -> None:
+    """The one-click token names one address, but every recipient gets the
+    same headers. With 2 or more recipients, send none, so a cc pressing
+    the button cannot suppress the first `to` address."""
+    _org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers)
+
+    resp = await client.post(
+        "/emails",
+        json={
+            **recipients,
+            "subject": "hi",
+            "body_text": "hello",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    send_headers = email_mock.send_email.call_args.kwargs["headers"] or {}
+    assert "List-Unsubscribe" not in send_headers
+    assert "List-Unsubscribe-Post" not in send_headers
+
+
 # --------------------------------------------------------------------------- #
-# GET /unsubscribe.
+# GET and POST /unsubscribe.
 # --------------------------------------------------------------------------- #
 
 
@@ -214,9 +253,76 @@ async def test_unsubscribe_then_send_is_blocked(
     assert send_resp.status_code == 403
 
 
-async def test_unsubscribe_rejects_invalid_token(client: httpx.AsyncClient) -> None:
-    resp = await client.get("/unsubscribe?token=not-a-real-token")
+# GET is a person clicking the link; POST is the Gmail / Yahoo one-click
+# button (RFC 8058 body, optional). Both mounts serve the route.
+_UNSUBSCRIBE_CASES = [
+    pytest.param("GET", "", None, id="get"),
+    pytest.param("GET", "/v1", None, id="get-v1"),
+    pytest.param("POST", "", "List-Unsubscribe=One-Click", id="post"),
+    pytest.param("POST", "/v1", "List-Unsubscribe=One-Click", id="post-v1"),
+    pytest.param("POST", "", None, id="post-no-body"),
+]
+
+
+def _unsubscribe_request_kwargs(body: str | None) -> dict:
+    if body is None:
+        return {}
+    return {
+        "content": body,
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+    }
+
+
+@pytest.mark.parametrize(("method", "prefix", "body"), _UNSUBSCRIBE_CASES)
+async def test_unsubscribe_valid_token_suppresses_recipient(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[uuid.UUID, ApiKey, str],
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    prefix: str,
+    body: str | None,
+) -> None:
+    monkeypatch.setattr(settings, "hail_unsubscribe_secret", "test-secret")
+    org_id, _, _ = org_and_key
+    url = build_unsubscribe_url("carol@example.com", org_id)
+    token = url.split("token=", 1)[1]
+
+    resp = await client.request(
+        method,
+        f"{prefix}/unsubscribe?token={token}",
+        **_unsubscribe_request_kwargs(body),
+    )
+    assert resp.status_code == 200, resp.text
+    assert "carol@example.com" in resp.text
+
+    row = (
+        await async_session.execute(
+            select(Suppression).where(Suppression.recipient == "carol@example.com")
+        )
+    ).scalar_one()
+    assert row.organization_id == org_id
+    assert row.channel == "email"
+    assert row.source == "unsubscribe_link"
+
+
+@pytest.mark.parametrize(("method", "prefix", "body"), _UNSUBSCRIBE_CASES)
+async def test_unsubscribe_rejects_invalid_token(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    method: str,
+    prefix: str,
+    body: str | None,
+) -> None:
+    resp = await client.request(
+        method,
+        f"{prefix}/unsubscribe?token=not-a-real-token",
+        **_unsubscribe_request_kwargs(body),
+    )
     assert resp.status_code == 400
+    assert resp.headers["content-type"].startswith("text/html")
+    rows = (await async_session.execute(select(Suppression))).scalars().all()
+    assert rows == []
 
 
 # --------------------------------------------------------------------------- #

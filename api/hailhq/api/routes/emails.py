@@ -3,6 +3,8 @@
 POST /emails - send an outbound message through SES.
 GET /emails/{id} - read a single email (org-scoped).
 GET /emails - cursor-paginated list (org-scoped).
+GET /emails/suppressions - the org's suppressed addresses.
+DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
 
@@ -58,6 +60,10 @@ from hailhq.api.routes.email_domains import (
     resolve_hail_mail_prefixes,
     verified_senders,
 )
+from hailhq.api.suppressions import (
+    delete_channel_suppression,
+    list_channel_suppressions,
+)
 from hailhq.api.usage import write_usage_event
 from hailhq.core.compliance_gate import check_email_allowed, normalize_recipient
 from hailhq.core.config import settings
@@ -91,6 +97,7 @@ from hailhq.core.schemas import (
     EmailStatsResponse,
     EmailStatus,
     EmailSummary,
+    SuppressionListResponse,
 )
 from hailhq.core.telemetry_identity import tag_outbound_email
 from hailhq.core.unsubscribe import build_unsubscribe_url
@@ -302,22 +309,36 @@ async def deliver_email(
 
     Shared by POST /emails and the internal agent-send route (spec:
     docs/superpowers/specs/2026-07-11-voicebot-agent-tools-design.md).
-    Mints the one-click unsubscribe header, sends the stored body exactly
-    as authored (with ``attachment_rows`` payloads when the caller
-    resolved any), and writes sent/failed back. Bills the flat 1¢ usage
+    Mints the one-click unsubscribe header (single-recipient sends only),
+    sends the stored body exactly as authored (with ``attachment_rows``
+    payloads when the caller resolved any), and writes sent/failed back. Bills the flat 1¢ usage
     event on success. Returns None on success or the exception class name
     on transport failure — the caller owns HTTP semantics (502 + audit
     for the public route, a spoken sentence for the agent route). Never
     raises for provider errors.
     """
     attachment_rows = attachment_rows or []
-    # One-click unsubscribe (RFC 8058) — minted per-send against the primary
-    # recipient. A single send can target multiple `to` addresses; the
-    # header necessarily picks one (the first) since SES/RFC only support
-    # one List-Unsubscribe target per message.
-    unsubscribe_url = build_unsubscribe_url(
-        email.to_addresses[0], email.organization_id
-    )
+    # One-click unsubscribe (RFC 8058) only when the send has exactly one
+    # recipient (to + cc + bcc, deduped). The headers are the same for every
+    # copy of the message and the token names one address, so with 2 or more
+    # recipients a cc or bcc pressing the button would suppress someone else.
+    recipients = {
+        normalize_recipient(r)
+        for r in [
+            *email.to_addresses,
+            *(email.cc_addresses or []),
+            *(email.bcc_addresses or []),
+        ]
+    }
+    unsubscribe_headers: dict[str, str] | None = None
+    if len(recipients) == 1:
+        unsubscribe_url = build_unsubscribe_url(
+            email.to_addresses[0], email.organization_id
+        )
+        unsubscribe_headers = {
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
     provider_attachments: list[ProviderAttachment] = []
     try:
         if attachment_rows:
@@ -351,11 +372,9 @@ async def deliver_email(
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,
-            headers={
-                "List-Unsubscribe": f"<{unsubscribe_url}>",
-                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            },
+            headers=unsubscribe_headers,
             attachments=provider_attachments or None,
+            organization_id=email.organization_id,
         )
     except Exception as exc:
         logger.warning(
@@ -843,6 +862,61 @@ async def get_email_stats(
         totals=totals,
         rates=rates,
         series=list(buckets.values()),  # inserted in ascending bucket order
+    )
+
+
+# --------------------------------------------------------------------------- #
+# GET /emails/suppressions, DELETE /emails/suppressions/{address}
+#
+# MUST be registered above GET /{email_id}, for the same reason as /stats.
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/suppressions",
+    response_model=SuppressionListResponse,
+)
+async def list_email_suppressions(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
+) -> SuppressionListResponse:
+    """List email addresses suppressed from receiving mail, newest first.
+
+    Cursor-paginated. A suppressed address blocks POST /v1/emails sends to it
+    with a 403 until removed via DELETE /v1/emails/suppressions/{address}.
+    """
+    return await list_channel_suppressions(
+        db,
+        organization_id=principal.organization_id,
+        channel="email",
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.delete(
+    "/suppressions/{address}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
+async def delete_email_suppression(
+    address: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Remove one address from the email suppression list, re-allowing sends to it.
+
+    The address match ignores case. Does not itself constitute renewed
+    consent: the caller is responsible for having a lawful basis (e.g. a
+    fresh opt-in) before sending again. Returns 404 if the address was not
+    suppressed.
+    """
+    await delete_channel_suppression(
+        db,
+        organization_id=principal.organization_id,
+        recipient=address,
+        channel="email",
     )
 
 

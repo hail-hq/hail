@@ -153,6 +153,7 @@ hail email list
 hail email get <id>
 hail email tail <id>              # follow events for one email
 hail email raw <id>               # RFC 5322 source
+hail email suppressions list      # addresses Hail will not send to
 hail email attachment <id> <att-id> --output file.pdf
 hail email domain register --kind hail_mail
 hail email domain register --kind custom --domain acme.com  # send + receive on your own domain

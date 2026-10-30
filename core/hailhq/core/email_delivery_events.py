@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, get_args
 from uuid import UUID, uuid4
 
+from hailhq.core.compliance_gate import add_suppression, normalize_recipient
 from hailhq.core.config import settings
 from hailhq.core.forward_targets import (
     normalize_address,
@@ -168,6 +169,14 @@ async def apply_delivery_event(
         status_changed = result.rowcount == 1
 
     meta = email.metadata_ or {}
+    reason = _suppression_reason(event)
+    if reason is not None and not (
+        meta.get("forwarded_from") or meta.get("system_kind")
+    ):
+        # Forwards and system mail have their own stop rules (above and
+        # below); only the org's own sends suppress the recipient.
+        await _suppress_recipients(db, email, event, reason)
+
     if event.kind == "complained" and (
         meta.get("forwarded_from")
         or meta.get("system_kind") == SYSTEM_KIND_FORWARD_CONFIRM
@@ -191,6 +200,50 @@ async def apply_delivery_event(
 
     await db.flush()
     return ApplyResult(email_id=email.id, inserted=True, status_changed=status_changed)
+
+
+def _suppression_reason(event: DeliveryEvent) -> str | None:
+    if event.kind == "bounced" and event.detail.get("hard"):
+        # SES did not try to deliver: the address is on the SES account's
+        # suppression list, which every org on that account shares (one
+        # org's complaint puts it there). Not this org's bounce.
+        if event.detail.get("bounce_sub_type") == "OnAccountSuppressionList":
+            return None
+        return "hard_bounce"
+    if event.kind == "complained":
+        return "spam_complaint"
+    return None
+
+
+async def _suppress_recipients(
+    db: AsyncSession, email: Email, event: DeliveryEvent, reason: str
+) -> None:
+    """Add an org-scoped email suppression for each reported recipient.
+
+    Only addresses the event names AND this email was sent to: a bounce
+    with no recipient list suppresses nobody, rather than every address on
+    the send. The send gate then blocks the next send to that address
+    (``check_email_allowed``). An address already suppressed keeps its
+    row (``add_suppression`` skips duplicates).
+    """
+    sent_to = {
+        normalize_recipient(a)
+        for a in (
+            *(email.to_addresses or []),
+            *(email.cc_addresses or []),
+            *(email.bcc_addresses or []),
+        )
+    }
+    reported = {normalize_recipient(r) for r in (event.detail.get("recipients") or [])}
+    for recipient in sorted(reported & sent_to):
+        await add_suppression(
+            db,
+            organization_id=email.organization_id,
+            recipient=recipient,
+            channel="email",
+            reason=reason,
+            source="bounce",
+        )
 
 
 async def _stop_forwarding_on_complaint(

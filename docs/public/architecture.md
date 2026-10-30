@@ -114,6 +114,10 @@ If none of those resolve, the request returns `503` with instructions on how to 
 
 Refer to [AWS SES setup](./self-host/aws-ses.md) for the operator-side setup. Refer to [`docs/superpowers/plans/2026-05-17-hail-mail-addressing.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/plans/2026-05-17-hail-mail-addressing.md) for the addressing/configurability plan.
 
+### Bounces and complaints
+
+A hard bounce or a spam complaint adds the recipient to the org's suppression list (`reason`: `hard_bounce` or `spam_complaint`). The next `POST /emails` to that address returns `403`. Only addresses the event names and the email was sent to are added. A soft bounce adds nothing. Neither does a bounce from the shared SES account suppression list (`OnAccountSuppressionList`), since SES never tried to deliver. Forwards and Hail's own system mail are left out; a complaint on a forward stops the forward address instead (see below). Code: [`core/hailhq/core/email_delivery_events.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/email_delivery_events.py).
+
 ## Inbound email
 
 Operators on AWS enable inbound email when they apply `infra/terraform/`.
