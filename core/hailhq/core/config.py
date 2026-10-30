@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     # Shortcut for self-hosters running a SINGLE org: one full address the
     # server splits into the user/org prefix pair internally. Wins over the
     # per-org derived org prefix when set. Example:
-    #   HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
+    #   HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
     # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
     # SES-verified parent); each side of the ``+`` must match the
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.

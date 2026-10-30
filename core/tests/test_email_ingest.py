@@ -1291,7 +1291,7 @@ async def test_missing_from_header_falls_back_to_envelope_from(async_session):
 
 
 @pytest.mark.asyncio
-async def test_created_email_ids_excludes_replays(async_session):
+async def test_billable_email_ids_excludes_replays(async_session):
     org_id = uuid.uuid4()
     domain = _make_inbound_domain(org_id)
     async_session.add(domain)
@@ -1325,9 +1325,9 @@ async def test_created_email_ids_excludes_replays(async_session):
         hail_mail_base_domain="mail.hail.so",
         org_rate_per_hour=10_000,
     )
-    assert len(first.created_email_ids) == 1
-    assert first.created_email_ids[0][1] == org_id  # (email_id, org_id) tuple
-    assert second.created_email_ids == []  # replay creates nothing
+    assert len(first.billable_email_ids) == 1
+    assert first.billable_email_ids[0][1] == org_id  # (email_id, org_id) tuple
+    assert second.billable_email_ids == []  # replay creates nothing
     assert len(second.email_ids) == 1  # but still resolves the row
 
 
@@ -1414,7 +1414,9 @@ async def test_unfunded_org_suppresses_forwarding_with_reason(async_session):
         funds_check=broke,
         org_rate_per_hour=10_000,
     )
-    assert len(result.created_email_ids) == 1
+    # Stored, shown, and free.
+    assert len(result.email_ids) == 1
+    assert result.billable_email_ids == []
     forward_enqueue.assert_not_awaited()
     assert "insufficient_funds" in result.suppressed_reasons
     types = [c.kwargs["event_type"] for c in fanout.await_args_list]
@@ -1506,7 +1508,7 @@ async def test_suppression_reason_persisted_on_row(async_session):
     )
     email = (
         await async_session.execute(
-            select(Email).where(Email.id == result.created_email_ids[0][0])
+            select(Email).where(Email.id == result.email_ids[0])
         )
     ).scalar_one()
     assert email.metadata_.get("suppressed_reasons") == ["insufficient_funds"]
@@ -1579,9 +1581,9 @@ async def test_mixed_kind_recipients_same_org_yield_two_rows(async_session, reci
     )
     assert len(result1.email_ids) == 2, (
         f"expected 2 rows (one per kind), got {len(result1.email_ids)}: "
-        f"created={result1.created_email_ids}"
+        f"billable={result1.billable_email_ids}"
     )
-    assert len(result1.created_email_ids) == 2
+    assert len(result1.billable_email_ids) == 2
 
     # Confirm one row per kind.
     from sqlalchemy import select as _select
@@ -1612,7 +1614,7 @@ async def test_mixed_kind_recipients_same_org_yield_two_rows(async_session, reci
         result2.email_ids == result1.email_ids
     ), "redelivery must resolve the same row ids, not create new ones"
     assert (
-        result2.created_email_ids == []
+        result2.billable_email_ids == []
     ), "redelivery must not report any newly created rows"
 
     # Total row count must still be exactly 2.
@@ -1660,7 +1662,7 @@ async def test_two_custom_domains_same_org_yield_two_rows(async_session):
     assert len(result.email_ids) == 2
     domain_ids = {
         d
-        for (_eid, _oid) in result.created_email_ids
+        for (_eid, _oid) in result.billable_email_ids
         for d in [
             (
                 await async_session.execute(
@@ -1873,6 +1875,75 @@ async def test_mail_to_an_address_another_org_retired_is_dropped(async_session):
     # The keeper's own aliases still arrive.
     kept = await _ingest_to(async_session, "kept", "alice+sales@mail.hail.so")
     assert len(kept.email_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_nested_alias_of_a_retired_address_is_dropped(async_session):
+    async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="globex",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    result = await _ingest_to(async_session, "nest", "alice+globex+promo@mail.hail.so")
+
+    assert result.email_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "recipient", ["alice+acme@mail.hail.so", "alice+acme+promo@mail.hail.so"]
+)
+async def test_the_holders_live_tail_arrives_even_if_another_org_retired_it(
+    async_session, recipient
+):
+    async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="acme",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    result = await _ingest_to(async_session, "live", recipient)
+
+    assert len(result.email_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_funds_are_read_once_per_org_per_message(async_session):
+    org_id = uuid.uuid4()
+    async_session.add(_make_custom_inbound_domain(org_id, "a.acme.com"))
+    async_session.add(_make_custom_inbound_domain(org_id, "b.acme.com"))
+    await async_session.commit()
+    funded = AsyncMock(return_value=True)
+    msg = InboundMessage(
+        provider_message_id="once",
+        envelope_from="x@example.com",
+        envelope_recipients=["x@a.acme.com", "x@b.acme.com"],
+        raw_s3_bucket="b",
+        raw_s3_key="raw/once",
+    )
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = (FIX / "simple.eml").read_bytes()
+
+    result = await ingest_inbound(
+        async_session,
+        message=msg,
+        s3=s3,
+        hail_mail_base_domain="mail.hail.so",
+        funds_check=funded,
+        org_rate_per_hour=10_000,
+    )
+
+    assert len(result.billable_email_ids) == 2
+    funded.assert_awaited_once()
 
 
 @pytest.mark.asyncio

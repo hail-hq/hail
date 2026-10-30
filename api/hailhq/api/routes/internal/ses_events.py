@@ -150,11 +150,7 @@ async def receive_ses_event(
         org_rate_per_hour=settings.hail_inbound_org_rate_per_hour,
         funds_check=has_funds,
     )
-    for created_id, created_org_id in result.created_email_ids:
-        # Inbound email is free at zero balance: the row stays, the charge
-        # does not.
-        if not await has_funds(db, created_org_id):
-            continue
+    for created_id, created_org_id in result.billable_email_ids:
         await write_usage_event(
             organization_id=created_org_id,
             channel="email",

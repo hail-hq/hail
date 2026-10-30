@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
-from hailhq.core.models import ApiKey, EmailDomain
+from hailhq.core.models import ApiKey, EmailDomain, RetiredHailMailAddress
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -795,6 +796,45 @@ async def test_default_from_shows_the_unminted_hail_mail_address(
     assert body["items"] == []
     token = org_prefix_from_id(org_id)
     assert body["default_from"] == f"admin-{token}+{token}@mail.hail.so"
+
+
+async def test_default_from_is_null_when_another_org_retired_the_pinned_head(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+) -> None:
+    """The send would refuse this address, so the preview must not show it."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="team",
+            local_prefix_org="shared",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.json()["default_from"] is None
+
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="team",
+            local_prefix_org="old",
+            organization_id=org_id,
+            retired_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.json()["default_from"] == "team+shared@mail.hail.so"
 
 
 async def test_default_from_is_null_while_a_custom_domain_is_pending(

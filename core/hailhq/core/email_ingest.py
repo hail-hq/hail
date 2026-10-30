@@ -69,7 +69,9 @@ _BENIGN_DEDUP_INDEXES = frozenset(
 @dataclass
 class IngestResult:
     email_ids: list[UUID] = field(default_factory=list)
-    created_email_ids: list[tuple[UUID, UUID]] = field(default_factory=list)
+    # (email id, org id) of each new row to charge. Inbound email is free at
+    # zero balance: such a row is stored and shown, and is not listed here.
+    billable_email_ids: list[tuple[UUID, UUID]] = field(default_factory=list)
     suppressed_reasons: list[str] = field(default_factory=list)
     skipped_recipients: list[str] = field(default_factory=list)
 
@@ -109,8 +111,15 @@ async def _find_domain_for_recipient(
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
         if row is not None:
-            if classified.tail and await _retired_by_other_org(
-                db, classified.user_prefix, classified.tail, row.organization_id
+            # An alias can carry its own ``+``: compare alice+globex+promo as
+            # alice+globex. The holder's live tail is never another org's mail.
+            tail = classified.tail.partition("+")[0]
+            if (
+                tail
+                and tail != row.local_prefix_org
+                and await _retired_by_other_org(
+                    db, classified.user_prefix, tail, row.organization_id
+                )
             ):
                 return None
             return row
@@ -452,6 +461,8 @@ async def ingest_inbound(
     # One row per dedup scope: custom → receiving domain id, hail_mail → org id.
     # (domain ids and org ids are disjoint UUID spaces, so one set is safe.)
     seen_scopes: set[UUID] = set()
+    # One balance read per org, for every row of this message.
+    funded_orgs: dict[UUID, bool] = {}
     for recipient in message.envelope_recipients:
         domain = await _find_domain_for_recipient(db, recipient, hail_mail_base_domain)
         if domain is None:
@@ -487,8 +498,16 @@ async def ingest_inbound(
             from_=parsed.from_address,
             to=recipient,
         )
+        funded = False
         if created:
-            result.created_email_ids.append((email_id, domain.organization_id))
+            org_id = domain.organization_id
+            if org_id not in funded_orgs:
+                funded_orgs[org_id] = funds_check is None or await funds_check(
+                    db, org_id
+                )
+            funded = funded_orgs[org_id]
+            if funded:
+                result.billable_email_ids.append((email_id, org_id))
 
         row_reasons: list[str] = []
         if over_cap:
@@ -501,9 +520,6 @@ async def ingest_inbound(
             and forward_enqueue is not None
             and domain.inbound_enabled
         ):
-            funded = funds_check is None or await funds_check(
-                db, domain.organization_id
-            )
             if funded:
                 row_reasons += await _enqueue_forwards(
                     db,
@@ -517,7 +533,7 @@ async def ingest_inbound(
                     forward_enqueue=forward_enqueue,
                 )
             elif domain.forward_to:
-                # Out of credit: keep + store + (later) charge, but don't spend
+                # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
                 row_reasons.append("insufficient_funds")
 

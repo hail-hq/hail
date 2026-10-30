@@ -5,8 +5,10 @@ clients and mail providers treat it as the mailbox, and the tail as an
 alias. Inbound mail now routes on the head alone.
 
 * An org that holds several hail-mail rows keeps one: the row with the most
-  emails, then the oldest. Its ``emails`` and ``webhook_deliveries`` rows move
-  to the kept row, and the other rows are deleted.
+  emails, then the oldest. The kept row takes the union of ``forward_to``,
+  turns ``inbound_enabled`` on if any row had it, and keeps its own
+  ``forward_rate_per_hour``. The ``emails`` and ``webhook_deliveries`` rows of
+  the others move to the kept row, and the others are deleted.
 * Rows of different orgs that share a head are fixed the same way. The row
   with the most emails keeps the head, then the oldest. Each other row gets
   the new head ``<first 11 chars>-<8 hex chars>`` and a matching ``domain``.
@@ -128,6 +130,17 @@ FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
 """
 
 
+# The row with the most emails stays. Used by the merge and by the rewrite.
+EMAIL_COUNTS = """
+email_counts AS (
+    SELECT email_domain_id, count(*) AS n
+      FROM emails
+     WHERE email_domain_id IS NOT NULL
+     GROUP BY email_domain_id
+)
+"""
+
+
 def upgrade() -> None:
     # A row written between the rewrites and the indexes would fail the deploy.
     op.execute("LOCK TABLE email_domains IN SHARE ROW EXCLUSIVE MODE")
@@ -149,16 +162,51 @@ def upgrade() -> None:
     op.execute(RETIRE_FUNCTION)
     op.execute(RETIRE_TRIGGER)
 
+    # Only a merge moves rows in these tables, so only a merge locks them: an
+    # old container must not insert a row for a domain that is about to go.
     op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM email_domains
+                 WHERE kind = 'hail_mail'
+                 GROUP BY organization_id
+                HAVING count(*) > 1
+            ) THEN
+                LOCK TABLE emails, webhook_deliveries IN SHARE ROW EXCLUSIVE MODE;
+            END IF;
+        END
+        $$
+        """)
+    op.execute(f"""
         CREATE TEMP TABLE hail_mail_merge ON COMMIT DROP AS
+        WITH {EMAIL_COUNTS}
         SELECT d.id, first_value(d.id) OVER (
                    PARTITION BY d.organization_id
-                   ORDER BY (
-                       SELECT count(*) FROM emails e WHERE e.email_domain_id = d.id
-                   ) DESC, d.created_at, d.id
+                   ORDER BY coalesce(c.n, 0) DESC, d.created_at, d.id
                ) AS keeper
         FROM email_domains d
+        LEFT JOIN email_counts c ON c.email_domain_id = d.id
         WHERE d.kind = 'hail_mail'
+        """)
+    op.execute("""
+        UPDATE email_domains k
+           SET forward_to = s.forward_to,
+               inbound_enabled = s.inbound_enabled,
+               updated_at = now()
+          FROM (
+              SELECT m.keeper,
+                     bool_or(d.inbound_enabled) AS inbound_enabled,
+                     array_agg(DISTINCT t.address) FILTER (
+                         WHERE t.address IS NOT NULL
+                     ) AS forward_to
+                FROM hail_mail_merge m
+                JOIN email_domains d ON d.id = m.id
+                LEFT JOIN LATERAL unnest(d.forward_to) AS t(address) ON true
+               GROUP BY m.keeper
+              HAVING count(DISTINCT m.id) > 1
+          ) s
+         WHERE k.id = s.keeper
         """)
     op.execute(
         "UPDATE emails e SET email_domain_id = m.keeper FROM hail_mail_merge m "
@@ -175,15 +223,15 @@ def upgrade() -> None:
     )
     op.execute("DROP TABLE hail_mail_merge")
 
-    op.execute("""
-        WITH ranked AS (
+    op.execute(f"""
+        WITH {EMAIL_COUNTS},
+        ranked AS (
             SELECT d.id, row_number() OVER (
                 PARTITION BY d.local_prefix_user
-                ORDER BY (
-                    SELECT count(*) FROM emails e WHERE e.email_domain_id = d.id
-                ) DESC, d.created_at, d.id
+                ORDER BY coalesce(c.n, 0) DESC, d.created_at, d.id
             ) AS rn
             FROM email_domains d
+            LEFT JOIN email_counts c ON c.email_domain_id = d.id
             WHERE d.kind = 'hail_mail'
         ), renamed AS (
             SELECT d.id,

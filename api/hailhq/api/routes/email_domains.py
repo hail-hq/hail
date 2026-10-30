@@ -69,7 +69,7 @@ from hailhq.core.forward_targets import (
     sync_targets,
 )
 from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
-from hailhq.core.models import Email, EmailDomain
+from hailhq.core.models import Email, EmailDomain, RetiredHailMailAddress
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
@@ -170,7 +170,7 @@ def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 f"HAIL_MAIL_FROM local-part {local!r} must be "
-                "<user>+<org> (e.g. admin+selfhost)"
+                "<user>+<org> (e.g. hi+selfhost)"
             ),
         )
     if not LOCAL_PREFIX.match(user) or not LOCAL_PREFIX.match(org):
@@ -355,6 +355,21 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         )
     ).scalar_one_or_none()
     if owner is not None and owner != organization_id:
+        return None
+    # The same rule as the email_domains guard trigger: only the org that gave
+    # a head up last may take it back.
+    last_holder = (
+        await db.execute(
+            select(RetiredHailMailAddress.organization_id)
+            .where(RetiredHailMailAddress.local_prefix_user == user_prefix)
+            .order_by(
+                RetiredHailMailAddress.retired_at.desc(),
+                RetiredHailMailAddress.organization_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if last_holder is not None and last_holder != organization_id:
         return None
     return address
 

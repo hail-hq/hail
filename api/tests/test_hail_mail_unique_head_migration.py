@@ -186,6 +186,76 @@ async def test_org_with_several_rows_keeps_the_busiest(db) -> None:
         await _row(db, "carol", "c", org=org)
 
 
+async def test_merge_keeps_the_settings_of_every_row(db) -> None:
+    await _run(db, migration.downgrade)
+    org = uuid.uuid4()
+    kept = await _row(db, "alice", "a", org=org)
+    other = await _row(db, "bob", "b", minutes=5, org=org)
+    async with db.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE email_domains SET forward_to = :to, "
+                "forward_rate_per_hour = :rate, inbound_enabled = :on "
+                "WHERE id = :id"
+            ),
+            [
+                {"id": kept, "to": ["a@x.test", "b@x.test"], "rate": 7, "on": False},
+                {"id": other, "to": ["b@x.test", "c@x.test"], "rate": 9, "on": True},
+            ],
+        )
+
+    await _run(db, migration.upgrade)
+
+    async with db.begin() as connection:
+        row = await connection.execute(
+            text(
+                "SELECT forward_to, inbound_enabled, forward_rate_per_hour "
+                "FROM email_domains WHERE id = :id"
+            ),
+            {"id": kept},
+        )
+        forward_to, inbound_enabled, rate = row.one()
+    assert sorted(forward_to) == ["a@x.test", "b@x.test", "c@x.test"]
+    assert inbound_enabled is True
+    assert rate == 7
+
+
+async def _locked_during_upgrade(db) -> set[str]:
+    async with db.begin() as connection:
+
+        def go(sync):
+            migration.op = Operations(MigrationContext.configure(sync))
+            migration.upgrade()
+
+        await connection.run_sync(go)
+        rows = await connection.execute(
+            text(
+                "SELECT c.relname FROM pg_locks l "
+                "JOIN pg_class c ON c.oid = l.relation "
+                "WHERE l.pid = pg_backend_pid() "
+                "AND l.mode = 'ShareRowExclusiveLock' "
+                "AND c.relname IN ('emails', 'webhook_deliveries')"
+            )
+        )
+        return {r[0] for r in rows}
+
+
+async def test_merge_locks_the_tables_it_repoints(db) -> None:
+    await _run(db, migration.downgrade)
+    org = uuid.uuid4()
+    await _row(db, "alice", "a", org=org)
+    await _row(db, "bob", "b", org=org)
+
+    assert await _locked_during_upgrade(db) == {"emails", "webhook_deliveries"}
+
+
+async def test_no_merge_leaves_those_tables_unlocked(db) -> None:
+    await _run(db, migration.downgrade)
+    await _row(db, "alice", "a")
+
+    assert await _locked_during_upgrade(db) == set()
+
+
 def test_function_text_matches_the_code() -> None:
     assert _squash(migration.GUARD_FUNCTION) == _squash(EMAIL_DOMAINS_GUARD_FUNCTION)
     assert _squash(migration.RETIRE_FUNCTION) == _squash(EMAIL_DOMAINS_RETIRE_FUNCTION)
