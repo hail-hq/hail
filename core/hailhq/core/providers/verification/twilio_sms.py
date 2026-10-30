@@ -16,6 +16,7 @@ from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
+    SMS_REFUSED,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -95,7 +96,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
-        return sms_requirements(self.name, subject_type)
+        return sms_requirements(self, subject_type)
 
     # -- draft ---------------------------------------------------------------
 
@@ -109,7 +110,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self.name, fields, subject_type)
+        problems = field_problems(self, fields, subject_type)
         if (
             subject_type == "business"
             and fields.get("ein")
@@ -591,4 +592,4 @@ def _safe_message(msg) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return "The carrier refused a detail. Check your entries and try again."
+    return SMS_REFUSED

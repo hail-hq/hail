@@ -516,6 +516,8 @@ async def _poll_and_apply(
     plug-in creates the campaign inside status() and stores its id there;
     the JSONB column does not track in-place changes, so mark it)."""
     status = await _settle_sms_approval(db, row, status, registry)
+    if row.purpose == "sms":
+        _stamp_campaign_filed(registry(row.provider, row.purpose), row.provider_refs)
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
@@ -523,6 +525,36 @@ async def _poll_and_apply(
         flag_modified(row, "provider_refs")
         changed = True
     return changed
+
+
+def _campaign_filed(provider: object, refs: dict | None) -> bool:
+    """``SmsRegistrationProvider.campaign_filed``; False for any other
+    plug-in, or none."""
+    if not isinstance(provider, SmsRegistrationProvider):
+        return False
+    return provider.campaign_filed(refs)
+
+
+def _stamp_campaign_filed(provider: object, refs: dict) -> None:
+    """Write ``campaign_filed_at`` once a US texting campaign is filed, under
+    whatever key the carrier keeps it (``campaign_ref``). The billing
+    service charges the carriers' review on this one key, so a new carrier
+    needs nothing more than its ``campaign_ref``. Call it after every
+    plug-in call that can file a campaign, before the commit."""
+    filed_at = refs.get("campaign_filed_at")
+    # Missing unless a non-empty string: the rule campaign_filed and the
+    # billing service read.
+    if not (isinstance(filed_at, str) and filed_at) and _campaign_filed(provider, refs):
+        refs["campaign_filed_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _keep_refs(row: CarrierVerification, provider: object) -> None:
+    """After plug-in calls that may write into ``row.provider_refs`` in
+    place (check, submit): stamp a filed campaign, and mark the column
+    changed so the next commit saves it (JSONB does not track in-place
+    changes)."""
+    _stamp_campaign_filed(provider, row.provider_refs)
+    flag_modified(row, "provider_refs")
 
 
 def _notify_billing(rows: list[CarrierVerification]) -> None:
@@ -562,9 +594,10 @@ async def _rate_before_wipe(
 
     Commits first. Never call it while holding the organization's lock
     (``org_lock``): the rater takes the same lock."""
-    key = getattr(provider, "campaign_ref", None)
-    if row.purpose != "sms" or not key or not (row.provider_refs or {}).get(key):
+    if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
         return
+    # Saved with the stamp, so the rater reads a campaign filed just now.
+    _keep_refs(row, provider)
     await db.commit()
     await rate_sms_registration(str(row.id))
 
@@ -1219,6 +1252,9 @@ async def create_verification(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
         ) from exc
+    _stamp_campaign_filed(provider, draft.refs)
+    if draft.billed_refs:
+        _stamp_campaign_filed(provider, draft.billed_refs)
     if draft.problems:
         if draft.billed_refs:
             await _record_billed_refusal(
@@ -1313,6 +1349,7 @@ async def _submit_row(
     approved_by = actor_user_id if actor_kind == "superadmin" else None
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
     row.approved_by = approved_by
+    _keep_refs(row, provider)  # what check() wrote just before
     await db.commit()
     try:
         await provider.submit(row.provider_refs)
@@ -1332,6 +1369,7 @@ async def _submit_row(
         return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
+        _keep_refs(row, provider)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
         row.approved_by = None
         await db.commit()
@@ -1339,6 +1377,7 @@ async def _submit_row(
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
+    _keep_refs(row, provider)
     await db.commit()
     _notify_if_changed(row, before)
     await write_audit_log(
@@ -1442,11 +1481,18 @@ async def _reject_row(
     row is left as it was and tried again next tick; the sweeper never dies
     on carrier trouble."""
     await _rate_before_wipe(db, row, provider)
+    refs = copy.deepcopy(row.provider_refs)
     try:
         await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
         await db.rollback()
+        # The rollback drops what check() or submit() wrote into the refs in
+        # place (a filed campaign is billed): save it for the next try.
+        await db.refresh(row)
+        row.provider_refs = refs
+        _keep_refs(row, provider)
+        await db.commit()
         return
     row.state, row.rejection_reason = "rejected", reason
     row.provider_refs = _wiped_refs(row)

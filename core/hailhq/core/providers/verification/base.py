@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -22,6 +24,8 @@ __all__ = [
     "CAMPAIGN_REJECTED",
     "DETAILS_REJECTED",
     "NOT_ACCEPTED",
+    "SMS_REFUSED",
+    "SMS_VALUE_REFUSED",
     "VALUE_NOT_ACCEPTED",
     "Address",
     "DocumentInput",
@@ -261,14 +265,18 @@ NOT_ACCEPTED = (
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
 DETAILS_REJECTED = "The carrier rejected the details. Start again."
+# US texting (10DLC): the registry checks the business or person, then the
+# US mobile networks review what will be sent.
 BRAND_REJECTED = (
-    "The carrier rejected the brand registration. Check the business or "
+    "The 10DLC registry rejected the registration. Check the business or "
     "person details and start again."
 )
 CAMPAIGN_REJECTED = (
-    "The carrier rejected the campaign. Check the use case, description, "
-    "sample messages and links, and start again."
+    "The registration was rejected in review. Check the use case, "
+    "description, sample messages and links, and start again."
 )
+SMS_REFUSED = "The 10DLC registry refused a detail. Check your entries and try again."
+SMS_VALUE_REFUSED = "The 10DLC registry did not accept this value."
 
 
 class Problem(BaseModel):
@@ -432,13 +440,35 @@ class SmsRegistrationProvider(VerificationProvider):
         await self.discard(refs)
         return {}
 
-    # The refs key that holds the campaign once it is filed.
+    # The refs key that holds the campaign once it is filed. Required, as a
+    # class attribute: the API marks a filing as sent for review
+    # (``campaign_filed_at``) by it, and a test checks every registered
+    # SMS plug-in sets it.
     campaign_ref: str | None = None
+    # Carrier maximums, in characters, for fields of the shared US form
+    # (``sms_form``), by field name.
+    field_limits: Mapping[str, int] = MappingProxyType({})
+
+    def extra_fields(self, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
+        """Fields this carrier asks for on top of the shared US form. They
+        follow the campaign description."""
+        return ()
+
+    def campaign_filed(self, refs: dict | None) -> bool:
+        """True when the refs hold a filed campaign: a non-empty string
+        under ``campaign_ref``, or ``campaign_filed_at`` (which the API
+        writes). The billing service reads the same rule."""
+        refs = refs or {}
+        return any(
+            isinstance(refs.get(k), str) and refs[k] != ""
+            for k in (self.campaign_ref, "campaign_filed_at")
+            if k
+        )
 
     def in_review(self, refs: dict) -> bool:
         """True while the carriers review the filing: the campaign is filed
-        (``campaign_ref``). A plug-in can add other review steps."""
-        return bool(self.campaign_ref and refs.get(self.campaign_ref))
+        (``campaign_filed``). A plug-in can add other review steps."""
+        return self.campaign_filed(refs)
 
     def step(self, refs: dict) -> str | None:
         """Where a filing still in progress is: 'confirm_identity' while the

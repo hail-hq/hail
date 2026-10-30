@@ -933,7 +933,8 @@ async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
     assert "too many registrations" in by_field["mobile_phone_number"].message
     assert "too many registrations" in by_field["email"].message
     assert (
-        by_field["address.region"].message == "The carrier did not accept this value."
+        by_field["address.region"].message
+        == "The 10DLC registry did not accept this value."
     )
     assert by_field["email"].raw == "Email duplicate threshold reached"
     assert not any(p.endswith("/smsOtp") for _, p in calls)
@@ -1088,7 +1089,7 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert [(p.field, p.message) for p in draft.problems] == [
-        ("email", "The carrier did not accept this value.")
+        ("email", "The 10DLC registry did not accept this value.")
     ]
 
 
