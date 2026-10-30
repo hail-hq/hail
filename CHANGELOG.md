@@ -11,7 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Email suppressions: list them with `GET /v1/emails/suppressions` and remove one with `DELETE /v1/emails/suppressions/{address}`. CLI: `hail email suppressions list` and `hail email suppressions delete <address>`.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
-- US texting: after a rejected campaign, a person who files again with the same details keeps their confirmed brand, with no new PIN or brand fee.
+- US texting: after a rejected campaign, a person who files again with the same details keeps their confirmed brand, with no new PIN or brand fee. A cancelled filing shows this as `identity_confirmed`.
 - Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
 - Hail Cloud emails the organization's owners when a verification is approved or rejected.
 - Email: a hard bounce or a spam complaint adds the recipient to the organization's suppression list, so the next send to that address is blocked (403).

@@ -613,6 +613,8 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
     # Telnyx refuses the delete, and a typo must not cost the brand.
     assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
+    # The brand read decides it: no call to list its campaigns.
+    assert not [c for c in calls if c[0] == "GET" and "/10dlc/campaign" in c[1]]
 
 
 async def test_a_kept_brand_matches_a_mobile_in_any_format() -> None:

@@ -2266,6 +2266,8 @@ async def test_a_dismissed_filing_hands_its_kept_brand_to_the_next_one(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     # The rater still reads the mark after the wipe.
     assert row.provider_refs == {"brand_reused": True, "kept_brand_id": "B9"}
+    listed = await client.get("/verifications", headers=_auth(key))
+    assert [v["identity_confirmed"] for v in listed.json()] == [True]
     second = await _post_sms(client, key)
     assert second.status_code == 201
     assert sms_carrier.drafts[-1]["kept_brand_id"] == "B9"

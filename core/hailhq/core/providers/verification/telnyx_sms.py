@@ -383,6 +383,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         for 3 months after its campaign."""
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
+            if (
+                not _same_person(brand, fields)
+                or brand.get("status") != "OK"
+                or brand.get("failureReasons")
+                or brand.get("identityStatus") not in _VERIFIED
+            ):
+                return False
             found = await self._api.request(
                 "GET", "/10dlc/campaign", params={"brandId": brand_id}
             )
@@ -394,13 +401,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning("10DLC kept brand lookup failed: status=%s", status)
                 return False
             raise
-        if (
-            found.get("records")
-            or not _same_person(brand, fields)
-            or brand.get("status") != "OK"
-            or brand.get("failureReasons")
-            or brand.get("identityStatus") not in _VERIFIED
-        ):
+        if found.get("records"):
             return False
         refs["brand_id"] = brand_id
         refs["identity_verified"] = True

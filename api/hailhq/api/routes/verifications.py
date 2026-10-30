@@ -682,10 +682,15 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """The response for a row, with ``confirmation`` and ``step`` filled in."""
+    """The response for a row, with ``confirmation``, ``step`` and
+    ``identity_confirmed`` filled in."""
     confirmation, step = _sms_progress(row, registry)
     return model.model_validate(row).model_copy(
-        update={"confirmation": confirmation, "step": step}
+        update={
+            "confirmation": confirmation,
+            "step": step,
+            "identity_confirmed": bool((row.provider_refs or {}).get("kept_brand_id")),
+        }
     )
 
 
