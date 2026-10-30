@@ -314,9 +314,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     type(exc).__name__,
                 )
         try:
-            if subject_type == "person" and kept_brand_id:
-                if await self._reuse_brand(refs, fields, kept_brand_id):
-                    return DraftResult(refs=refs)
+            if (
+                subject_type == "person"
+                and kept_brand_id
+                and await self._reuse_brand(refs, fields, kept_brand_id)
+            ):
+                return DraftResult(refs=refs)
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
             refused = _refused(exc)
