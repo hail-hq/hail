@@ -9,6 +9,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
+- `hail-sdk`: `emails.list_suppressions()` and `emails.delete_suppression(address)` list and remove suppressed email addresses.
 - Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
 - Hail Cloud emails the organization's owners when a verification is approved or rejected.
 
