@@ -59,8 +59,9 @@ linked by `In-Reply-To` and `References`, and only rows with this same sender, s
 a forged `References` header cannot read another thread. Inbound rows join the
 chat only with `emails.from_verified`, and not when they were spam, a virus, or
 skipped for their sender. Ingest sets `from_verified` for one `From` address with
-DMARC `PASS`, and nothing else sets it. An outbound row joins only if it answers
-a row that qualifies. The newest rows win when a thread is long.
+DMARC `PASS`, and nothing else sets it. An agent's outbound row joins only if it answers
+a row that qualifies. An outbound row with no agent was written by the org, so it
+stays in. The newest rows win when a thread is long.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
 the earlier row: a sent one is done, a failed one is delivered again if SES took
@@ -71,6 +72,9 @@ waits. The send writes its result only while that claim holds. SES calls have a
 total budget of 141 seconds, under the grace. A failure that proves SES took
 nothing (throttling, limits, connect timeouts, endpoint connection errors) comes
 back as `retry`, and the worker marks the row failed only after its last attempt.
+A wait for a send still running is not an attempt. A skip marks a reply left queued
+as failed, and the worker fails any reply still queued past the max age, so none
+stays queued forever.
 Any other failure is final, read timeouts and closed connections included: SES may
 already have sent the message, and a resend could deliver it twice. When a reply row exists, the
 worker does not call the model or its tools again. The reply carries

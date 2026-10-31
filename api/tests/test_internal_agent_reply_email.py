@@ -489,6 +489,45 @@ def test_ses_ends_before_a_retry_can_resend() -> None:
     assert internal_agent._QUEUED_GRACE.total_seconds() > SES_SEND_BUDGET_SECONDS
 
 
+async def test_a_skip_does_not_leave_a_reply_queued(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session, credits=0)
+    row = await _prior_reply(
+        async_session,
+        org,
+        agent,
+        domain,
+        inbound,
+        status="queued",
+        age=timedelta(minutes=5),
+    )
+    assert (await _reply(client, inbound.id))["reason"] == "insufficient_funds"
+    email_mock.send_email.assert_not_awaited()
+    await async_session.refresh(row)
+    assert row.status == "failed" and row.end_reason == "insufficient_funds"
+
+
+async def test_a_removed_route_does_not_leave_a_reply_queued(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session,
+        org,
+        agent,
+        domain,
+        inbound,
+        status="queued",
+        age=timedelta(minutes=5),
+    )
+    domain.email_agent_id = None
+    await async_session.commit()
+    await _reply(client, inbound.id)
+    await async_session.refresh(row)
+    assert row.status == "failed" and row.end_reason == "no_agent"
+
+
 async def test_a_bounced_reply_is_final(client, async_session, email_mock) -> None:
     org, agent, domain, inbound = await _seed(async_session)
     await _prior_reply(

@@ -314,13 +314,51 @@ async def test_a_retry_with_its_reply_written_skips_the_model(
     assert await _state(async_session, email_id) == "done"
 
 
-async def test_a_retry_still_reads_the_rules(async_session, monkeypatch) -> None:
+async def test_a_retry_leaves_the_rules_to_the_route(
+    async_session, monkeypatch
+) -> None:
+    """The route reads scope and funds, and owns the queued reply."""
     email_id = await _seed(async_session, credits=0)
-    await _written_reply(async_session, email_id)
-    api = SimpleNamespace(post=AsyncMock())
+    await _written_reply(async_session, email_id, status="queued")
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "insufficient_funds",
+            }
+        )
+    )
     await emailbot.reply_once(api)
-    api.post.assert_not_awaited()
+    assert llm.calls == []
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id)}
+    )
     assert await _state(async_session, email_id) == "skipped"
+
+
+async def test_a_wait_at_the_last_attempt_does_not_fail_the_row(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    row = await async_session.get(Email, email_id)
+    row.agent_reply_attempts = MAX_ATTEMPTS - 1
+    await async_session.commit()
+    await _written_reply(async_session, email_id, status="queued")
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "retry",
+                "reason": "in_flight",
+                "retry_after_seconds": 120,
+            }
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
 
 
 async def test_a_retry_after_a_tool_send_has_no_tools(

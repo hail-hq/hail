@@ -1533,6 +1533,13 @@ class Email(Base):
             postgresql_where=text("agent_reply_state IN ('pending','processing')"),
         ),
         Index(
+            "emails_agent_reply_queued_idx",
+            "requested_at",
+            postgresql_where=text(
+                "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
+            ),
+        ),
+        Index(
             "emails_agent_thread_idx",
             "organization_id",
             "agent_id",
