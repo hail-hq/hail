@@ -53,6 +53,26 @@ def test_one_shot_logs_the_review_code(monkeypatch, caplog):
     assert "requires_review code=sender_not_verified" in caplog.text
 
 
+def test_digest_engine_uses_the_url_options(monkeypatch):
+    seen = {}
+
+    def capture(url, **options):
+        seen.update(options)
+        raise RuntimeError("stop before connecting")
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h/db?pgbouncer=true")
+    monkeypatch.setattr("sys.argv", ["activity-digest", "--preview"])
+    monkeypatch.setattr(command, "create_async_engine", capture)
+    assert command.main() == 1
+    assert seen == {
+        "poolclass": command.NullPool,
+        "connect_args": {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
+    }
+
+
 def test_private_preview_files_are_not_readable_by_other_users(tmp_path):
     for name in ("report.txt", "report.html"):
         path = tmp_path / name

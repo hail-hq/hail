@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import logfire
@@ -41,7 +41,7 @@ _SCHEME_ALIASES = (
 # Heroku) commonly carry these. ``sslmode`` accepts the same string values
 # ('disable', 'prefer', 'require', ...) under asyncpg's ``ssl`` kwarg.
 _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
-    # Better Auth/Prisma's client hint is not an asyncpg connection option.
+    # Better Auth/Prisma's client hint. ``engine_options`` reads it instead.
     "pgbouncer": None,
     "sslmode": "ssl",
     "channel_binding": None,
@@ -54,6 +54,9 @@ _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
     "application_name": None,
     "krbsrvname": None,
 }
+
+# Query params meant for asyncpg URLs. ``psycopg.connect`` rejects them.
+_NOT_FOR_LIBPQ = ("pgbouncer", "prepared_statement_cache_size")
 
 
 def _rewrite_scheme(url: str, target_prefix: str) -> str:
@@ -92,14 +95,44 @@ def to_async_url(url: str) -> str:
 
 
 def to_sync_url(url: str) -> str:
-    """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic."""
-    return _rewrite_scheme(url, "postgresql+psycopg://")
+    """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic.
+
+    Also drops the params libpq rejects. A URL without them keeps its query as is.
+    """
+    rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
+    parts = urlsplit(rewritten)
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [param for param in params if param[0] not in _NOT_FOR_LIBPQ]
+    if len(kept) == len(params):
+        return rewritten
+    return urlunsplit(parts._replace(query=urlencode(kept, quote_via=quote)))
+
+
+def engine_options(url: str) -> dict:
+    """Return the asyncpg engine options that ``url`` asks for.
+
+    ``pgbouncer=true`` marks a transaction-mode pooler, which can move a
+    client to another server connection after each transaction. A named
+    prepared statement would be missing there. With both caches at 0,
+    asyncpg sends unnamed statements only.
+    """
+    query = dict(parse_qsl(urlsplit(url).query))
+    if query.get("pgbouncer", "").lower() != "true":
+        return {}
+    return {
+        "connect_args": {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        }
+    }
 
 
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
+        _engine = create_async_engine(
+            to_async_url(settings.database_url), **engine_options(settings.database_url)
+        )
         if telemetry_enabled():
             # Tracing must never take the database down: the instrumentation
             # refused SQLAlchemy 2.1 and failed every request.

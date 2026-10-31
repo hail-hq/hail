@@ -11,7 +11,7 @@ import signal
 from pathlib import Path
 
 import httpx
-from hailhq.core.db import to_async_url
+from hailhq.core.db import engine_options, to_async_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -55,9 +55,12 @@ async def execute(args):
         raise ValueError("database_url_missing")
     if not args.preview:
         config.validate_send()
+    database_url = config.database_url.get_secret_value()
     # A pooled connection would sit idle all day and hold a database slot.
     engine = create_async_engine(
-        to_async_url(config.database_url.get_secret_value()), poolclass=NullPool
+        to_async_url(database_url),
+        poolclass=NullPool,
+        **engine_options(database_url),
     )
     try:
         async with httpx.AsyncClient(follow_redirects=False) as http:

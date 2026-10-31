@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import parse_qs, urlsplit
 
-from hailhq.core.db import to_async_url, to_sync_url
+from hailhq.core.db import engine_options, to_async_url, to_sync_url
 
 
 def test_to_async_url_rewrites_scheme_aliases():
@@ -70,6 +70,59 @@ def test_to_sync_url_keeps_sslmode():
     rewritten = to_sync_url("postgres://u:p@h/db?sslmode=require")
     assert rewritten.startswith("postgresql+psycopg://")
     assert "sslmode=require" in rewritten
+
+
+def test_to_sync_url_drops_params_psycopg_rejects():
+    rewritten = to_sync_url(
+        "postgres://u:p@h/db?pgbouncer=true&sslmode=require&prepared_statement_cache_size=0"
+    )
+    assert parse_qs(urlsplit(rewritten).query) == {"sslmode": ["require"]}
+
+
+def test_to_sync_url_leaves_other_params_byte_for_byte():
+    url = "postgres://u:p@h/db?sslmode=require&options=-c%20geqo%3Doff"
+    assert to_sync_url(url) == url.replace("postgres://", "postgresql+psycopg://")
+
+
+def test_pgbouncer_flag_turns_off_prepared_statements():
+    assert engine_options("postgres://u:p@h/db?pgbouncer=true&sslmode=require") == {
+        "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    }
+
+
+def test_urls_without_the_flag_keep_prepared_statements():
+    assert engine_options("postgres://u:p@h/db?sslmode=require") == {}
+    assert engine_options("postgres://u:p@h/db?pgbouncer=false") == {}
+    assert engine_options("postgres://u:p@h/db") == {}
+
+
+def test_the_shared_engine_uses_the_url_options(monkeypatch):
+    from hailhq.core import db
+
+    calls = []
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(
+        db.settings, "database_url", "postgres://u:p@h/db?pgbouncer=true"
+    )
+    monkeypatch.setattr(
+        db, "create_async_engine", lambda url, **options: calls.append((url, options))
+    )
+
+    db._ensure_initialized()
+
+    assert calls == [
+        (
+            "postgresql+asyncpg://u:p@h/db",
+            {
+                "connect_args": {
+                    "statement_cache_size": 0,
+                    "prepared_statement_cache_size": 0,
+                }
+            },
+        )
+    ]
 
 
 def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
