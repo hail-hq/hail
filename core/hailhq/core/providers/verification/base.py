@@ -303,7 +303,7 @@ class DraftResult(BaseModel):
     # (a brand it registered, then refused). Empty when nothing was billed.
     billed_refs: dict = Field(default_factory=dict)
     # The kept brand does not fit this filing, and the credit cannot pay for a
-    # new one. Nothing was made or billed.
+    # new one. No brand was made or billed. A messaging profile may exist.
     needs_new_brand_credit: bool = False
 
 
@@ -400,8 +400,9 @@ class SmsRegistrationProvider(VerificationProvider):
     plug-in whose ``discard_rejected`` returns ``kept_brand_id`` also takes
     that keyword, when the organization's last filing left a brand, and
     ``new_brand_funded``: False means the credit covers the filing only with
-    that brand, so a plug-in that cannot reuse it files nothing and sets
-    ``needs_new_brand_credit``.
+    that brand, so a plug-in that cannot reuse it files no brand and sets
+    ``needs_new_brand_credit``. It defaults to False, so a caller that does
+    not pass it never pays for a new brand.
     ``status`` creates the campaign once the brand is approved and reports
     'approved' only when the campaign is approved. ``attach_number`` puts
     one of the organization's US long codes on the approved campaign;

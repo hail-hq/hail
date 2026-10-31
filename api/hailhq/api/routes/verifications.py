@@ -31,6 +31,7 @@ from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
+from hailhq.api.funds import BILLING_URL
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.sms_registration import (
     attach_org_numbers,
@@ -1043,7 +1044,8 @@ async def create_verification(
     in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
     are charged from credit per step, when the details are submitted and when
     the carriers start their review, and 402 means there is not enough credit
-    to file), `country_code`, `number_type`, `subject_type` (required:
+    to file, also when a kept brand cannot be reused and the credit does not
+    cover a new one), `country_code`, `number_type`, `subject_type` (required:
     `person` for you, `business` for your company; ask the user which),
     `quote_id` (required for `number`: the offer to verify for), `number_id`
     (optional, for `sms`: one of your US numbers; needed when your US numbers
@@ -1272,7 +1274,7 @@ async def create_verification(
             status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
                 "The details changed or cannot be reused, so a submission fee "
-                "applies. Add credit and file again."
+                f"applies. Add credit at {BILLING_URL} and file again."
             ),
         )
     _stamp_campaign_filed(provider, draft.refs)

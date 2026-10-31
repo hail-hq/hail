@@ -4781,7 +4781,9 @@ paths:
 
         the carriers start their review, and 402 means there is not enough credit
 
-        to file), `country_code`, `number_type`, `subject_type` (required:
+        to file, also when a kept brand cannot be reused and the credit does not
+
+        cover a new one), `country_code`, `number_type`, `subject_type` (required:
 
         `person` for you, `business` for your company; ask the user which),
 

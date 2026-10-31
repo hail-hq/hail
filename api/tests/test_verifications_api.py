@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 from hailhq.api import verification_decisions
+from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
@@ -2445,6 +2446,48 @@ async def test_a_kept_brand_filing_says_if_credit_covers_a_new_brand(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_filing_counts_against_a_new_brand(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    vid = await _kept_brand_filing(client, key, sms_carrier, async_session, monkeypatch)
+    kept = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    # A person's filing the website has not charged yet. It leaves the
+    # company's kept brand as the last company filing.
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider=kept.provider,
+            purpose="sms",
+            country_code=kept.country_code,
+            number_type=kept.number_type,
+            subject_type="person",
+            state="rejected",
+            provider_refs={},
+            requirements_version=kept.requirements_version,
+        )
+    )
+    await async_session.commit()
+    floor = sms_registration_fees.filing_fee_cents("fake", "business", brand_kept=True)
+    full = sms_registration_fees.filing_fee_cents("fake", "business")
+    # Covers the reused price and the uncharged filing, but not a new brand too.
+    await _set_balance(async_session, org_id, full + floor)
+    first = await _post_sms(client, key)
+    assert first.status_code == 201, first.text
+    assert sms_carrier.drafts[-1]["new_brand_funded"] is False
+    await _set_refs(
+        async_session,
+        first.json()["id"],
+        "cancelled",
+        {"brand_reused": True, "kept_brand_id": "B9"},
+    )
+    await _set_balance(async_session, org_id, full * 2)
+    assert (await _post_sms(client, key)).status_code == 201
+    assert sms_carrier.drafts[-1]["new_brand_funded"] is True
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_a_new_brand_without_credit_returns_402_and_files_nothing(
     client, org_and_key, sms_carrier, async_session, monkeypatch
 ) -> None:
@@ -2461,7 +2504,10 @@ async def test_a_new_brand_without_credit_returns_402_and_files_nothing(
     await _set_balance(async_session, org_id, floor)
     resp = await _post_sms(client, key)
     assert resp.status_code == 402, resp.text
-    assert "submission fee applies" in resp.json()["detail"]
+    assert resp.json()["detail"] == (
+        "The details changed or cannot be reused, so a submission fee applies. "
+        f"Add credit at {BILLING_URL} and file again."
+    )
     live = await client.get("/verifications", headers=_auth(key))
     assert [v["state"] for v in live.json()] == ["cancelled"]
 
