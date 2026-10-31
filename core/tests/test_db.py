@@ -84,6 +84,13 @@ def test_to_sync_url_leaves_other_params_byte_for_byte():
     assert to_sync_url(url) == url.replace("postgres://", "postgresql+psycopg://")
 
 
+def test_to_sync_url_drop_leaves_the_kept_params_byte_for_byte():
+    url = "postgres://u:p@h/db?pgbouncer=true&sslrootcert=/etc/ssl/ca.pem&options=a=b"
+    assert to_sync_url(url) == (
+        "postgresql+psycopg://u:p@h/db?sslrootcert=/etc/ssl/ca.pem&options=a=b"
+    )
+
+
 def test_pgbouncer_flag_turns_off_prepared_statements():
     assert engine_options("postgres://u:p@h/db?pgbouncer=true&sslmode=require") == {
         "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}

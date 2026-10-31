@@ -21,6 +21,7 @@ from .worker import (
     DigestService,
     DigestSettings,
     DigestWorker,
+    RetryLater,
     ReviewRequired,
 )
 
@@ -52,7 +53,7 @@ async def execute(args):
             await stop.wait()
         return 0
     if not config.database_url.get_secret_value():
-        raise ValueError("database_url_missing")
+        raise ReviewRequired("database_url_missing")
     if not args.preview:
         config.validate_send()
     database_url = config.database_url.get_secret_value()
@@ -109,6 +110,9 @@ def main():
         return asyncio.run(execute(args))
     except ReviewRequired as error:
         logger.error("activity_digest requires_review code=%s", error)
+        return 1
+    except RetryLater as error:
+        logger.error("activity_digest command_failed code=%s", error)
         return 1
     except Exception as error:
         # Never print exception reprs with SQL parameters, URLs, or headers.

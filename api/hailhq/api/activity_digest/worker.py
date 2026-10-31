@@ -14,7 +14,7 @@ from uuid import UUID
 
 import httpx
 from hailhq.api.auth import hash_key
-from hailhq.core.schemas import EmailCreate
+from hailhq.core.schemas import EMAIL_ADDR, EmailCreate
 from hailhq.core.urls import canonical_url, join_url
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +22,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .report import REPORT_KIND, daily_window, format_report, next_due, render_html
 
 logger = logging.getLogger(__name__)
+
+
+class ReviewRequired(Exception):
+    """A stable diagnostic code. Never include raw API bodies or secrets."""
+
+
+class RetryLater(Exception):
+    """A stable diagnostic code for a failure the next check can clear."""
 
 
 class DigestSettings(BaseSettings):
@@ -47,15 +55,12 @@ class DigestSettings(BaseSettings):
 
     def validate_send(self):
         if not self.api_key.get_secret_value():
-            raise ValueError("Daily activity API key is missing")
+            raise ReviewRequired("api_key_missing")
         if not re.fullmatch(r"[^@\s,<>]+@hail\.so", self.to_address.lower()):
-            raise ValueError("Daily activity requires one internal recipient")
-        if not re.fullmatch(r"[^@\s,<>]+@[^@\s,<>]+", self.from_address):
-            raise ValueError("Daily activity sender is missing or invalid")
-
-
-class ReviewRequired(Exception):
-    """A stable diagnostic code. Never include raw API bodies or secrets."""
+            raise ReviewRequired("recipient_invalid")
+        # The rule EmailCreate applies, so a bad sender fails at startup.
+        if not EMAIL_ADDR.match(self.from_address):
+            raise ReviewRequired("sender_invalid")
 
 
 @dataclass(frozen=True)
@@ -90,15 +95,12 @@ class DigestClient:
             timeout=30,
         )
         if not response.is_success:
-            if (
-                payload is not None
-                and 400 <= response.status_code < 500
-                and response.status_code != 429
-            ):
-                # Cached pre-send rejections can persist after a credit top-up.
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                # A retry cannot clear these. A bad key stays bad, and cached
+                # pre-send rejections can persist after a credit top-up.
                 # A new key could duplicate an ambiguously accepted email.
                 raise ReviewRequired(f"api_rejection_{response.status_code}")
-            raise RuntimeError(f"Hail API status {response.status_code}")
+            raise RetryLater(f"api_status_{response.status_code}")
         return response.json()
 
     async def organization(self) -> str:
@@ -242,6 +244,8 @@ class DigestWorker:
                         window.date,
                         error,
                     )
+                except RetryLater as error:
+                    logger.error("activity_digest failed code=%s", error)
                 except Exception as error:
                     # SQL exceptions and request reprs can contain private values.
                     logger.error("activity_digest failed type=%s", type(error).__name__)

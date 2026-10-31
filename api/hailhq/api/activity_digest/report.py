@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from html import escape
@@ -82,13 +82,24 @@ def one_line(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def by_org(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row.get("count", 1) > 0:
+            grouped[row["org_id"]].append(row)
+    return grouped
+
+
 def format_report(data: ActivityData, window: ReportWindow) -> str:
     sections = []
+    traffic_by_org = by_org(data.traffic)
+    actions_by_org = by_org(data.actions)
+    accesses_by_org = by_org(data.accesses)
     for org in sorted(data.organizations, key=lambda org: org["name"].casefold()):
         org_id = org["id"]
-        traffic = [r for r in data.traffic if r["org_id"] == org_id and r["count"] > 0]
-        actions = [r for r in data.actions if r["org_id"] == org_id and r["count"] > 0]
-        accesses = [r for r in data.accesses if r["org_id"] == org_id]
+        traffic = traffic_by_org.get(org_id, [])
+        actions = actions_by_org.get(org_id, [])
+        accesses = accesses_by_org.get(org_id, [])
         created = window.start <= org["created_at"] < window.end
         if not (traffic or actions or accesses or created):
             continue

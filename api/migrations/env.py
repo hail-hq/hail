@@ -13,7 +13,8 @@ if not db_url:
         "DATABASE_URL is not set. Export it before running alembic so the "
         "migration targets the right database — there is no implicit default."
     )
-config.set_main_option("sqlalchemy.url", to_sync_url(db_url))
+# ConfigParser reads ``%`` as interpolation, and URLs carry percent-encoding.
+config.set_main_option("sqlalchemy.url", to_sync_url(db_url).replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

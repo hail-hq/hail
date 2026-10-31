@@ -53,6 +53,14 @@ def test_one_shot_logs_the_review_code(monkeypatch, caplog):
     assert "requires_review code=sender_not_verified" in caplog.text
 
 
+def test_missing_settings_log_a_stable_code(monkeypatch, caplog):
+    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "true")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
+    assert command.main() == 1
+    assert "requires_review code=database_url_missing" in caplog.text
+
+
 def test_digest_engine_uses_the_url_options(monkeypatch):
     seen = {}
 

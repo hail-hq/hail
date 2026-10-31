@@ -118,10 +118,12 @@ A later check first reads the receipt, then reuses the same key if needed.
 
 Hail can cache pre-send rejections, including insufficient credits.
 A top-up alone does not clear a cached submission. The worker never rotates keys to bypass it.
+Any 4xx API response except 429 is a terminal rejection, on reads as well as sends.
 A terminal rejection is logged once for that process and date. The next day has its own daily key.
 Inspect the receipt and API result before any separately approved recovery send.
 
-Transient failures retry after one minute. Logs show the error kind without customer data or credentials.
+API 429 and 5xx responses, network errors, and database errors retry after one minute.
+Logs show a stable code or the error type, without customer data or credentials.
 `submitted` means API acceptance. Use the email ID to check delivery events and final status.
 
 ## Stop

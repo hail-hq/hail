@@ -11,6 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from .report import CREATION_ACTIONS, REPORT_KIND, ActivityData, ReportWindow
 
+# The key owner's oldest membership, the workspace the API resolves for a key.
+_KEY_ORGANIZATION = """
+  JOIN LATERAL (
+    SELECT organization_id FROM members WHERE user_id::text = k.reference_id
+     ORDER BY created_at, organization_id LIMIT 1
+  ) m ON TRUE
+"""
+_ACTOR_SOURCE = """
+  CASE WHEN a.actor_kind IN ('user','api_key','superadmin','system') THEN a.actor_kind
+    WHEN a.api_key_id IS NOT NULL THEN 'api_key'
+    WHEN a.actor_user_id IS NOT NULL THEN 'user'
+    ELSE 'unknown' END
+"""
+
 
 async def read_activity(
     db: AsyncConnection, window: ReportWindow, reporter_hash: str | None
@@ -34,12 +48,10 @@ async def read_activity(
     traffic = (
         (
             await db.execute(
-                text("""
+                text(f"""
             WITH reporter AS (
-              SELECT m.organization_id FROM api_keys k JOIN LATERAL (
-                SELECT organization_id FROM members WHERE user_id::text = k.reference_id
-                 ORDER BY created_at, organization_id LIMIT 1
-              ) m ON TRUE WHERE k.key = :reporter_hash LIMIT 1
+              SELECT m.organization_id FROM api_keys k {_KEY_ORGANIZATION}
+               WHERE k.key = :reporter_hash LIMIT 1
             ), traffic AS (
               SELECT organization_id, id, 'call' AS resource_type, 'Calls' AS channel,
                      direction, status, requested_at, FALSE AS forwarded, FALSE AS automated
@@ -58,10 +70,7 @@ async def read_activity(
                 WHEN direction = 'inbound' THEN 'incoming'
                 WHEN forwarded THEN 'forward'
                 WHEN automated THEN 'system'
-                WHEN a.actor_kind IN ('user','api_key','superadmin','system') THEN a.actor_kind
-                WHEN a.api_key_id IS NOT NULL THEN 'api_key'
-                WHEN a.actor_user_id IS NOT NULL THEN 'user'
-                ELSE 'unknown' END AS source
+                ELSE {_ACTOR_SOURCE} END AS source
               FROM traffic t LEFT JOIN LATERAL (
                 SELECT actor_kind, api_key_id, actor_user_id FROM audit_log a
                  WHERE a.organization_id = t.organization_id AND a.resource_id = t.id
@@ -83,13 +92,10 @@ async def read_activity(
     actions = (
         (
             await db.execute(
-                text("""
-            SELECT organization_id AS org_id, action,
-              CASE WHEN actor_kind IN ('user','api_key','superadmin','system') THEN actor_kind
-                WHEN api_key_id IS NOT NULL THEN 'api_key'
-                WHEN actor_user_id IS NOT NULL THEN 'user' ELSE 'unknown' END AS source,
+                text(f"""
+            SELECT organization_id AS org_id, action, {_ACTOR_SOURCE} AS source,
               count(*)::int AS count
-              FROM audit_log WHERE occurred_at >= :start AND occurred_at < :end
+              FROM audit_log a WHERE occurred_at >= :start AND occurred_at < :end
                AND NOT (action = ANY(CAST(:creation_actions AS text[])))
              GROUP BY organization_id, action, source ORDER BY organization_id, action, source
             """),
@@ -102,12 +108,9 @@ async def read_activity(
     accesses = (
         (
             await db.execute(
-                text("""
+                text(f"""
             SELECT m.organization_id AS org_id, max(k.last_request) AS last_at
-              FROM api_keys k JOIN LATERAL (
-                SELECT organization_id FROM members WHERE user_id::text = k.reference_id
-                 ORDER BY created_at, organization_id LIMIT 1
-              ) m ON TRUE
+              FROM api_keys k {_KEY_ORGANIZATION}
              WHERE k.last_request >= :start AND k.last_request < :end
                AND k.key IS DISTINCT FROM :reporter_hash
              GROUP BY m.organization_id

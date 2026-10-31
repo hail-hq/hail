@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import logfire
@@ -97,15 +97,15 @@ def to_async_url(url: str) -> str:
 def to_sync_url(url: str) -> str:
     """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic.
 
-    Also drops the params libpq rejects. A URL without them keeps its query as is.
+    Also drops the params libpq rejects. Every other param keeps its exact text.
     """
     rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
     parts = urlsplit(rewritten)
-    params = parse_qsl(parts.query, keep_blank_values=True)
-    kept = [param for param in params if param[0] not in _NOT_FOR_LIBPQ]
+    params = parts.query.split("&")
+    kept = [param for param in params if param.split("=")[0] not in _NOT_FOR_LIBPQ]
     if len(kept) == len(params):
         return rewritten
-    return urlunsplit(parts._replace(query=urlencode(kept, quote_via=quote)))
+    return urlunsplit(parts._replace(query="&".join(kept)))
 
 
 def engine_options(url: str) -> dict:

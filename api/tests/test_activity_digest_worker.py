@@ -14,6 +14,7 @@ from hailhq.api.activity_digest.worker import (
     DigestService,
     DigestSettings,
     DigestWorker,
+    RetryLater,
     ReviewRequired,
 )
 from hailhq.core.schemas import EmailCreate
@@ -214,11 +215,43 @@ async def test_recipient_is_one_internal_address(setup, recipient):
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: pytest.fail("network access"))
     ) as http:
-        with pytest.raises(ValueError):
+        with pytest.raises(ReviewRequired, match="recipient_invalid"):
             await DigestService(
                 config, repository, DigestClient(config, http)
             ).run_once(NOW)
     repository.snapshot.assert_not_awaited()
+
+
+@pytest.mark.parametrize("sender", ["", "reports@hail", "reports hail.so"])
+def test_a_sender_the_email_schema_refuses_fails_validation(setup, sender):
+    config, _ = setup
+    config.from_address = sender
+    with pytest.raises(ReviewRequired, match="sender_invalid"):
+        config.validate_send()
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+async def test_a_rejected_read_requires_review(setup, status):
+    config, repository = setup
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(status, json={}))
+    ) as http:
+        with pytest.raises(ReviewRequired, match=f"api_rejection_{status}"):
+            await DigestService(
+                config, repository, DigestClient(config, http)
+            ).run_once(NOW)
+
+
+@pytest.mark.parametrize("status", [429, 503])
+async def test_a_busy_api_retries_with_its_status_code(setup, status):
+    config, repository = setup
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(status, json={}))
+    ) as http:
+        with pytest.raises(RetryLater, match=f"api_status_{status}"):
+            await DigestService(
+                config, repository, DigestClient(config, http)
+            ).run_once(NOW)
 
 
 async def test_unverified_sender_never_sends(setup):
@@ -304,6 +337,18 @@ async def test_worker_waits_until_the_next_day_after_a_terminal_rejection(caplog
     await asyncio.wait_for(task, timeout=1)
     service.run_once.assert_awaited_once()
     assert "api_rejection_402" in caplog.text
+
+
+async def test_worker_logs_the_retry_code_and_keeps_the_date_open(caplog):
+    service = AsyncMock()
+    service.run_once.side_effect = RetryLater("api_status_503")
+    worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
+    task = asyncio.create_task(worker.run_forever())
+    while service.run_once.await_count < 2:
+        await asyncio.sleep(0)
+    await worker.stop()
+    await asyncio.wait_for(task, timeout=1)
+    assert "failed code=api_status_503" in caplog.text
 
 
 async def test_worker_does_not_log_exception_content(caplog):
