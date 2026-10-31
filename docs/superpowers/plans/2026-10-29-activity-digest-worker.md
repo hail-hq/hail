@@ -6,7 +6,7 @@
 
 ## Requirements
 
-- Deliver to the approved internal recipient, `r@hail.so`, around 08:00 Europe/Stockholm.
+- Deliver to the approved internal recipient around 08:00 Europe/Stockholm.
 - Keep the existing 08:00-to-08:00 Stockholm reporting window, including daylight saving changes.
 - List active organizations, their owner emails, and inbound/outbound activity by channel. Omit empty categories.
 - Show recorded authentication honestly. Do not guess console, MCP, or direct API attribution.

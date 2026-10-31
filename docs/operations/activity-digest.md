@@ -19,7 +19,7 @@ It stays disabled for ordinary self-host installations.
 
 ## Report and schedule
 
-The owner requested delivery to `r@hail.so`, around 08:00 Europe/Stockholm each day.
+The owner requested delivery to the internal recipient, around 08:00 Europe/Stockholm each day.
 Each report covers the previous local 08:00 through today's local 08:00. The end is exclusive.
 This is not a midnight-to-midnight UTC report.
 Daylight saving changes produce 23-hour and 25-hour windows without overlap.
