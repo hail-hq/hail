@@ -6656,7 +6656,7 @@ components:
             format: uuid
           - type: 'null'
           title: Email Agent Id
-          description: The agent that answers mail to this address. The agent must be live and answer email. Null stops agent replies. Omit to leave unchanged.
+          description: The agent that answers mail to this address. The agent must be live and answer email. A custom domain must be verified with inbound on. Null stops agent replies. Omit to leave unchanged.
         email_agent_scope:
           anyOf:
           - type: string
@@ -6665,7 +6665,7 @@ components:
             - anyone
           - type: 'null'
           title: Email Agent Scope
-          description: 'Who the agent answers. ''members'': verified members of the organization whose mail passes DMARC. ''anyone'': every sender that passes the spam and header rules, unless DMARC fails. A sender with DMARC PASS can then make the agent use its tools; any other sender gets a plain reply with no tools. Omit to leave unchanged.'
+          description: 'Who the agent answers. ''members'': verified members of the organization whose mail passes DMARC. ''anyone'': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged.'
         local_prefix_user:
           anyOf:
             - type: string

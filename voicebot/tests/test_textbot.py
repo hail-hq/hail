@@ -507,3 +507,29 @@ async def test_poll_loop_stops_when_the_voicebot_drains(monkeypatch, tmp_path) -
     monkeypatch.setattr(textbot, "reply_once", reply_once)
     await asyncio.wait_for(textbot._poll_loop(object(), None), timeout=1)
     assert calls == [1]
+
+
+async def test_a_slow_email_does_not_delay_texts(monkeypatch, tmp_path) -> None:
+    """The two polls are separate tasks."""
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "drain")
+    stop = threading.Event()
+    texts = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_email(_api):
+        await release.wait()
+        return False
+
+    async def text(_api):
+        texts.set()
+        return False
+
+    monkeypatch.setattr(textbot.emailbot, "reply_once", slow_email)
+    monkeypatch.setattr(textbot, "reply_once", text)
+    monkeypatch.setattr(textbot, "POLL_SECONDS", 0)
+    email_task = asyncio.create_task(textbot._email_poll_loop(object(), stop))
+    text_task = asyncio.create_task(textbot._poll_loop(object(), stop))
+    await asyncio.wait_for(texts.wait(), timeout=1)
+    stop.set()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(email_task, text_task), timeout=1)

@@ -1,5 +1,5 @@
-"""Text worker: the agent answers inbound SMS, and inbound email through
-``hailhq.voicebot.emailbot`` on the same polling loop.
+"""Text worker: the agent answers inbound SMS. Inbound email runs on its own
+polling tasks here, through ``hailhq.voicebot.emailbot``.
 
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and
@@ -246,22 +246,26 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
 DRAIN_FLAG = Path("/tmp/hail-draining")
 
 
-async def _poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
+async def _poll(name: str, work, api: AgentApiClient, stop) -> None:
     while stop is None or not stop.is_set():
         if DRAIN_FLAG.exists():
-            logger.info("text worker stopped: this voicebot is draining")
+            logger.info("%s worker stopped: this voicebot is draining", name)
             return
         try:
-            busy = await reply_once(api)
+            busy = await work(api)
         except Exception:
-            logger.exception("text worker iteration failed; will retry")
+            logger.exception("%s worker iteration failed; will retry", name)
             busy = False
-        try:
-            busy = await emailbot.reply_once(api) or busy
-        except Exception:
-            logger.exception("email worker iteration failed; will retry")
         if not busy:
             await asyncio.sleep(POLL_SECONDS)
+
+
+async def _poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
+    await _poll("text", reply_once, api, stop)
+
+
+async def _email_poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
+    await _poll("email", emailbot.reply_once, api, stop)
 
 
 async def run_forever(stop: threading.Event | None = None) -> None:
@@ -269,7 +273,11 @@ async def run_forever(stop: threading.Event | None = None) -> None:
     n = settings.hail_text_reply_concurrency
     logger.info("text worker started (%s at once, poll every %ss)", n, POLL_SECONDS)
     try:
-        await asyncio.gather(*(_poll_loop(api, stop) for _ in range(n)))
+        # Separate tasks: a slow email model call must not delay a text reply.
+        await asyncio.gather(
+            *(_poll_loop(api, stop) for _ in range(n)),
+            *(_email_poll_loop(api, stop) for _ in range(n)),
+        )
     finally:
         await api.aclose()
 

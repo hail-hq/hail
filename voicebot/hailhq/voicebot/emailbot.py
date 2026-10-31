@@ -1,14 +1,13 @@
 """Email worker: the agent answers inbound email.
 
-Polled by the text worker's loop in ``textbot``, with the same LLM precedence
-and keys. The DB side lives in ``hailhq.core.email_agent``. The send goes through
+Polled by its own tasks beside the text loops in ``textbot``, with the same LLM
+precedence and keys. The DB side lives in ``hailhq.core.email_agent``. The send goes through
 ``POST /internal/agent/reply-email``, where the scope, thread cap, funds,
 suppression, billing, and delivery live.
 
-Tool sends run during the claim, before the reply. Their routes refuse a second
-send to the same person for one inbound email, so a retried run cannot repeat
-one. They also refuse a sender whose ``From`` is not proven, so leaving tools out
-of an unverified run here is not the only guard.
+Tool sends run during the claim, before the reply. Each send's id comes from the
+message itself, so a retried run cannot repeat it, and a different message to the
+same person still goes.
 """
 
 from __future__ import annotations
@@ -115,32 +114,35 @@ async def generate_reply(
 
 async def _prepare(
     claimed: ClaimedEmailReply,
-) -> tuple[list[dict[str, Any]], list[ToolSpec]] | None:
-    """Load the thread and tools on a short session; nothing stays open. None
-    when the rules no longer allow a reply, so the model is not paid for one.
-    An unverified sender gets no tools and no history."""
+) -> tuple[list[dict[str, Any]], list[ToolSpec]] | str:
+    """Load the thread and tools on a short session; nothing stays open. A
+    string is why the rules no longer allow a reply, so the model is not paid
+    for one."""
     email = claimed.email
     async with session_scope() as db:
         refusal = await run_refusal(db, claimed.domain, email)
         if refusal is not None:
-            logger.info("email_id=%s not answered: %s", email.id, refusal)
-            return None
+            return refusal
         trust = await sender_trust(db, email)
         thread = await email_thread(db, email)
-        specs = (
-            [] if trust == "unverified" else await email_run_tools(claimed.agent, db)
-        )
+        specs = await email_run_tools(claimed.agent, db)
     return build_chat_messages(claimed.agent, thread, trust=trust), specs
 
 
 async def _settle(
-    claimed: ClaimedEmailReply, state: ReplyState | None, *, retry: bool = False
+    claimed: ClaimedEmailReply,
+    state: ReplyState | None,
+    *,
+    retry: bool = False,
+    reason: str | None = None,
 ) -> None:
     async with session_scope() as db:
         if retry:
             await retry_reply(db, claimed)
         elif state is not None:
-            await finish_reply(db, claimed.email, state, attempt=claimed.attempt)
+            await finish_reply(
+                db, claimed.email, state, attempt=claimed.attempt, reason=reason
+            )
 
 
 async def reply_once(api: AgentApiClient) -> bool:
@@ -190,10 +192,11 @@ async def _reply_claimed(
     email = claimed.email
     try:
         prepared = await _prepare(claimed)
-        if prepared is None:
+        if isinstance(prepared, str):
             if span is not None:
                 span.set_attribute("reply.state", "skipped")
-            await _settle(claimed, "skipped")
+            logger.info("email_id=%s not answered: %s", email.id, prepared)
+            await _settle(claimed, "skipped", reason=prepared)
             return True
         messages, specs = prepared
         text = await asyncio.wait_for(
@@ -223,7 +226,7 @@ async def _reply_claimed(
         if span is not None:
             span.set_attribute("reply.state", "skipped")
         logger.info("email_id=%s wrote nothing; skipped", email.id)
-        await _settle(claimed, "skipped")
+        await _settle(claimed, "skipped", reason="empty_reply")
         return True
     try:
         result = await api.post(
@@ -241,6 +244,9 @@ async def _reply_claimed(
         await _settle(claimed, None, retry=True)
         return True
     state = str(result.get("state") or "failed")
+    if state == "retry":
+        await _settle(claimed, None, retry=True)
+        return True
     if state not in ("done", "skipped", "failed"):
         state = "failed"
     if state != "done":

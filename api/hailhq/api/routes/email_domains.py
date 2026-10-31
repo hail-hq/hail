@@ -865,6 +865,20 @@ async def patch_email_domain(
                     "this agent does not answer email",
                     loc=["body", "email_agent_id"],
                 )
+            # A hail-mail address always receives: the route is its own switch.
+            if sd.kind == "custom" and sd.verification_status != "verified":
+                raise unprocessable(
+                    "verify this domain before an agent can answer its mail",
+                    loc=["body", "email_agent_id"],
+                )
+            if sd.kind == "custom" and not updates.get(
+                "inbound_enabled", sd.inbound_enabled
+            ):
+                raise unprocessable(
+                    "turn on inbound for this domain before an agent can answer "
+                    "its mail",
+                    loc=["body", "email_agent_id"],
+                )
         updates["email_agent_id"] = body.email_agent_id
     if body.email_agent_scope is not None:
         updates["email_agent_scope"] = body.email_agent_scope

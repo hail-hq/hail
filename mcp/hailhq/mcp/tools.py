@@ -2314,11 +2314,11 @@ def register_tools(
         ``email_agent_id`` makes the agent reply to inbound mail;
         ``clear_agent=True`` stops that. ``email_agent_scope`` is
         ``"members"`` (the default: verified members of the workspace whose
-        mail passes DMARC) or ``"anyone"`` (every sender that passes the spam
-        checks, unless DMARC fails). With ``"anyone"``, a stranger whose mail
-        passes DMARC can make the agent use its tools, so ask your user before
-        you set it. Other senders get a plain reply with no tools. A field
-        left out keeps its value. ``domain_id`` comes from
+        mail passes DMARC) or ``"anyone"`` (every sender whose mail passes
+        DMARC and the spam checks). With ``"anyone"``, a stranger can make the
+        agent use its tools, so ask your user before you set it. Mail without
+        a DMARC pass gets no reply. A custom domain must be verified with
+        inbound on. A field left out keeps its value. ``domain_id`` comes from
         ``list_email_domains``.
 
         Returns the updated ``EmailDomainResponse`` as a dict, or

@@ -2083,10 +2083,10 @@ type EmailDomainListResponse struct {
 // re-implement it here because the patch may merge with existing row
 // state to satisfy the invariant.
 type EmailDomainPatch struct {
-	// EmailAgentId The agent that answers mail to this address. The agent must be live and answer email. Null stops agent replies. Omit to leave unchanged.
+	// EmailAgentId The agent that answers mail to this address. The agent must be live and answer email. A custom domain must be verified with inbound on. Null stops agent replies. Omit to leave unchanged.
 	EmailAgentId *openapi_types.UUID `json:"email_agent_id,omitempty"`
 
-	// EmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender that passes the spam and header rules; the agent can then use its tools because of mail from strangers. Omit to leave unchanged.
+	// EmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged.
 	EmailAgentScope *EmailDomainPatchEmailAgentScope `json:"email_agent_scope,omitempty"`
 
 	// ForwardRatePerHour Cap on forwarded messages per hour. Omit to leave unchanged.
@@ -2105,7 +2105,7 @@ type EmailDomainPatch struct {
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
-// EmailDomainPatchEmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender that passes the spam and header rules; the agent can then use its tools because of mail from strangers. Omit to leave unchanged.
+// EmailDomainPatchEmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged.
 type EmailDomainPatchEmailAgentScope string
 
 // EmailDomainResponse Read view for an email domain.

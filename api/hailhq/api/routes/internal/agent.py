@@ -19,6 +19,7 @@ here, scoped to the call's org.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -56,12 +57,11 @@ from hailhq.core.email_agent import (
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
     answers_emails,
-    is_authenticated,
-    note_no_funds,
     reply_from_address,
     reply_references,
     reply_subject,
     run_refusal,
+    stamp_skip,
     tool_sends_for_reply,
 )
 from hailhq.core.email_agent import (
@@ -103,7 +103,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import any_, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -124,6 +124,9 @@ _SPOKEN_EMAIL_UNCONFIGURED = "Email isn't set up for this account."
 _SPOKEN_SMS_SENT_MEMBER = "Text message sent."
 _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
+# How long a queued reply counts as in flight. Past this the send is presumed
+# lost, and a retry delivers the same row.
+_QUEUED_GRACE = timedelta(seconds=60)
 
 
 class AgentSendBase(BaseModel):
@@ -567,6 +570,7 @@ class AgentReplyEmailRequest(BaseModel):
 class AgentReplyEmailResponse(BaseModel):
     ok: bool
     # done | skipped | failed: what the worker writes to agent_reply_state.
+    # retry: an earlier send may still be running; the worker tries again later.
     state: str
     reason: str | None = None
     reply_id: UUID | None = None
@@ -617,9 +621,14 @@ async def agent_reply_email(
     suppression, billing, audit, and delivery. The reply goes to the ``From``
     address, never to ``Reply-To``: only ``From`` was authenticated.
     """
+
+    async def skip(reason: str | None) -> AgentReplyEmailResponse:
+        await stamp_skip(db, body.email_id, reason or "refused")
+        return AgentReplyEmailResponse(ok=False, state="skipped", reason=reason)
+
     routed = await _routed_email(db, body.email_id)
     if routed is None:
-        return AgentReplyEmailResponse(ok=False, state="skipped", reason="no_agent")
+        return await skip("no_agent")
     inbound, domain, agent = routed
     org = inbound.organization_id
     recipient = normalize_address(inbound.from_address)
@@ -630,7 +639,7 @@ async def agent_reply_email(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
-    # Idempotent: the worker retries a timed-out POST with the same email_id.
+    # Idempotent per inbound row: the worker retries with the same email_id.
     prior = (
         (
             await db.execute(
@@ -646,25 +655,48 @@ async def agent_reply_email(
         .scalars()
         .first()
     )
-    if prior is not None:
-        return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
-
-    refusal = await run_refusal(db, domain, inbound)
-    if refusal is not None:
-        return AgentReplyEmailResponse(ok=False, state="skipped", reason=refusal)
-    if not await has_funds(db, org):
-        await note_no_funds(db, inbound)
+    if prior is not None and prior.status not in ("queued", "failed"):
+        # Not just "sent": see the same reasoning in agent_send_email below.
+        ok = prior.status != "bounced"
         return AgentReplyEmailResponse(
-            ok=False, state="skipped", reason="insufficient_funds"
+            ok=ok,
+            state="done" if ok else "failed",
+            reason=None if ok else "bounced",
+            reply_id=prior.id,
         )
+    if prior is not None and prior.status == "queued":
+        age = datetime.now(timezone.utc) - prior.requested_at
+        if age < _QUEUED_GRACE:
+            # The original may still be in the provider call: sending now could
+            # deliver twice. The worker tries again after its backoff.
+            return AgentReplyEmailResponse(
+                ok=False, state="retry", reason="in_flight", reply_id=prior.id
+            )
+
+    refusal = await run_refusal(db, domain, inbound, check_cap=prior is None)
+    if refusal is not None:
+        return await skip(refusal)
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
-        return AgentReplyEmailResponse(ok=False, state="skipped", reason=gate.reason)
+        return await skip(gate.reason)
     cap_denial = await check_agent_send_allowed(
         db, org, "email", [normalize_recipient(recipient)]
     )
     if cap_denial is not None:
-        return AgentReplyEmailResponse(ok=False, state="skipped", reason="agent_caps")
+        return await skip("agent_caps")
+
+    if prior is not None:
+        # The row exists, so the audit row does too: only the send is missing.
+        prior.status = "queued"
+        prior.end_reason = None
+        prior.failed_at = None
+        await db.commit()
+        err = await deliver_email(db, email_provider, prior)
+        if err is not None:
+            return AgentReplyEmailResponse(
+                ok=False, state="failed", reason=err, reply_id=prior.id
+            )
+        return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
 
     in_reply_to, references = reply_references(inbound)
     reply = Email(
@@ -680,12 +712,7 @@ async def agent_reply_email(
         provider="ses",
         in_reply_to=in_reply_to,
         references_ids=references,
-        metadata_={
-            "reply_to_email_id": str(inbound.id),
-            "agent_id": str(agent.id),
-            # Which thread budget this reply spends.
-            "sender_verified": is_authenticated(inbound),
-        },
+        metadata_={"reply_to_email_id": str(inbound.id), "agent_id": str(agent.id)},
     )
     db.add(reply)
     await db.commit()
@@ -743,18 +770,15 @@ def _email_run_meta(
 
 
 async def _email_run(
-    db: AsyncSession, body: AgentEmailRunBase
+    db: AsyncSession, body: AgentEmailRunBase, *, action: str, resource_type: str
 ) -> tuple[Email, Agent] | AgentSendResponse:
     """Everything a tool send in an email run must pass before it picks a
-    recipient. Only a claimed row runs tools, and only for a proven sender:
-    this is the check, and the worker leaving tools out is not. The scope and
-    the thread cap are read again under the thread lock."""
+    recipient. Only a claimed row runs tools. Scope, funds, and the thread cap
+    are read again under the thread lock."""
     routed = await _routed_email(db, body.inbound_email_id)
     if routed is None or routed[0].agent_reply_state != "processing":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     inbound, domain, agent = routed
-    if not is_authenticated(inbound):
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
@@ -762,21 +786,17 @@ async def _email_run(
     refusal = await run_refusal(db, domain, inbound)
     if refusal == "thread_cap":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
+    if refusal == "insufficient_funds":
+        return await _deny(
+            inbound.organization_id,
+            action=action,
+            resource_type=resource_type,
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**_email_run_meta(body, agent, inbound), "reason": refusal},
+        )
     if refusal is not None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     return inbound, agent
-
-
-async def _email_run_denial(
-    db: AsyncSession, org: UUID, inbound: Email
-) -> AgentSendResponse | str | None:
-    """The cap and funds checks of one tool send: a response to return, a
-    denial reason to audit, or None when the send may go."""
-    if await tool_sends_for_reply(db, inbound.id) >= MAX_TOOL_SENDS:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
-    if not await has_funds(db, org):
-        return "insufficient_funds"
-    return None
 
 
 @router.post("/email-run/send-email", response_model=AgentSendResponse)
@@ -786,12 +806,22 @@ async def agent_email_run_send_email(
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentSendResponse:
     """The ``send_email`` tool in an email run: a member by directory name."""
-    run = await _email_run(db, body)
+    run = await _email_run(
+        db, body, action="agent.email.blocked", resource_type="email"
+    )
     if isinstance(run, AgentSendResponse):
         return run
     inbound, agent = run
     org = inbound.organization_id
     meta = _email_run_meta(body, agent, inbound)
+
+    # The tool derives the id from the message: a retried run lands here.
+    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
+    if prior is not None:
+        ok = prior.status not in ("failed", "bounced")
+        return AgentSendResponse(
+            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+        )
 
     matches = await resolve_member_emails(db, org, body.recipient_name)
     if not matches:
@@ -809,38 +839,8 @@ async def agent_email_run_send_email(
         )
     recipient = matches[0]
 
-    # A retried run writes its reply again: it must not send again.
-    prior = (
-        (
-            await db.execute(
-                select(Email).where(
-                    Email.organization_id == org,
-                    Email.direction == "outbound",
-                    Email.metadata_["inbound_email_id"].astext == str(inbound.id),
-                    recipient == any_(Email.to_addresses),
-                )
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if prior is not None:
-        ok = prior.status not in ("failed", "bounced")
-        return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
-        )
-
-    denial = await _email_run_denial(db, org, inbound)
-    if isinstance(denial, AgentSendResponse):
-        return denial
-    if denial is not None:
-        return await _deny(
-            org,
-            action="agent.email.blocked",
-            resource_type="email",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": denial},
-        )
+    if await tool_sends_for_reply(db, inbound.id) >= MAX_TOOL_SENDS:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
         return await _deny(
@@ -918,12 +918,19 @@ async def agent_email_run_send_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentSendResponse:
     """The ``send_sms`` tool in an email run: a member by directory name."""
-    run = await _email_run(db, body)
+    run = await _email_run(db, body, action="agent.sms.blocked", resource_type="sms")
     if isinstance(run, AgentSendResponse):
         return run
     inbound, agent = run
     org = inbound.organization_id
     meta = _email_run_meta(body, agent, inbound)
+
+    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
+    if prior is not None:
+        ok = prior.status not in ("failed", "undelivered")
+        return AgentSendResponse(
+            ok=ok, spoken=_SPOKEN_SMS_SENT_MEMBER if ok else _SPOKEN_SMS_FAILED
+        )
 
     matches = await resolve_member_phones(db, org, body.recipient_name)
     if not matches:
@@ -941,37 +948,8 @@ async def agent_email_run_send_sms(
         )
     recipient = matches[0]
 
-    prior = (
-        (
-            await db.execute(
-                select(Sms).where(
-                    Sms.organization_id == org,
-                    Sms.direction == "outbound",
-                    Sms.metadata_["inbound_email_id"].astext == str(inbound.id),
-                    Sms.to_e164 == recipient,
-                )
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if prior is not None:
-        ok = prior.status not in ("failed", "undelivered")
-        return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_SMS_SENT_MEMBER if ok else _SPOKEN_SMS_FAILED
-        )
-
-    denial = await _email_run_denial(db, org, inbound)
-    if isinstance(denial, AgentSendResponse):
-        return denial
-    if denial is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": denial},
-        )
+    if await tool_sends_for_reply(db, inbound.id) >= MAX_TOOL_SENDS:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     gate = await check_sms_allowed(db, org, recipient)
     if not gate.allowed:
         return await _deny(

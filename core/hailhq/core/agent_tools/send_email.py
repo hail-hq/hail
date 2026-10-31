@@ -82,19 +82,24 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
         return "I need the recipient's name before I can send the email."
     if not subject.strip() or not body_text.strip():
         return "I need a subject and a message before I can send the email."
+    if ctx.inbound_email_id is not None:
+        # Same message, same id: a retried run cannot send it twice, and a
+        # different message to the same person still goes.
+        invocation = uuid.uuid5(
+            ctx.inbound_email_id,
+            f"send_email\x00{recipient_name}\x00{subject}\x00{body_text}",
+        )
+        path = "/internal/agent/email-run/send-email"
+        source = {"inbound_email_id": str(ctx.inbound_email_id)}
+    else:
+        invocation = uuid.uuid4()
+        path = "/internal/agent/send-email"
+        source = {"call_id": str(ctx.call_id)}
     resp = await ctx.api.post(
-        (
-            "/internal/agent/send-email"
-            if ctx.call_id is not None
-            else "/internal/agent/email-run/send-email"
-        ),
+        path,
         {
-            **(
-                {"call_id": str(ctx.call_id)}
-                if ctx.call_id is not None
-                else {"inbound_email_id": str(ctx.inbound_email_id)}
-            ),
-            "tool_invocation_id": str(uuid.uuid4()),
+            **source,
+            "tool_invocation_id": str(invocation),
             "recipient_name": recipient_name,
             "subject": subject,
             "body_text": body_text,

@@ -13,7 +13,14 @@ from hailhq.core.agent_tools.email_run import email_run_tools
 from hailhq.core.agent_tools.spec import NO_CALL, ToolContext
 from hailhq.core.config import settings
 from hailhq.core.email_agent import MAX_REPLIES_PER_THREAD
-from hailhq.core.models import Agent, Email, EmailDomain, OrganizationMember, User
+from hailhq.core.models import (
+    AccountCredit,
+    Agent,
+    Email,
+    EmailDomain,
+    OrganizationMember,
+    User,
+)
 from hailhq.voicebot import emailbot
 from hailhq.voicebot.pipeline import ProviderKeyError
 
@@ -30,9 +37,27 @@ def _internal_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _seed(
-    session, *, scope="members", tools=None, sender=MEMBER, dmarc="PASS", earlier=False
+    session,
+    *,
+    scope="members",
+    tools=None,
+    sender=MEMBER,
+    dmarc="PASS",
+    earlier=False,
+    credits=10_000,
 ):
     org = uuid.uuid4()
+    if credits:
+        session.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=credits,
+                source="test",
+                ref="test",
+            )
+        )
     agent = Agent(
         organization_id=org, name="Inbox", system_prompt="Help the team.", tools=tools
     )
@@ -222,27 +247,79 @@ async def test_a_proven_outside_sender_is_framed_and_keeps_tools(
     assert llm.calls[0]["tools"]
 
 
-async def test_an_unverified_sender_gets_no_tools_and_no_history(
+async def test_an_unproven_row_never_reaches_the_model(
     async_session, monkeypatch
 ) -> None:
-    await _seed(
-        async_session,
-        scope="anyone",
-        sender="stranger@example.net",
-        dmarc="GRAY",
-        earlier=True,
+    email_id = await _seed(
+        async_session, scope="anyone", sender="stranger@example.net", dmarc="GRAY"
     )
     llm = ScriptedLLM([("text", "Hi")])
     _use(monkeypatch, llm)
-    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    api = SimpleNamespace(post=AsyncMock())
     await emailbot.reply_once(api)
-    call = llm.calls[0]
-    assert not call["tools"]
-    assert len(llm.calls) == 1
-    text = " ".join(str(i.text_content) for i in call["items"])
-    assert "may be forged" in text
-    assert "Earlier private note" not in text
-    assert api.post.await_args.args[0] == "/internal/agent/reply-email"
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "sender_not_verified"
+
+
+async def test_no_funds_is_read_before_the_model_is_paid(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session, credits=0)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "insufficient_funds"
+    assert row.metadata_["suppressed_reasons"] == ["insufficient_funds"]
+
+
+async def test_a_retry_answer_puts_the_row_back(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": False, "state": "retry", "reason": "in_flight"}
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+
+
+async def test_an_empty_reply_says_why(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="   "))
+    await emailbot.reply_once(SimpleNamespace(post=AsyncMock()))
+    await _state(async_session, email_id)
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "empty_reply"
+
+
+async def test_the_same_message_keeps_its_id_across_a_retried_run() -> None:
+    api = SimpleNamespace(post=AsyncMock(return_value={"spoken": "ok"}))
+    email_id = uuid.uuid4()
+    ctx = ToolContext(
+        call_id=None,
+        organization_id=uuid.uuid4(),
+        api=api,  # type: ignore[arg-type]
+        hangup=None,
+        send_dtmf=None,
+        inbound_email_id=email_id,
+    )
+    args = {"recipient_name": "Ada", "subject": "s", "body_text": "b", "body": "b"}
+    for spec in (send_email.EMAIL_RUN_SPEC, send_sms.EMAIL_RUN_SPEC):
+        api.post.reset_mock()
+        await spec.execute(ctx, args)
+        await spec.execute(ctx, args)
+        await spec.execute(ctx, {**args, "body_text": "other", "body": "other"})
+        ids = [c.args[1]["tool_invocation_id"] for c in api.post.await_args_list]
+        assert ids[0] == ids[1] != ids[2]
 
 
 async def test_a_proven_member_reads_the_history(async_session, monkeypatch) -> None:
