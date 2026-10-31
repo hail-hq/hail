@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from uuid import UUID
 
 import logfire
@@ -41,6 +41,8 @@ _SCHEME_ALIASES = (
 # Heroku) commonly carry these. ``sslmode`` accepts the same string values
 # ('disable', 'prefer', 'require', ...) under asyncpg's ``ssl`` kwarg.
 _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
+    # Better Auth/Prisma's client hint. ``engine_options`` reads it instead.
+    "pgbouncer": None,
     "sslmode": "ssl",
     "channel_binding": None,
     "gssencmode": None,
@@ -53,6 +55,9 @@ _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
     "krbsrvname": None,
 }
 
+# Query params meant for asyncpg URLs. ``psycopg.connect`` rejects them.
+_NOT_FOR_LIBPQ = ("pgbouncer", "prepared_statement_cache_size")
+
 
 def _rewrite_scheme(url: str, target_prefix: str) -> str:
     """Strip whichever Postgres scheme alias ``url`` starts with and prepend ``target_prefix``."""
@@ -60,6 +65,15 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
         if url.startswith(alias):
             return target_prefix + url[len(alias) :]
     return url
+
+
+def _with_query(url: str, query: str) -> str:
+    """Replace the query of ``url``. ``urlunsplit`` would drop the ``//`` of a
+    URL with no host, because it does not know these schemes."""
+    base, _, rest = url.partition("?")
+    fragment = rest.partition("#")[2]
+    tail = f"#{fragment}" if fragment else ""
+    return f"{base}?{query}{tail}" if query else f"{base}{tail}"
 
 
 def _sanitize_asyncpg_query(query: str) -> str:
@@ -86,18 +100,47 @@ def to_async_url(url: str) -> str:
     parts = urlsplit(rewritten)
     if not parts.query:
         return rewritten
-    return urlunsplit(parts._replace(query=_sanitize_asyncpg_query(parts.query)))
+    return _with_query(rewritten, _sanitize_asyncpg_query(parts.query))
 
 
 def to_sync_url(url: str) -> str:
-    """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic."""
-    return _rewrite_scheme(url, "postgresql+psycopg://")
+    """Coerce a ``DATABASE_URL`` onto the ``psycopg`` (sync) driver used by alembic.
+
+    Also drops the params libpq rejects. Every other param keeps its exact text.
+    """
+    rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
+    params = urlsplit(rewritten).query.split("&")
+    kept = [param for param in params if param.split("=")[0] not in _NOT_FOR_LIBPQ]
+    if len(kept) == len(params):
+        return rewritten
+    return _with_query(rewritten, "&".join(kept))
+
+
+def engine_options(url: str) -> dict:
+    """Return the asyncpg engine options that ``url`` asks for.
+
+    ``pgbouncer=true`` marks a transaction-mode pooler, which can move a
+    client to another server connection after each transaction. A named
+    prepared statement would be missing there. With both caches at 0,
+    asyncpg sends unnamed statements only.
+    """
+    query = dict(parse_qsl(urlsplit(url).query))
+    if query.get("pgbouncer", "").lower() != "true":
+        return {}
+    return {
+        "connect_args": {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        }
+    }
 
 
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
+        _engine = create_async_engine(
+            to_async_url(settings.database_url), **engine_options(settings.database_url)
+        )
         if telemetry_enabled():
             # Tracing must never take the database down: the instrumentation
             # refused SQLAlchemy 2.1 and failed every request.
