@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.32.0] (2026-10-30)
+
+Email stops sending to addresses that hard bounce, complain or unsubscribe,
+and the Gmail and Yahoo unsubscribe button now works. Verifications carry a
+name, and US texting registration is charged per step.
+
+Component versions cut alongside this release:
+**`cli-v0.31.0`** (Homebrew + GitHub Releases) and **`sdk-v0.22.0`** (PyPI).
+Database migrations run on deploy.
+
 ### Added
 
 - Email: every send carries the sending organization in its `Feedback-ID` header, so Google Postmaster Tools can show spam rate per organization for mail from the Hail mail domain.
@@ -11,6 +21,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
 - Email suppressions: list them with `GET /v1/emails/suppressions` and remove one with `DELETE /v1/emails/suppressions/{address}`. CLI: `hail email suppressions list` and `hail email suppressions delete <address>`.
 - Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
+- US texting: after a rejected campaign, a person who files again with the same details keeps their confirmed brand, with no new PIN or brand fee.
+- `hail-sdk`: `emails.list_suppressions()` and `emails.delete_suppression(address)` list and remove suppressed email addresses.
 - Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
 - Hail Cloud emails the organization's owners when a verification is approved or rejected.
 - Email: a hard bounce or a spam complaint adds the recipient to the organization's suppression list, so the next send to that address is blocked (403).
@@ -21,6 +33,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
+- US texting registration: on Telnyx, the website, company name, person name and email take at most 100 characters.
+- US texting registration: refusal and rejection messages no longer say "the carrier"; refusals name the 10DLC registry.
 - The time-limit goodbye and the goodbye when a call's own LLM keeps failing are spoken in the call's language.
 - The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
 - Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.

@@ -7,6 +7,7 @@ Import the fixtures you need from here in each package's ``conftest.py``::
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
@@ -68,6 +69,12 @@ async def db(
 
     yield engine
 
+    # A background task cut off mid-transaction keeps its row locks, and the
+    # next test's drop_all then waits on them forever.
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
     await engine.dispose()
 
 

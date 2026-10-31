@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 
 import httpx
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
@@ -19,8 +20,10 @@ from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
-    VALUE_NOT_ACCEPTED,
+    SMS_REFUSED,
+    SMS_VALUE_REFUSED,
     DraftResult,
+    FieldSpec,
     Problem,
     ProviderStatus,
     Requirements,
@@ -33,6 +36,7 @@ from hailhq.core.providers.verification.sms_form import (
     field_problems,
     sms_requirements,
     sms_subject_name,
+    text_types_field,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,7 +81,6 @@ _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
 _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
-_REFUSED = "The carrier refused a detail. Check your entries and try again."
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
 # Sub use cases for a campaign filed before the form asked for them
 # (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
@@ -232,6 +235,18 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # Telnyx brand maximums. The person's first and last name are also
+    # filed together as the brand name, under the same 100 (``_validate``).
+    field_limits = MappingProxyType(
+        {
+            "legal_name": 100,
+            "website": 100,
+            "rep_email": 100,
+            "first_name": 100,
+            "last_name": 100,
+            "email": 100,
+        }
+    )
 
     def __init__(self, api_key=None, client=None) -> None:
         self._api = TelnyxClient(api_key, client)
@@ -239,10 +254,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
-        return sms_requirements(self.name, subject_type)
+        return sms_requirements(self, subject_type)
+
+    def extra_fields(self, subject_type) -> tuple[FieldSpec, ...]:
+        return (text_types_field(subject_type),)
 
     def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self.name, fields, subject_type)
+        problems = field_problems(self, fields, subject_type)
         mobile = (fields.get("mobile_phone_number") or "").strip()
         if subject_type == "person" and mobile and not mobile.startswith("+1"):
             problems.append(
@@ -283,6 +301,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         address,
         documents,
         messaging_service_sid=None,
+        kept_brand_id=None,
     ) -> DraftResult:
         subject_type = requirements.subject_type
         problems = self._validate(fields, address, subject_type)
@@ -313,6 +332,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     type(exc).__name__,
                 )
         try:
+            if (
+                subject_type == "person"
+                and kept_brand_id
+                and await self._reuse_brand(refs, fields, kept_brand_id)
+            ):
+                return DraftResult(refs=refs)
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
             refused = _refused(exc)
@@ -349,6 +374,62 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             await self.discard(refs)
             return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
+
+    def keeps_brand(self, refs) -> bool:
+        """A person's confirmed brand stays at Telnyx when a campaign was
+        filed: it is paid for, and the campaign is what the carriers refused.
+        The next filing with the same details reuses it, with no new brand
+        fee and no new PIN. A failed brand has no ``identity_verified``
+        (``status``), and with no campaign the brand itself failed."""
+        return bool(
+            refs.get("brand_id")
+            and refs.get("campaign_id")
+            and refs.get("subject_type") == "person"
+            and refs.get("identity_verified") is True
+        )
+
+    async def discard_rejected(self, refs) -> dict:
+        if self.keeps_brand(refs):
+            brand_id = refs["brand_id"]
+            await self.discard({k: v for k, v in refs.items() if k != "brand_id"})
+            return {"kept_brand_id": brand_id}
+        await self.discard(refs)
+        return {}
+
+    async def _reuse_brand(self, refs, fields, brand_id) -> bool:
+        """Put the kept brand in refs when Telnyx still holds it, confirmed,
+        for the same person, with no campaign. False files a new brand
+        instead. A sole proprietor brand takes one campaign, and ``status``
+        would adopt one still listed (a failed campaign delete). A brand
+        that does not fit stays at Telnyx, which refuses to delete a brand
+        for 3 months after its campaign."""
+        try:
+            brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
+            if (
+                not _same_person(brand, fields)
+                or brand.get("status") != "OK"
+                or brand.get("failureReasons")
+                or brand.get("identityStatus") not in _VERIFIED
+            ):
+                return False
+            found = await self._api.request(
+                "GET", "/10dlc/campaign", params={"brandId": brand_id}
+            )
+        except httpx.HTTPStatusError as exc:
+            # The lookup is optional: a refusal must not block the filing.
+            # An outage or 429 raises: retrying beats paying for a new brand.
+            status = exc.response.status_code
+            if status < 500 and status != 429:
+                logger.warning("10DLC kept brand lookup failed: status=%s", status)
+                return False
+            raise
+        if found.get("records"):
+            return False
+        refs["brand_id"] = brand_id
+        refs["identity_verified"] = True
+        # The fee rater bills no submission for a reused brand.
+        refs["brand_reused"] = True
+        return True
 
     async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
         """File the brand, wait for Telnyx to register it, then send the
@@ -539,6 +620,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 brand.get("failureReasons")
                 or brand.get("status") == "REGISTRATION_FAILED"
             ):
+                # A failed brand is not kept, even with a campaign filed.
+                refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
                     reason=BRAND_REJECTED,
@@ -825,6 +908,28 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning("10DLC discard failed: step=%s", key)
 
 
+def _same_person(brand: dict, fields: dict) -> bool:
+    """The brand names the person on the form. Case, spacing and the format
+    of the mobile do not count."""
+
+    def text(value: str | None) -> str:
+        return (value or "").strip().casefold()
+
+    def digits(value: str | None) -> str:
+        return re.sub(r"\D", "", value or "")
+
+    return digits(brand.get("mobilePhone")) == digits(
+        fields.get("mobile_phone_number")
+    ) and all(
+        text(brand.get(key)) == text(fields.get(field))
+        for key, field in (
+            ("firstName", "first_name"),
+            ("lastName", "last_name"),
+            ("email", "email"),
+        )
+    )
+
+
 def _refused(exc: Exception) -> bool:
     """Telnyx refused a value (a 4xx). Not 429 (slow down), and not 404:
     for about 2 seconds after a new brand, its PIN and vetting calls answer
@@ -889,7 +994,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
-                Problem(field=field, message=VALUE_NOT_ACCEPTED, raw=_detail(e))
+                Problem(field=field, message=SMS_VALUE_REFUSED, raw=_detail(e))
             )
     return problems or [Problem(field="", message=_safe_message(response))]
 
@@ -907,11 +1012,11 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             field = names.get(name)
             if not field or any(p.field == field for p in problems):
                 continue
-            message = VALUE_NOT_ACCEPTED
+            message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
             problems.append(Problem(field=field, message=message, raw=text or None))
-    return problems or [Problem(field="", message=_REFUSED)]
+    return problems or [Problem(field="", message=SMS_REFUSED)]
 
 
 def _safe_message(response: httpx.Response) -> str:
@@ -927,4 +1032,4 @@ def _safe_message(response: httpx.Response) -> str:
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
             return text
-    return _REFUSED
+    return SMS_REFUSED

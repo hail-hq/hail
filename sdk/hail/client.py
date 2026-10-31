@@ -450,6 +450,22 @@ class _EmailsResource:
             params["to"] = to.isoformat() if isinstance(to, datetime) else to
         return await self._http.request("GET", "/emails/stats", params=params)
 
+    async def list_suppressions(
+        self, *, cursor: str | None = None, limit: int = 50
+    ) -> SuppressionListResponse:
+        """List suppressed addresses (bounce, complaint, unsubscribe), cursor-paginated."""
+        params = {"limit": limit, "cursor": cursor}
+        data = await self._http.request("GET", "/emails/suppressions", params=params)
+        return SuppressionListResponse.model_validate(data)
+
+    async def delete_suppression(self, address: str) -> None:
+        """Remove an address from the suppression list (manual correction only)."""
+        # Percent-encode reserved characters ('/', '#', '?', '+') so the
+        # address stays one path segment.
+        await self._http.request(
+            "DELETE", f"/emails/suppressions/{quote(address, safe='@')}"
+        )
+
 
 class _EmailAttachmentsResource:
     """``client.email_attachments.*`` — upload files to attach to outbound email."""
