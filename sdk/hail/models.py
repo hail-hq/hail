@@ -432,9 +432,11 @@ class EmailCreate(BaseModel):
     with an HTML body; a plain-text-only email is never tracked for opens
     or clicks. ``to`` is a
     non-empty list of recipient addresses. ``from_`` is optional while the
-    org has one verified sender; with several the server 422s and the
-    caller must name one (or none at all, which auto-mints a hail-mail
-    address per the operator's configuration). ``populate_by_name=True``
+    org has one verified custom domain, which wins over the hail-mail
+    address, or only a hail-mail address. With several verified custom
+    domains the server 422s and the caller must name one. With no verified
+    sender, the server auto-mints a hail-mail address per the operator's
+    configuration. ``populate_by_name=True``
     so ``EmailCreate(from_="...")`` works at the Python boundary while
     ``model_dump(by_alias=True)`` still emits ``"from"`` on the wire.
     """
@@ -744,7 +746,7 @@ class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse]
     next_cursor: str | None = None
     # The address a send with no ``from_`` goes out as. ``None`` when such
-    # a send would be rejected: several verified identities (name one), or
+    # a send would be rejected: several verified custom domains (name one), or
     # none that can send yet. Whole-org answer, not per-page.
     default_from: str | None = None
 

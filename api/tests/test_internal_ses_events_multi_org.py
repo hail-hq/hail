@@ -22,7 +22,7 @@ from hailhq.api.routes.internal.ses_events import (
     get_inbound_provider,
     get_s3_mail_client,
 )
-from hailhq.core.models import Email, EmailDomain, UsageEvent
+from hailhq.core.models import AccountCredit, Email, EmailDomain, UsageEvent
 from hailhq.core.providers.email.inbound.ses import SesInboundProvider
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,7 +106,7 @@ async def test_two_orgs_same_provider_message_id_persists_both(
     both rows land and the route returns 200 with two email_ids.
     """
     # Seed org A — hail-mail address alice+orgalpha@mail.hail.so
-    # The routing lookup matches on (local_prefix_user, local_prefix_org).
+    # The routing lookup matches on local_prefix_user.
     org_a = uuid.uuid4()
     domain_a = EmailDomain(
         organization_id=org_a,
@@ -133,6 +133,17 @@ async def test_two_orgs_same_provider_message_id_persists_both(
         verified_at=datetime.now(timezone.utc),
     )
     async_session.add(domain_b)
+    for org_id in (org_a, org_b):
+        async_session.add(
+            AccountCredit(
+                organization_id=org_id,
+                kind="credit",
+                channel="credit",
+                amount_cents=100,
+                source="test.fixture",
+                ref=f"funds-{org_id}",
+            )
+        )
     await async_session.commit()
 
     # One SES delivery: same provider_message_id / same RFC Message-ID, two recipients

@@ -339,10 +339,12 @@ class _EmailsResource:
         delivered, and bounce events, but opens and clicks are never
         tracked. ``recipient_consent``
         is required — the server 422s without it. ``from_`` is optional
-        while the org has one verified sender; with several the server
-        422s and you must name one (read ``default_from`` from
-        :meth:`Client.email_domains.list`). With none it auto-mints a
-        hail-mail address (operator-configured).
+        while the org has one verified custom domain, which wins over the
+        hail-mail address, or only a hail-mail address. With several
+        verified custom domains the server 422s and you must name one (read
+        ``default_from`` from :meth:`Client.email_domains.list`). With no
+        verified sender it auto-mints a hail-mail address
+        (operator-configured).
         ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         # Build the body with the wire-side ``"from"`` alias. We don't

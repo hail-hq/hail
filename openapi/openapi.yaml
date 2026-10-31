@@ -4781,7 +4781,9 @@ paths:
 
         the carriers start their review, and 402 means there is not enough credit
 
-        to file), `country_code`, `number_type`, `subject_type` (required:
+        to file, also when a kept brand cannot be reused and the credit does not
+
+        cover a new one), `country_code`, `number_type`, `subject_type` (required:
 
         `person` for you, `business` for your company; ask the user which),
 
@@ -6499,9 +6501,10 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            User-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX
-            if omitted.
+            User-chosen local-part prefix for a hail_mail address. One organization
+            only may hold it; a taken prefix returns 409. Only valid for kind='hail_mail'.
+            Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization
+            token if omitted.
         local_prefix_org:
           anyOf:
             - type: string
@@ -6509,8 +6512,8 @@ components:
           title: Local Prefix Org
           description:
             Org-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX
-            if omitted.
+            valid for kind='hail_mail'. Falls back to a prefix derived from
+            the organization id if omitted.
       additionalProperties: false
       type: object
       required:
@@ -6614,8 +6617,9 @@ components:
             - type: "null"
           title: Default From
           description:
-            The From address used when a send omits 'from'. Null when no
-            such default can be resolved (e.g. multiple verified identities, or none
+            The From address used when a send omits 'from'. A verified custom
+            domain wins over the hail-mail address. Null when no such default
+            can be resolved (e.g. multiple verified custom domains, or none
             that can send yet). Computed across the whole organization, not just this
             page.
       type: object
@@ -6630,8 +6634,9 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            New user local-part prefix. Only valid on kind='hail_mail'
-            rows. Omit to leave unchanged.
+            New user local-part prefix. One organization only may hold it;
+            a taken prefix returns 409. Only valid on kind='hail_mail' rows.
+            Omit to leave unchanged.
         local_prefix_org:
           anyOf:
             - type: string

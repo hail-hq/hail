@@ -10,7 +10,15 @@ from datetime import datetime, timedelta, timezone
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
-from hailhq.core.models import Agent, Call, CallEvent, EmailDomain, PhoneNumber, Sms
+from hailhq.core.models import (
+    Agent,
+    Call,
+    CallEvent,
+    EmailDomain,
+    PhoneNumber,
+    RetiredHailMailAddress,
+    Sms,
+)
 from hailhq.core.threads import ThreadScope
 from sqlalchemy import select
 
@@ -185,6 +193,52 @@ async def test_send_email_available_via_hail_mail_mint_fallback(
     tools = {t.name: t for t in all_tools()}
     org = uuid.uuid4()
     assert await tools["send_email"].is_available(org, async_session) is True
+
+
+async def test_send_email_unavailable_when_the_pinned_head_is_a_role_name(
+    async_session, monkeypatch
+):
+    monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "admin+selfhost@mail.hail.so")
+    tools = {t.name: t for t in all_tools()}
+    org = uuid.uuid4()
+    assert await tools["send_email"].is_available(org, async_session) is False
+
+
+async def test_send_email_available_when_the_default_prefix_is_a_role_name(
+    async_session, monkeypatch
+):
+    """The per-org token makes the head a different name."""
+    monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    tools = {t.name: t for t in all_tools()}
+    org = uuid.uuid4()
+    assert await tools["send_email"].is_available(org, async_session) is True
+
+
+async def test_send_email_unavailable_when_another_org_retired_the_head(
+    async_session, monkeypatch
+):
+    monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
+    tools = {t.name: t for t in all_tools()}
+    org = uuid.uuid4()
+    other = uuid.uuid4()
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="team",
+            local_prefix_org="shared",
+            organization_id=other,
+        )
+    )
+    await async_session.commit()
+
+    assert await tools["send_email"].is_available(org, async_session) is False
+    assert await tools["send_email"].is_available(other, async_session) is True
 
 
 async def test_send_sms_posts_call_scoped_payload():
