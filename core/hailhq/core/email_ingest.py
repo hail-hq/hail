@@ -23,7 +23,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
-from hailhq.core.email_agent import proves_sender, queue_decision
+from hailhq.core.email_agent import proves_sender, queue_decision, with_skip_reason
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -557,9 +557,7 @@ async def ingest_inbound(
                     "agent_reply_state": decision.state,
                 }
                 if decision.reason is not None:
-                    values["metadata_"] = Email.metadata_.op("||")(
-                        func.jsonb_build_object("agent_skip_reason", decision.reason)
-                    )
+                    values["metadata_"] = with_skip_reason(decision.reason)
                 await db.execute(
                     update(Email).where(Email.id == email_id).values(**values)
                 )

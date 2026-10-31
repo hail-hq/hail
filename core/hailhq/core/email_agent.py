@@ -28,7 +28,11 @@ from hailhq.core.email_mime import ParsedMime
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.models import Agent, Email, EmailDomain, Sms
-from hailhq.core.prompts import SenderTrust, build_email_instructions
+from hailhq.core.prompts import (
+    TEAM_EMAIL_LABEL,
+    SenderTrust,
+    build_email_instructions,
+)
 from hailhq.core.text_agent import (
     CHAT_LIMIT,
     CLAIM_LEASE,
@@ -37,7 +41,17 @@ from hailhq.core.text_agent import (
     REPLY_CAP_WINDOW,
     RETRY_BACKOFF,
 )
-from sqlalchemy import and_, any_, func, or_, select, true, update
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    any_,
+    func,
+    literal_column,
+    or_,
+    select,
+    true,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("hailhq.core.email_agent")
@@ -67,6 +81,7 @@ __all__ = [
     "stamp_skip",
     "thread_lock_key",
     "tool_sends_for_reply",
+    "with_skip_reason",
 ]
 
 MAX_REPLY_CHARS = 5000  # same cap as the send_email tool
@@ -88,6 +103,8 @@ _NO_REPLY_LOCAL = re.compile(
 _MESSAGE_ID = re.compile(r"^<[!-;=?-~]+@[!-;=?-~]+>$")
 # Why a stored row stays out of the chat: nothing proved who wrote it, or it was
 # never meant for the agent.
+_AGENT_SEND_KEYS = ("reply_to_email_id", "inbound_email_id", "thread_sender")
+_NOT_TEAM_SEND_KEYS = ("forwarded_from", "system_kind", "call_id", "tool_invocation_id")
 _UNTRUSTED_SKIPS = (
     "auto_generated",
     "sender_blocked",
@@ -131,11 +148,20 @@ def is_authenticated(email: Email) -> bool:
     return email.from_verified is True
 
 
-def _sender_blocked(
-    sender: str, domain: EmailDomain, recipients: Sequence[str], base_domain: str
-) -> bool:
+def with_skip_reason(reason: str) -> ColumnElement[Any]:
+    """``metadata`` with this skip reason merged in. ``||`` on a JSON ``null``
+    makes an array and the key is lost, so that row starts from ``{}``."""
+    current = func.coalesce(
+        func.nullif(Email.metadata_, literal_column("'null'::jsonb")),
+        literal_column("'{}'::jsonb"),
+    )
+    return current.op("||")(func.jsonb_build_object("agent_skip_reason", reason))
+
+
+def _sender_blocked(sender: str, recipients: Sequence[str], base_domain: str) -> bool:
     """True for an address that must never get a reply: a daemon, a noreply
-    box, Hail itself, or this message's own recipient (a loop)."""
+    box, Hail itself, or this message's own recipient (a loop). A custom
+    domain's host is not checked: the team's members send from it."""
     local, _, host = sender.rpartition("@")
     if not local or not host:
         return True
@@ -143,9 +169,7 @@ def _sender_blocked(
         return True
     if base_domain and host == base_domain.lower():
         return True
-    return sender == domain.domain.lower() or sender in {
-        normalize_address(r) for r in recipients
-    }
+    return sender in {normalize_address(r) for r in recipients}
 
 
 async def sender_refusal(
@@ -308,7 +332,7 @@ async def queue_decision(
     if parsed.auto_generated or not envelope_from:
         return skip("auto_generated")
     sender = normalize_address(parsed.from_address or "")
-    if _sender_blocked(sender, domain, recipients, base_domain):
+    if _sender_blocked(sender, recipients, base_domain):
         return skip("sender_blocked")
     refusal = await sender_refusal(
         db, domain, sender=sender, verified=proves_sender(parsed, dmarc_verdict)
@@ -341,9 +365,7 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
         .where(*base, Email.requested_at < cutoff)
         .values(
             agent_reply_state="skipped",
-            metadata_=Email.metadata_.op("||")(
-                func.jsonb_build_object("agent_skip_reason", "expired")
-            ),
+            metadata_=with_skip_reason("expired"),
         )
     )
     await db.execute(
@@ -554,14 +576,30 @@ def _answered_id(row: Email) -> uuid.UUID | None:
         return None
 
 
-async def _answers_trusted(
+def _agent_wrote(row: Email) -> bool:
+    """An agent's outbound row. Deleting the agent clears ``agent_id``, so the
+    metadata counts too."""
+    meta = row.metadata_ or {}
+    return row.agent_id is not None or any(key in meta for key in _AGENT_SEND_KEYS)
+
+
+def _team_send(row: Email) -> bool:
+    """Mail a person at the org sent. A forward holds a stranger's words, and
+    the other marked rows are Hail's own mail or a call's."""
+    meta = row.metadata_ or {}
+    return not any(key in meta for key in _NOT_TEAM_SEND_KEYS)
+
+
+async def _thread_rows(
     db: AsyncSession, email: Email, sender: str, rows: Sequence[Email]
 ) -> list[Email]:
-    """``rows`` without any agent row that answers something unproven. A reply to
-    forged mail says what the forger asked for, so it stays out too. An outbound
-    row with no agent was written by the org, so it stays in."""
+    """The ``rows`` a chat may read. An agent row must answer something proven:
+    a reply to forged mail says what the forger asked for. Any other outbound
+    row must be a team send."""
     answered = {
-        r.id: _answered_id(r) for r in rows if r.direction == "outbound" and r.agent_id
+        r.id: _answered_id(r)
+        for r in rows
+        if r.direction == "outbound" and _agent_wrote(r)
     }
     ids = {i for i in answered.values() if i is not None}
     trusted: set[uuid.UUID] = set()
@@ -573,7 +611,12 @@ async def _answers_trusted(
             func.lower(Email.from_address) == sender,
         )
         trusted = set((await db.execute(stmt)).scalars().all())
-    return [r for r in rows if r.id not in answered or answered[r.id] in trusted]
+    return [
+        r
+        for r in rows
+        if r.direction != "outbound"
+        or (answered[r.id] in trusted if r.id in answered else _team_send(r))
+    ]
 
 
 async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
@@ -608,7 +651,7 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
         # Newest first, so a long thread keeps its recent mail.
         newest = stmt.order_by(Email.requested_at.desc()).limit(CHAT_LIMIT)
         rows = (await db.execute(newest)).scalars().all()
-        rows = await _answers_trusted(db, email, sender, rows)
+        rows = await _thread_rows(db, email, sender, rows)
         frontier = [r for r in rows if r.id not in seen]
         seen.update({r.id: r for r in frontier})
     earlier = [row for row in seen.values() if row.id != email.id]
@@ -660,9 +703,9 @@ def _plain_body(email: Email) -> str:
 def build_chat_messages(
     agent: Agent, thread: list[Email], *, trust: SenderTrust
 ) -> list[dict[str, Any]]:
-    """OpenAI-style messages: the system message, then the thread. Inbound
-    mail is ``user``, labeled so the model reads it as mail, and replies are
-    ``assistant``."""
+    """OpenAI-style messages: the system message, then the thread. Mail from
+    people is ``user``, labeled so the model reads it as mail, and only an
+    agent's own replies are ``assistant``."""
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -676,8 +719,11 @@ def build_chat_messages(
                 f"Subject: {row.subject}\n\n{_plain_body(row)}"
             )
             messages.append({"role": "user", "content": text})
-        else:
+        elif _agent_wrote(row):
             messages.append({"role": "assistant", "content": _plain_body(row)})
+        else:
+            text = f"{TEAM_EMAIL_LABEL}\nSubject: {row.subject}\n\n{_plain_body(row)}"
+            messages.append({"role": "user", "content": text})
     return messages
 
 
