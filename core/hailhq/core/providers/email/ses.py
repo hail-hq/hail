@@ -22,6 +22,7 @@ from typing import Any
 from uuid import UUID
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from hailhq.core.config import settings
 from hailhq.core.providers.email.base import (
@@ -33,6 +34,17 @@ from hailhq.core.providers.email.base import (
     ProviderSendResult,
 )
 
+# Every SES call shares these. botocore's defaults (60 seconds each, 5 attempts)
+# let one send run for minutes. An agent's reply is resent once its queued row is
+# older than _QUEUED_GRACE in routes/internal/agent.py, so a send must end first.
+SES_CONNECT_TIMEOUT_SECONDS = 5
+SES_READ_TIMEOUT_SECONDS = 20
+SES_MAX_ATTEMPTS = 2
+# Both attempts timing out, plus the one backoff between them (at most a second).
+SES_SEND_BUDGET_SECONDS = (
+    SES_MAX_ATTEMPTS * (SES_CONNECT_TIMEOUT_SECONDS + SES_READ_TIMEOUT_SECONDS) + 1
+)
+
 
 def _build_default_client() -> Any:
     """Lazy-construct a SESv2 boto3 client from ``settings``.
@@ -41,7 +53,17 @@ def _build_default_client() -> Any:
     ``~/.aws/credentials``, IAM role) when explicit keys are empty, so
     operators running on EC2/ECS get IAM-role creds automatically.
     """
-    return boto3.client("sesv2", **_default_aws_options())
+    return boto3.client(
+        "sesv2",
+        region_name=settings.aws_region or None,
+        aws_access_key_id=settings.aws_access_key_id or None,
+        aws_secret_access_key=settings.aws_secret_access_key or None,
+        config=Config(
+            connect_timeout=SES_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=SES_READ_TIMEOUT_SECONDS,
+            retries={"total_max_attempts": SES_MAX_ATTEMPTS, "mode": "standard"},
+        ),
+    )
 
 
 def _default_aws_options() -> dict[str, str | None]:

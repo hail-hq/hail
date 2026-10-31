@@ -65,7 +65,9 @@ a row that qualifies. The newest rows win when a thread is long.
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
 the earlier row: a sent one is done, and a failed one is delivered again, as is a
 queued one past a 60-second grace. A resend first claims the row by resetting
-`requested_at`, so a retry during a slow resend waits. When a reply row exists, the
+`requested_at`, guarded on the old status and time, so a retry during a slow resend
+waits. The send writes its result only while that claim holds. SES calls have a
+total budget of 51 seconds, under the grace. When a reply row exists, the
 worker does not call the model or its tools again. The reply carries
 `In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. Tool emails carry `Auto-Submitted: auto-generated`. It goes
 out from the hail-mail address, or `noreply@` on a custom domain: `To` and `Cc`
@@ -74,6 +76,10 @@ never `Reply-To`. SES
 overrides `Message-ID`, so thread lookup also matches the local part of a
 referenced id against `provider_message_id`. Replies bill as outbound email and
 write audit action `agent.email.reply`.
+
+`reply_to_email_id`, `inbound_email_id`, and `thread_sender` are reserved in `POST
+/emails` metadata. A row counts as an earlier reply only if an agent wrote it to
+this sender.
 
 ## Tools
 

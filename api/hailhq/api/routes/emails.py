@@ -333,6 +333,7 @@ async def deliver_email(
     attachment_rows: list[FileUpload] | None = None,
     *,
     billable: bool = True,
+    claimed_at: datetime | None = None,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
@@ -345,7 +346,14 @@ async def deliver_email(
     on transport failure — the caller owns HTTP semantics (502 + audit
     for the public route, a spoken sentence for the agent route). Never
     raises for provider errors.
+
+    ``claimed_at`` is the row's ``requested_at`` when this send claimed it. The
+    outcome is written only while that claim holds: a newer resend owns the row
+    otherwise, and it records the result and the charge.
     """
+    owned = (Email.id == email.id,) + (
+        (Email.requested_at == claimed_at,) if claimed_at is not None else ()
+    )
     attachment_rows = attachment_rows or []
     # One-click unsubscribe (RFC 8058) only when the send has exactly one
     # recipient (to + cc + bcc, deduped). The headers are the same for every
@@ -412,15 +420,18 @@ async def deliver_email(
             exc_info=True,
         )
         now = datetime.now(timezone.utc)
-        await db.execute(
+        written = await db.execute(
             update(Email)
-            .where(Email.id == email.id)
+            .where(*owned)
             .values(
                 status="failed",
                 end_reason=type(exc).__name__,
                 failed_at=now,
             )
         )
+        if not written.rowcount:  # type: ignore[attr-defined]
+            await db.commit()
+            return type(exc).__name__
         await fanout_email_event(
             db,
             organization_id=email.organization_id,
@@ -448,15 +459,19 @@ async def deliver_email(
         return type(exc).__name__
 
     now = datetime.now(timezone.utc)
-    await db.execute(
+    written = await db.execute(
         update(Email)
-        .where(Email.id == email.id)
+        .where(*owned)
         .values(
             status="sent",
             provider_message_id=result.provider_message_id,
             sent_at=now,
         )
     )
+    if not written.rowcount:  # type: ignore[attr-defined]
+        await db.commit()
+        logger.warning("email_id=%s lost its send claim", email.id)
+        return None
     record_sent_event(
         db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
     )

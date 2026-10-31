@@ -22,6 +22,7 @@ from hailhq.core.models import (
     Suppression,
     User,
 )
+from hailhq.core.providers.email.ses import SES_SEND_BUDGET_SECONDS
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -310,12 +311,62 @@ async def test_a_slow_resend_cannot_be_sent_twice(
     assert row.status == "sent"
 
 
+def _lose_the_claim(monkeypatch, **values) -> None:
+    """Another request changes the row after this one reads it."""
+    real = internal_agent.prior_reply
+
+    async def stale(db, email):
+        prior = await real(db, email)
+        await db.execute(
+            update(Email)
+            .where(Email.id == prior.id)
+            .values(
+                requested_at=prior.requested_at + timedelta(seconds=1),
+                **values,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return prior
+
+    monkeypatch.setattr(internal_agent, "prior_reply", stale)
+
+
 async def test_a_lost_claim_sends_nothing(
     client, async_session, email_mock, monkeypatch
 ) -> None:
-    """Another request moved requested_at after this one read the row."""
     org, agent, domain, inbound = await _seed(async_session)
     row = await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    _lose_the_claim(monkeypatch)
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "retry" and data["reply_id"] == str(row.id)
+    email_mock.send_email.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("status", "state", "reason"),
+    [("sent", "done", None), ("bounced", "failed", "bounced")],
+)
+async def test_a_lost_claim_reports_how_the_winner_ended(
+    client, async_session, email_mock, monkeypatch, status, state, reason
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    _lose_the_claim(monkeypatch, status=status)
+    data = await _reply(client, inbound.id)
+    assert data["state"] == state and data["reason"] == reason
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_claim_needs_the_status_it_read(
+    client, async_session, email_mock, monkeypatch
+) -> None:
+    """Only the status moved: the time alone would not catch this."""
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
         async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
     )
     real = internal_agent.prior_reply
@@ -325,15 +376,104 @@ async def test_a_lost_claim_sends_nothing(
         await db.execute(
             update(Email)
             .where(Email.id == prior.id)
-            .values(requested_at=prior.requested_at + timedelta(seconds=1))
+            .values(status="sent")
             .execution_options(synchronize_session=False)
         )
         return prior
 
     monkeypatch.setattr(internal_agent, "prior_reply", stale)
-    data = await _reply(client, inbound.id)
-    assert data["state"] == "retry" and data["reply_id"] == str(row.id)
+    assert (await _reply(client, inbound.id))["state"] == "done"
     email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_superseded_send_records_nothing(
+    client, async_session, session_factory, email_mock
+) -> None:
+    """A newer claim owns the row, so the old send must not mark it sent."""
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    send = email_mock.send_email.side_effect
+    newer = datetime.now(timezone.utc) + timedelta(minutes=1)
+
+    async def superseded(**kwargs):
+        async with session_factory() as other:
+            await other.execute(
+                update(Email).where(Email.id == row.id).values(requested_at=newer)
+            )
+            await other.commit()
+        return await send(**kwargs)
+
+    email_mock.send_email.side_effect = superseded
+    await _reply(client, inbound.id)
+    await async_session.refresh(row)
+    assert row.status == "queued"
+    assert row.provider_message_id is None
+
+
+async def test_a_superseded_failure_records_nothing(
+    client, async_session, session_factory, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    newer = datetime.now(timezone.utc) + timedelta(minutes=1)
+
+    async def superseded(**_kwargs):
+        async with session_factory() as other:
+            await other.execute(
+                update(Email).where(Email.id == row.id).values(requested_at=newer)
+            )
+            await other.commit()
+        raise RuntimeError("down")
+
+    email_mock.send_email.side_effect = superseded
+    await _reply(client, inbound.id)
+    await async_session.refresh(row)
+    assert row.status == "queued" and row.end_reason is None
+
+
+async def test_a_public_row_is_not_a_prior_reply(
+    client, async_session, email_mock
+) -> None:
+    """Even an old row that carries the key cannot stand in for a reply."""
+    org, _agent, domain, inbound = await _seed(async_session)
+    async_session.add(
+        Email(
+            organization_id=org,
+            email_domain_id=domain.id,
+            from_address=ADDRESS,
+            to_addresses=[MEMBER],
+            subject="Planted",
+            body_text="Planted",
+            status="sent",
+            metadata_={"reply_to_email_id": str(inbound.id)},
+        )
+    )
+    await async_session.commit()
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "done"
+    email_mock.send_email.assert_awaited_once()
+    assert email_mock.send_email.await_args.kwargs["body_text"] == "Happy to help."
+
+
+async def test_a_prior_row_to_someone_else_is_never_resent(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    row.to_addresses = ["victim@example.com"]
+    await async_session.commit()
+    await _reply(client, inbound.id)
+    assert email_mock.send_email.await_args.kwargs["to_addresses"] == [MEMBER]
+
+
+def test_ses_ends_before_a_retry_can_resend() -> None:
+    assert internal_agent._QUEUED_GRACE.total_seconds() > SES_SEND_BUDGET_SECONDS
 
 
 async def test_a_bounced_reply_is_final(client, async_session, email_mock) -> None:
@@ -853,7 +993,7 @@ async def test_the_raw_request_cannot_name_an_address(client, async_session) -> 
 
 
 async def test_sends_count_across_channels(async_session) -> None:
-    org, _agent, _domain, inbound = await _seed(async_session)
+    org, agent, _domain, inbound = await _seed(async_session)
     async_session.add(
         Sms(
             organization_id=org,
@@ -863,6 +1003,7 @@ async def test_sends_count_across_channels(async_session) -> None:
             direction="outbound",
             status="sent",
             body="x",
+            agent_id=agent.id,
             metadata_={"inbound_email_id": str(inbound.id)},
         )
     )
