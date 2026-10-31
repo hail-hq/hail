@@ -398,6 +398,109 @@ async def test_tools_run_only_during_a_claim(
     email_mock.send_email.assert_not_awaited()
 
 
+@pytest.mark.parametrize("verdict", ["GRAY", "PROCESSING_FAILED", None])
+async def test_the_server_refuses_tools_for_an_unproven_sender(
+    client, async_session, email_mock, sms_mock, add_phone_number, verdict
+) -> None:
+    """A plain reply is allowed under anyone. The tools are not, whatever the
+    worker sends."""
+    org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", dmarc=verdict, sender="stranger@example.net"
+    )
+    await add_phone_number(async_session, org, "+14155550100")
+    for response in (
+        await _tool_email(client, inbound.id),
+        await _tool_sms(client, inbound.id),
+    ):
+        assert response == {
+            "ok": False,
+            "spoken": "This email can no longer send messages.",
+        }
+    email_mock.send_email.assert_not_awaited()
+    sms_mock.send_sms.assert_not_awaited()
+
+
+async def test_an_unproven_sender_can_get_a_plain_reply(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", dmarc="GRAY", sender="stranger@example.net"
+    )
+    assert (await _reply(client, inbound.id))["state"] == "done"
+
+
+async def test_a_failed_dmarc_gets_no_reply_under_anyone(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", dmarc="FAIL", sender="stranger@example.net"
+    )
+    assert (await _reply(client, inbound.id))["reason"] == "sender_not_verified"
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_proven_outside_sender_keeps_the_tools(
+    client, async_session, email_mock
+) -> None:
+    """The owner asked for full tools under anyone, for a proven address."""
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="stranger@example.net"
+    )
+    assert (await _tool_email(client, inbound.id))["ok"] is True
+
+
+async def test_tool_sends_stop_at_the_thread_cap(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    for _ in range(email_agent.MAX_REPLIES_PER_THREAD):
+        async_session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_={"thread_sender": MEMBER},
+            )
+        )
+    await async_session.commit()
+    data = await _tool_email(client, inbound.id)
+    assert data == {
+        "ok": False,
+        "spoken": "That is the limit of messages for one email.",
+    }
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_tool_send_records_its_thread(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    await _tool_email(client, inbound.id)
+    row = (
+        await async_session.execute(select(Email).where(Email.subject == "Note"))
+    ).scalar_one()
+    assert row.metadata_["thread_sender"] == MEMBER
+
+
+async def test_a_custom_domain_reply_ignores_the_to_header(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, domain, inbound = await _seed(async_session)
+    domain.kind = "custom"
+    domain.domain = "acme.com"
+    domain.local_prefix_user = None
+    domain.local_prefix_org = None
+    inbound.to_addresses = ["ceo@acme.com"]
+    await async_session.commit()
+    await _reply(client, inbound.id)
+    assert email_mock.send_email.await_args.kwargs["from_address"] == "noreply@acme.com"
+
+
 async def test_tools_read_the_scope_again(client, async_session, email_mock) -> None:
     _org, _agent, _domain, inbound = await _seed(
         async_session, sender="stranger@example.net"

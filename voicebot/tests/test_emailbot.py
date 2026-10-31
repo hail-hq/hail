@@ -12,6 +12,7 @@ from hailhq.core.agent_tools import send_email, send_sms
 from hailhq.core.agent_tools.email_run import email_run_tools
 from hailhq.core.agent_tools.spec import NO_CALL, ToolContext
 from hailhq.core.config import settings
+from hailhq.core.email_agent import MAX_REPLIES_PER_THREAD
 from hailhq.core.models import Agent, Email, EmailDomain, OrganizationMember, User
 from hailhq.voicebot import emailbot
 from hailhq.voicebot.pipeline import ProviderKeyError
@@ -28,7 +29,9 @@ def _internal_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "hail_internal_secret", "test-secret")
 
 
-async def _seed(session, *, scope="members", tools=None, sender=MEMBER):
+async def _seed(
+    session, *, scope="members", tools=None, sender=MEMBER, dmarc="PASS", earlier=False
+):
     org = uuid.uuid4()
     agent = Agent(
         organization_id=org, name="Inbox", system_prompt="Help the team.", tools=tools
@@ -73,11 +76,28 @@ async def _seed(session, *, scope="members", tools=None, sender=MEMBER):
         body_text="Can you help?",
         status="received",
         message_id="<one@example.com>",
-        dmarc_verdict="PASS",
+        references_ids=["<zero@example.com>"] if earlier else None,
+        dmarc_verdict=dmarc,
         agent_id=agent.id,
         agent_reply_state="pending",
     )
     session.add(row)
+    if earlier:
+        session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                email_domain_kind="hail_mail",
+                direction="inbound",
+                from_address=sender,
+                to_addresses=[ADDRESS],
+                subject="Question",
+                body_text="Earlier private note",
+                status="received",
+                message_id="<zero@example.com>",
+                dmarc_verdict="PASS",
+            )
+        )
     await session.commit()
     return row.id
 
@@ -187,7 +207,7 @@ async def test_the_model_reads_the_mail_as_a_labeled_message(
     assert text[1].startswith(f"Email from {MEMBER}")
 
 
-async def test_outside_senders_are_framed_as_unverified(
+async def test_a_proven_outside_sender_is_framed_and_keeps_tools(
     async_session, monkeypatch
 ) -> None:
     await _seed(async_session, scope="anyone", sender="stranger@example.net")
@@ -197,6 +217,70 @@ async def test_outside_senders_are_framed_as_unverified(
         SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
     )
     assert "outside the organization" in str(llm.calls[0]["items"][0].text_content)
+    assert llm.calls[0]["tools"]
+
+
+async def test_an_unverified_sender_gets_no_tools_and_no_history(
+    async_session, monkeypatch
+) -> None:
+    await _seed(
+        async_session,
+        scope="anyone",
+        sender="stranger@example.net",
+        dmarc="GRAY",
+        earlier=True,
+    )
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    call = llm.calls[0]
+    assert not call["tools"]
+    assert len(llm.calls) == 1
+    text = " ".join(str(i.text_content) for i in call["items"])
+    assert "may be forged" in text
+    assert "Earlier private note" not in text
+    assert api.post.await_args.args[0] == "/internal/agent/reply-email"
+
+
+async def test_a_proven_member_reads_the_history(async_session, monkeypatch) -> None:
+    await _seed(async_session, earlier=True)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" in text
+
+
+async def test_the_cap_is_read_before_the_model_is_paid(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    row = await async_session.get(Email, email_id)
+    for _ in range(MAX_REPLIES_PER_THREAD):
+        async_session.add(
+            Email(
+                organization_id=row.organization_id,
+                email_domain_id=row.email_domain_id,
+                agent_id=row.agent_id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_={"thread_sender": MEMBER},
+            )
+        )
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock())
+    assert await emailbot.reply_once(api) is True
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
 
 
 async def test_a_tool_call_reaches_the_email_run_route(

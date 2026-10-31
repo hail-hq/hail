@@ -50,9 +50,13 @@ async def run_chat(
             last = round_no == max_rounds
             parts: list[str] = []
             calls: list[FunctionToolCall] = []
-            async with llm.chat(
-                chat_ctx=chat_ctx, tools=tools, tool_choice="none" if last else "auto"
-            ) as stream:
+            # Providers reject tool_choice when there are no tools.
+            options = (
+                {"tools": tools, "tool_choice": "none" if last else "auto"}
+                if tools
+                else {}
+            )
+            async with llm.chat(chat_ctx=chat_ctx, **options) as stream:
                 async for chunk in stream:
                     delta = getattr(chunk, "delta", None)
                     if delta is None:
