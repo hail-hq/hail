@@ -585,21 +585,23 @@ def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> 
 
 async def _rate_before_wipe(
     db: AsyncSession, row: CarrierVerification, provider: object
-) -> None:
+) -> bool:
     """Before ``provider_refs`` is emptied: the rater charges the carrier
     review by the campaign id in the refs, so let it read them first. A
     campaign's ping when it was filed can be lost; once the id is gone,
     neither a ping nor the rater's sweep can charge it. Awaited, not
     fire-and-forget, so the rater reads before the wipe is committed.
 
-    Commits first. Never call it while holding the organization's lock
-    (``org_lock``): the rater takes the same lock."""
+    Commits first, which ends any row lock; True when it did. Never call it
+    while holding the organization's lock (``org_lock``): the rater takes
+    the same lock."""
     if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
-        return
+        return False
     # Saved with the stamp, so the rater reads a campaign filed just now.
     _keep_refs(row, provider)
     await db.commit()
     await rate_sms_registration(str(row.id))
+    return True
 
 
 async def _audit_carrier_rejection(
@@ -1373,8 +1375,9 @@ async def _submit_row(
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
         await db.refresh(row)
-        if row.state != "rejected":
+        if row.state == "submitting":
             # The discard failed: wait for the next try, as when it is down.
+            # A row that moved on meanwhile (a cancel) is left as it is.
             row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
             row.approved_by = None
             await db.commit()
@@ -1495,7 +1498,24 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row keeps its state and its refs and is tried again next tick; the
     sweeper never dies on carrier trouble."""
-    await _rate_before_wipe(db, row, provider)
+    state = row.state
+    if await _rate_before_wipe(db, row, provider):
+        # Its commit ended the row lock: lock the row again, and leave it
+        # when another worker holds it or it moved on (a cancel, say).
+        relocked = (
+            await db.execute(
+                select(CarrierVerification)
+                .where(
+                    CarrierVerification.id == row.id,
+                    CarrierVerification.state == state,
+                )
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if relocked is None:
+            await db.rollback()
+            return
     # What check() wrote into the refs in place is kept if the discard
     # fails. Flushed, not committed: a commit would end the row lock while
     # the discard runs.

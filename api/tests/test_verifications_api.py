@@ -3666,6 +3666,42 @@ async def test_a_refused_retry_rates_the_campaign_before_its_id_is_wiped(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_refusal_leaves_a_row_cancelled_while_it_was_rated(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """Rating commits, which ends the row lock. A cancel in that gap wins:
+    the refusal neither discards nor rejects the row."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def cancel_meanwhile(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state, row.provider_refs = "cancelled", {}
+            await other.commit()
+
+    async def refuse(refs):
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    discarded: list[dict] = []
+
+    async def discard(refs):
+        discarded.append(refs)
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", cancel_meanwhile)
+    sms_carrier.check, sms_carrier.discard = refuse, discard
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and row.provider_refs == {}
+    assert discarded == []
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
     client, org_and_key, sms_carrier, async_session, pinged, rated
 ) -> None:
