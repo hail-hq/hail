@@ -1374,13 +1374,23 @@ async def _submit_row(
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
+        # The discard failed: wait for the next try, as when it is down. In
+        # one statement, so a row that moved on meanwhile is left as it is.
+        back = await db.execute(
+            update(CarrierVerification)
+            .where(
+                CarrierVerification.id == row.id,
+                CarrierVerification.state == "submitting",
+            )
+            .values(
+                state="awaiting_review",
+                updated_at=datetime.now(timezone.utc),
+                approved_by=None,
+            )
+        )
+        await db.commit()
         await db.refresh(row)
-        if row.state == "submitting":
-            # The discard failed: wait for the next try, as when it is down.
-            # A row that moved on meanwhile (a cancel) is left as it is.
-            row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
-            row.approved_by = None
-            await db.commit()
+        if back.rowcount:
             _notify_if_changed(row, before)
         elif raise_refused:
             raise
