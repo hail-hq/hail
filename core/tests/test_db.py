@@ -97,6 +97,15 @@ def test_a_url_with_no_host_stays_valid():
     assert to_async_url(url).startswith("postgresql+asyncpg:///hail?host=")
 
 
+def test_a_rewritten_query_keeps_the_text_after_a_hash():
+    assert to_async_url("postgres://u:p@h/db?sslmode=require#tail") == (
+        "postgresql+asyncpg://u:p@h/db?ssl=require#tail"
+    )
+    assert to_sync_url("postgres://u:p@h/db?pgbouncer=true&sslmode=require#tail") == (
+        "postgresql+psycopg://u:p@h/db?sslmode=require#tail"
+    )
+
+
 def test_pgbouncer_flag_turns_off_prepared_statements():
     assert engine_options("postgres://u:p@h/db?pgbouncer=true&sslmode=require") == {
         "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}

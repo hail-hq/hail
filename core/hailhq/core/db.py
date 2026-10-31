@@ -70,8 +70,10 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
 def _with_query(url: str, query: str) -> str:
     """Replace the query of ``url``. ``urlunsplit`` would drop the ``//`` of a
     URL with no host, because it does not know these schemes."""
-    base = url.partition("?")[0]
-    return f"{base}?{query}" if query else base
+    base, _, rest = url.partition("?")
+    fragment = rest.partition("#")[2]
+    tail = f"#{fragment}" if fragment else ""
+    return f"{base}?{query}{tail}" if query else f"{base}{tail}"
 
 
 def _sanitize_asyncpg_query(query: str) -> str:

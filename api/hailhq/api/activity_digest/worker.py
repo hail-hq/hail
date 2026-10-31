@@ -14,6 +14,7 @@ from uuid import UUID
 
 import httpx
 from hailhq.api.auth import hash_key
+from hailhq.api.idempotency import STILL_PROCESSING
 from hailhq.core.schemas import EmailCreate
 from hailhq.core.urls import canonical_url, join_url
 from pydantic import Field, SecretStr, field_validator
@@ -78,6 +79,13 @@ class Result:
         }
 
 
+def is_terminal(response: httpx.Response) -> bool:
+    status = response.status_code
+    if status == 409:
+        return STILL_PROCESSING not in response.text
+    return status in (301, 308) or (400 <= status < 500 and status not in (408, 429))
+
+
 class DigestClient:
     def __init__(self, config: DigestSettings, http: httpx.AsyncClient):
         self.config = config
@@ -95,9 +103,9 @@ class DigestClient:
             timeout=30,
         )
         if not response.is_success:
-            if response.status_code < 500 and response.status_code != 429:
-                # A retry does not clear these. A bad key stays bad, and cached
-                # pre-send rejections can persist after a credit top-up.
+            if is_terminal(response):
+                # A bad key stays bad, and cached pre-send rejections can
+                # persist after a credit top-up.
                 # A new key could duplicate an ambiguously accepted email.
                 raise ReviewRequired(f"api_rejection_{response.status_code}")
             raise RetryLater(f"api_status_{response.status_code}")

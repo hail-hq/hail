@@ -17,6 +17,7 @@ from hailhq.api.activity_digest.worker import (
     RetryLater,
     ReviewRequired,
 )
+from hailhq.api.idempotency import STILL_PROCESSING
 from hailhq.core.schemas import EmailCreate
 
 NOW = datetime(2026, 10, 29, 9, tzinfo=timezone.utc)
@@ -233,14 +234,14 @@ async def test_recipient_is_one_internal_address(setup, recipient):
         "reports@hail.so\n",
     ],
 )
-def test_a_sender_the_email_schema_refuses_fails_validation(setup, sender):
+def test_an_invalid_sender_fails_validation(setup, sender):
     config, _ = setup
     config.from_address = sender
     with pytest.raises(ReviewRequired, match="sender_invalid"):
         config.validate_send()
 
 
-@pytest.mark.parametrize("status", [301, 401, 403, 404])
+@pytest.mark.parametrize("status", [301, 308, 401, 403, 404])
 async def test_a_rejected_read_requires_review(setup, status):
     config, repository = setup
     async with httpx.AsyncClient(
@@ -252,7 +253,7 @@ async def test_a_rejected_read_requires_review(setup, status):
             ).run_once(NOW)
 
 
-@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("status", [302, 307, 408, 429, 503])
 async def test_a_busy_api_retries_with_its_status_code(setup, status):
     config, repository = setup
     async with httpx.AsyncClient(
@@ -262,6 +263,26 @@ async def test_a_busy_api_retries_with_its_status_code(setup, status):
             await DigestService(
                 config, repository, DigestClient(config, http)
             ).run_once(NOW)
+
+
+async def test_a_send_still_in_progress_retries(setup):
+    config, _ = setup
+    answer = httpx.Response(409, json={"detail": STILL_PROCESSING})
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: answer)
+    ) as http:
+        with pytest.raises(RetryLater, match="api_status_409"):
+            await DigestClient(config, http).request("emails", payload={}, key="k")
+
+
+async def test_a_reused_key_with_a_new_body_requires_review(setup):
+    config, _ = setup
+    answer = httpx.Response(409, json={"detail": "reused with a different body"})
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: answer)
+    ) as http:
+        with pytest.raises(ReviewRequired, match="api_rejection_409"):
+            await DigestClient(config, http).request("emails", payload={}, key="k")
 
 
 async def test_unverified_sender_never_sends(setup):
@@ -319,6 +340,12 @@ async def test_database_failure_never_sends_partial_data(setup):
     assert not any(r.method == "POST" for r in requests)
 
 
+async def wait_for_runs(service, count=1):
+    async with asyncio.timeout(1):
+        while service.run_once.await_count < count:
+            await asyncio.sleep(0)
+
+
 async def test_worker_handles_a_day_once_and_stops_promptly(caplog):
     service = AsyncMock()
     from hailhq.api.activity_digest.worker import Result
@@ -326,8 +353,7 @@ async def test_worker_handles_a_day_once_and_stops_promptly(caplog):
     service.run_once.return_value = Result("submitted", "2026-10-29", EMAIL_ID)
     worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
     task = asyncio.create_task(worker.run_forever())
-    while not service.run_once.await_count:
-        await asyncio.sleep(0)
+    await wait_for_runs(service)
     await asyncio.sleep(0.01)
     await worker.stop()
     await asyncio.wait_for(task, timeout=1)
@@ -340,8 +366,7 @@ async def test_worker_waits_until_the_next_day_after_a_terminal_rejection(caplog
     service.run_once.side_effect = ReviewRequired("api_rejection_402")
     worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
     task = asyncio.create_task(worker.run_forever())
-    while not service.run_once.await_count:
-        await asyncio.sleep(0)
+    await wait_for_runs(service)
     await asyncio.sleep(0.01)
     await worker.stop()
     await asyncio.wait_for(task, timeout=1)
@@ -354,9 +379,7 @@ async def test_worker_logs_the_retry_code_and_keeps_the_date_open(caplog):
     service.run_once.side_effect = RetryLater("api_status_503")
     worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
     task = asyncio.create_task(worker.run_forever())
-    async with asyncio.timeout(1):
-        while service.run_once.await_count < 2:
-            await asyncio.sleep(0)
+    await wait_for_runs(service, 2)
     await worker.stop()
     await asyncio.wait_for(task, timeout=1)
     assert "failed code=api_status_503" in caplog.text
@@ -367,8 +390,7 @@ async def test_worker_does_not_log_exception_content(caplog):
     service.run_once.side_effect = RuntimeError("private@example.com secret-bearer")
     worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
     task = asyncio.create_task(worker.run_forever())
-    while not service.run_once.await_count:
-        await asyncio.sleep(0)
+    await wait_for_runs(service)
     await worker.stop()
     await asyncio.wait_for(task, timeout=1)
     assert "failed type=RuntimeError" in caplog.text

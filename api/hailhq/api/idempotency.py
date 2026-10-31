@@ -41,6 +41,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 # Sentinel `response_status` for an in-flight handler. Real HTTP responses
 # are always >= 100, so 0 unambiguously means "another worker is running".
 _IN_FLIGHT_STATUS = 0
+STILL_PROCESSING = "request with this idempotency key is still processing"
 
 _TTL = timedelta(hours=24)
 
@@ -253,7 +254,7 @@ async def idempotency_dep(
     if existing.response_status == _IN_FLIGHT_STATUS:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail="request with this idempotency key is still processing",
+            detail=STILL_PROCESSING,
         )
 
     ctx = IdempotencyContext(
