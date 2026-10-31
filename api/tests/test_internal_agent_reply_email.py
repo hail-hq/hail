@@ -114,6 +114,7 @@ async def _seed(
         message_id="<two@example.com>",
         references_ids=["<one@example.com>"],
         dmarc_verdict=dmarc,
+        from_verified=dmarc == "PASS",
         agent_id=agent.id,
         agent_reply_state=state,
     )
@@ -268,7 +269,10 @@ async def test_the_thread_cap_holds_at_send(client, async_session, email_mock) -
                 subject="Re: Question",
                 body_text="Hello",
                 status="sent",
-                metadata_={"reply_to_email_id": str(uuid.uuid4())},
+                metadata_={
+                    "reply_to_email_id": str(uuid.uuid4()),
+                    "sender_verified": True,
+                },
             )
         )
     await async_session.commit()
@@ -427,6 +431,27 @@ async def test_an_unproven_sender_can_get_a_plain_reply(
         async_session, scope="anyone", dmarc="GRAY", sender="stranger@example.net"
     )
     assert (await _reply(client, inbound.id))["state"] == "done"
+
+
+async def test_a_reply_records_which_budget_it_spends(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", dmarc="GRAY", sender="stranger@example.net"
+    )
+    data = await _reply(client, inbound.id)
+    reply = await async_session.get(Email, uuid.UUID(data["reply_id"]))
+    assert reply.metadata_["sender_verified"] is False
+
+
+async def test_a_pass_alone_is_not_the_stamp(client, async_session, email_mock) -> None:
+    """Only ingest proves a sender."""
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    inbound.from_verified = False
+    await async_session.commit()
+    assert (await _tool_email(client, inbound.id))["ok"] is False
+    assert (await _reply(client, inbound.id))["reason"] == "sender_not_verified"
+    email_mock.send_email.assert_not_awaited()
 
 
 async def test_a_failed_dmarc_gets_no_reply_under_anyone(

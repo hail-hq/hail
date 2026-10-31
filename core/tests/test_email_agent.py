@@ -313,7 +313,7 @@ async def test_anyone_scope_refuses_two_from_addresses(async_session):
 async def test_sender_trust_needs_a_pass(async_session):
     org, _agent, domain = await _seed(async_session, scope="anyone")
     member = _row(org, domain)
-    gray = _row(org, domain, dmarc_verdict="GRAY")
+    gray = _row(org, domain, dmarc_verdict="GRAY", from_verified=False)
     outside = _row(org, domain, from_address="stranger@example.net")
     async_session.add_all([member, gray, outside])
     await async_session.commit()
@@ -336,12 +336,80 @@ async def test_thread_cap(async_session):
                 subject="Re: Question",
                 body_text="Hello",
                 status="sent",
-                metadata_={"reply_to_email_id": str(uuid.uuid4())},
+                metadata_={
+                    "reply_to_email_id": str(uuid.uuid4()),
+                    "sender_verified": True,
+                },
             )
         )
     await async_session.commit()
     row = await _ingest(async_session, _raw())
     assert row.metadata_["agent_skip_reason"] == "thread_cap"
+
+
+@pytest.mark.parametrize(
+    ("message", "sender", "expected"),
+    [
+        ({}, MEMBER, True),
+        ({"dmarc_verdict": "GRAY"}, MEMBER, False),
+        ({"dmarc_verdict": None}, MEMBER, False),
+        ({"dmarc_verdict": "FAIL"}, MEMBER, False),
+        ({}, f"{MEMBER}, other@example.com", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ingest_stamps_only_one_from_with_a_pass(
+    async_session, message, sender, expected
+):
+    await _seed(async_session, scope="anyone")
+    row = await _ingest(async_session, _raw(sender=sender), **message)
+    assert row.from_verified is expected
+
+
+def _reply_to(org, agent, domain, sender=MEMBER, *, verified) -> Email:
+    return Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        agent_id=agent.id,
+        from_address=ADDRESS,
+        to_addresses=[sender],
+        subject="Re: Question",
+        body_text="Hello",
+        status="sent",
+        metadata_={
+            "reply_to_email_id": str(uuid.uuid4()),
+            "sender_verified": verified,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_forged_mail_cannot_use_up_a_proven_senders_cap(async_session):
+    org, agent, domain = await _seed(async_session, scope="anyone")
+    for _ in range(email_agent.MAX_REPLIES_PER_THREAD):
+        async_session.add(_reply_to(org, agent, domain, verified=False))
+    await async_session.commit()
+    assert (await _ingest(async_session, _raw())).agent_reply_state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_unproven_mail_has_its_own_smaller_cap(async_session):
+    org, agent, domain = await _seed(async_session, scope="anyone")
+    for _ in range(email_agent.MAX_UNVERIFIED_REPLIES_PER_THREAD):
+        async_session.add(_reply_to(org, agent, domain, verified=False))
+    await async_session.commit()
+    row = await _ingest(async_session, _raw(), dmarc_verdict="GRAY")
+    assert row.metadata_["agent_skip_reason"] == "thread_cap"
+
+
+@pytest.mark.asyncio
+async def test_proven_replies_do_not_use_up_the_unproven_budget(async_session):
+    org, agent, domain = await _seed(async_session, scope="anyone")
+    for _ in range(email_agent.MAX_REPLIES_PER_THREAD):
+        async_session.add(_reply_to(org, agent, domain, verified=True))
+    await async_session.commit()
+    row = await _ingest(async_session, _raw(), dmarc_verdict="GRAY")
+    assert row.agent_reply_state == "pending"
 
 
 @pytest.mark.asyncio
@@ -385,7 +453,10 @@ async def test_tool_texts_count_toward_the_cap(async_session):
             )
         )
     await async_session.commit()
-    assert await email_agent.replies_in_thread(async_session, org, MEMBER) == 3
+    count = await email_agent.replies_in_thread(
+        async_session, org, MEMBER, verified=True
+    )
+    assert count == 3
 
 
 @pytest.mark.asyncio
@@ -404,7 +475,10 @@ async def test_old_replies_leave_the_cap(async_session):
                 body_text="Hello",
                 status="sent",
                 requested_at=old,
-                metadata_={"reply_to_email_id": str(uuid.uuid4())},
+                metadata_={
+                    "reply_to_email_id": str(uuid.uuid4()),
+                    "sender_verified": True,
+                },
             )
         )
     await async_session.commit()
@@ -466,6 +540,7 @@ def _row(org, domain, **over) -> Email:
         "body_text": "Hello",
         "status": "received",
         "dmarc_verdict": "PASS",
+        "from_verified": True,
     }
     return Email(**{**fields, **over})
 
@@ -474,6 +549,8 @@ def _row(org, domain, **over) -> Email:
 async def test_thread_follows_references_and_matches_ses_ids(async_session):
     org, _agent, domain = await _seed(async_session)
     first = _row(org, domain, message_id="<one@example.com>", body_text="First")
+    async_session.add(first)
+    await async_session.flush()
     reply = _row(
         org,
         domain,
@@ -483,6 +560,7 @@ async def test_thread_follows_references_and_matches_ses_ids(async_session):
         to_addresses=[MEMBER],
         provider_message_id="ses-id-1",
         body_text="Reply",
+        metadata_={"reply_to_email_id": str(first.id)},
     )
     now = _row(
         org,
@@ -492,11 +570,103 @@ async def test_thread_follows_references_and_matches_ses_ids(async_session):
         references_ids=["<one@example.com>", "<ses-id-1@eu-west-1.amazonses.com>"],
         body_text="Second",
     )
-    async_session.add_all([first, reply, now])
+    async_session.add_all([reply, now])
     await async_session.commit()
     thread = await email_agent.email_thread(async_session, now)
     assert [r.body_text for r in thread][-1] == "Second"
     assert {r.body_text for r in thread} == {"First", "Reply", "Second"}
+
+
+@pytest.mark.parametrize(
+    "link", ["reply_to_email_id", "inbound_email_id"], ids=["reply", "tool"]
+)
+@pytest.mark.asyncio
+async def test_a_reply_to_unproven_mail_stays_out_of_the_thread(async_session, link):
+    """It says what a forger asked for."""
+    org, _agent, domain = await _seed(async_session)
+    forged = _row(
+        org, domain, from_verified=False, dmarc_verdict="GRAY", body_text="Forged"
+    )
+    async_session.add(forged)
+    await async_session.flush()
+    answer = _row(
+        org,
+        domain,
+        direction="outbound",
+        status="sent",
+        from_address=ADDRESS,
+        to_addresses=[MEMBER],
+        provider_message_id="ses-f",
+        body_text="Answer to forgery",
+        metadata_={link: str(forged.id)},
+    )
+    now = _row(
+        org,
+        domain,
+        references_ids=["<ses-f@eu-west-1.amazonses.com>"],
+        body_text="Now",
+    )
+    async_session.add_all([answer, now])
+    await async_session.commit()
+    assert await email_agent.email_thread(async_session, now) == [now]
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"reply_to_email_id": "not-a-uuid"}, {"reply_to_email_id": str(uuid.uuid4())}],
+    ids=["no-link", "bad-link", "unknown-row"],
+)
+@pytest.mark.asyncio
+async def test_outbound_mail_with_no_trusted_link_stays_out(async_session, metadata):
+    org, _agent, domain = await _seed(async_session)
+    sent = _row(
+        org,
+        domain,
+        direction="outbound",
+        status="sent",
+        from_address=ADDRESS,
+        to_addresses=[MEMBER],
+        provider_message_id="ses-x",
+        body_text="Unlinked",
+        metadata_=metadata,
+    )
+    now = _row(
+        org,
+        domain,
+        references_ids=["<ses-x@eu-west-1.amazonses.com>"],
+        body_text="Now",
+    )
+    async_session.add_all([sent, now])
+    await async_session.commit()
+    assert await email_agent.email_thread(async_session, now) == [now]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_to_another_senders_mail_stays_out(async_session):
+    org, _agent, domain = await _seed(async_session)
+    theirs = _row(org, domain, from_address="ceo@example.com", body_text="Theirs")
+    async_session.add(theirs)
+    await async_session.flush()
+    sent = _row(
+        org,
+        domain,
+        direction="outbound",
+        status="sent",
+        from_address=ADDRESS,
+        to_addresses=[MEMBER],
+        provider_message_id="ses-y",
+        body_text="Crossed",
+        metadata_={"reply_to_email_id": str(theirs.id)},
+    )
+    now = _row(
+        org,
+        domain,
+        references_ids=["<ses-y@eu-west-1.amazonses.com>"],
+        body_text="Now",
+    )
+    async_session.add_all([sent, now])
+    await async_session.commit()
+    assert await email_agent.email_thread(async_session, now) == [now]
 
 
 @pytest.mark.asyncio
@@ -542,9 +712,21 @@ async def test_unproven_earlier_mail_stays_out_of_the_thread(async_session):
     rows = [
         _row(org, domain, message_id="<a@x.co>", body_text="Good"),
         _row(
-            org, domain, message_id="<b@x.co>", dmarc_verdict="GRAY", body_text="Gray"
+            org,
+            domain,
+            message_id="<b@x.co>",
+            dmarc_verdict="GRAY",
+            from_verified=False,
+            body_text="Gray",
         ),
-        _row(org, domain, message_id="<c@x.co>", dmarc_verdict=None, body_text="None"),
+        _row(
+            org,
+            domain,
+            message_id="<c@x.co>",
+            dmarc_verdict="PASS",
+            from_verified=False,
+            body_text="Not stamped",
+        ),
         _row(org, domain, message_id="<d@x.co>", spam_verdict="FAIL", body_text="Spam"),
         _row(
             org, domain, message_id="<e@x.co>", virus_verdict="FAIL", body_text="Virus"
@@ -596,6 +778,7 @@ async def test_an_unproven_sender_gets_no_history(async_session, verdict):
         org,
         domain,
         dmarc_verdict=verdict,
+        from_verified=False,
         references_ids=["<a@x.co>", "<ses-1@eu-west-1.amazonses.com>"],
         body_text="Now",
     )

@@ -6,6 +6,9 @@
 2. ``agents.email_enabled`` says whether the agent answers email.
 3. ``emails`` gets ``agent_id`` and the reply columns ``sms`` has:
    ``agent_reply_state``, ``agent_reply_attempts``, ``agent_reply_available_at``.
+4. ``emails.from_verified`` is true only when ingest saw one ``From`` address and
+   a DMARC ``PASS``. It is an allowlist: older rows stay false, so they stay out
+   of an agent's chat.
 
 Tables checked (no new table): ``email_domains`` routes an address the way
 ``phone_numbers`` routes a number. ``agents`` holds the per-channel switches.
@@ -67,6 +70,15 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
+    op.add_column(
+        "emails",
+        sa.Column(
+            "from_verified",
+            sa.Boolean(),
+            server_default=sa.text("FALSE"),
+            nullable=False,
+        ),
+    )
     op.add_column("emails", sa.Column("agent_reply_state", sa.Text(), nullable=True))
     op.add_column(
         "emails",
@@ -110,6 +122,7 @@ def downgrade() -> None:
     op.drop_column("emails", "agent_reply_available_at")
     op.drop_column("emails", "agent_reply_attempts")
     op.drop_column("emails", "agent_reply_state")
+    op.drop_column("emails", "from_verified")
     op.drop_column("emails", "agent_id")
     op.drop_constraint(
         "email_domains_email_agent_scope_check", "email_domains", type_="check"

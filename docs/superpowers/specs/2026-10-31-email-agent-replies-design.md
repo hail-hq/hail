@@ -30,10 +30,12 @@ only when all of these hold:
    `GRAY` when only an unaligned SPF or DKIM check passed, so `GRAY` does not
    prove the `From` address.
 6. Scope `anyone`: the DMARC verdict is not `FAIL`, so a forged `From` does not
-   turn a reply into mail to a third party. Only `PASS` counts as proven: other
+   turn a reply into mail to a third party. Only a proven sender counts: other
    verdicts may get a plain reply, with no tools and no thread history.
-7. The sender is under the thread cap: 20 agent sends in 24 hours, counting
-   replies and tool sends in any channel.
+7. The sender is under the thread cap. A proven sender has 20 agent sends in 24
+   hours, counting replies and tool sends in any channel. Unproven mail has its
+   own budget of 5 replies per `From` address, so forged mail cannot use up the
+   real sender's budget.
 8. The org has funds.
 
 Rows that fail get `agent_reply_state = 'skipped'` and `metadata.agent_skip_reason`.
@@ -49,8 +51,11 @@ The voicebot's text worker also claims email rows, with the same lease, attempts
 and backoff as texts. The chat is the agent's instructions plus the thread: rows
 linked by `In-Reply-To` and `References`, and only rows with this same sender, so
 a forged `References` header cannot read another thread. Inbound rows join the
-chat only with DMARC `PASS`, and not when they were spam, a virus, or skipped for
-their sender. An unproven sender gets no history at all.
+chat only with `emails.from_verified`, and not when they were spam, a virus, or
+skipped for their sender. Ingest sets `from_verified` for one `From` address with
+DMARC `PASS`, and nothing else sets it. An outbound row joins only if it answers
+a row that qualifies, so a reply to forged mail stays out. An unproven sender
+gets no history at all.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row, with
 `In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. It goes
