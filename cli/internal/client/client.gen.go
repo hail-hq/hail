@@ -240,6 +240,42 @@ func (e EmailDomainDnsCheckKind) Valid() bool {
 	}
 }
 
+// Defines values for EmailDomainPatchEmailAgentScope.
+const (
+	EmailDomainPatchEmailAgentScopeAnyone  EmailDomainPatchEmailAgentScope = "anyone"
+	EmailDomainPatchEmailAgentScopeMembers EmailDomainPatchEmailAgentScope = "members"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainPatchEmailAgentScope enum.
+func (e EmailDomainPatchEmailAgentScope) Valid() bool {
+	switch e {
+	case EmailDomainPatchEmailAgentScopeAnyone:
+		return true
+	case EmailDomainPatchEmailAgentScopeMembers:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailDomainResponseEmailAgentScope.
+const (
+	EmailDomainResponseEmailAgentScopeAnyone  EmailDomainResponseEmailAgentScope = "anyone"
+	EmailDomainResponseEmailAgentScopeMembers EmailDomainResponseEmailAgentScope = "members"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainResponseEmailAgentScope enum.
+func (e EmailDomainResponseEmailAgentScope) Valid() bool {
+	switch e {
+	case EmailDomainResponseEmailAgentScopeAnyone:
+		return true
+	case EmailDomainResponseEmailAgentScopeMembers:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailDomainResponseKind.
 const (
 	Custom   EmailDomainResponseKind = "custom"
@@ -1392,6 +1428,9 @@ type AgentCreate struct {
 	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
 
+	// EmailEnabled Answer email on addresses that route email to this agent.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
+
 	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
@@ -1446,6 +1485,9 @@ type AgentPromptTemplates struct {
 	// CallsOut Full prompt for a call the agent places.
 	CallsOut string `json:"calls_out"`
 
+	// Emails Full prompt for an email reply.
+	Emails string `json:"emails"`
+
 	// InstructionsPlaceholder The marker inside each template where the agent's instructions go.
 	InstructionsPlaceholder string `json:"instructions_placeholder"`
 
@@ -1463,6 +1505,9 @@ type AgentResponse struct {
 
 	// CreatedAt ISO 8601 timestamp.
 	CreatedAt time.Time `json:"created_at"`
+
+	// EmailEnabled Whether the agent answers email.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
 	// FirstMessage Opening line, or null to wait.
 	FirstMessage *string `json:"first_message"`
@@ -1522,6 +1567,9 @@ type AgentUpdate struct {
 
 	// AiDisclosureLine New AI line template ('{org}' = organization name); null returns to the workspace line.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
+
+	// EmailEnabled Whether the agent answers email.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
 	// FirstMessage New opening line; null makes the agent wait for the other side.
 	FirstMessage *string `json:"first_message,omitempty"`
@@ -2035,6 +2083,12 @@ type EmailDomainListResponse struct {
 // re-implement it here because the patch may merge with existing row
 // state to satisfy the invariant.
 type EmailDomainPatch struct {
+	// EmailAgentId The agent that answers mail to this address. The agent must be live and answer email. A custom domain must be verified with inbound on. Null stops agent replies. Omit to leave unchanged.
+	EmailAgentId *openapi_types.UUID `json:"email_agent_id,omitempty"`
+
+	// EmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged.
+	EmailAgentScope *EmailDomainPatchEmailAgentScope `json:"email_agent_scope,omitempty"`
+
 	// ForwardRatePerHour Cap on forwarded messages per hour. Omit to leave unchanged.
 	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
 
@@ -2051,6 +2105,9 @@ type EmailDomainPatch struct {
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
+// EmailDomainPatchEmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged.
+type EmailDomainPatchEmailAgentScope string
+
 // EmailDomainResponse Read view for an email domain.
 //
 // The inbound-action fields (“inbound_enabled“, “forward_to“,
@@ -2065,6 +2122,12 @@ type EmailDomainResponse struct {
 
 	// Domain The DNS domain mail is sent from.
 	Domain string `json:"domain"`
+
+	// EmailAgentId The agent that answers mail to this address. Null when none does.
+	EmailAgentId *openapi_types.UUID `json:"email_agent_id,omitempty"`
+
+	// EmailAgentScope Who the agent answers: 'members' or 'anyone'.
+	EmailAgentScope *EmailDomainResponseEmailAgentScope `json:"email_agent_scope,omitempty"`
 
 	// ForwardRatePerHour Configured cap on forwarded messages per hour, if set.
 	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
@@ -2111,6 +2174,9 @@ type EmailDomainResponse struct {
 	// VerifiedAt When the domain became verified, ISO 8601 timestamp. Null until it is.
 	VerifiedAt *time.Time `json:"verified_at"`
 }
+
+// EmailDomainResponseEmailAgentScope Who the agent answers: 'members' or 'anyone'.
+type EmailDomainResponseEmailAgentScope string
 
 // EmailDomainResponseKind 'hail_mail' (Hail-hosted address) or 'custom' (your own domain).
 type EmailDomainResponseKind string
@@ -2159,6 +2225,12 @@ type EmailListResponse struct {
 
 // EmailResponse defines model for EmailResponse.
 type EmailResponse struct {
+	// AgentId The agent this email belongs to: the address's agent on inbound rows, the writer on outbound rows.
+	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
+
+	// AgentReplyState Inbound rows routed to an agent: 'pending', 'processing', 'done', 'skipped', or 'failed'. A skipped row names why in metadata.agent_skip_reason.
+	AgentReplyState *string `json:"agent_reply_state,omitempty"`
+
 	// Attachments Inbound MIME attachments on this email. Empty on outbound rows.
 	Attachments *[]EmailAttachmentResponse `json:"attachments,omitempty"`
 

@@ -68,7 +68,7 @@ _OPEN_WORLD_WRITES = {
     "confirm_verification",
 }
 
-_EXPECTED_COUNT = 38
+_EXPECTED_COUNT = 39
 
 
 @pytest.fixture()

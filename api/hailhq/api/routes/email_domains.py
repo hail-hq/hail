@@ -69,7 +69,7 @@ from hailhq.core.forward_targets import (
     sync_targets,
 )
 from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
-from hailhq.core.models import Email, EmailDomain
+from hailhq.core.models import Agent, Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
@@ -799,6 +799,8 @@ async def patch_email_domain(
       an org admin changes the visible hail-mail address.
     * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /
       ``forward_rate_per_hour``): any row kind.
+    * **Agent route** (``email_agent_id`` / ``email_agent_scope``): any row
+      kind. The agent must be in the organization, live, and answer email.
     """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
@@ -836,6 +838,50 @@ async def patch_email_domain(
         updates["forward_to"] = body.forward_to or None
     if body.forward_rate_per_hour is not None:
         updates["forward_rate_per_hour"] = body.forward_rate_per_hour
+
+    # ---- agent route (any kind) ----
+    # Null clears the route, so "sent" is what counts here.
+    if "email_agent_id" in body.model_fields_set:
+        if body.email_agent_id is not None:
+            agent = (
+                await db.execute(
+                    select(Agent).where(
+                        Agent.id == body.email_agent_id,
+                        Agent.organization_id == principal.organization_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if agent is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_404_NOT_FOUND,
+                    detail="agent not found",
+                )
+            if agent.status != "live":
+                raise unprocessable(
+                    "this agent is paused", loc=["body", "email_agent_id"]
+                )
+            if not agent.email_enabled:
+                raise unprocessable(
+                    "this agent does not answer email",
+                    loc=["body", "email_agent_id"],
+                )
+            # A hail-mail address always receives: the route is its own switch.
+            if sd.kind == "custom" and sd.verification_status != "verified":
+                raise unprocessable(
+                    "verify this domain before an agent can answer its mail",
+                    loc=["body", "email_agent_id"],
+                )
+            if sd.kind == "custom" and not updates.get(
+                "inbound_enabled", sd.inbound_enabled
+            ):
+                raise unprocessable(
+                    "turn on inbound for this domain before an agent can answer "
+                    "its mail",
+                    loc=["body", "email_agent_id"],
+                )
+        updates["email_agent_id"] = body.email_agent_id
+    if body.email_agent_scope is not None:
+        updates["email_agent_scope"] = body.email_agent_scope
 
     if not updates:
         return EmailDomainResponse.model_validate(sd)
@@ -913,7 +959,23 @@ async def patch_email_domain(
         action="email_domain.patch",
         resource_type="email_domain",
         resource_id=sd.id,
-        payload={"domain": sd.domain},
+        payload={
+            "domain": sd.domain,
+            **(
+                {
+                    "email_agent_id": (
+                        str(sd.email_agent_id) if sd.email_agent_id else None
+                    )
+                }
+                if "email_agent_id" in updates
+                else {}
+            ),
+            **(
+                {"email_agent_scope": sd.email_agent_scope}
+                if "email_agent_scope" in updates
+                else {}
+            ),
+        },
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )

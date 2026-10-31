@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"text/tabwriter"
@@ -17,7 +20,7 @@ import (
 //
 // Self-hosters don't have the managed-cloud web console, so the CLI is
 // the only way for them to register a hail-mail row or a custom domain.
-// Subcommand verbs follow the API: register, list, get, verify, dns-check, delete.
+// Subcommand verbs follow the API: register, list, get, verify, dns-check, delete, route.
 func newEmailDomainCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "domain",
@@ -37,6 +40,7 @@ Two flavors of identity (POST body 'kind' field):
 	cmd.AddCommand(newEmailDomainVerifyCmd(opts))
 	cmd.AddCommand(newEmailDomainDnsCheckCmd(opts))
 	cmd.AddCommand(newEmailDomainDeleteCmd(opts))
+	cmd.AddCommand(newEmailDomainRouteCmd(opts))
 	return cmd
 }
 
@@ -354,6 +358,82 @@ func runEmailDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) erro
 // printers
 // --------------------------------------------------------------------------- //
 
+// --------------------------------------------------------------------------- //
+// route
+// --------------------------------------------------------------------------- //
+
+type emailDomainRouteFlags struct {
+	agent string
+	scope string
+	clear bool
+}
+
+func newEmailDomainRouteCmd(opts *Options) *cobra.Command {
+	var f emailDomainRouteFlags
+	cmd := &cobra.Command{
+		Use:   "route <id>",
+		Short: "Choose which agent answers mail to this address, and who it answers",
+		Long: `hail email domain route — make an agent answer inbound mail.
+
+--scope members (default): verified members of the organization whose mail
+passes DMARC. --scope anyone: every sender whose mail passes DMARC and the spam
+checks. With anyone, a stranger can make the agent use its tools. Mail without
+a DMARC pass gets no reply. A custom domain must be verified with inbound on.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := uuid.Parse(args[0])
+			if err != nil {
+				return fmt.Errorf("invalid email domain id %q: %w", args[0], err)
+			}
+			if f.clear && f.agent != "" {
+				return errors.New("use --agent or --clear, not both")
+			}
+			body := map[string]any{}
+			if f.clear {
+				body["email_agent_id"] = nil
+			} else if f.agent != "" {
+				body["email_agent_id"] = f.agent
+			}
+			if f.scope != "" {
+				body["email_agent_scope"] = f.scope
+			}
+			if len(body) == 0 {
+				return errors.New("pass --agent, --clear, or --scope")
+			}
+			return runEmailDomainRoute(cmd.Context(), opts, id, body)
+		},
+	}
+	cmd.Flags().StringVar(&f.agent, "agent", "", "Agent id that answers mail to this address")
+	cmd.Flags().StringVar(&f.scope, "scope", "", "Who the agent answers: members or anyone")
+	cmd.Flags().BoolVar(&f.clear, "clear", false, "Stop agent replies on this address")
+	return cmd
+}
+
+func runEmailDomainRoute(ctx context.Context, opts *Options, id uuid.UUID, body map[string]any) error {
+	apiClient, err := opts.newClient()
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	resp, err := apiClient.PatchEmailDomainV1EmailDomainsDomainIdPatchWithBodyWithResponse(
+		ctx,
+		openapi_types.UUID(id),
+		&client.PatchEmailDomainV1EmailDomainsDomainIdPatchParams{},
+		"application/json",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return fmt.Errorf("email-domain API: %w", err)
+	}
+	if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+		return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+	}
+	return printEmailDomain(opts, resp.JSON200)
+}
+
 func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, sd)
@@ -367,6 +447,12 @@ func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 		fmt.Fprintf(opts.Stdout, "  Org prefix:   %s\n", *sd.LocalPrefixOrg)
 	}
 	fmt.Fprintf(opts.Stdout, "  Verification: %s\n", string(sd.VerificationStatus))
+	if sd.EmailAgentId != nil {
+		fmt.Fprintf(opts.Stdout, "  Agent:        %s\n", sd.EmailAgentId.String())
+		if sd.EmailAgentScope != nil {
+			fmt.Fprintf(opts.Stdout, "  Answers:      %s\n", string(*sd.EmailAgentScope))
+		}
+	}
 	if len(sd.DnsRecords) > 0 {
 		fmt.Fprintln(opts.Stdout, "  Publish these CNAMEs at your DNS provider:")
 		w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)

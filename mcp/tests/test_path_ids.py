@@ -108,6 +108,7 @@ def test_the_id_method_list_is_the_expected_one() -> None:
     assert {n for n, _ in _id_methods()} == {
         "get_call",
         "route_number",
+        "route_email_domain",
         "get_agent",
         "update_agent",
         "delete_agent",
@@ -149,6 +150,7 @@ _TOOL_CASES = [
     ("release_number", "number_id", {"confirm_e164": "+15550001111"}),
     ("get_number", "number_id", {}),
     ("route_number", "number_id", {"clear_voice": True}),
+    ("route_email_domain", "domain_id", {"clear_agent": True}),
     ("delete_agent", "agent_id", {"confirm_name": "x"}),
     ("get_agent", "agent_id", {}),
     ("update_agent", "agent_id", {"name": "x"}),

@@ -347,6 +347,7 @@ class AgentResponse(BaseModel):
     max_duration_seconds: int | None = None
     voice_enabled: bool = True
     sms_enabled: bool = True
+    email_enabled: bool = True
     status: AgentStatus = "live"
     created_at: datetime
     updated_at: datetime
@@ -674,6 +675,9 @@ class EmailDomainCreate(BaseModel):
         return self
 
 
+EmailAgentScope = Literal["members", "anyone"]
+
+
 class EmailDomainPatch(BaseModel):
     """Body for ``PATCH /email-domains/{id}``.
 
@@ -684,6 +688,8 @@ class EmailDomainPatch(BaseModel):
     * Inbound action — ``inbound_enabled``, ``forward_to``,
       ``webhook_url`` (empty string clears it; the server returns the new
       plaintext secret once when set), ``forward_rate_per_hour``.
+    * Agent route — ``email_agent_id`` (null stops replies) and
+      ``email_agent_scope`` (``members`` or ``anyone``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -694,6 +700,8 @@ class EmailDomainPatch(BaseModel):
     forward_to: list[str] | None = None
     webhook_url: str | None = None
     forward_rate_per_hour: int | None = None
+    email_agent_id: UUID | None = None
+    email_agent_scope: EmailAgentScope | None = None
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -730,6 +738,8 @@ class EmailDomainResponse(BaseModel):
     mail_from_status: str | None = None
     provider: str
     verified_at: datetime | None = None
+    email_agent_id: UUID | None = None
+    email_agent_scope: EmailAgentScope = "members"
     inbound_enabled: bool = False
     forward_to: list[str] | None = None
     webhook_url: str | None = None

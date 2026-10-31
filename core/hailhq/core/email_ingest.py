@@ -23,6 +23,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
+from hailhq.core.email_agent import proves_sender, queue_decision
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -264,6 +265,7 @@ async def _persist_one(
         spf_verdict=message.spf_verdict,
         dkim_verdict=message.dkim_verdict,
         dmarc_verdict=message.dmarc_verdict,
+        from_verified=proves_sender(parsed, message.dmarc_verdict),
         provider_received_at=message.received_at,
         metadata_=metadata,
     )
@@ -535,6 +537,37 @@ async def ingest_inbound(
                 # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
                 row_reasons.append("insufficient_funds")
+
+        if created:
+            decision = await queue_decision(
+                db,
+                domain,
+                parsed=parsed,
+                envelope_from=message.envelope_from,
+                recipients=message.envelope_recipients,
+                dmarc_verdict=message.dmarc_verdict,
+                suppress=suppress,
+                over_cap=over_cap,
+                funded=funded,
+                base_domain=hail_mail_base_domain,
+            )
+            if decision is not None:
+                values: dict[str, Any] = {
+                    "agent_id": decision.agent.id,
+                    "agent_reply_state": decision.state,
+                }
+                if decision.reason is not None:
+                    values["metadata_"] = Email.metadata_.op("||")(
+                        func.jsonb_build_object("agent_skip_reason", decision.reason)
+                    )
+                await db.execute(
+                    update(Email).where(Email.id == email_id).values(**values)
+                )
+                if (
+                    decision.reason == "insufficient_funds"
+                    and decision.reason not in row_reasons
+                ):
+                    row_reasons.append(decision.reason)
 
         for reason in row_reasons:
             if reason not in result.suppressed_reasons:

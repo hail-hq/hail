@@ -20,7 +20,7 @@ def test_inbound_says_answering_and_asks_for_a_what_i_can_do_first_reply() -> No
 
 
 def test_templates_hold_the_marker_exactly_once() -> None:
-    for channel in ("calls_in", "calls_out", "texts"):
+    for channel in ("calls_in", "calls_out", "texts", "emails"):
         assert (
             prompts.prompt_template(channel).count(prompts.INSTRUCTIONS_PLACEHOLDER)
             == 1

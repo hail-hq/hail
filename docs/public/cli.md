@@ -140,6 +140,9 @@ hail email domain get <id>
 hail email domain verify <id>      # re-poll the provider for DKIM status
 hail email domain dns-check <id>   # detect the DNS host, confirm records + DMARC are published
 hail email domain delete <id>      # also drops the SES identity for custom rows
+hail email domain route <id> --agent <agent-id>   # the agent answers mail to this address
+hail email domain route <id> --scope anyone       # answer every sender, not only members
+hail email domain route <id> --clear              # stop agent replies
 ```
 
 `register` flags: `--kind` (`hail_mail|custom`, required), `--domain` (required for `custom`), `--local-prefix-user`, `--local-prefix-org` (for `hail_mail`), `--idempotency-key`. `list` takes `--limit` / `--cursor`. Aliases: `list`→`ls`, `delete`→`rm`.

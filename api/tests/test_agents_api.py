@@ -582,11 +582,12 @@ async def test_prompt_templates_show_the_full_prompt_per_channel(client, org) ->
     assert r.status_code == 200, r.text
     body = r.json()
     marker = body["instructions_placeholder"]
-    for channel in ("calls_in", "calls_out", "texts"):
+    for channel in ("calls_in", "calls_out", "texts", "emails"):
         assert body[channel].count(marker) == 1
     assert "answering the call" in body["calls_in"]
     assert "placing the call" in body["calls_out"]
     assert "SMS" in body["texts"]
+    assert "by email" in body["emails"]
     # The agent's own text follows Hail's framing, never leads it.
     assert body["calls_in"].index(marker) > body["calls_in"].index("# Guardrails")
 
@@ -1004,3 +1005,23 @@ async def test_agent_handover_team_member_rejected(
         headers=headers,
     )
     assert r.status_code == 422, r.text
+
+
+async def test_email_enabled_defaults_on_and_can_be_changed(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Inbox", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["email_enabled"] is True
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": False}, headers=headers
+    )
+    assert r.json()["email_enabled"] is False
+    # Null means leave it: the column is not nullable.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email_enabled"] is False
