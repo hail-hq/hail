@@ -45,6 +45,8 @@ from hailhq.core.schemas import (
     ContactListResponse,
     EmailCreate,
     EmailDomainListResponse,
+    EmailDomainPatch,
+    EmailDomainResponse,
     EmailEventListResponse,
     EmailListResponse,
     EmailResponse,
@@ -302,6 +304,25 @@ class HailClient:
         number_id_ = _path_id(number_id, name="number_id")
         resp = await self._client.patch(f"/numbers/{number_id_}", json=body)
         return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def route_email_domain(
+        self,
+        domain_id: str,
+        *,
+        email_agent_id: str | None = None,
+        email_agent_scope: str | None = None,
+        clear_agent: bool = False,
+    ) -> dict[str, Any]:
+        """PATCH /email-domains/{id} — which agent answers mail, and whom."""
+        body: dict[str, Any] = {}
+        if email_agent_id is not None or clear_agent:
+            body["email_agent_id"] = email_agent_id
+        if email_agent_scope is not None:
+            body["email_agent_scope"] = email_agent_scope
+        EmailDomainPatch.model_validate(body)
+        domain_id_ = _path_id(domain_id, name="domain_id")
+        resp = await self._client.patch(f"/email-domains/{domain_id_}", json=body)
+        return EmailDomainResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def get_agent(self, agent_id: str) -> dict[str, Any]:
         agent_id_ = _path_id(agent_id, name="agent_id")

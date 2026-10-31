@@ -291,6 +291,19 @@ async def _write_usage_event(
 # --------------------------------------------------------------------------- #
 
 
+def _send_headers(email: Email, extra: dict[str, str] | None) -> dict[str, str] | None:
+    """Headers for the wire. An agent's reply threads in the sender's mail
+    client and marks itself automatic, so another agent does not answer it."""
+    headers = dict(extra or {})
+    if email.in_reply_to:
+        headers["In-Reply-To"] = email.in_reply_to
+    if email.references_ids:
+        headers["References"] = " ".join(email.references_ids)
+    if email.metadata_ and email.metadata_.get("reply_to_email_id"):
+        headers["Auto-Submitted"] = "auto-replied"
+    return headers or None
+
+
 async def deliver_email(
     db: AsyncSession,
     email_provider: EmailProvider,
@@ -364,7 +377,7 @@ async def deliver_email(
             cc=email.cc_addresses,
             bcc=email.bcc_addresses,
             reply_to=email.reply_to,
-            headers=unsubscribe_headers,
+            headers=_send_headers(email, unsubscribe_headers),
             attachments=provider_attachments or None,
             organization_id=email.organization_id,
         )

@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Email agents: route an address to an agent with `email_agent_id`, and the agent answers inbound mail in the thread. `email_agent_scope` is `members` by default or `anyone`. CLI: `hail email domain route`. MCP: `route_email_domain`.
+
 ### Fixed
 
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.

@@ -164,4 +164,6 @@ A separate `inbound_routes` table, for per-mailbox routing in custom domains, is
 
 The `/webhooks` CRUD surface is the firehose pattern — one subscription covers multiple event types (`email.received`, `email.bounced`, `email.complained`). Signatures are Stripe-style: `X-Hail-Signature: t=<unix>,v1=<hex>`. Hail retries deliveries on a fixed `0/30s/2m/10m/1h/6h/24h` ladder. After the last retry, Hail marks the delivery `dead`. After 50 consecutive dead deliveries, the subscription auto-disables.
 
+An address with `email_agent_id` set is answered by that agent: see [Agents](./agents.md#answer-email-with-an-agent). The voicebot's text worker claims the row, and the reply goes out through `POST /internal/agent/reply-email`.
+
 Refer to [AWS SES setup](./self-host/aws-ses.md) §10 for the operator runbook. Refer to [`docs/superpowers/specs/2026-06-06-inbound-email-design.md`](https://github.com/hail-hq/hail/blob/main/docs/superpowers/specs/2026-06-06-inbound-email-design.md) for the full spec.

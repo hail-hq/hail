@@ -481,7 +481,8 @@ class ApiKey(Base):
 class Agent(Base):
     """A saved brain: what a number answers with, and what POST /calls can
     place calls with (``agent_id``). Numbers point at an agent for calls
-    (``voice_agent_id``) and for texts (``sms_agent_id``)."""
+    (``voice_agent_id``) and for texts (``sms_agent_id``); an email address
+    points at one with ``email_domains.email_agent_id``."""
 
     __tablename__ = "agents"
 
@@ -520,6 +521,9 @@ class Agent(Base):
         Boolean, server_default=text("TRUE"), nullable=False
     )
     sms_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
+    email_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
@@ -1156,6 +1160,18 @@ class EmailDomain(Base):
     )
     forward_to: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     forward_rate_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The agent that answers mail to this address, as phone_numbers.sms_agent_id
+    # does for texts. NULL: no agent replies.
+    email_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # members: verified org members only. anyone: every sender that passes the
+    # spam and header rules.
+    email_agent_scope: Mapped[str] = mapped_column(
+        Text, server_default="members", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1164,6 +1180,10 @@ class EmailDomain(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "email_agent_scope IN ('members','anyone')",
+            name="email_domains_email_agent_scope_check",
+        ),
         CheckConstraint(
             "kind IN ('hail_mail','custom')",
             name="email_domains_kind_check",
@@ -1477,11 +1497,43 @@ class Email(Base):
     # branch on it without a join. NULL for outbound rows (kind is not
     # meaningful there) and for legacy inbound rows created before this column.
     email_domain_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The agent this email belongs to: the address's agent on inbound rows, the
+    # agent that wrote it on outbound rows. NULL when no agent is involved.
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Inbound rows routed to an agent, as on ``sms``:
+    # pending | processing | done | skipped | failed.
+    agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_reply_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # Claim lease, or retry backoff when pending.
+    agent_reply_available_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "agent_reply_state IS NULL OR agent_reply_state IN "
+            "('pending','processing','done','skipped','failed')",
+            name="emails_agent_reply_state_check",
+        ),
+        Index(
+            "emails_agent_reply_pending_idx",
+            "requested_at",
+            postgresql_where=text("agent_reply_state IN ('pending','processing')"),
+        ),
+        Index(
+            "emails_agent_thread_idx",
+            "organization_id",
+            "agent_id",
+            "requested_at",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"
             "'complained','received')",

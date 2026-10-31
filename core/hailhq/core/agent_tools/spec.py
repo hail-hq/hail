@@ -64,7 +64,9 @@ class ToolContext:
 
     ``call_id`` is None outside a call (the text agent); tools that act on
     a call refuse then. ``thread`` is the one thread ``thread_history`` may
-    read, set by the server when the run starts.
+    read, set by the server when the run starts. ``inbound_email_id`` is the
+    email an agent is answering (an email run); send tools then post to the
+    email-run routes.
     """
 
     call_id: uuid.UUID | None
@@ -82,6 +84,7 @@ class ToolContext:
     # Make the agent speak about something that happened after its tool
     # returned (a handover dial that ended). The text is an instruction.
     prompt: Callable[[str], Awaitable[None]] | None = None
+    inbound_email_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)

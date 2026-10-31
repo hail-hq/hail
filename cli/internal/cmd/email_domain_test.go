@@ -470,3 +470,64 @@ func TestEmailDomain_DeleteInvalidUUID(t *testing.T) {
 		t.Fatalf("server should not have been hit, got %d", got)
 	}
 }
+
+func TestEmailDomain_RouteSetsAgentAndScope(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleEmailDomainResponse("hail_mail"))
+	id := "11111111-1111-1111-1111-111111111111"
+	agent := "22222222-2222-2222-2222-222222222222"
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "route", id, "--agent", agent, "--scope", "anyone",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodPatch {
+		t.Fatalf("method = %s", srv.lastReq.Method)
+	}
+	if srv.lastReq.URL.Path != "/v1/email-domains/"+id {
+		t.Fatalf("unexpected path: %s", srv.lastReq.URL.Path)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body["email_agent_id"] != agent || body["email_agent_scope"] != "anyone" {
+		t.Fatalf("body = %v", body)
+	}
+}
+
+func TestEmailDomain_RouteClearSendsNull(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleEmailDomainResponse("hail_mail"))
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "route", "11111111-1111-1111-1111-111111111111", "--clear",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if value, ok := body["email_agent_id"]; !ok || value != nil {
+		t.Fatalf("body = %v", body)
+	}
+}
+
+func TestEmailDomain_RouteNeedsAFlag(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleEmailDomainResponse("hail_mail"))
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "route", "11111111-1111-1111-1111-111111111111",
+	)
+	if err == nil || !strings.Contains(err.Error(), "pass --agent") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("expected no request, got %d", got)
+	}
+}

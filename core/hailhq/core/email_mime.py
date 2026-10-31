@@ -36,6 +36,14 @@ class ParsedMime:
     body_text: str | None
     body_html: str | None
     attachments: list[ParsedAttachment] = field(default_factory=list)
+    # How many addresses the From header holds. Only one can be verified.
+    from_count: int = 1
+    # True for mail no person wrote: auto-replies, lists, bulk. No agent answers it.
+    auto_generated: bool = False
+
+
+_BULK_PRECEDENCE = frozenset({"bulk", "list", "junk"})
+_LIST_HEADERS = ("List-Id", "List-Unsubscribe")
 
 
 def _addresses(msg: Message, header: str) -> list[str]:
@@ -49,6 +57,17 @@ def _references(msg: Message) -> list[str] | None:
         return None
     parts = [p.strip() for p in raw.split() if p.strip()]
     return parts or None
+
+
+def _auto_generated(msg: Message) -> bool:
+    """RFC 3834 ``Auto-Submitted`` (any value but ``no``), plus the headers
+    that mark list and bulk mail."""
+    auto = str(msg.get("Auto-Submitted") or "").split(";")[0].strip().lower()
+    if auto and auto != "no":
+        return True
+    if str(msg.get("Precedence") or "").strip().lower() in _BULK_PRECEDENCE:
+        return True
+    return any(msg.get(name) is not None for name in _LIST_HEADERS)
 
 
 def _safe_text(part: Message) -> str:
@@ -139,4 +158,6 @@ def parse_mime(raw: bytes) -> ParsedMime:
         body_text=text,
         body_html=html,
         attachments=atts,
+        from_count=len(from_list),
+        auto_generated=_auto_generated(msg),
     )

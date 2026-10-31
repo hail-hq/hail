@@ -1,4 +1,5 @@
-"""Text worker: the agent answers inbound SMS.
+"""Text worker: the agent answers inbound SMS, and inbound email through
+``hailhq.voicebot.emailbot`` on the same polling loop.
 
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and
@@ -45,24 +46,17 @@ from hailhq.core.text_agent import (
     thread_history_for_reply,
 )
 from hailhq.core.threads import ThreadScope
+from hailhq.voicebot import emailbot
+from hailhq.voicebot.chat_loop import MAX_TOOL_ROUNDS, TOOL_APOLOGY, run_chat
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from hailhq.voicebot.tools import wrap_tool
-from livekit.agents.llm import (
-    ChatContext,
-    FunctionCall,
-    FunctionCallOutput,
-    FunctionToolCall,
-)
+from livekit.agents.llm import FunctionToolCall
 
 logger = logging.getLogger("hailhq.voicebot.textbot")
 
 POLL_SECONDS = 2.0
 # Per model call. One reply may make MAX_TOOL_ROUNDS of them.
 LLM_TIMEOUT_SECONDS = 30.0
-# Model calls per reply. The last one may not call a tool, so it writes text.
-MAX_TOOL_ROUNDS = 3
-# What the model reads when a tool call fails or names a tool it does not have.
-TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 
 __all__ = [
     "MAX_TOOL_ROUNDS",
@@ -73,13 +67,6 @@ __all__ = [
     "run_forever",
     "start_thread",
 ]
-
-
-def _chat_context(messages: list[dict[str, Any]]) -> ChatContext:
-    ctx = ChatContext.empty()
-    for m in messages:
-        ctx.add_message(role=m["role"], content=m["content"])
-    return ctx
 
 
 def _tool_context(claimed: ClaimedReply) -> ToolContext:
@@ -121,59 +108,18 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
     org_cfgs = await resolve_org_configs(claimed.agent.organization_id)
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed)
-    tools = [wrap_tool(THREAD_HISTORY, tctx)]
-    chat_ctx = _chat_context(messages)
-    text = ""
-    try:
-        for round_no in range(1, MAX_TOOL_ROUNDS + 1):
-            last = round_no == MAX_TOOL_ROUNDS
-            parts: list[str] = []
-            calls: list[FunctionToolCall] = []
-            async with llm.chat(
-                chat_ctx=chat_ctx, tools=tools, tool_choice="none" if last else "auto"
-            ) as stream:
-                async for chunk in stream:
-                    delta = getattr(chunk, "delta", None)
-                    if delta is None:
-                        continue
-                    if delta.content:
-                        parts.append(delta.content)
-                    calls.extend(delta.tool_calls or [])
-            # Text beside a tool call ("let me check") is not the reply.
-            text = "".join(parts).strip()
-            if last and calls and not text:
-                # The model ignored tool_choice="none"; retry, do not skip.
-                raise RuntimeError("model made a tool call on the last round")
-            if not calls or last:
-                break
-            for call in calls:
-                output, is_error = await _run_tool(call, tctx)
-                logger.info(
-                    "sms_id=%s text agent tool=%s round=%d error=%s",
-                    claimed.sms.id,
-                    call.name,
-                    round_no,
-                    is_error,
-                )
-                chat_ctx.insert(
-                    FunctionCall(
-                        call_id=call.call_id,
-                        name=call.name,
-                        arguments=call.arguments,
-                        extra=call.extra or {},
-                    )
-                )
-                chat_ctx.insert(
-                    FunctionCallOutput(
-                        call_id=call.call_id,
-                        name=call.name,
-                        output=output,
-                        is_error=is_error,
-                    )
-                )
-    finally:
-        # Plugin LLMs own an HTTP client each; one is built per reply.
-        await llm.aclose()
+
+    async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
+        return await _run_tool(call, tctx)
+
+    text = await run_chat(
+        llm,
+        messages,
+        [wrap_tool(THREAD_HISTORY, tctx)],
+        run_tool,
+        max_rounds=MAX_TOOL_ROUNDS,
+        log_label=f"sms_id={claimed.sms.id}",
+    )
     return text[:MAX_REPLY_CHARS]
 
 
@@ -310,6 +256,10 @@ async def _poll_loop(api: AgentApiClient, stop: threading.Event | None) -> None:
         except Exception:
             logger.exception("text worker iteration failed; will retry")
             busy = False
+        try:
+            busy = await emailbot.reply_once(api) or busy
+        except Exception:
+            logger.exception("email worker iteration failed; will retry")
         if not busy:
             await asyncio.sleep(POLL_SECONDS)
 

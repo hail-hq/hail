@@ -181,6 +181,7 @@ async def create_agent(
         handover_max_duration_seconds=body.handover_max_duration_seconds,
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
+        email_enabled=body.email_enabled,
         status=body.status,
     )
     db.add(agent)
@@ -238,6 +239,7 @@ async def get_prompt_templates(
         calls_in=prompts.prompt_template("calls_in"),
         calls_out=prompts.prompt_template("calls_out"),
         texts=prompts.prompt_template("texts"),
+        emails=prompts.prompt_template("emails"),
     )
 
 
@@ -276,6 +278,7 @@ async def update_agent(
         "voice_config",
         "voice_enabled",
         "sms_enabled",
+        "email_enabled",
         "status",
     ):
         if field in changes and changes[field] is None:

@@ -1527,3 +1527,178 @@ async def test_verify_receive_ready_is_none_when_dns_lookup_raises(
     body = resp.json()
     assert body["verification_status"] == "verified"
     assert body["receive_ready"] is None
+
+
+# --------------------------------------------------------------------------- #
+# PATCH /email-domains/{id}: agent route
+# --------------------------------------------------------------------------- #
+
+
+async def _hail_mail_and_agent(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    **agent_fields,
+) -> tuple[str, str]:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    domain = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "amber-heron",
+            "local_prefix_org": "acme",
+        },
+        headers=headers,
+    )
+    assert domain.status_code == 201, domain.text
+    agent = await client.post(
+        "/agents",
+        json={"name": "Inbox", "system_prompt": "Help.", **agent_fields},
+        headers=headers,
+    )
+    assert agent.status_code == 201, agent.text
+    return domain.json()["id"], agent.json()["id"]
+
+
+async def test_patch_routes_an_address_to_an_agent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(client, headers, monkeypatch)
+
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id, "email_agent_scope": "anyone"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email_agent_id"] == agent_id
+    assert resp.json()["email_agent_scope"] == "anyone"
+
+    # A field left out keeps its value.
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_scope": "members"},
+        headers=headers,
+    )
+    assert resp.json()["email_agent_id"] == agent_id
+
+    # Null stops replies.
+    resp = await client.patch(
+        f"/email-domains/{domain_id}", json={"email_agent_id": None}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email_agent_id"] is None
+
+
+async def test_a_new_address_defaults_to_members(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, _agent = await _hail_mail_and_agent(client, headers, monkeypatch)
+    body = (await client.get(f"/email-domains/{domain_id}", headers=headers)).json()
+    assert body["email_agent_id"] is None
+    assert body["email_agent_scope"] == "members"
+
+
+async def test_patch_refuses_an_agent_that_does_not_answer_email(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(
+        client, headers, monkeypatch, email_enabled=False
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "this agent does not answer email" in resp.text
+
+
+async def test_patch_refuses_a_paused_agent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(
+        client, headers, monkeypatch, status="paused"
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "this agent is paused" in resp.text
+
+
+async def test_patch_refuses_another_orgs_agent(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, _agent = await _hail_mail_and_agent(client, headers, monkeypatch)
+    _, _, other = await insert_org_and_key(async_session)
+    theirs = await client.post(
+        "/agents",
+        json={"name": "Theirs", "system_prompt": "Help."},
+        headers={"Authorization": f"Bearer {other}"},
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": theirs.json()["id"]},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "agent not found"
+
+
+async def test_patch_refuses_an_unknown_scope(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, _agent = await _hail_mail_and_agent(client, headers, monkeypatch)
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_scope": "everyone"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_deleting_the_agent_clears_the_route(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(client, headers, monkeypatch)
+    await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id},
+        headers=headers,
+    )
+    resp = await client.delete(f"/agents/{agent_id}", headers=headers)
+    assert resp.status_code == 204, resp.text
+    body = (await client.get(f"/email-domains/{domain_id}", headers=headers)).json()
+    assert body["email_agent_id"] is None

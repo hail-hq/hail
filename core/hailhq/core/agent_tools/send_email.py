@@ -8,6 +8,7 @@ accepted. Resolution, gate, cap, and billing run server-side in
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from typing import Any
 
@@ -64,7 +65,7 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
 
 
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
-    if ctx.call_id is None:
+    if ctx.call_id is None and ctx.inbound_email_id is None:
         return NO_CALL
     if ctx.api is None:
         return _UNAVAILABLE
@@ -82,9 +83,17 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if not subject.strip() or not body_text.strip():
         return "I need a subject and a message before I can send the email."
     resp = await ctx.api.post(
-        "/internal/agent/send-email",
+        (
+            "/internal/agent/send-email"
+            if ctx.call_id is not None
+            else "/internal/agent/email-run/send-email"
+        ),
         {
-            "call_id": str(ctx.call_id),
+            **(
+                {"call_id": str(ctx.call_id)}
+                if ctx.call_id is not None
+                else {"inbound_email_id": str(ctx.inbound_email_id)}
+            ),
             "tool_invocation_id": str(uuid.uuid4()),
             "recipient_name": recipient_name,
             "subject": subject,
@@ -122,4 +131,14 @@ SPEC = ToolSpec(
     risk_tier="outbound_send",
     is_available=_is_available,
     execute=_execute,
+)
+
+# In an email run there is no one on a call. The rest of the spec is the same.
+EMAIL_RUN_SPEC = dataclasses.replace(
+    SPEC,
+    description=(
+        "Send an email to a member of the organization's team directory "
+        "(use list_contacts to see who). You cannot email arbitrary "
+        "addresses, only directory names."
+    ),
 )

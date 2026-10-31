@@ -117,6 +117,7 @@ type agentFlags struct {
 	handoverMinutes int
 	tools           []string
 	noSms           bool
+	noEmail         bool
 	noCalls         bool
 	status          string
 	name            string
@@ -135,6 +136,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&f.handoverMinutes, "handover-max-minutes", 0, "Call limit after a handover contact answers, 1..60 minutes (0 = default, 30)")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; omitted = all; on update, --all-tools resets to all)")
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
+	cmd.Flags().BoolVar(&f.noEmail, "no-email", false, "Do not answer email")
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
 	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note>, where contact_id is a contact id or member:<user id> (repeatable, max 10; replaces the list)")
@@ -201,6 +203,9 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	}
 	if changed("no-sms") {
 		b["sms_enabled"] = !f.noSms
+	}
+	if changed("no-email") {
+		b["email_enabled"] = !f.noEmail
 	}
 	if changed("no-calls") {
 		b["voice_enabled"] = !f.noCalls
@@ -518,6 +523,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	}
 	fmt.Fprintf(opts.Stdout, "  Calls:         %s\n", yesNo(a.VoiceEnabled))
 	fmt.Fprintf(opts.Stdout, "  Texts:         %s\n", yesNo(a.SmsEnabled))
+	fmt.Fprintf(opts.Stdout, "  Email:         %s\n", yesNo(a.EmailEnabled == nil || *a.EmailEnabled))
 	if a.MaxDurationSeconds != nil {
 		fmt.Fprintf(opts.Stdout, "  Max length:    %d min\n", *a.MaxDurationSeconds/60)
 	}

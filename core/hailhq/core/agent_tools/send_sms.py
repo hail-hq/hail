@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_BODY_CHARS = 480  # ~3 SMS segments; the internal route imports this as its cap
+MAX_RECIPIENT_NAME_CHARS = 200
 
 _UNAVAILABLE = "Text messaging is not available right now."
 
@@ -61,6 +62,33 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     return str(resp.get("spoken", SPOKEN_FALLBACK))
 
 
+async def _execute_for_email(ctx: ToolContext, args: dict[str, Any]) -> str:
+    """An email run has no one on a call: the recipient is a directory name,
+    and the route resolves the number. The model never sees or supplies one."""
+    if ctx.inbound_email_id is None:
+        return _UNAVAILABLE
+    if ctx.api is None:
+        return _UNAVAILABLE
+    recipient_name = str(args.get("recipient_name", "")).strip()[
+        :MAX_RECIPIENT_NAME_CHARS
+    ]
+    body_text = str(args.get("body", ""))[:MAX_BODY_CHARS]
+    if not recipient_name:
+        return "I need the recipient's name before I can send the text."
+    if not body_text.strip():
+        return "I need the message text before I can send it."
+    resp = await ctx.api.post(
+        "/internal/agent/email-run/send-sms",
+        {
+            "inbound_email_id": str(ctx.inbound_email_id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": recipient_name,
+            "body": body_text,
+        },
+    )
+    return str(resp.get("spoken", SPOKEN_FALLBACK))
+
+
 SPEC = ToolSpec(
     name="send_sms",
     description=(
@@ -82,4 +110,32 @@ SPEC = ToolSpec(
     risk_tier="outbound_send",
     is_available=_is_available,
     execute=_execute,
+)
+
+# In an email run the recipient is a member named in the directory.
+EMAIL_RUN_SPEC = ToolSpec(
+    name="send_sms",
+    description=(
+        "Send a text message to a member of the organization's team directory "
+        "(use list_contacts to see who). You cannot text arbitrary numbers, "
+        "only directory names."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "recipient_name": {
+                "type": "string",
+                "description": "The directory name of the recipient.",
+            },
+            "body": {
+                "type": "string",
+                "description": "The text message to send. Keep it short.",
+                "maxLength": MAX_BODY_CHARS,
+            },
+        },
+        "required": ["recipient_name", "body"],
+    },
+    risk_tier="outbound_send",
+    is_available=_is_available,
+    execute=_execute_for_email,
 )
