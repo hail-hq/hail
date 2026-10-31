@@ -831,6 +831,7 @@ class Call(Base):
             " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
             name="calls_number_for_direction",
         ),
+        Index("calls_requested_at_idx", "requested_at"),
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )
@@ -939,6 +940,7 @@ class Sms(Base):
             "status IN ('queued','sent','delivered','failed','undelivered','received')",
             name="sms_status_check",
         ),
+        Index("sms_requested_at_idx", "requested_at"),
         Index(
             "sms_thread_from_idx",
             "organization_id",
@@ -1364,6 +1366,7 @@ class Email(Base):
             "direction = 'inbound' OR email_domain_id IS NOT NULL",
             name="emails_outbound_has_domain",
         ),
+        Index("emails_requested_at_idx", "requested_at"),
         Index(
             "emails_provider_message_id_outbound_uq",
             "provider_message_id",
@@ -1533,6 +1536,8 @@ class AuditLog(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+
+    __table_args__ = (Index("audit_log_occurred_at_idx", "occurred_at"),)
 
 
 class WebhookSubscription(Base):

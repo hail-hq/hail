@@ -757,3 +757,25 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert rows == [(agent, contact)]
         assert _column_data_type(conn, "agent_handover_contacts", "user_id") is None
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
+
+
+def test_0070_report_date_indexes(empty_db: str) -> None:
+    """A cross-organization read by date needs an index that starts with the
+    date. Downgrade removes them."""
+    names = (
+        "calls_requested_at_idx",
+        "sms_requested_at_idx",
+        "emails_requested_at_idx",
+        "audit_log_occurred_at_idx",
+    )
+    query = "SELECT indexname FROM pg_indexes WHERE indexname = ANY(%s)"
+    url = _to_libpq_url(to_sync_url(empty_db))
+
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        found = {row[0] for row in conn.execute(query, (list(names),))}
+    assert found == set(names)
+
+    _run_alembic(empty_db, ["downgrade", "-1"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        assert conn.execute(query, (list(names),)).fetchall() == []
