@@ -266,13 +266,9 @@ async def _fill_cap(session, email_id, *, meta) -> None:
     await session.commit()
 
 
-async def test_a_retry_with_its_reply_written_passes_a_full_cap(
-    async_session, monkeypatch
-) -> None:
-    email_id = await _seed(async_session)
-    await _fill_cap(async_session, email_id, meta={})
-    row = await async_session.get(Email, email_id)
-    async_session.add(
+async def _written_reply(session, email_id, *, status="failed") -> None:
+    row = await session.get(Email, email_id)
+    session.add(
         Email(
             organization_id=row.organization_id,
             email_domain_id=row.email_domain_id,
@@ -281,16 +277,50 @@ async def test_a_retry_with_its_reply_written_passes_a_full_cap(
             to_addresses=[MEMBER],
             subject="Re: Question",
             body_text="Written earlier.",
-            status="failed",
+            status=status,
             metadata_={"reply_to_email_id": str(email_id)},
         )
     )
-    await async_session.commit()
+    await session.commit()
+
+
+async def test_a_retry_with_its_reply_written_passes_a_full_cap(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    await _fill_cap(async_session, email_id, meta={})
+    await _written_reply(async_session, email_id)
     _use(monkeypatch, FakeLLM(reply="Hi"))
     api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
     await emailbot.reply_once(api)
     assert api.post.await_args.args[0] == "/internal/agent/reply-email"
     assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_retry_with_its_reply_written_skips_the_model(
+    async_session, monkeypatch
+) -> None:
+    """No second tool sends, and an empty model answer cannot skip the row."""
+    email_id = await _seed(async_session)
+    await _written_reply(async_session, email_id)
+    llm = ScriptedLLM([("tool", "send_email", "{}"), ("text", "")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id)}
+    )
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_retry_still_reads_the_rules(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session, credits=0)
+    await _written_reply(async_session, email_id)
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
 
 
 async def test_a_retried_runs_own_sends_do_not_stop_it(

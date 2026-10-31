@@ -64,8 +64,10 @@ a row that qualifies. The newest rows win when a thread is long.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
 the earlier row: a sent one is done, and a failed one is delivered again, as is a
-queued one past a 60-second grace. The reply carries
-`In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. It goes
+queued one past a 60-second grace. A resend first claims the row by resetting
+`requested_at`, so a retry during a slow resend waits. When a reply row exists, the
+worker does not call the model or its tools again. The reply carries
+`In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. Tool emails carry `Auto-Submitted: auto-generated`. It goes
 out from the hail-mail address, or `noreply@` on a custom domain: `To` and `Cc`
 are sender-written, so they do not choose the `From`. The reply goes to `From`,
 never `Reply-To`. SES
