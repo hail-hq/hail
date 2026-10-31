@@ -292,15 +292,18 @@ async def _write_usage_event(
 
 
 def _send_headers(email: Email, extra: dict[str, str] | None) -> dict[str, str] | None:
-    """Headers for the wire. An agent's reply threads in the sender's mail
-    client and marks itself automatic, so another agent does not answer it."""
+    """Headers for the wire. An agent's mail threads in the sender's client and
+    marks itself automatic, so another agent does not answer it."""
     headers = dict(extra or {})
     if email.in_reply_to:
         headers["In-Reply-To"] = email.in_reply_to
     if email.references_ids:
         headers["References"] = " ".join(email.references_ids)
-    if email.metadata_ and email.metadata_.get("reply_to_email_id"):
+    meta = email.metadata_ or {}
+    if meta.get("reply_to_email_id"):
         headers["Auto-Submitted"] = "auto-replied"
+    elif meta.get("inbound_email_id"):
+        headers["Auto-Submitted"] = "auto-generated"
     return headers or None
 
 

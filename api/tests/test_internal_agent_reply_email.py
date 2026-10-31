@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from hailhq.api.routes.internal import agent as internal_agent
 from hailhq.core import email_agent, hmac_signing
 from hailhq.core.config import settings
 from hailhq.core.models import (
@@ -21,7 +22,7 @@ from hailhq.core.models import (
     Suppression,
     User,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 HMAC_SECRET = "test-internal-secret"
@@ -248,6 +249,93 @@ async def test_a_stale_queued_reply_is_delivered(
     assert kwargs["body_text"] == "Written earlier."
 
 
+async def test_a_retry_without_a_body_delivers_the_stored_text(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    raw = json.dumps({"email_id": str(inbound.id)}).encode()
+    resp = await client.post(
+        "/internal/agent/reply-email", content=raw, headers=_signed(raw)
+    )
+    assert resp.json()["state"] == "done"
+    kwargs = email_mock.send_email.await_args.kwargs
+    assert kwargs["body_text"] == "Written earlier."
+
+
+async def test_no_body_and_no_earlier_reply_sends_nothing(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    raw = json.dumps({"email_id": str(inbound.id)}).encode()
+    resp = await client.post(
+        "/internal/agent/reply-email", content=raw, headers=_signed(raw)
+    )
+    assert resp.json()["state"] == "failed" and resp.json()["reason"] == "no_body"
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_slow_resend_cannot_be_sent_twice(
+    client, async_session, email_mock
+) -> None:
+    """A retry that lands during the resend sees a fresh claim and waits."""
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session,
+        org,
+        agent,
+        domain,
+        inbound,
+        status="queued",
+        age=timedelta(minutes=5),
+    )
+    await async_session.refresh(row)
+    before = row.requested_at
+    send = email_mock.send_email.side_effect
+    during: list[dict] = []
+
+    async def slow(**kwargs):
+        during.append(await _reply(client, inbound.id))
+        return await send(**kwargs)
+
+    email_mock.send_email.side_effect = slow
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "done"
+    assert during[0]["state"] == "retry" and during[0]["reason"] == "in_flight"
+    assert email_mock.send_email.await_count == 1
+    await async_session.refresh(row)
+    assert row.requested_at > before
+    assert row.status == "sent"
+
+
+async def test_a_lost_claim_sends_nothing(
+    client, async_session, email_mock, monkeypatch
+) -> None:
+    """Another request moved requested_at after this one read the row."""
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    real = internal_agent.prior_reply
+
+    async def stale(db, email):
+        prior = await real(db, email)
+        await db.execute(
+            update(Email)
+            .where(Email.id == prior.id)
+            .values(requested_at=prior.requested_at + timedelta(seconds=1))
+            .execution_options(synchronize_session=False)
+        )
+        return prior
+
+    monkeypatch.setattr(internal_agent, "prior_reply", stale)
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "retry" and data["reply_id"] == str(row.id)
+    email_mock.send_email.assert_not_awaited()
+
+
 async def test_a_bounced_reply_is_final(client, async_session, email_mock) -> None:
     org, agent, domain, inbound = await _seed(async_session)
     await _prior_reply(
@@ -463,7 +551,7 @@ async def test_tool_email_reaches_a_member_by_name(
     assert data == {"ok": True, "spoken": "Email sent."}
     kwargs = email_mock.send_email.await_args.kwargs
     assert kwargs["to_addresses"] == [MEMBER]
-    assert "Auto-Submitted" not in (kwargs["headers"] or {})
+    assert kwargs["headers"]["Auto-Submitted"] == "auto-generated"
     row = (
         await async_session.execute(
             select(Email).where(Email.subject == "Note", Email.direction == "outbound")

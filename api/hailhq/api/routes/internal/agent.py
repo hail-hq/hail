@@ -104,7 +104,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -565,7 +565,10 @@ class AgentReplyEmailRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email_id: UUID  # the inbound row being answered
-    body: str = Field(min_length=1, max_length=EMAIL_MAX_REPLY_CHARS)
+    # Omitted when the reply already exists: the stored text is delivered.
+    body: str | None = Field(
+        default=None, min_length=1, max_length=EMAIL_MAX_REPLY_CHARS
+    )
 
 
 class AgentReplyEmailResponse(BaseModel):
@@ -674,16 +677,35 @@ async def agent_reply_email(
 
     if prior is not None:
         # The row exists, so the audit row does too: only the send is missing.
-        prior.status = "queued"
-        prior.end_reason = None
-        prior.failed_at = None
+        # requested_at restarts the grace above, so a retry during a slow resend
+        # waits. The guard means one claim wins even without the thread lock.
+        claim = await db.execute(
+            update(Email)
+            .where(Email.id == prior.id, Email.requested_at == prior.requested_at)
+            .values(
+                status="queued",
+                end_reason=None,
+                failed_at=None,
+                requested_at=datetime.now(timezone.utc),
+            )
+            .execution_options(synchronize_session=False)
+        )
         await db.commit()
+        if not claim.rowcount:  # type: ignore[attr-defined]
+            return AgentReplyEmailResponse(
+                ok=False, state="retry", reason="in_flight", reply_id=prior.id
+            )
+        await db.refresh(prior)
         err = await deliver_email(db, email_provider, prior)
         if err is not None:
             return AgentReplyEmailResponse(
                 ok=False, state="failed", reason=err, reply_id=prior.id
             )
         return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
+
+    if body.body is None:
+        # Only the worker's retry omits the body, and it saw a reply row.
+        return AgentReplyEmailResponse(ok=False, state="failed", reason="no_body")
 
     in_reply_to, references = reply_references(inbound)
     reply = Email(

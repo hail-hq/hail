@@ -115,18 +115,19 @@ async def generate_reply(
 
 async def _prepare(
     claimed: ClaimedEmailReply,
-) -> tuple[list[dict[str, Any]], list[ToolSpec]] | str:
+) -> tuple[list[dict[str, Any]], list[ToolSpec]] | str | None:
     """Load the thread and tools on a short session; nothing stays open. A
     string is why the rules no longer allow a reply, so the model is not paid
-    for one."""
+    for one. None means the reply exists: the model and its tools do not run
+    again, and the route delivers the stored text."""
     email = claimed.email
     async with session_scope() as db:
-        # A retry whose reply already exists was under the cap when it was
-        # written, the same rule as the reply route.
         prior = await prior_reply(db, email)
         refusal = await run_refusal(db, claimed.domain, email, check_cap=prior is None)
         if refusal is not None:
             return refusal
+        if prior is not None:
+            return None
         trust = await sender_trust(db, email)
         thread = await email_thread(db, email)
         specs = await email_run_tools(claimed.agent, db)
@@ -202,11 +203,20 @@ async def _reply_claimed(
             logger.info("email_id=%s not answered: %s", email.id, prepared)
             await _settle(claimed, "skipped", reason=prepared)
             return True
-        messages, specs = prepared
-        text = await asyncio.wait_for(
-            generate_reply(claimed, messages, specs, api),
-            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
-        )
+        payload: dict[str, str] = {"email_id": str(email.id)}
+        if prepared is not None:
+            messages, specs = prepared
+            text = await asyncio.wait_for(
+                generate_reply(claimed, messages, specs, api),
+                timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
+            )
+            if not text:
+                if span is not None:
+                    span.set_attribute("reply.state", "skipped")
+                logger.info("email_id=%s wrote nothing; skipped", email.id)
+                await _settle(claimed, "skipped", reason="empty_reply")
+                return True
+            payload["body"] = text
     except ProviderKeyError as exc:
         if span is not None:
             span.set_attribute("reply.state", "failed")
@@ -226,16 +236,8 @@ async def _reply_claimed(
         )
         await _settle(claimed, None, retry=True)
         return True
-    if not text:
-        if span is not None:
-            span.set_attribute("reply.state", "skipped")
-        logger.info("email_id=%s wrote nothing; skipped", email.id)
-        await _settle(claimed, "skipped", reason="empty_reply")
-        return True
     try:
-        result = await api.post(
-            "/internal/agent/reply-email", {"email_id": str(email.id), "body": text}
-        )
+        result = await api.post("/internal/agent/reply-email", payload)
     except Exception as exc:
         if span is not None:
             span.set_attribute("reply.state", "retry")
