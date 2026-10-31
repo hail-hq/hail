@@ -680,7 +680,12 @@ async def agent_reply_email(
         provider="ses",
         in_reply_to=in_reply_to,
         references_ids=references,
-        metadata_={"reply_to_email_id": str(inbound.id), "agent_id": str(agent.id)},
+        metadata_={
+            "reply_to_email_id": str(inbound.id),
+            "agent_id": str(agent.id),
+            # Which thread budget this reply spends.
+            "sender_verified": is_authenticated(inbound),
+        },
     )
     db.add(reply)
     await db.commit()

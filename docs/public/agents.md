@@ -181,7 +181,7 @@ What happens on inbound mail:
    its instructions and the last 20 proven messages of the thread.
 3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
    addresses. For one sender in any 24 hours, the agent sends at most 20 messages, counting
-   replies and tool sends.
+   replies and tool sends. Mail without DMARC `PASS` has its own limit of 5 replies per address.
 4. With no credit, the mail is stored and the agent stays quiet. The row carries
    `suppressed_reasons: ["insufficient_funds"]`.
 

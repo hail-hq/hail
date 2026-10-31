@@ -1504,6 +1504,11 @@ class Email(Base):
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # True only when ingest saw one From address and a DMARC PASS. The one proof
+    # of a sender: tools and thread history need it.
+    from_verified: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
     # Inbound rows routed to an agent, as on ``sms``:
     # pending | processing | done | skipped | failed.
     agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)

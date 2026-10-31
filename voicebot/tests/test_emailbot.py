@@ -78,6 +78,7 @@ async def _seed(
         message_id="<one@example.com>",
         references_ids=["<zero@example.com>"] if earlier else None,
         dmarc_verdict=dmarc,
+        from_verified=dmarc == "PASS",
         agent_id=agent.id,
         agent_reply_state="pending",
     )
@@ -96,6 +97,7 @@ async def _seed(
                 status="received",
                 message_id="<zero@example.com>",
                 dmarc_verdict="PASS",
+                from_verified=True,
             )
         )
     await session.commit()

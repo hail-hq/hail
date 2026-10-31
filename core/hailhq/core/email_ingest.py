@@ -23,7 +23,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
-from hailhq.core.email_agent import queue_decision
+from hailhq.core.email_agent import proves_sender, queue_decision
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -265,6 +265,7 @@ async def _persist_one(
         spf_verdict=message.spf_verdict,
         dkim_verdict=message.dkim_verdict,
         dmarc_verdict=message.dmarc_verdict,
+        from_verified=proves_sender(parsed, message.dmarc_verdict),
         provider_received_at=message.received_at,
         metadata_=metadata,
     )
