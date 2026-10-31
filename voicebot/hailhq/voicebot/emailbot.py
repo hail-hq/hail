@@ -5,9 +5,10 @@ precedence and keys. The DB side lives in ``hailhq.core.email_agent``. The send 
 ``POST /internal/agent/reply-email``, where the scope, thread cap, funds,
 suppression, billing, and delivery live.
 
-Tool sends run during the claim, before the reply. Each send's id comes from the
-message itself, so a retried run cannot repeat it, and a different message to the
-same person still goes.
+Tool sends run during the claim, before the reply. Within one run, a send's id
+comes from the message, so a client retry cannot repeat it, and a different message
+to the same person still goes. A later attempt after a tool send runs with no
+tools: the model could reword a message, and it would go out twice.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from hailhq.core.email_agent import (
     retry_reply,
     run_refusal,
     sender_trust,
+    tool_sends_for_reply,
 )
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
@@ -131,7 +133,10 @@ async def _prepare(
             return None
         trust = await sender_trust(db, email)
         thread = await email_thread(db, email)
-        specs = await email_run_tools(claimed.agent, db)
+        # A send from an earlier attempt: no tools, so a reworded message cannot
+        # go out twice. The model still writes the reply.
+        sent = await tool_sends_for_reply(db, email.id)
+        specs = [] if sent else await email_run_tools(claimed.agent, db)
     return build_chat_messages(claimed.agent, thread, trust=trust), specs
 
 

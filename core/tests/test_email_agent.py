@@ -974,6 +974,17 @@ def test_reply_references_chain_and_drop_bad_ids():
     )
 
 
+def test_a_message_id_too_long_for_a_header_is_left_out():
+    long_id = f"<{'x' * email_agent.MAX_HEADER_CHARS}@example.com>"
+    assert email_agent._MESSAGE_ID.match(long_id)
+    assert email_agent.reply_references(
+        Email(message_id=long_id, references_ids=["<one@x.co>"])
+    ) == (None, None)
+    assert email_agent.reply_references(
+        Email(message_id="<two@x.co>", references_ids=[long_id, "<one@x.co>"])
+    ) == ("<two@x.co>", ["<one@x.co>", "<two@x.co>"])
+
+
 def test_reply_references_fit_one_header():
     ids = [f"<{'x' * 60}{i}@example.com>" for i in range(40)]
     _, chain = email_agent.reply_references(

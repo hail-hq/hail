@@ -659,14 +659,19 @@ def reply_from_address(domain: EmailDomain) -> str:
     return from_address_for(domain)
 
 
+def _usable_id(value: str) -> bool:
+    return len(value) <= MAX_HEADER_CHARS and bool(_MESSAGE_ID.match(value))
+
+
 def reply_references(email: Email) -> tuple[str | None, list[str] | None]:
-    """``(In-Reply-To, References)`` for a reply. A malformed id is dropped: it
-    came from the sender and goes into a header. The first id and the newest
-    ones stay when the list is too long for one header."""
+    """``(In-Reply-To, References)`` for a reply. An id that is malformed, or too
+    long for a header, is left out, and the reply still sends: ids come from the
+    sender and go into headers. The first id and the newest ones stay when the
+    list is too long for one header."""
     message_id = (email.message_id or "").strip()
-    if not _MESSAGE_ID.match(message_id):
+    if not _usable_id(message_id):
         return None, None
-    chain = [r for r in (email.references_ids or []) if _MESSAGE_ID.match(r)]
+    chain = [r for r in (email.references_ids or []) if _usable_id(r)]
     chain.append(message_id)
     while len(" ".join(chain)) > MAX_HEADER_CHARS and len(chain) > 2:
         del chain[1]

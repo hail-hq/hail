@@ -93,8 +93,10 @@ the risk. Every run has a proven sender, so it gets every tool the agent allows
 that works outside a call: `list_contacts`, `send_email`, and `send_sms`, each
 aimed at a member by directory name. Call-only tools do not apply. Addresses never
 reach the model, each reply may make at most 3 sends, and tool sends count toward
-the thread cap. A send's id comes from its message: a retried run cannot repeat
-it, and a different message to the same person still goes.
+the thread cap. Within one run, a send's id comes from its message, so a client
+retry cannot repeat it, and a different message to the same person still goes. A
+later attempt after a tool send has no tools, so a reworded message cannot go out
+twice.
 
 Email text is untrusted. The prompt says so, and scope `members` is the default.
 
