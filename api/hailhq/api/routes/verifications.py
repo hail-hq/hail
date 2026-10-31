@@ -1364,6 +1364,11 @@ async def _submit_row(
     try:
         await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
+        # Saved before the discard: the ids submit() wrote (a filed campaign
+        # is billed) must survive a failed discard, or a restart during it.
+        # The 'submitting' state keeps the sweeper and admins off the row.
+        _keep_refs(row, provider)
+        await db.commit()
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
         await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
@@ -1490,17 +1495,17 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row keeps its state and its refs and is tried again next tick; the
     sweeper never dies on carrier trouble."""
-    # Saved before the discard: what check() or submit() wrote into the refs
-    # in place (a filed campaign is billed) must survive a failed discard,
-    # or a restart during it.
-    _keep_refs(row, provider)
-    await db.commit()
     await _rate_before_wipe(db, row, provider)
+    # What check() wrote into the refs in place is kept if the discard
+    # fails. Flushed, not committed: a commit would end the row lock while
+    # the discard runs.
+    _keep_refs(row, provider)
+    await db.flush()
     try:
         await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
-        await db.rollback()
+        await db.commit()  # saves the refs; the row keeps its state
         return
     row.state, row.rejection_reason = "rejected", reason
     row.provider_refs = _wiped_refs(row)
