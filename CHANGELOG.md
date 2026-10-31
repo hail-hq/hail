@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
+
 ## [0.32.0] (2026-10-30)
 
 Email stops sending to addresses that hard bounce, complain or unsubscribe,
