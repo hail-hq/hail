@@ -126,7 +126,7 @@ _SPOKEN_SMS_SENT_MEMBER = "Text message sent."
 _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
 # How long a queued reply counts as in flight. Past this the send is presumed
-# lost, and a retry delivers the same row.
+# lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
 _QUEUED_GRACE = timedelta(seconds=60)
 
 
@@ -580,6 +580,20 @@ class AgentReplyEmailResponse(BaseModel):
     reply_id: UUID | None = None
 
 
+def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
+    """The answer for a reply row whose send is over, or None while it still
+    needs sending. Not just "sent": see the same reasoning in agent_send_email."""
+    if row.status in ("queued", "failed"):
+        return None
+    ok = row.status != "bounced"
+    return AgentReplyEmailResponse(
+        ok=ok,
+        state="done" if ok else "failed",
+        reason=None if ok else "bounced",
+        reply_id=row.id,
+    )
+
+
 async def _routed_email(
     db: AsyncSession, email_id: UUID
 ) -> tuple[Email, EmailDomain, Agent] | None:
@@ -645,15 +659,8 @@ async def agent_reply_email(
     )
     # Idempotent per inbound row: the worker retries with the same email_id.
     prior = await prior_reply(db, inbound)
-    if prior is not None and prior.status not in ("queued", "failed"):
-        # Not just "sent": see the same reasoning in agent_send_email below.
-        ok = prior.status != "bounced"
-        return AgentReplyEmailResponse(
-            ok=ok,
-            state="done" if ok else "failed",
-            reason=None if ok else "bounced",
-            reply_id=prior.id,
-        )
+    if prior is not None and (finished := _finished_reply(prior)) is not None:
+        return finished
     if prior is not None and prior.status == "queued":
         age = datetime.now(timezone.utc) - prior.requested_at
         if age < _QUEUED_GRACE:
@@ -679,24 +686,31 @@ async def agent_reply_email(
         # The row exists, so the audit row does too: only the send is missing.
         # requested_at restarts the grace above, so a retry during a slow resend
         # waits. The guard means one claim wins even without the thread lock.
+        claimed_at = datetime.now(timezone.utc)
         claim = await db.execute(
             update(Email)
-            .where(Email.id == prior.id, Email.requested_at == prior.requested_at)
+            .where(
+                Email.id == prior.id,
+                Email.status == prior.status,
+                Email.requested_at == prior.requested_at,
+            )
             .values(
                 status="queued",
                 end_reason=None,
                 failed_at=None,
-                requested_at=datetime.now(timezone.utc),
+                requested_at=claimed_at,
             )
             .execution_options(synchronize_session=False)
         )
         await db.commit()
         if not claim.rowcount:  # type: ignore[attr-defined]
-            return AgentReplyEmailResponse(
+            # Another request got there first. Report how it ended, or try later.
+            await db.refresh(prior)
+            return _finished_reply(prior) or AgentReplyEmailResponse(
                 ok=False, state="retry", reason="in_flight", reply_id=prior.id
             )
         await db.refresh(prior)
-        err = await deliver_email(db, email_provider, prior)
+        err = await deliver_email(db, email_provider, prior, claimed_at=claimed_at)
         if err is not None:
             return AgentReplyEmailResponse(
                 ok=False, state="failed", reason=err, reply_id=prior.id
@@ -725,6 +739,7 @@ async def agent_reply_email(
     )
     db.add(reply)
     await db.commit()
+    await db.refresh(reply)
     await write_audit_log(
         organization_id=org,
         api_key_id=None,
@@ -741,7 +756,7 @@ async def agent_reply_email(
         },
         actor_kind="system",
     )
-    err = await deliver_email(db, email_provider, reply)
+    err = await deliver_email(db, email_provider, reply, claimed_at=reply.requested_at)
     if err is not None:
         return AgentReplyEmailResponse(
             ok=False, state="failed", reason=err, reply_id=reply.id

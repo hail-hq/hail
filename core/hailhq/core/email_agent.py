@@ -215,14 +215,17 @@ async def replies_in_thread(
 
 
 async def prior_reply(db: AsyncSession, email: Email) -> Email | None:
-    """The reply already written for this inbound row, or None. Its existence
-    means a retry: the row was under the cap when the reply was written."""
+    """The reply the agent already wrote for this inbound row, or None. Its
+    existence means a retry: the row was under the cap when the reply was
+    written. Only an agent's row to this sender counts."""
     stmt = (
         select(Email)
         .where(
             Email.organization_id == email.organization_id,
             Email.direction == "outbound",
+            Email.agent_id.is_not(None),
             Email.metadata_["reply_to_email_id"].astext == str(email.id),
+            Email.to_addresses == [normalize_address(email.from_address)],
         )
         .order_by(Email.requested_at)
     )
@@ -516,7 +519,11 @@ async def _answers_trusted(
 ) -> list[Email]:
     """``rows`` without any outbound row that answers something unproven. A reply
     to forged mail says what the forger asked for, so it stays out too."""
-    answered = {r.id: _answered_id(r) for r in rows if r.direction == "outbound"}
+    answered = {
+        r.id: _answered_id(r) if r.agent_id else None
+        for r in rows
+        if r.direction == "outbound"
+    }
     ids = {i for i in answered.values() if i is not None}
     trusted: set[uuid.UUID] = set()
     if ids:
@@ -670,6 +677,7 @@ async def tool_sends_for_reply(db: AsyncSession, inbound_id: uuid.UUID) -> int:
     for model in (Email, Sms):
         stmt = select(func.count(model.id)).where(
             model.direction == "outbound",
+            model.agent_id.is_not(None),
             model.metadata_["inbound_email_id"].astext == str(inbound_id),
         )
         total += int((await db.execute(stmt)).scalar_one() or 0)

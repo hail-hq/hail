@@ -1984,7 +1984,7 @@ type EmailCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers' and 'system_kind' are reserved for Hail's own queue bookkeeping and are rejected.
+	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers', 'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender' are reserved for Hail's own bookkeeping and are rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.

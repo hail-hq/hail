@@ -6476,9 +6476,7 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the email and echoed back
-            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers'
-            and 'system_kind' are reserved for Hail's own queue bookkeeping and are
-            rejected.
+            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers', 'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender' are reserved for Hail's own bookkeeping and are rejected.
         attachment_ids:
           anyOf:
             - items:

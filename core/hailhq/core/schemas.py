@@ -1394,7 +1394,15 @@ MAX_FORWARD_TARGETS = 10
 
 # Email.metadata keys the queue uses internally; POST /emails rejects them.
 RESERVED_EMAIL_METADATA_KEYS = frozenset(
-    {"forwarded_from", "forward_headers", "system_kind"}
+    {
+        "forwarded_from",
+        "forward_headers",
+        "system_kind",
+        # An agent's reply bookkeeping: a forged key could pose as a prior reply.
+        "reply_to_email_id",
+        "inbound_email_id",
+        "thread_sender",
+    }
 )
 
 
@@ -1819,8 +1827,9 @@ class EmailCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the email and echoed back on "
             "reads. Not interpreted by Hail. The keys 'forwarded_from', "
-            "'forward_headers' and 'system_kind' are reserved for Hail's own "
-            "queue bookkeeping and are rejected."
+            "'forward_headers', 'system_kind', 'reply_to_email_id', "
+            "'inbound_email_id' and 'thread_sender' are reserved for Hail's own "
+            "bookkeeping and are rejected."
         ),
     )
     attachment_ids: list[UUID] | None = Field(
