@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,7 +12,7 @@ from hailhq.core.agent_tools import send_email, send_sms
 from hailhq.core.agent_tools.email_run import email_run_tools
 from hailhq.core.agent_tools.spec import NO_CALL, ToolContext
 from hailhq.core.config import settings
-from hailhq.core.email_agent import MAX_REPLIES_PER_THREAD
+from hailhq.core.email_agent import MAX_ATTEMPTS, MAX_REPLIES_PER_THREAD
 from hailhq.core.models import (
     AccountCredit,
     Agent,
@@ -377,6 +377,67 @@ async def test_a_retry_answer_puts_the_row_back(async_session, monkeypatch) -> N
     )
     await emailbot.reply_once(api)
     assert await _state(async_session, email_id) == "pending"
+
+
+async def test_retry_after_replaces_the_backoff(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "retry",
+                "reason": "in_flight",
+                "retry_after_seconds": 170,
+            }
+        )
+    )
+    before = datetime.now(timezone.utc)
+    await emailbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Email, email_id)
+    assert row.agent_reply_available_at >= before + timedelta(seconds=165)
+
+
+async def test_one_ses_error_then_a_delivered_reply(async_session, monkeypatch) -> None:
+    """The second pass posts no body, and the route sends the stored text."""
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            side_effect=[
+                {"ok": False, "state": "retry", "reason": "TimeoutError"},
+                {"ok": True, "state": "done"},
+            ]
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+    row = await async_session.get(Email, email_id)
+    row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await async_session.commit()
+    await _written_reply(async_session, email_id)
+
+    await emailbot.reply_once(api)
+    assert api.post.await_args.args[1] == {"email_id": str(email_id)}
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_lasting_send_failure_ends_failed(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": False, "state": "retry", "reason": "TimeoutError"}
+        )
+    )
+    for _ in range(MAX_ATTEMPTS):
+        row = await async_session.get(Email, email_id)
+        row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await async_session.commit()
+        await emailbot.reply_once(api)
+        async_session.expire_all()
+    assert await _state(async_session, email_id) == "failed"
 
 
 async def test_an_empty_reply_says_why(async_session, monkeypatch) -> None:
