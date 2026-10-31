@@ -7,7 +7,8 @@ suppression, billing, and delivery live.
 
 Tool sends run during the claim, before the reply. Their routes refuse a second
 send to the same person for one inbound email, so a retried run cannot repeat
-one.
+one. They also refuse a sender whose ``From`` is not proven, so leaving tools out
+of an unverified run here is not the only guard.
 """
 
 from __future__ import annotations
@@ -31,9 +32,9 @@ from hailhq.core.email_agent import (
     email_thread,
     finish_reply,
     retry_reply,
-    sender_refusal,
+    run_refusal,
+    sender_trust,
 )
-from hailhq.core.forward_targets import normalize_address
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
@@ -106,7 +107,7 @@ async def generate_reply(
         messages,
         [wrap_tool(s, tctx) for s in specs],
         run_tool,
-        max_rounds=MAX_TOOL_ROUNDS,
+        max_rounds=MAX_TOOL_ROUNDS if specs else 1,
         log_label=f"email_id={claimed.email.id}",
     )
     return text[:MAX_REPLY_CHARS]
@@ -114,21 +115,22 @@ async def generate_reply(
 
 async def _prepare(
     claimed: ClaimedEmailReply,
-) -> tuple[list[dict[str, Any]], list[ToolSpec]]:
-    """Load the thread and tools on a short session; nothing stays open."""
+) -> tuple[list[dict[str, Any]], list[ToolSpec]] | None:
+    """Load the thread and tools on a short session; nothing stays open. None
+    when the rules no longer allow a reply, so the model is not paid for one.
+    An unverified sender gets no tools and no history."""
     email = claimed.email
     async with session_scope() as db:
+        refusal = await run_refusal(db, claimed.domain, email)
+        if refusal is not None:
+            logger.info("email_id=%s not answered: %s", email.id, refusal)
+            return None
+        trust = await sender_trust(db, email)
         thread = await email_thread(db, email)
-        specs = await email_run_tools(claimed.agent, db)
-        refusal = await sender_refusal(
-            db,
-            claimed.domain,
-            sender=normalize_address(email.from_address),
-            dmarc_verdict=email.dmarc_verdict,
+        specs = (
+            [] if trust == "unverified" else await email_run_tools(claimed.agent, db)
         )
-    # Reaching here under scope anyone says nothing about who the sender is.
-    member = claimed.domain.email_agent_scope == "members" and refusal is None
-    return build_chat_messages(claimed.agent, thread, member=member), specs
+    return build_chat_messages(claimed.agent, thread, trust=trust), specs
 
 
 async def _settle(
@@ -187,7 +189,13 @@ async def _reply_claimed(
 ) -> bool:
     email = claimed.email
     try:
-        messages, specs = await _prepare(claimed)
+        prepared = await _prepare(claimed)
+        if prepared is None:
+            if span is not None:
+                span.set_attribute("reply.state", "skipped")
+            await _settle(claimed, "skipped")
+            return True
+        messages, specs = prepared
         text = await asyncio.wait_for(
             generate_reply(claimed, messages, specs, api),
             timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,

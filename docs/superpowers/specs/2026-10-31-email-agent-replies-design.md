@@ -30,38 +30,50 @@ only when all of these hold:
    `GRAY` when only an unaligned SPF or DKIM check passed, so `GRAY` does not
    prove the `From` address.
 6. Scope `anyone`: the DMARC verdict is not `FAIL`, so a forged `From` does not
-   turn a reply into mail to a third party.
-7. The sender is under the thread cap (20 replies in 24 hours).
+   turn a reply into mail to a third party. Only `PASS` counts as proven: other
+   verdicts may get a plain reply, with no tools and no thread history.
+7. The sender is under the thread cap: 20 agent sends in 24 hours, counting
+   replies and tool sends in any channel.
 8. The org has funds.
 
 Rows that fail get `agent_reply_state = 'skipped'` and `metadata.agent_skip_reason`.
 With no funds, `suppressed_reasons` also gets `insufficient_funds`, the reason
 the console already shows on inbound mail. The row stays stored and visible.
 
-The rules run again when the reply is sent: routing, scope, funds, and the
-suppression gate can change while the model writes.
+The rules run again before the model is called, and when the reply is sent:
+routing, scope, funds, and the suppression gate can change while the model writes.
 
 ## Replies
 
 The voicebot's text worker also claims email rows, with the same lease, attempts,
 and backoff as texts. The chat is the agent's instructions plus the thread: rows
 linked by `In-Reply-To` and `References`, and only rows with this same sender, so
-a forged `References` header cannot read another thread.
+a forged `References` header cannot read another thread. Inbound rows join the
+chat only with DMARC `PASS`, and not when they were spam, a virus, or skipped for
+their sender. An unproven sender gets no history at all.
 
-`POST /internal/agent/reply-email` sends one reply per inbound row, from the
-address the mail reached, with `In-Reply-To`, `References`, `Re:`, and
-`Auto-Submitted: auto-replied`. The reply goes to `From`, never `Reply-To`. SES
+`POST /internal/agent/reply-email` sends one reply per inbound row, with
+`In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. It goes
+out from the hail-mail address, or `noreply@` on a custom domain: `To` and `Cc`
+are sender-written, so they do not choose the `From`. The reply goes to `From`,
+never `Reply-To`. SES
 overrides `Message-ID`, so thread lookup also matches the local part of a
 referenced id against `provider_message_id`. Replies bill as outbound email and
 write audit action `agent.email.reply`.
 
 ## Tools
 
-The owner chose full capability. An email run gets every tool the agent allows
-that works outside a call: `list_contacts`, `send_email`, and `send_sms`, each
-aimed at a member by directory name. Call-only tools do not apply. Addresses
-never reach the model, and each reply may make at most 3 sends. A retried run
-does not repeat a send to the same person.
+The owner chose full capability, with `anyone` as an explicit opt-in that states
+the risk. A run with a proven sender (a verified member, or DMARC `PASS` under
+`anyone`) gets every tool the agent allows that works outside a call:
+`list_contacts`, `send_email`, and `send_sms`, each aimed at a member by directory
+name. Call-only tools do not apply. Addresses never reach the model, each reply
+may make at most 3 sends, and tool sends count toward the thread cap. A retried
+run does not repeat a send to the same person.
+
+An unverified run gets no tools. The worker leaves them out, and
+`/internal/agent/email-run/*` refuses them on the server, so this does not rest on
+prompt text.
 
 Email text is untrusted. The prompt says so, and scope `members` is the default.
 

@@ -56,15 +56,13 @@ from hailhq.core.email_agent import (
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
     answers_emails,
+    is_authenticated,
     note_no_funds,
     reply_from_address,
     reply_references,
     reply_subject,
-    sender_refusal,
+    run_refusal,
     tool_sends_for_reply,
-)
-from hailhq.core.email_agent import (
-    replies_in_thread as email_replies_in_thread,
 )
 from hailhq.core.email_agent import (
     thread_lock_key as email_thread_lock_key,
@@ -651,13 +649,9 @@ async def agent_reply_email(
     if prior is not None:
         return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
 
-    refusal = await sender_refusal(
-        db, domain, sender=recipient, dmarc_verdict=inbound.dmarc_verdict
-    )
+    refusal = await run_refusal(db, domain, inbound)
     if refusal is not None:
         return AgentReplyEmailResponse(ok=False, state="skipped", reason=refusal)
-    if await email_replies_in_thread(db, org, recipient) >= MAX_REPLIES_PER_THREAD:
-        return AgentReplyEmailResponse(ok=False, state="skipped", reason="thread_cap")
     if not await has_funds(db, org):
         await note_no_funds(db, inbound)
         return AgentReplyEmailResponse(
@@ -677,7 +671,7 @@ async def agent_reply_email(
         organization_id=org,
         email_domain_id=domain.id,
         agent_id=agent.id,
-        from_address=reply_from_address(domain, inbound),
+        from_address=reply_from_address(domain),
         from_name=agent.name,
         to_addresses=[recipient],
         subject=reply_subject(inbound.subject),
@@ -731,11 +725,15 @@ class AgentEmailRunSmsRequest(AgentEmailRunBase):
     body: str = Field(min_length=1, max_length=SMS_MAX_BODY_CHARS)
 
 
-def _email_run_meta(body: AgentEmailRunBase, agent: Agent) -> dict[str, str]:
+def _email_run_meta(
+    body: AgentEmailRunBase, agent: Agent, inbound: Email
+) -> dict[str, str]:
     return {
         "inbound_email_id": str(body.inbound_email_id),
         "tool_invocation_id": str(body.tool_invocation_id),
         "agent_id": str(agent.id),
+        # Counts toward the sender's thread cap.
+        "thread_sender": normalize_address(inbound.from_address),
     }
 
 
@@ -743,22 +741,22 @@ async def _email_run(
     db: AsyncSession, body: AgentEmailRunBase
 ) -> tuple[Email, Agent] | AgentSendResponse:
     """Everything a tool send in an email run must pass before it picks a
-    recipient. Only a claimed row runs tools, and the scope is read again: an
-    owner may have narrowed it while the model worked."""
+    recipient. Only a claimed row runs tools, and only for a proven sender:
+    this is the check, and the worker leaving tools out is not. The scope and
+    the thread cap are read again under the thread lock."""
     routed = await _routed_email(db, body.inbound_email_id)
     if routed is None or routed[0].agent_reply_state != "processing":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     inbound, domain, agent = routed
+    if not is_authenticated(inbound):
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
-    refusal = await sender_refusal(
-        db,
-        domain,
-        sender=normalize_address(inbound.from_address),
-        dmarc_verdict=inbound.dmarc_verdict,
-    )
+    refusal = await run_refusal(db, domain, inbound)
+    if refusal == "thread_cap":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     if refusal is not None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
     return inbound, agent
@@ -788,7 +786,7 @@ async def agent_email_run_send_email(
         return run
     inbound, agent = run
     org = inbound.organization_id
-    meta = _email_run_meta(body, agent)
+    meta = _email_run_meta(body, agent, inbound)
 
     matches = await resolve_member_emails(db, org, body.recipient_name)
     if not matches:
@@ -920,7 +918,7 @@ async def agent_email_run_send_sms(
         return run
     inbound, agent = run
     org = inbound.organization_id
-    meta = _email_run_meta(body, agent)
+    meta = _email_run_meta(body, agent, inbound)
 
     matches = await resolve_member_phones(db, org, body.recipient_name)
     if not matches:

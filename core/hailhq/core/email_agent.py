@@ -12,13 +12,13 @@ module holds the DB side so the worker stays LLM-only.
 
 from __future__ import annotations
 
-import html
 import logging
 import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any, Literal
 
 from hailhq.core.config import settings
@@ -27,7 +27,7 @@ from hailhq.core.email_mime import ParsedMime
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.models import Agent, Email, EmailDomain, Sms
-from hailhq.core.prompts import build_email_instructions
+from hailhq.core.prompts import SenderTrust, build_email_instructions
 from hailhq.core.text_agent import (
     CHAT_LIMIT,
     CLAIM_LEASE,
@@ -51,6 +51,7 @@ __all__ = [
     "claim_pending_reply",
     "email_thread",
     "finish_reply",
+    "is_authenticated",
     "note_no_funds",
     "queue_decision",
     "replies_in_thread",
@@ -58,7 +59,9 @@ __all__ = [
     "reply_references",
     "reply_subject",
     "retry_reply",
+    "run_refusal",
     "sender_refusal",
+    "sender_trust",
     "thread_lock_key",
     "tool_sends_for_reply",
 ]
@@ -66,6 +69,8 @@ __all__ = [
 MAX_REPLY_CHARS = 5000  # same cap as the send_email tool
 # Characters of one email in the chat. Quoted history makes bodies long.
 MAX_EMAIL_CHARS = 6000
+# HTML read per email, cut before parsing so a huge body costs a bounded time.
+MAX_HTML_CHARS = 200_000
 # Texts and emails one reply run may send, so one email cannot spend without limit.
 MAX_TOOL_SENDS = 3
 # SES caps a header value at 995 characters.
@@ -77,7 +82,16 @@ _NO_REPLY_LOCAL = re.compile(
     r"^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounces?)([+.\-_].*)?$"
 )
 _MESSAGE_ID = re.compile(r"^<[!-;=?-~]+@[!-;=?-~]+>$")
-_TAG = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.IGNORECASE | re.DOTALL)
+# Why a stored row stays out of the chat: nothing proved who wrote it, or it was
+# never meant for the agent.
+_UNTRUSTED_SKIPS = (
+    "auto_generated",
+    "sender_blocked",
+    "sender_not_member",
+    "sender_not_verified",
+    "spam",
+    "virus",
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +113,12 @@ def answers_emails(agent: Agent | None) -> bool:
     """True for a live agent with ``email_enabled``: the one test for queueing,
     claiming, and sending an email reply."""
     return agent is not None and agent.status == "live" and agent.email_enabled
+
+
+def is_authenticated(email: Email) -> bool:
+    """True when DMARC proved the ``From`` address. Only ``PASS`` counts. Tools
+    and thread history need it, under every scope."""
+    return email.dmarc_verdict == "PASS"
 
 
 def _sender_blocked(
@@ -131,12 +151,14 @@ async def sender_refusal(
     DMARC ``PASS`` is the only proof of a ``From`` address. SES reports ``GRAY``
     when any SPF or DKIM check passed for a domain with no policy or ``p=none``,
     aligned or not, so a forger with a valid signature of their own gets
-    ``GRAY``. The agent has tools, so ``members`` accepts nothing less.
+    ``GRAY``. ``members`` accepts nothing less than ``PASS``. ``anyone`` lets
+    unproven mail through for a plain reply, with no tools and no history.
     """
+    if from_count != 1 or dmarc_verdict == "FAIL":
+        return "sender_not_verified"
     if domain.email_agent_scope == "anyone":
-        # A reply to a forged From would reach an innocent third party.
-        return "sender_not_verified" if dmarc_verdict == "FAIL" else None
-    if from_count != 1 or dmarc_verdict != "PASS":
+        return None
+    if dmarc_verdict != "PASS":
         return "sender_not_verified"
     if not await is_verified_member(db, domain.organization_id, sender):
         return "sender_not_member"
@@ -146,17 +168,56 @@ async def sender_refusal(
 async def replies_in_thread(
     db: AsyncSession, organization_id: uuid.UUID, sender: str
 ) -> int:
-    """Agent replies to this sender within ``REPLY_CAP_WINDOW``."""
+    """Agent sends for this sender within ``REPLY_CAP_WINDOW``: replies, and
+    tool sends in any channel. A run that only uses tools still counts."""
     since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
-    stmt = select(func.count(Email.id)).where(
+    emails = select(func.count(Email.id)).where(
         Email.organization_id == organization_id,
         Email.direction == "outbound",
         Email.agent_id.is_not(None),
         Email.requested_at >= since,
-        Email.metadata_["reply_to_email_id"].astext.is_not(None),
-        sender == any_(Email.to_addresses),
+        or_(
+            and_(
+                Email.metadata_["reply_to_email_id"].astext.is_not(None),
+                sender == any_(Email.to_addresses),
+            ),
+            Email.metadata_["thread_sender"].astext == sender,
+        ),
     )
-    return int((await db.execute(stmt)).scalar_one() or 0)
+    texts = select(func.count(Sms.id)).where(
+        Sms.organization_id == organization_id,
+        Sms.direction == "outbound",
+        Sms.agent_id.is_not(None),
+        Sms.requested_at >= since,
+        Sms.metadata_["thread_sender"].astext == sender,
+    )
+    total = (await db.execute(emails)).scalar_one() or 0
+    return int(total) + int((await db.execute(texts)).scalar_one() or 0)
+
+
+async def run_refusal(
+    db: AsyncSession, domain: EmailDomain, email: Email
+) -> str | None:
+    """Why this row must not be answered now, or None. Scope and cap can change
+    between ingest and a claim, and the model costs money."""
+    sender = normalize_address(email.from_address)
+    refusal = await sender_refusal(
+        db, domain, sender=sender, dmarc_verdict=email.dmarc_verdict
+    )
+    if refusal is not None:
+        return refusal
+    count = await replies_in_thread(db, email.organization_id, sender)
+    return "thread_cap" if count >= MAX_REPLIES_PER_THREAD else None
+
+
+async def sender_trust(db: AsyncSession, email: Email) -> SenderTrust:
+    """What the prompt may say about the sender. A member is told apart under
+    every scope, and only a proven ``From`` can be a member."""
+    if not is_authenticated(email):
+        return "unverified"
+    sender = normalize_address(email.from_address)
+    member = await is_verified_member(db, email.organization_id, sender)
+    return "member" if member else "outside"
 
 
 async def queue_decision(
@@ -358,13 +419,31 @@ def _local_part(message_id: str) -> str:
     return message_id.strip("<> ").partition("@")[0]
 
 
+def _trusted_inbound():
+    """Inbound rows the chat may quote: a proven sender, and mail that was
+    meant for the agent. A forged row with the same ``From`` stays out."""
+    return and_(
+        Email.direction == "inbound",
+        Email.dmarc_verdict == "PASS",
+        or_(Email.spam_verdict.is_(None), Email.spam_verdict != "FAIL"),
+        or_(Email.virus_verdict.is_(None), Email.virus_verdict != "FAIL"),
+        or_(
+            Email.metadata_["agent_skip_reason"].astext.is_(None),
+            Email.metadata_["agent_skip_reason"].astext.not_in(_UNTRUSTED_SKIPS),
+        ),
+    )
+
+
 async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
     """The thread up to and including ``email``, oldest first, at most
     ``CHAT_LIMIT`` rows.
 
-    Only rows with this sender count. ``References`` is written by the sender,
-    so an unknown sender cannot name someone else's message and read it.
+    An unproven sender gets no history: anyone can write their ``From``. A proven
+    sender gets rows with this sender only, because ``References`` is written by
+    the sender and could name someone else's message.
     """
+    if not is_authenticated(email):
+        return [email]
     sender = normalize_address(email.from_address)
     seen: dict[uuid.UUID, Email] = {email.id: email}
     frontier = [email]
@@ -380,10 +459,7 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
                 Email.provider_message_id.in_({_local_part(i) for i in ids}),
             ),
             or_(
-                and_(
-                    Email.direction == "inbound",
-                    func.lower(Email.from_address) == sender,
-                ),
+                and_(_trusted_inbound(), func.lower(Email.from_address) == sender),
                 and_(Email.direction == "outbound", sender == any_(Email.to_addresses)),
             ),
         )
@@ -395,15 +471,49 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
     return earlier[-(CHAT_LIMIT - 1) :] + [email]
 
 
+class _TextExtractor(HTMLParser):
+    """The visible text of an HTML body."""
+
+    _HIDDEN = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._hidden = 0
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in self._HIDDEN:
+            self._hidden += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._HIDDEN and self._hidden:
+            self._hidden -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._hidden:
+            self.parts.append(data)
+
+
+def _html_text(body_html: str) -> str:
+    parser = _TextExtractor()
+    try:
+        parser.feed(body_html[:MAX_HTML_CHARS])
+        parser.close()
+    except (AssertionError, ValueError):
+        # Sender-written markup must not fail the reply. Keep what was read.
+        logger.warning("email html could not be parsed to the end")
+    return " ".join(" ".join(parser.parts).split())
+
+
 def _plain_body(email: Email) -> str:
     body = email.body_text
     if not (body or "").strip() and email.body_html:
-        body = html.unescape(_TAG.sub(" ", email.body_html))
+        body = _html_text(email.body_html)
     return (body or "").strip()[:MAX_EMAIL_CHARS]
 
 
 def build_chat_messages(
-    agent: Agent, thread: list[Email], *, member: bool
+    agent: Agent, thread: list[Email], *, trust: SenderTrust
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: the system message, then the thread. Inbound
     mail is ``user``, labeled so the model reads it as mail, and replies are
@@ -411,7 +521,7 @@ def build_chat_messages(
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": build_email_instructions(agent.system_prompt, member=member),
+            "content": build_email_instructions(agent.system_prompt, trust=trust),
         }
     ]
     for row in thread:
@@ -433,14 +543,9 @@ def reply_subject(subject: str | None) -> str:
     return f"Re: {clean}" if clean else "Re: your email"
 
 
-def reply_from_address(domain: EmailDomain, email: Email) -> str:
-    """The address the mail reached. A custom domain takes any local part."""
-    if domain.kind == "hail_mail":
-        return domain.domain
-    suffix = f"@{domain.domain.lower()}"
-    for address in [*email.to_addresses, *(email.cc_addresses or [])]:
-        if address.lower().endswith(suffix):
-            return address
+def reply_from_address(domain: EmailDomain) -> str:
+    """The hail-mail address, or ``noreply@`` on a custom domain. To and Cc
+    are sender-written headers: they must not choose the ``From``."""
     return from_address_for(domain)
 
 

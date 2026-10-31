@@ -2315,9 +2315,11 @@ def register_tools(
         ``clear_agent=True`` stops that. ``email_agent_scope`` is
         ``"members"`` (the default: verified members of the workspace whose
         mail passes DMARC) or ``"anyone"`` (every sender that passes the spam
-        checks). With ``"anyone"``, a stranger's email can make the agent use
-        its tools, so ask your user before you set it. A field left out keeps
-        its value. ``domain_id`` comes from ``list_email_domains``.
+        checks, unless DMARC fails). With ``"anyone"``, a stranger whose mail
+        passes DMARC can make the agent use its tools, so ask your user before
+        you set it. Other senders get a plain reply with no tools. A field
+        left out keeps its value. ``domain_id`` comes from
+        ``list_email_domains``.
 
         Returns the updated ``EmailDomainResponse`` as a dict, or
         ``{"error": "<message>"}``.

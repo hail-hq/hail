@@ -169,16 +169,19 @@ Send `null` to stop replies. The agent must be `live` with `email_enabled: true`
 - `members` (default): verified members of the organization. The mail must pass DMARC
   (`dmarc_verdict: PASS`), because anyone can write a `From` header. A member whose domain
   has no DMARC policy gets no reply.
-- `anyone`: every sender. An outside sender's email can then make the agent use its tools,
-  so choose this only for an agent that is safe to reach from the internet.
+- `anyone`: every sender except a DMARC `FAIL`. A sender with DMARC `PASS` can make the agent
+  use its tools, so choose this only for an agent that is safe to reach from the internet.
+  Any other sender may get a plain reply, with no tools and no earlier messages.
 
 What happens on inbound mail:
 
 1. Hail stores the mail and sends `email.received` as before.
-2. The agent answers once, from the address the mail reached, to the `From` address, in the
-   same thread. It reads the instructions and the last 20 messages of the thread.
+2. The agent answers once, to the `From` address, in the same thread. A hail-mail reply comes
+   from the address itself, and a custom-domain reply from `noreply@<domain>`. The agent reads
+   its instructions and the last 20 proven messages of the thread.
 3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
-   addresses. The agent sends at most 20 replies to one sender in any 24 hours.
+   addresses. For one sender in any 24 hours, the agent sends at most 20 messages, counting
+   replies and tool sends.
 4. With no credit, the mail is stored and the agent stays quiet. The row carries
    `suppressed_reasons: ["insufficient_funds"]`.
 
@@ -186,9 +189,9 @@ Inbound rows carry `agent_reply_state` (`pending`, `processing`, `done`, `skippe
 A skipped row names why in `metadata.agent_skip_reason`. Replies bill as outbound email and
 carry `agent_id`.
 
-An agent answering email can use `list_contacts`, `send_email`, and `send_sms`, unless its
-`tools` list leaves them out. Each send names a person in the directory, and each email allows
-at most 3 sends.
+With a proven sender, an agent answering email can use `list_contacts`, `send_email`, and
+`send_sms`, unless its `tools` list leaves them out. Each send names a person in the directory,
+and each email allows at most 3 sends. The server refuses tools for every other sender.
 
 ## Threads
 

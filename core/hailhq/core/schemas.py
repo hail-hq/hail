@@ -1461,8 +1461,9 @@ class EmailDomainPatch(BaseModel):
         description=(
             "Who the agent answers. 'members': verified members of the "
             "organization whose mail passes DMARC. 'anyone': every sender that "
-            "passes the spam and header rules; the agent can then use its tools "
-            "because of mail from strangers. Omit to leave unchanged."
+            "passes the spam and header rules, unless DMARC fails. A sender "
+            "with DMARC PASS can then make the agent use its tools; any other "
+            "sender gets a plain reply with no tools. Omit to leave unchanged."
         ),
     )
 
