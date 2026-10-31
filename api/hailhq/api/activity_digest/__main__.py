@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 from hailhq.core.db import engine_options, to_async_url
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -37,8 +38,17 @@ def write_preview(directory: Path, result):
             output.write(body)
 
 
+def load_settings() -> DigestSettings:
+    try:
+        return DigestSettings()
+    except ValidationError as error:
+        # Name the settings only. Their values can hold secrets.
+        fields = ",".join(sorted({str(e["loc"][0]) for e in error.errors()}))
+        raise ReviewRequired(f"invalid_settings:{fields}") from None
+
+
 async def execute(args):
-    config = DigestSettings()
+    config = load_settings()
     one_shot = args.once or args.preview
     stop = asyncio.Event()
     if not one_shot:

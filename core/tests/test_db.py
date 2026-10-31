@@ -91,6 +91,12 @@ def test_to_sync_url_drop_leaves_the_kept_params_byte_for_byte():
     )
 
 
+def test_a_url_with_no_host_stays_valid():
+    url = "postgres:///hail?host=/var/run/postgresql&pgbouncer=true"
+    assert to_sync_url(url) == ("postgresql+psycopg:///hail?host=/var/run/postgresql")
+    assert to_async_url(url).startswith("postgresql+asyncpg:///hail?host=")
+
+
 def test_pgbouncer_flag_turns_off_prepared_statements():
     assert engine_options("postgres://u:p@h/db?pgbouncer=true&sslmode=require") == {
         "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}

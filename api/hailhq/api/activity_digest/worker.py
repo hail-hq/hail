@@ -14,7 +14,7 @@ from uuid import UUID
 
 import httpx
 from hailhq.api.auth import hash_key
-from hailhq.core.schemas import EMAIL_ADDR, EmailCreate
+from hailhq.core.schemas import EmailCreate
 from hailhq.core.urls import canonical_url, join_url
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -58,8 +58,8 @@ class DigestSettings(BaseSettings):
             raise ReviewRequired("api_key_missing")
         if not re.fullmatch(r"[^@\s,<>]+@hail\.so", self.to_address.lower()):
             raise ReviewRequired("recipient_invalid")
-        # The rule EmailCreate applies, so a bad sender fails at startup.
-        if not EMAIL_ADDR.match(self.from_address):
+        # Stricter than EmailCreate, so a bad sender fails at startup.
+        if not re.fullmatch(r"[^@\s,<>]+@[^@\s,<>]+\.[^@\s,<>]+", self.from_address):
             raise ReviewRequired("sender_invalid")
 
 
@@ -95,8 +95,8 @@ class DigestClient:
             timeout=30,
         )
         if not response.is_success:
-            if 400 <= response.status_code < 500 and response.status_code != 429:
-                # A retry cannot clear these. A bad key stays bad, and cached
+            if response.status_code < 500 and response.status_code != 429:
+                # A retry does not clear these. A bad key stays bad, and cached
                 # pre-send rejections can persist after a credit top-up.
                 # A new key could duplicate an ambiguously accepted email.
                 raise ReviewRequired(f"api_rejection_{response.status_code}")

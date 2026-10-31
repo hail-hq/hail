@@ -25,7 +25,7 @@ def test_invalid_config_logs_the_error_kind_without_the_secret(monkeypatch, capl
     monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_API_URL", "not-a-url")
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     assert command.main() == 1
-    assert "command_failed" in caplog.text
+    assert "requires_review code=invalid_settings:api_url" in caplog.text
     assert "do-not-log-this-key" not in caplog.text
     assert "not-a-url" not in caplog.text
 

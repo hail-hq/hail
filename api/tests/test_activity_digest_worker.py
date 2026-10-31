@@ -222,7 +222,17 @@ async def test_recipient_is_one_internal_address(setup, recipient):
     repository.snapshot.assert_not_awaited()
 
 
-@pytest.mark.parametrize("sender", ["", "reports@hail", "reports hail.so"])
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "",
+        "reports@hail",
+        "reports hail.so",
+        "<reports@hail.so>",
+        "a,b@hail.so",
+        "reports@hail.so\n",
+    ],
+)
 def test_a_sender_the_email_schema_refuses_fails_validation(setup, sender):
     config, _ = setup
     config.from_address = sender
@@ -230,7 +240,7 @@ def test_a_sender_the_email_schema_refuses_fails_validation(setup, sender):
         config.validate_send()
 
 
-@pytest.mark.parametrize("status", [401, 403, 404])
+@pytest.mark.parametrize("status", [301, 401, 403, 404])
 async def test_a_rejected_read_requires_review(setup, status):
     config, repository = setup
     async with httpx.AsyncClient(
@@ -344,8 +354,9 @@ async def test_worker_logs_the_retry_code_and_keeps_the_date_open(caplog):
     service.run_once.side_effect = RetryLater("api_status_503")
     worker = DigestWorker(service, clock=lambda: NOW, poll_interval=0.001)
     task = asyncio.create_task(worker.run_forever())
-    while service.run_once.await_count < 2:
-        await asyncio.sleep(0)
+    async with asyncio.timeout(1):
+        while service.run_once.await_count < 2:
+            await asyncio.sleep(0)
     await worker.stop()
     await asyncio.wait_for(task, timeout=1)
     assert "failed code=api_status_503" in caplog.text

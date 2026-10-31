@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from uuid import UUID
 
 import logfire
@@ -67,6 +67,13 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
     return url
 
 
+def _with_query(url: str, query: str) -> str:
+    """Replace the query of ``url``. ``urlunsplit`` would drop the ``//`` of a
+    URL with no host, because it does not know these schemes."""
+    base = url.partition("?")[0]
+    return f"{base}?{query}" if query else base
+
+
 def _sanitize_asyncpg_query(query: str) -> str:
     """Translate ``sslmode`` to ``ssl`` and drop other libpq-only params asyncpg rejects."""
     out: list[tuple[str, str]] = []
@@ -91,7 +98,7 @@ def to_async_url(url: str) -> str:
     parts = urlsplit(rewritten)
     if not parts.query:
         return rewritten
-    return urlunsplit(parts._replace(query=_sanitize_asyncpg_query(parts.query)))
+    return _with_query(rewritten, _sanitize_asyncpg_query(parts.query))
 
 
 def to_sync_url(url: str) -> str:
@@ -100,12 +107,11 @@ def to_sync_url(url: str) -> str:
     Also drops the params libpq rejects. Every other param keeps its exact text.
     """
     rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
-    parts = urlsplit(rewritten)
-    params = parts.query.split("&")
+    params = urlsplit(rewritten).query.split("&")
     kept = [param for param in params if param.split("=")[0] not in _NOT_FOR_LIBPQ]
     if len(kept) == len(params):
         return rewritten
-    return urlunsplit(parts._replace(query="&".join(kept)))
+    return _with_query(rewritten, "&".join(kept))
 
 
 def engine_options(url: str) -> dict:
