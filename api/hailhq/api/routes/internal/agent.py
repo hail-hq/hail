@@ -20,6 +20,7 @@ here, scoped to the call's org.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from math import ceil
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -138,7 +139,19 @@ _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
 # How long a queued reply counts as in flight. Past this the send is presumed
 # lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
-_QUEUED_GRACE = timedelta(seconds=60)
+_QUEUED_GRACE = timedelta(seconds=180)
+# SES refusals that a retry cannot change. Anything else, such as a timeout or
+# throttling, is worth another attempt.
+_PERMANENT_SEND_FAILURES = frozenset(
+    {
+        "AccountSuspendedException",
+        "BadRequestException",
+        "MailFromDomainNotVerifiedException",
+        "MessageRejected",
+        "NotFoundException",
+        "SendingPausedException",
+    }
+)
 
 
 class AgentSendBase(BaseModel):
@@ -652,10 +665,31 @@ class AgentReplyEmailRequest(BaseModel):
 class AgentReplyEmailResponse(BaseModel):
     ok: bool
     # done | skipped | failed: what the worker writes to agent_reply_state.
-    # retry: an earlier send may still be running; the worker tries again later.
+    # retry: try again later, a send failed for now or may still be running.
     state: str
     reason: str | None = None
     reply_id: UUID | None = None
+    # With retry: wait at least this long. None means the worker's own backoff.
+    retry_after_seconds: int | None = None
+
+
+def _send_failure(reason: str, reply: Email) -> AgentReplyEmailResponse:
+    """The worker keeps a transient failure for another attempt, and settles it
+    as failed after its last one."""
+    state = "failed" if reason in _PERMANENT_SEND_FAILURES else "retry"
+    return AgentReplyEmailResponse(
+        ok=False, state=state, reason=reason, reply_id=reply.id
+    )
+
+
+def _in_flight(reply: Email, wait: timedelta) -> AgentReplyEmailResponse:
+    return AgentReplyEmailResponse(
+        ok=False,
+        state="retry",
+        reason="in_flight",
+        reply_id=reply.id,
+        retry_after_seconds=ceil(wait.total_seconds()),
+    )
 
 
 def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
@@ -743,10 +777,8 @@ async def agent_reply_email(
         age = datetime.now(timezone.utc) - prior.requested_at
         if age < _QUEUED_GRACE:
             # The original may still be in the provider call: sending now could
-            # deliver twice. The worker tries again after its backoff.
-            return AgentReplyEmailResponse(
-                ok=False, state="retry", reason="in_flight", reply_id=prior.id
-            )
+            # deliver twice. The worker comes back when the grace ends.
+            return _in_flight(prior, _QUEUED_GRACE - age)
 
     refusal = await run_refusal(db, domain, inbound, check_cap=prior is None)
     if refusal is not None:
@@ -784,15 +816,11 @@ async def agent_reply_email(
         if not claim.rowcount:  # type: ignore[attr-defined]
             # Another request got there first. Report how it ended, or try later.
             await db.refresh(prior)
-            return _finished_reply(prior) or AgentReplyEmailResponse(
-                ok=False, state="retry", reason="in_flight", reply_id=prior.id
-            )
+            return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
         await db.refresh(prior)
         err = await deliver_email(db, email_provider, prior, claimed_at=claimed_at)
         if err is not None:
-            return AgentReplyEmailResponse(
-                ok=False, state="failed", reason=err, reply_id=prior.id
-            )
+            return _send_failure(err, prior)
         return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
 
     if body.body is None:
@@ -836,9 +864,7 @@ async def agent_reply_email(
     )
     err = await deliver_email(db, email_provider, reply, claimed_at=reply.requested_at)
     if err is not None:
-        return AgentReplyEmailResponse(
-            ok=False, state="failed", reason=err, reply_id=reply.id
-        )
+        return _send_failure(err, reply)
     return AgentReplyEmailResponse(ok=True, state="done", reply_id=reply.id)
 
 

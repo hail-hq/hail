@@ -448,13 +448,17 @@ async def finish_reply(
         await stamp_skip(db, email.id, reason)
 
 
-async def retry_reply(db: AsyncSession, claimed: ClaimedEmailReply) -> str | None:
+async def retry_reply(
+    db: AsyncSession, claimed: ClaimedEmailReply, *, delay: timedelta | None = None
+) -> str | None:
     """A transient error: back to ``pending`` after a backoff, or ``failed``
-    once ``MAX_ATTEMPTS`` claims are used. None when the claim lost the row."""
+    once ``MAX_ATTEMPTS`` claims are used. None when the claim lost the row.
+    ``delay`` replaces the backoff when the caller knows how long to wait."""
     if claimed.attempt >= MAX_ATTEMPTS:
         await finish_reply(db, claimed.email, "failed", attempt=claimed.attempt)
         return "failed"
-    retry_at = datetime.now(timezone.utc) + RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
+    wait = delay or RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
+    retry_at = datetime.now(timezone.utc) + wait
     result = await db.execute(
         update(Email)
         .where(

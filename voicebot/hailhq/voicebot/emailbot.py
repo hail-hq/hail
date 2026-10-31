@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 import logfire
@@ -140,10 +141,11 @@ async def _settle(
     *,
     retry: bool = False,
     reason: str | None = None,
+    delay: timedelta | None = None,
 ) -> None:
     async with session_scope() as db:
         if retry:
-            await retry_reply(db, claimed)
+            await retry_reply(db, claimed, delay=delay)
         elif state is not None:
             await finish_reply(
                 db, claimed.email, state, attempt=claimed.attempt, reason=reason
@@ -251,7 +253,15 @@ async def _reply_claimed(
         return True
     state = str(result.get("state") or "failed")
     if state == "retry":
-        await _settle(claimed, None, retry=True)
+        # Failed once the attempts run out, in retry_reply.
+        wait = result.get("retry_after_seconds")
+        logger.info("email_id=%s reply retry: %s", email.id, result.get("reason"))
+        await _settle(
+            claimed,
+            None,
+            retry=True,
+            delay=timedelta(seconds=wait) if wait else None,
+        )
         return True
     if state not in ("done", "skipped", "failed"):
         state = "failed"

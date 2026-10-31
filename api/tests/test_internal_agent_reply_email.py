@@ -188,7 +188,7 @@ async def test_a_failed_reply_is_delivered_again(
     send = email_mock.send_email.side_effect
     email_mock.send_email.side_effect = RuntimeError("down")
     first = await _reply(client, inbound.id)
-    assert first["state"] == "failed"
+    assert first["state"] == "retry"
 
     email_mock.send_email.side_effect = send
     second = await _reply(client, inbound.id)
@@ -228,6 +228,7 @@ async def test_a_young_queued_reply_is_left_to_finish(
     )
     data = await _reply(client, inbound.id)
     assert data["state"] == "retry" and data["reason"] == "in_flight"
+    assert 0 < data["retry_after_seconds"] <= 180
     email_mock.send_email.assert_not_awaited()
 
 
@@ -568,6 +569,7 @@ async def test_scope_is_checked_again_at_send(
         "state": "skipped",
         "reason": "sender_not_member",
         "reply_id": None,
+        "retry_after_seconds": None,
     }
     email_mock.send_email.assert_not_awaited()
 
@@ -634,13 +636,51 @@ async def test_the_thread_cap_holds_at_send(client, async_session, email_mock) -
     assert (await _reply(client, inbound.id))["reason"] == "thread_cap"
 
 
-async def test_a_provider_failure_reports_failed(
+class MessageRejected(Exception):
+    """Named like the SES error, which ``deliver_email`` reports by class name."""
+
+
+async def test_a_transient_send_failure_is_retried(
     client, async_session, email_mock
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
-    email_mock.send_email.side_effect = RuntimeError("down")
+    send = email_mock.send_email.side_effect
+    email_mock.send_email.side_effect = TimeoutError("ses")
+    first = await _reply(client, inbound.id)
+    assert first["state"] == "retry" and first["reason"] == "TimeoutError"
+    assert first["retry_after_seconds"] is None
+
+    email_mock.send_email.side_effect = send
+    raw = json.dumps({"email_id": str(inbound.id)}).encode()
+    resp = await client.post(
+        "/internal/agent/reply-email", content=raw, headers=_signed(raw)
+    )
+    assert resp.json()["state"] == "done"
+    assert resp.json()["reply_id"] == first["reply_id"]
+    assert email_mock.send_email.await_args.kwargs["body_text"] == "Happy to help."
+    async_session.expire_all()
+    row = await async_session.get(Email, uuid.UUID(first["reply_id"]))
+    assert row.status == "sent"
+
+
+async def test_a_refusal_ses_will_repeat_fails_at_once(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    email_mock.send_email.side_effect = MessageRejected("no")
     data = await _reply(client, inbound.id)
-    assert data["state"] == "failed" and data["reason"] == "RuntimeError"
+    assert data["state"] == "failed" and data["reason"] == "MessageRejected"
+
+
+async def test_a_transient_failure_on_a_resend_is_retried(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    email_mock.send_email.side_effect = TimeoutError("ses")
+    assert (await _reply(client, inbound.id))["state"] == "retry"
 
 
 async def test_unsigned_requests_are_refused(client, async_session) -> None:

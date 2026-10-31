@@ -34,11 +34,12 @@ from hailhq.core.providers.email.base import (
     ProviderSendResult,
 )
 
-# Every SES call shares these. botocore's defaults (60 seconds each, 5 attempts)
-# let one send run for minutes. An agent's reply is resent once its queued row is
-# older than _QUEUED_GRACE in routes/internal/agent.py, so a send must end first.
-SES_CONNECT_TIMEOUT_SECONDS = 5
-SES_READ_TIMEOUT_SECONDS = 20
+# Every SES call shares these. botocore's default of 5 attempts lets one send run
+# for minutes. An agent's reply is resent once its queued row is older than
+# _QUEUED_GRACE in routes/internal/agent.py, so a send must end first. The read
+# timeout stays at 60 seconds for large attachment sends.
+SES_CONNECT_TIMEOUT_SECONDS = 10
+SES_READ_TIMEOUT_SECONDS = 60
 SES_MAX_ATTEMPTS = 2
 # Both attempts timing out, plus the one backoff between them (at most a second).
 SES_SEND_BUDGET_SECONDS = (
