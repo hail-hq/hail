@@ -172,6 +172,17 @@ async def test_reply_is_threaded_from_the_address_and_billed(
     assert audit.payload["consent_source"] == "inbound_email"
 
 
+async def test_a_reply_to_an_oversized_message_id_still_sends(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    inbound.message_id = f"<{'x' * 2000}@example.com>"
+    await async_session.commit()
+    assert (await _reply(client, inbound.id))["state"] == "done"
+    headers = email_mock.send_email.await_args.kwargs["headers"]
+    assert "In-Reply-To" not in headers and "References" not in headers
+
+
 async def test_a_retry_does_not_send_twice(client, async_session, email_mock) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     first = await _reply(client, inbound.id)

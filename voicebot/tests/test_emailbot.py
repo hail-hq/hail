@@ -323,6 +323,40 @@ async def test_a_retry_still_reads_the_rules(async_session, monkeypatch) -> None
     assert await _state(async_session, email_id) == "skipped"
 
 
+async def test_a_retry_after_a_tool_send_has_no_tools(
+    async_session, monkeypatch
+) -> None:
+    """The model could reword the message, and it would go out twice."""
+    email_id = await _seed(async_session)
+    row = await async_session.get(Email, email_id)
+    async_session.add(
+        Email(
+            organization_id=row.organization_id,
+            email_domain_id=row.email_domain_id,
+            agent_id=row.agent_id,
+            from_address=ADDRESS,
+            to_addresses=["other@example.com"],
+            subject="Note",
+            body_text="Sent on the first attempt.",
+            status="sent",
+            metadata_={
+                "inbound_email_id": str(email_id),
+                "thread_sender": MEMBER,
+            },
+        )
+    )
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "Done.")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert len(llm.calls) == 1
+    assert not llm.calls[0]["tools"]
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id), "body": "Done."}
+    )
+
+
 async def test_a_retried_runs_own_sends_do_not_stop_it(
     async_session, monkeypatch
 ) -> None:
