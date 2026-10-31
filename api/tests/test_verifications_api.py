@@ -2139,6 +2139,10 @@ async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    # A failed discard waits for the next try; a cut one is left
+    # 'submitting', for _refresh to settle.
+    cut = isinstance(fail, asyncio.CancelledError)
+    assert row.state == ("submitting" if cut else "awaiting_review")
 
 
 async def test_response_carries_purpose_number_by_default(
