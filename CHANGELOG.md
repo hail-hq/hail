@@ -36,6 +36,7 @@ Database migrations run on deploy.
 - US texting registration: on Telnyx, the website, company name, person name and email take at most 100 characters.
 - US texting registration: refusal and rejection messages no longer say "the carrier"; refusals name the 10DLC registry.
 - The time-limit goodbye and the goodbye when a call's own LLM keeps failing are spoken in the call's language.
+- The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
 - Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.
 
 ### Fixed

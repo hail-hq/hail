@@ -710,6 +710,7 @@ async def _drive_entrypoint(
     classifier: Any = "fake",
     real_amd_models: bool = False,
     shutdown: bool = True,
+    org_cfgs: dict | None = None,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback.
 
@@ -728,7 +729,7 @@ async def _drive_entrypoint(
     session.amd_models = models
 
     async def _no_org_cfgs(_org_id: UUID | None, *, skip_llm: bool = False) -> dict:
-        return {}
+        return org_cfgs or {}
 
     async def _fake_run_amd(_session: object, _call_id: UUID, **kwargs):
         return amd_result
@@ -868,6 +869,24 @@ async def test_non_hangup_categories_speak_the_disclosure(
     assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
+
+
+async def test_disclosure_follows_the_workspace_voice_language(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request with no language uses the workspace voice's language."""
+    from hailhq.voicebot.pipeline import ResolvedLayer
+
+    tts = ResolvedLayer("cartesia", None, {"language": "sv"}, False)
+    _call_id, _ctx, session = await _drive_entrypoint(
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("human"),
+        org_cfgs={"tts": tts},
+    )
+    assert session.say_calls == [
+        "Hej, det här är en AI-assistent. Is this a good time?"
+    ]
 
 
 async def test_failed_greeting_is_not_saved_as_no_answer(
