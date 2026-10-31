@@ -1210,8 +1210,6 @@ async def create_verification(
         kept_brand_id = await _kept_brand(
             db, principal.organization_id, provider_name, sub.subject_type
         )
-        if kept_brand_id:
-            draft_kwargs["kept_brand_id"] = kept_brand_id
         try:
             floor_cents = sms_registration_fees.filing_fee_cents(
                 provider_name, sub.subject_type, brand_kept=bool(kept_brand_id)
@@ -1224,6 +1222,7 @@ async def create_verification(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="no SMS registration for this carrier",
             )
+        new_brand_funded = True
         if principal.auth_kind != "shared":
             balance = await get_balance_cents(db, principal.organization_id)
             # Filings the website has not charged yet (it charges a moment
@@ -1235,6 +1234,12 @@ async def create_verification(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                     detail="not enough credit to file; add credit first",
                 )
+            new_brand_funded = balance >= full_cents * (unsettled + 1)
+        if kept_brand_id:
+            draft_kwargs["kept_brand_id"] = kept_brand_id
+            # The floor above assumes the brand is reused. Only the carrier
+            # can tell, so the plug-in stops if it needs a new one.
+            draft_kwargs["new_brand_funded"] = new_brand_funded
         draft_kwargs["messaging_service_sid"] = (
             await sms_setup.org_messaging_service_sid(
                 db, principal.organization_id, provider_name
@@ -1262,6 +1267,14 @@ async def create_verification(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
         ) from exc
+    if draft.needs_new_brand_credit:
+        raise HTTPException(
+            status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                "The details changed or cannot be reused, so a submission fee "
+                "applies. Add credit and file again."
+            ),
+        )
     _stamp_campaign_filed(provider, draft.refs)
     if draft.billed_refs:
         _stamp_campaign_filed(provider, draft.billed_refs)

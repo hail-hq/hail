@@ -302,6 +302,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         documents,
         messaging_service_sid=None,
         kept_brand_id=None,
+        new_brand_funded=True,
     ) -> DraftResult:
         subject_type = requirements.subject_type
         problems = self._validate(fields, address, subject_type)
@@ -338,6 +339,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 and await self._reuse_brand(refs, fields, kept_brand_id)
             ):
                 return DraftResult(refs=refs)
+            # Telnyx bills a new brand once made, so stop before _build.
+            if kept_brand_id and not new_brand_funded:
+                return DraftResult(refs={}, needs_new_brand_credit=True)
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
             refused = _refused(exc)

@@ -2414,6 +2414,58 @@ async def test_a_refusal_before_any_brand_keeps_nothing(
     assert rows == []
 
 
+async def _kept_brand_filing(client, key, sms_carrier, async_session, monkeypatch):
+    """Leave a cancelled filing with a kept brand, and return its row id."""
+
+    async def keep(refs):
+        return {"kept_brand_id": "B9"}
+
+    monkeypatch.setattr(sms_carrier, "discard_rejected", keep)
+    vid = (await _post_sms(client, key)).json()["id"]
+    await _set_refs(async_session, vid, "rejected", {"brand_reused": True})
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200 and resp.json()["state"] == "cancelled"
+    return vid
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("extra, funded", [(0, False), (None, True)])
+async def test_a_kept_brand_filing_says_if_credit_covers_a_new_brand(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, extra, funded
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    await _kept_brand_filing(client, key, sms_carrier, async_session, monkeypatch)
+    floor = sms_registration_fees.filing_fee_cents("fake", "business", brand_kept=True)
+    full = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _set_balance(async_session, org_id, full if extra is None else floor + extra)
+    assert (await _post_sms(client, key)).status_code == 201
+    assert sms_carrier.drafts[-1]["kept_brand_id"] == "B9"
+    assert sms_carrier.drafts[-1]["new_brand_funded"] is funded
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_new_brand_without_credit_returns_402_and_files_nothing(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    await _kept_brand_filing(client, key, sms_carrier, async_session, monkeypatch)
+
+    async def stop(**kwargs):
+        assert kwargs["new_brand_funded"] is False
+        return DraftResult(refs={}, needs_new_brand_credit=True)
+
+    monkeypatch.setattr(sms_carrier, "create_draft", stop)
+    floor = sms_registration_fees.filing_fee_cents("fake", "business", brand_kept=True)
+    await _set_balance(async_session, org_id, floor)
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 402, resp.text
+    assert "submission fee applies" in resp.json()["detail"]
+    live = await client.get("/verifications", headers=_auth(key))
+    assert [v["state"] for v in live.json()] == ["cancelled"]
+
+
 @pytest.mark.usefixtures("us_number")
 async def test_sms_registration_402_when_balance_too_low(
     client, org_and_key, sms_carrier, async_session
