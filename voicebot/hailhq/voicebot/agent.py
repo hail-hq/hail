@@ -391,12 +391,6 @@ def disclosure_line(
     )
 
 
-def call_language(metadata: dict[str, Any]) -> str | None:
-    """The call's language: ``voice_config.language``, filled from the
-    workspace voice in :func:`_run_call` when the request set none."""
-    return (metadata.get("voice_config") or {}).get("language")
-
-
 def make_agent_hangup(
     ctx: JobContext,
     captured: dict[str, str | None],
@@ -936,11 +930,37 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
-# A sentence end: ".", "!" or "?" followed by the next sentence.
-_SENTENCE_END = re.compile(r"(\w*)[.!?]\s+(?=\S)")
+# A sentence end followed by the next sentence. Chinese and Japanese marks
+# take no space after them.
+_SENTENCE_END = re.compile(r"(\w*)(?:[.!?؟।\u037e]\s+|[。！？]\s*)(?=\S)")
+# How a greeting's last sentence ends. Greek asks with ";".
+_QUESTION_ENDS = ("?", "？", "؟", ";", "\u037e")
+_STATEMENT_ENDS = (".", "!", "。", "！", "।")
 # Words whose "." does not end a sentence: "Mrs. Smith", "Prof. Lee".
 _TITLES = frozenset(
-    {"dr", "mr", "mrs", "ms", "mx", "prof", "st", "jr", "sr", "mt", "rev", "hon"}
+    {
+        "dr",
+        "mr",
+        "mrs",
+        "ms",
+        "mx",
+        "prof",
+        "st",
+        "jr",
+        "sr",
+        "mt",
+        "rev",
+        "hon",
+        "sra",
+        "srta",
+        "dra",
+        "fr",
+        "hr",
+        "mme",
+        "mlle",
+        "sig",
+        "dott",
+    }
 )
 
 
@@ -963,9 +983,9 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     message = first_message.strip()
     match = _first_sentence_end(message)
     if match is None:
-        if message.endswith("?"):
+        if message.endswith(_QUESTION_ENDS):
             return f"{ai_line} {message}"
-        end = "" if message.endswith((".", "!")) else "."
+        end = "" if message.endswith(_STATEMENT_ENDS) else "."
         return f"{message}{end} {ai_line}"
     end = match.start() + len(match.group(1)) + 1
     head, tail = message[:end], message[match.end() :]
@@ -979,6 +999,7 @@ async def speak_greeting(
     *,
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
+    language: str | None = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -1017,7 +1038,7 @@ async def speak_greeting(
             metadata.get("org_name"),
             metadata.get("direction"),
             metadata.get("ai_disclosure_line"),
-            call_language(metadata),
+            language,
         )
         if metadata.get("ai_disclosure", True)
         else None
@@ -1061,9 +1082,7 @@ async def speak_greeting(
             elif inbound and not (metadata.get("ai_disclosure_line") or "").strip():
                 greeting = greeting_with_ai_line(
                     first_message,
-                    after_greeting_text(
-                        metadata.get("org_name"), call_language(metadata)
-                    ),
+                    after_greeting_text(metadata.get("org_name"), language),
                 )
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
@@ -1103,6 +1122,7 @@ def arm_deferred_greeting(
     agent: SpeechSanitizingAgent,
     on_machine: Callable[[AMDCategory], Awaitable[None]],
     classifier: LLM | None,
+    language: str | None = None,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -1133,6 +1153,7 @@ def arm_deferred_greeting(
                 pickup_transcript=None if text else agent.phone_menu.unconfirmed,
                 generate_opening=not text,
                 on_opened=agent.release_opening,
+                language=language,
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2393,8 +2414,6 @@ async def _run_call(
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
             org_tts = org_cfgs.get("tts")
             language = language or (org_tts.params.get("language") if org_tts else None)
-            # The greeting reads the language from here (see call_language).
-            metadata = {**metadata, "voice_config": {**voice_cfg, "language": language}}
             session = build_session(
                 llm_cfg,
                 vad,
@@ -2794,6 +2813,7 @@ async def _run_call(
             on_machine=hangup_machine,
             # AMD's classifier, built once per call (see build_amd_models).
             classifier=models.llm,
+            language=language,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript)
@@ -2810,6 +2830,7 @@ async def _run_call(
                 metadata,
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
+                language=language,
             )
             recovery.start()
         except Exception:
@@ -2839,7 +2860,6 @@ __all__ = [
     "attach_event_handlers",
     "build_instructions",
     "build_tools_safely",
-    "call_language",
     "disclosure_line",
     "disconnect_reason_to_status",
     "entrypoint",

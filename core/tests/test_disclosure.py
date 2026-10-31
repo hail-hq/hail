@@ -75,6 +75,8 @@ def test_built_in_lines_cover_every_supported_language():
     for lines in BUILT_IN_LINES.values():
         for named in (lines.outbound, lines.inbound, lines.after_greeting):
             assert named.count("{org}") == 1
+            # An org name like "[Beta] Labs" must not open a spoken line.
+            assert not named.startswith("{org}")
         for unnamed in (lines.unnamed, lines.unnamed_after_greeting):
             assert "{org}" not in unnamed
 
@@ -84,7 +86,7 @@ def test_built_in_lines_follow_the_call_language():
         "Hej, det här är en AI-assistent som ringer på uppdrag av Acme."
     )
     assert disclosure_text("inbound", None, language="fr") == (
-        "Bonjour, je suis un assistant IA."
+        "Bonjour, je suis une intelligence artificielle."
     )
     assert after_greeting_text("Acme", language="de") == (
         "Ich bin ein KI-Assistent von Acme."
@@ -98,3 +100,17 @@ def test_unknown_language_and_custom_line_stay_as_before():
         )
     line = disclosure_text("outbound", "Acme", template="AI for {org}.", language="sv")
     assert line == "AI for Acme."
+
+
+def test_after_greeting_line_never_opens_with_the_org_name():
+    for language in BUILT_IN_LINES:
+        assert not after_greeting_text("[Beta] Labs", language).startswith("[")
+
+
+def test_custom_template_without_org_name_fills_in_the_call_language():
+    line = disclosure_text(
+        "inbound", None, template="Du har nått {org}.", language="sv"
+    )
+    assert line == "Du har nått det här numret."
+    line = disclosure_text("outbound", None, template="For {org}.", language="xx")
+    assert line == "For whoever requested this call."

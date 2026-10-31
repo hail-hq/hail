@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+from hailhq.core.languages import by_language
+
 __all__ = ["SPOKEN_LINES", "SpokenLines", "spoken_lines"]
 
 
@@ -180,6 +182,4 @@ SPOKEN_LINES: dict[str, SpokenLines] = {
 
 def spoken_lines(language: str | None) -> SpokenLines:
     """The lines in ``language``, English when it is unknown."""
-    if not isinstance(language, str):
-        return SPOKEN_LINES["en"]
-    return SPOKEN_LINES.get(language, SPOKEN_LINES["en"])
+    return by_language(SPOKEN_LINES, language)
