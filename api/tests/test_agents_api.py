@@ -1004,3 +1004,23 @@ async def test_agent_handover_team_member_rejected(
         headers=headers,
     )
     assert r.status_code == 422, r.text
+
+
+async def test_email_enabled_defaults_on_and_can_be_changed(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Inbox", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["email_enabled"] is True
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": False}, headers=headers
+    )
+    assert r.json()["email_enabled"] is False
+    # Null means leave it: the column is not nullable.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email_enabled"] is False

@@ -115,6 +115,51 @@ async def resolve_member_emails(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def resolve_member_phones(
+    session: AsyncSession, organization_id: uuid.UUID, name: str
+) -> list[str]:
+    """Phone numbers of members matching ``name``, for agent sends. Same
+    policy as :func:`resolve_member_emails`."""
+    stmt = (
+        select(User.phone_number)
+        .join(OrganizationMember, OrganizationMember.user_id == User.id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            func.lower(User.name) == name.strip().lower(),
+            User.phone_number.is_not(None),
+        )
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def is_verified_member(
+    session: AsyncSession, organization_id: uuid.UUID, address: str
+) -> bool:
+    """True when ``address`` is the verified login email of an org member.
+
+    False when the website-owned tables do not exist (a pure self-host): the
+    savepoint keeps the caller's transaction usable, and no member means no
+    trust. A member whose login is unverified does not count: anyone can
+    register an address they do not own.
+    """
+    stmt = (
+        select(User.id)
+        .join(OrganizationMember, OrganizationMember.user_id == User.id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            func.lower(User.email) == address.strip().lower(),
+            User.email_verified.is_(True),
+        )
+        .limit(1)
+    )
+    try:
+        async with session.begin_nested():
+            return (await session.execute(stmt)).first() is not None
+    except ProgrammingError as exc:
+        logger.warning("member lookup failed (schema missing or drifted): %s", exc)
+        return False
+
+
 async def find_by_phone(
     session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
 ) -> DirectoryEntry | None:
@@ -154,6 +199,8 @@ async def find_by_phone(
 __all__ = [
     "DirectoryEntry",
     "find_by_phone",
+    "is_verified_member",
     "list_directory",
     "resolve_member_emails",
+    "resolve_member_phones",
 ]
