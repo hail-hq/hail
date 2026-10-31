@@ -128,6 +128,9 @@ A 409 for a send still in progress also closes the date, even though the email m
 Logs show a stable code or the error type, without customer data or credentials.
 `submitted` means API acceptance. Use the email ID to check delivery events and final status.
 
+The report reads have a 30 second limit. A read past it fails that check, and the worker tries again one minute later.
+The full read took under 2 seconds on 2 million local rows per table. If a real run hits the limit, add `requested_at` indexes on `calls`, `sms`, and `emails`, and an `occurred_at` index on `audit_log`, each built concurrently.
+
 ## Stop
 
 During an approved stop, set `HAIL_ACTIVITY_DIGEST_ENABLED=false` and recreate or stop the service.
