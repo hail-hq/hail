@@ -186,7 +186,7 @@ async def test_a_failed_reply_is_delivered_again(
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     send = email_mock.send_email.side_effect
-    email_mock.send_email.side_effect = RuntimeError("down")
+    email_mock.send_email.side_effect = _ses_error("TooManyRequestsException")
     first = await _reply(client, inbound.id)
     assert first["state"] == "retry"
 
@@ -210,6 +210,7 @@ async def _prior_reply(session, org, agent, domain, inbound, *, status, age):
         subject="Re: Question",
         body_text="Written earlier.",
         status=status,
+        end_reason="TooManyRequestsException" if status == "failed" else None,
         requested_at=datetime.now(timezone.utc) - age,
         metadata_={"reply_to_email_id": str(inbound.id)},
     )
@@ -636,18 +637,28 @@ async def test_the_thread_cap_holds_at_send(client, async_session, email_mock) -
     assert (await _reply(client, inbound.id))["reason"] == "thread_cap"
 
 
-class MessageRejected(Exception):
-    """Named like the SES error, which ``deliver_email`` reports by class name."""
+def _ses_error(name: str) -> Exception:
+    """``deliver_email`` reports a failure by its class name."""
+    return type(name, (Exception,), {})("ses")
 
 
-async def test_a_transient_send_failure_is_retried(
-    client, async_session, email_mock
+@pytest.mark.parametrize(
+    "name",
+    [
+        "TooManyRequestsException",
+        "LimitExceededException",
+        "ConnectTimeoutError",
+        "EndpointConnectionError",
+    ],
+)
+async def test_a_failure_that_proves_nothing_was_sent_is_retried(
+    client, async_session, email_mock, name
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     send = email_mock.send_email.side_effect
-    email_mock.send_email.side_effect = TimeoutError("ses")
+    email_mock.send_email.side_effect = _ses_error(name)
     first = await _reply(client, inbound.id)
-    assert first["state"] == "retry" and first["reason"] == "TimeoutError"
+    assert first["state"] == "retry" and first["reason"] == name
     assert first["retry_after_seconds"] is None
 
     email_mock.send_email.side_effect = send
@@ -658,29 +669,35 @@ async def test_a_transient_send_failure_is_retried(
     assert resp.json()["state"] == "done"
     assert resp.json()["reply_id"] == first["reply_id"]
     assert email_mock.send_email.await_args.kwargs["body_text"] == "Happy to help."
-    async_session.expire_all()
-    row = await async_session.get(Email, uuid.UUID(first["reply_id"]))
-    assert row.status == "sent"
+    assert email_mock.send_email.await_count == 2
 
 
-async def test_a_refusal_ses_will_repeat_fails_at_once(
-    client, async_session, email_mock
+@pytest.mark.parametrize(
+    "name",
+    ["ReadTimeoutError", "ConnectionClosedError", "MessageRejected", "RuntimeError"],
+)
+async def test_a_send_that_may_have_gone_out_is_final(
+    client, async_session, email_mock, name
 ) -> None:
+    """SES may have sent it: a resend could deliver the reply twice."""
     _org, _agent, _domain, inbound = await _seed(async_session)
-    email_mock.send_email.side_effect = MessageRejected("no")
-    data = await _reply(client, inbound.id)
-    assert data["state"] == "failed" and data["reason"] == "MessageRejected"
+    email_mock.send_email.side_effect = _ses_error(name)
+    first = await _reply(client, inbound.id)
+    assert first["state"] == "failed" and first["reason"] == name
+
+    second = await _reply(client, inbound.id)
+    assert second["state"] == "failed" and second["reason"] == name
+    assert second["reply_id"] == first["reply_id"]
+    assert email_mock.send_email.await_count == 1
 
 
-async def test_a_transient_failure_on_a_resend_is_retried(
-    client, async_session, email_mock
-) -> None:
+async def test_a_resend_keeps_the_same_rule(client, async_session, email_mock) -> None:
     org, agent, domain, inbound = await _seed(async_session)
     await _prior_reply(
         async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
     )
-    email_mock.send_email.side_effect = TimeoutError("ses")
-    assert (await _reply(client, inbound.id))["state"] == "retry"
+    email_mock.send_email.side_effect = _ses_error("ReadTimeoutError")
+    assert (await _reply(client, inbound.id))["state"] == "failed"
 
 
 async def test_unsigned_requests_are_refused(client, async_session) -> None:

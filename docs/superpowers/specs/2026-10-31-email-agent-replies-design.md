@@ -63,13 +63,16 @@ DMARC `PASS`, and nothing else sets it. An outbound row joins only if it answers
 a row that qualifies. The newest rows win when a thread is long.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
-the earlier row: a sent one is done, and a failed one is delivered again, as is a
+the earlier row: a sent one is done, a failed one is delivered again if SES took
+nothing, and so is a
 queued one past a 180-second grace. A resend first claims the row by resetting
 `requested_at`, guarded on the old status and time, so a retry during a slow resend
 waits. The send writes its result only while that claim holds. SES calls have a
-total budget of 141 seconds, under the grace. A transient send failure comes back
-as `retry`, and the worker marks the row failed only after its last attempt. A
-refusal SES will repeat, such as `MessageRejected`, fails at once. When a reply row exists, the
+total budget of 141 seconds, under the grace. A failure that proves SES took
+nothing (throttling, limits, connect timeouts, endpoint connection errors) comes
+back as `retry`, and the worker marks the row failed only after its last attempt.
+Any other failure is final, read timeouts and closed connections included: SES may
+already have sent the message, and a resend could deliver it twice. When a reply row exists, the
 worker does not call the model or its tools again. The reply carries
 `In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. Tool emails carry `Auto-Submitted: auto-generated`. It goes
 out from the hail-mail address, or `noreply@` on a custom domain: `To` and `Cc`

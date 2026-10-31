@@ -129,16 +129,15 @@ _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
 # How long a queued reply counts as in flight. Past this the send is presumed
 # lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
 _QUEUED_GRACE = timedelta(seconds=180)
-# SES refusals that a retry cannot change. Anything else, such as a timeout or
-# throttling, is worth another attempt.
-_PERMANENT_SEND_FAILURES = frozenset(
+# Failures that prove SES did not accept the message, so a resend cannot deliver
+# it twice. Anything else ends the reply: after a read timeout or a closed
+# connection SES may already have sent it.
+_RETRYABLE_SEND_FAILURES = frozenset(
     {
-        "AccountSuspendedException",
-        "BadRequestException",
-        "MailFromDomainNotVerifiedException",
-        "MessageRejected",
-        "NotFoundException",
-        "SendingPausedException",
+        "ConnectTimeoutError",
+        "EndpointConnectionError",
+        "LimitExceededException",
+        "TooManyRequestsException",
     }
 )
 
@@ -596,9 +595,9 @@ class AgentReplyEmailResponse(BaseModel):
 
 
 def _send_failure(reason: str, reply: Email) -> AgentReplyEmailResponse:
-    """The worker keeps a transient failure for another attempt, and settles it
-    as failed after its last one."""
-    state = "failed" if reason in _PERMANENT_SEND_FAILURES else "retry"
+    """The worker keeps a safe failure for another attempt, and settles it as
+    failed after its last one."""
+    state = "retry" if reason in _RETRYABLE_SEND_FAILURES else "failed"
     return AgentReplyEmailResponse(
         ok=False, state=state, reason=reason, reply_id=reply.id
     )
@@ -616,9 +615,16 @@ def _in_flight(reply: Email, wait: timedelta) -> AgentReplyEmailResponse:
 
 def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
     """The answer for a reply row whose send is over, or None while it still
-    needs sending. Not just "sent": see the same reasoning in agent_send_email."""
-    if row.status in ("queued", "failed"):
+    needs sending. Not just "sent": see the same reasoning in agent_send_email.
+    A failed row needs sending only if SES proved it took nothing."""
+    if row.status == "queued":
         return None
+    if row.status == "failed":
+        if row.end_reason in _RETRYABLE_SEND_FAILURES:
+            return None
+        return AgentReplyEmailResponse(
+            ok=False, state="failed", reason=row.end_reason, reply_id=row.id
+        )
     ok = row.status != "bounced"
     return AgentReplyEmailResponse(
         ok=ok,
