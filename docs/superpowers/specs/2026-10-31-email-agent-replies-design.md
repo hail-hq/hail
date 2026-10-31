@@ -60,8 +60,10 @@ a forged `References` header cannot read another thread. Inbound rows join the
 chat only with `emails.from_verified`, and not when they were spam, a virus, or
 skipped for their sender. Ingest sets `from_verified` for one `From` address with
 DMARC `PASS`, and nothing else sets it. An agent's outbound row joins only if it answers
-a row that qualifies. An outbound row with no agent was written by the org, so it
-stays in. The newest rows win when a thread is long.
+a row that qualifies. Any other outbound row must be a team send: rows
+marked `forwarded_from`, `system_kind`, `call_id`, or `tool_invocation_id` stay out,
+because a forward holds a stranger's words. A team send reaches the model as quoted
+text, never as an `assistant` turn. The newest rows win when a thread is long.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
 the earlier row: a sent one is done, a failed one is delivered again if SES took
