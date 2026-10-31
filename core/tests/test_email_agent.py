@@ -818,21 +818,24 @@ def test_html_only_mail_reaches_the_model_as_text():
     assert email_agent._plain_body(row) == "Hi & bye"
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "<" * 5_000_000,
-        "<a " * 2_000_000,
-        "<!--" * 2_000_000,
-        '<a b="' * 1_000_000,
-        "<script>" + "<" * 5_000_000,
-        "<style>" * 1_000_000,
-        "<" + "a" * 5_000_000,
-    ],
-)
-def test_crafted_html_costs_bounded_time(body):
+# Named bodies: a long string as a parameter becomes the test id, and pytest -v
+# then prints megabytes for each test.
+_CRAFTED_HTML = {
+    "open-brackets": "<" * 5_000_000,
+    "open-tags": "<a " * 2_000_000,
+    "open-comments": "<!--" * 2_000_000,
+    "open-attributes": '<a b="' * 1_000_000,
+    "unclosed-script": "<script>" + "<" * 5_000_000,
+    "nested-styles": "<style>" * 1_000_000,
+    "one-long-tag": "<" + "a" * 5_000_000,
+}
+
+
+@pytest.mark.parametrize("name", list(_CRAFTED_HTML))
+def test_crafted_html_costs_bounded_time(name):
+    row = Email(body_text=None, body_html=_CRAFTED_HTML[name])
     started = time.perf_counter()
-    text_out = email_agent._plain_body(Email(body_text=None, body_html=body))
+    text_out = email_agent._plain_body(row)
     assert time.perf_counter() - started < 2
     assert len(text_out) <= email_agent.MAX_EMAIL_CHARS
 
