@@ -36,7 +36,9 @@ only when all of these hold:
    proven: `alice@member.com <evil@attacker.com>` parses to alice.
 6. Scope `members`: the sender is a verified login email of an org member.
 7. The sender is under the thread cap: 20 agent sends in 24 hours, counting
-   replies and tool sends in any channel.
+   replies and tool sends in any channel. The cap is read when a run starts.
+   Tool sends count as they go, but a run's own sends do not stop its one reply,
+   and a reply that already exists is only delivered.
 8. The org has funds.
 
 Rows that fail get `agent_reply_state = 'skipped'` and `metadata.agent_skip_reason`,

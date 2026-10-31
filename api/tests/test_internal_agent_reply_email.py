@@ -651,6 +651,56 @@ async def test_tool_sends_stop_at_the_thread_cap(
     email_mock.send_email.assert_not_awaited()
 
 
+async def _fill_cap(session, org, agent, domain, inbound, *, own):
+    """Use every slot of the sender's cap. ``own`` tool sends belong to this run."""
+    for i in range(email_agent.MAX_REPLIES_PER_THREAD):
+        meta = {"thread_sender": MEMBER}
+        if i < own:
+            meta["inbound_email_id"] = str(inbound.id)
+        session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_=meta,
+            )
+        )
+    await session.commit()
+
+
+async def test_a_runs_own_tool_sends_do_not_stop_its_reply(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _fill_cap(async_session, org, agent, domain, inbound, own=1)
+    # The others used 19 slots, and this run's tool send took the last one.
+    assert (await _reply(client, inbound.id))["state"] == "done"
+    email_mock.send_email.assert_awaited_once()
+
+
+async def test_a_full_cap_from_other_runs_still_stops_the_reply(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _fill_cap(async_session, org, agent, domain, inbound, own=0)
+    assert (await _reply(client, inbound.id))["reason"] == "thread_cap"
+
+
+async def test_a_runs_own_sends_still_stop_more_tool_sends(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _fill_cap(async_session, org, agent, domain, inbound, own=1)
+    data = await _tool_email(client, inbound.id)
+    assert data["spoken"] == "That is the limit of messages for one email."
+    email_mock.send_email.assert_not_awaited()
+
+
 async def test_a_tool_send_records_its_thread(
     client, async_session, email_mock
 ) -> None:
