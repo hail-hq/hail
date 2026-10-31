@@ -585,22 +585,29 @@ def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> 
 
 
 async def _rate_before_wipe(
-    db: AsyncSession, row: CarrierVerification, provider: object
-) -> None:
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: object,
+    refs_saved: bool = False,
+) -> bool:
     """Before ``provider_refs`` is emptied: the rater charges the carrier
     review by the campaign id in the refs, so let it read them first. A
     campaign's ping when it was filed can be lost; once the id is gone,
     neither a ping nor the rater's sweep can charge it. Awaited, not
     fire-and-forget, so the rater reads before the wipe is committed.
 
-    Commits first. Never call it while holding the organization's lock
-    (``org_lock``): the rater takes the same lock."""
+    Commits first, which ends any row lock; True when it did. Never call it
+    while holding the organization's lock (``org_lock``): the rater takes
+    the same lock. ``refs_saved``: the caller already committed the refs
+    with their stamp."""
     if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
-        return
+        return False
     # Saved with the stamp, so the rater reads a campaign filed just now.
-    _keep_refs(row, provider)
+    if not refs_saved:
+        _keep_refs(row, provider)
     await db.commit()
     await rate_sms_registration(str(row.id))
+    return True
 
 
 async def _audit_carrier_rejection(
@@ -1379,15 +1386,33 @@ async def _submit_row(
     try:
         await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
+        # Saved before the discard: the ids submit() wrote (a filed campaign
+        # is billed) must survive a failed discard, or a restart during it.
+        # The 'submitting' state keeps the sweeper and admins off the row.
+        _keep_refs(row, provider)
+        await db.commit()
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again.
-        await _refuse_row(db, row, provider, exc.problems)  # pings when rejected
+        await _refuse_row(  # pings when rejected
+            db, row, provider, exc.problems, refs_saved=True
+        )
+        # The discard failed: wait for the next try, as when it is down. In
+        # one statement, so a row that moved on meanwhile is left as it is.
+        back = await db.execute(
+            update(CarrierVerification)
+            .where(
+                CarrierVerification.id == row.id,
+                CarrierVerification.state == "submitting",
+            )
+            .values(
+                state="awaiting_review",
+                updated_at=datetime.now(timezone.utc),
+                approved_by=None,
+            )
+        )
+        await db.commit()
         await db.refresh(row)
-        if row.state != "rejected":
-            # The discard failed: wait for the next try, as when it is down.
-            row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
-            row.approved_by = None
-            await db.commit()
+        if back.rowcount:
             _notify_if_changed(row, before)
         elif raise_refused:
             raise
@@ -1478,6 +1503,7 @@ async def _refuse_row(
     row: CarrierVerification,
     provider: VerificationProvider,
     problems: list[Problem],
+    refs_saved: bool = False,
 ) -> None:
     """Reject a draft the carrier refused, with its per-field reasons."""
     _log_carrier_refusal(problems, row.organization_id, row.id, row.provider)
@@ -1489,6 +1515,7 @@ async def _refuse_row(
             f"{p.field}: {p.message}" if p.field else p.message for p in problems
         ),
         carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
+        refs_saved=refs_saved,
     )
 
 
@@ -1498,26 +1525,45 @@ async def _reject_row(
     provider: VerificationProvider,
     reason: str,
     carrier_reason: str | None = None,
+    refs_saved: bool = False,
 ) -> None:
     """The carrier refused the draft before submission: record why (Hail's
     wording on the row, the carrier's own text in the audit row), discard
     the draft so nothing of the customer's is left at the carrier, and audit
     it as a system action (no person rejected it). If the discard fails the
-    row is left as it was and tried again next tick; the sweeper never dies
-    on carrier trouble."""
-    await _rate_before_wipe(db, row, provider)
-    refs = copy.deepcopy(row.provider_refs)
+    row keeps its state and its refs and is tried again next tick; the
+    sweeper never dies on carrier trouble. ``refs_saved``: the caller
+    already committed what the plug-in wrote into the refs."""
+    state = row.state
+    if await _rate_before_wipe(db, row, provider, refs_saved):
+        # Its commit saved the refs and ended the row lock: lock the row
+        # again (waiting for a poll that holds it), and leave it when it
+        # moved on (a cancel, say).
+        relocked = (
+            await db.execute(
+                select(CarrierVerification)
+                .where(
+                    CarrierVerification.id == row.id,
+                    CarrierVerification.state == state,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if relocked is None:
+            await db.rollback()
+            return
+    elif not refs_saved:
+        # What check() wrote into the refs in place is kept if the discard
+        # fails. Flushed, not committed: a commit would end the row lock
+        # while the discard runs.
+        _keep_refs(row, provider)
+        await db.flush()
     try:
         await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
-        await db.rollback()
-        # The rollback drops what check() or submit() wrote into the refs in
-        # place (a filed campaign is billed): save it for the next try.
-        await db.refresh(row)
-        row.provider_refs = refs
-        _keep_refs(row, provider)
-        await db.commit()
+        await db.commit()  # saves the refs; the row keeps its state
         return
     row.state, row.rejection_reason = "rejected", reason
     row.provider_refs = _wiped_refs(row)
