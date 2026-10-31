@@ -86,7 +86,7 @@ Field summary: `p=none` reports but does not block (start here). `quarantine` mo
 HAIL_MAIL_BASE_DOMAIN=mail.hail.so
 
 # Single-variable form (self-hosters running a SINGLE org):
-HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
+HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
 
 # Multi-tenant: leave HAIL_MAIL_FROM unset. The org prefix is derived
 # per-org from the organization id; set only the default user prefix:
@@ -97,9 +97,13 @@ AWS_REGION=us-east-1
 
 Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` — for example `alice+acme@mail.hail.so`. Hail validates both `<user>` and `<org>` against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 characters, lowercase alphanumeric plus hyphens, no leading or trailing hyphen).
 
+`<user>` is the mailbox. One organization only may hold it. A taken `<user>` returns 409. `<org>` is an alias, so `alice@mail.hail.so` and `alice+anything@mail.hail.so` reach the same organization. Role names, such as `admin` and `postmaster`, stay with the operator: no organization can register one as `<user>`, and Hail never routes a bare `admin@mail.hail.so` to an organization. The full list is `ROLE_MAILBOXES` in [`core/hailhq/core/hail_mail.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/hail_mail.py).
+
+An organization keeps every `<user>` it gives up: no other organization can take it, so mail sent to the old address never reaches a stranger. A custom domain, once verified, is the default sender over the hail-mail address.
+
 Precedence at send time (highest wins):
 
-- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX`.
+- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX` plus a per-organization token (for example `admin-j3bv6cw2`).
 - **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. The org prefix is never a deploy-wide constant — that constant would make every org collide on one address.
 
 ### Self-host vs managed
@@ -161,12 +165,12 @@ curl -X POST $HAIL_API_URL/v1/emails \
 The `from` field is optional. Resolution order:
 
 1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org.
-2. The org's single verified domain. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
-3. The auto-minted hail-mail row, if `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
+2. The org's single verified custom domain, which wins over the hail-mail address. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
+3. The org's hail-mail address. Hail mints it on the first send if the org has none and `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
 
 If none of these resolve, the call returns `503` with instructions to register a domain.
 
-To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified identities.
+To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified custom domains.
 
 The optional `from_name` field sets a display name on the `From:` header (`"Acme Billing" <billing@acme.com>`). Non-ASCII names are RFC-2047-encoded automatically; control characters are rejected with `422`.
 

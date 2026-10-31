@@ -28,7 +28,12 @@ from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
 from hailhq.core.forward_limiter import ForwardLimiter
 from hailhq.core.forward_targets import normalize_address, statuses_for
-from hailhq.core.models import Email, EmailAttachment, EmailDomain
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    RetiredHailMailAddress,
+)
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.system_email import noreply_address
@@ -64,7 +69,9 @@ _BENIGN_DEDUP_INDEXES = frozenset(
 @dataclass
 class IngestResult:
     email_ids: list[UUID] = field(default_factory=list)
-    created_email_ids: list[tuple[UUID, UUID]] = field(default_factory=list)
+    # (email id, org id) of each new row to charge. Inbound email is free at
+    # zero balance: such a row is stored and shown, and is not listed here.
+    billable_email_ids: list[tuple[UUID, UUID]] = field(default_factory=list)
     suppressed_reasons: list[str] = field(default_factory=list)
     skipped_recipients: list[str] = field(default_factory=list)
 
@@ -77,6 +84,20 @@ def _suppress_reason(message: InboundMessage) -> str | None:
     return None
 
 
+async def _retired_by_other_org(
+    db: AsyncSession, head: str, tail: str, organization_id: UUID
+) -> bool:
+    """Did another org retire exactly this address? Its mail is not for this org."""
+    stmt = (
+        select(RetiredHailMailAddress.organization_id)
+        .where(RetiredHailMailAddress.local_prefix_user == head)
+        .where(RetiredHailMailAddress.local_prefix_org == tail)
+        .where(RetiredHailMailAddress.organization_id != organization_id)
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
 async def _find_domain_for_recipient(
     db: AsyncSession, recipient: str, base_domain: str
 ) -> EmailDomain | None:
@@ -86,11 +107,20 @@ async def _find_domain_for_recipient(
             select(EmailDomain)
             .where(EmailDomain.kind == "hail_mail")
             .where(EmailDomain.local_prefix_user == classified.user_prefix)
-            .where(EmailDomain.local_prefix_org == classified.org_prefix)
             .limit(1)
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
         if row is not None:
+            # The holder's live tail is never another org's mail.
+            tail = classified.tail
+            if (
+                tail
+                and tail != row.local_prefix_org
+                and await _retired_by_other_org(
+                    db, classified.user_prefix, tail, row.organization_id
+                )
+            ):
+                return None
             return row
 
     # Custom domains: match any local-part at a verified, inbound-enabled
@@ -430,6 +460,8 @@ async def ingest_inbound(
     # One row per dedup scope: custom → receiving domain id, hail_mail → org id.
     # (domain ids and org ids are disjoint UUID spaces, so one set is safe.)
     seen_scopes: set[UUID] = set()
+    # One balance read per org, for every row of this message.
+    funded_orgs: dict[UUID, bool] = {}
     for recipient in message.envelope_recipients:
         domain = await _find_domain_for_recipient(db, recipient, hail_mail_base_domain)
         if domain is None:
@@ -465,8 +497,16 @@ async def ingest_inbound(
             from_=parsed.from_address,
             to=recipient,
         )
+        funded = False
         if created:
-            result.created_email_ids.append((email_id, domain.organization_id))
+            org_id = domain.organization_id
+            if org_id not in funded_orgs:
+                funded_orgs[org_id] = funds_check is None or await funds_check(
+                    db, org_id
+                )
+            funded = funded_orgs[org_id]
+            if funded:
+                result.billable_email_ids.append((email_id, org_id))
 
         row_reasons: list[str] = []
         if over_cap:
@@ -479,9 +519,6 @@ async def ingest_inbound(
             and forward_enqueue is not None
             and domain.inbound_enabled
         ):
-            funded = funds_check is None or await funds_check(
-                db, domain.organization_id
-            )
             if funded:
                 row_reasons += await _enqueue_forwards(
                     db,
@@ -495,7 +532,7 @@ async def ingest_inbound(
                     forward_enqueue=forward_enqueue,
                 )
             elif domain.forward_to:
-                # Out of credit: keep + store + (later) charge, but don't spend
+                # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
                 row_reasons.append("insufficient_funds")
 

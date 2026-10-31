@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from hailhq.core.config import settings
-from hailhq.core.hail_mail import org_prefix_from_id
-from hailhq.core.models import ApiKey, EmailDomain
+from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
+from hailhq.core.models import ApiKey, EmailDomain, RetiredHailMailAddress
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,8 +135,8 @@ async def test_post_hail_mail_user_default_with_derived_org_prefix(
     org_and_key: tuple,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With only HAIL_MAIL_DEFAULT_USER_PREFIX set, the user prefix comes from
-    the env default and the org prefix is derived per-org from the org id."""
+    """With only HAIL_MAIL_DEFAULT_USER_PREFIX set, the user prefix is the env
+    default plus a per-org token, and the org prefix is derived from the org id."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
     org_id, _, plain = org_and_key
@@ -147,9 +148,9 @@ async def test_post_hail_mail_user_default_with_derived_org_prefix(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     expected_org = org_prefix_from_id(org_id)
-    assert body["local_prefix_user"] == "admin"
+    assert body["local_prefix_user"] == f"admin-{expected_org}"
     assert body["local_prefix_org"] == expected_org
-    assert body["domain"] == f"admin+{expected_org}@mail.hail.so"
+    assert body["domain"] == f"admin-{expected_org}+{expected_org}@mail.hail.so"
 
 
 async def test_post_hail_mail_uses_hail_mail_from_env(
@@ -513,8 +514,8 @@ async def test_post_hail_mail_default_org_prefix_is_per_org_not_shared(
     Reproduces the multi-tenant bug: the org prefix used to come from a
     deploy-wide constant (HAIL_MAIL_DEFAULT_ORG_PREFIX), so every org
     resolved to the same ``admin+selfhost@…`` address — the first org claimed
-    it and every later org hit the global-unique index (409). The org prefix
-    is now derived per-org from the organization id.
+    it and every later org hit the global-unique index (409). Both default
+    prefixes now carry a per-org token, so the heads differ as well.
     """
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
@@ -532,8 +533,8 @@ async def test_post_hail_mail_default_org_prefix_is_per_org_not_shared(
     assert r2.status_code == 201, r2.text
     d1, d2 = r1.json()["domain"], r2.json()["domain"]
     assert d1 != d2, "two orgs must not share one hail-mail address"
-    assert d1 == f"admin+{org_prefix_from_id(org_a)}@mail.hail.so"
-    assert d2 == f"admin+{org_prefix_from_id(org_b)}@mail.hail.so"
+    assert d1.split("+")[0] == default_user_prefix("admin", org_a)
+    assert d2.split("+")[0] == default_user_prefix("admin", org_b)
 
 
 async def test_post_hail_mail_default_org_prefix_is_deterministic(
@@ -560,7 +561,7 @@ async def test_post_hail_mail_default_org_prefix_is_deterministic(
     # Same org, same derived address → the second POST conflicts with itself
     # (409) rather than producing a different address.
     assert r2.status_code == 409, r2.text
-    assert first.startswith("admin+")
+    assert first.startswith("admin-")
 
 
 async def test_post_hail_mail_duplicate_across_orgs_returns_409(
@@ -569,9 +570,9 @@ async def test_post_hail_mail_duplicate_across_orgs_returns_409(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A hail-mail address is globally unique — inbound routing matches on
-    (local_prefix_user, local_prefix_org) with no org scoping, so org B
-    registering org A's address would intercept org A's mail."""
+    """A hail-mail user prefix is globally unique — inbound routing matches on
+    it with no org scoping, so org B holding org A's prefix would intercept
+    org A's mail."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     _, _, plain_a = org_and_key
     _, _, plain_b = await insert_org_and_key(async_session)
@@ -592,7 +593,144 @@ async def test_post_hail_mail_duplicate_across_orgs_returns_409(
         headers={"Authorization": f"Bearer {plain_b}"},
     )
     assert r2.status_code == 409, r2.text
-    assert "already registered" in r2.text
+    assert r2.json()["detail"] == (
+        "hail-mail user prefix 'alice' is already taken; "
+        "choose a different local_prefix_user"
+    )
+
+
+async def test_post_hail_mail_taken_head_with_another_tail_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The head alone routes inbound mail, so a different tail does not help."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+
+    r1 = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "acme",
+        },
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert r1.status_code == 201, r1.text
+    r2 = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "globex",
+        },
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert r2.status_code == 409, r2.text
+    assert "'alice' is already taken" in r2.json()["detail"]
+
+
+async def test_patch_hail_mail_taken_head_returns_409(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+    for plain, head in ((plain_a, "alice"), (plain_b, "bob")):
+        created = await client.post(
+            "/email-domains",
+            json={
+                "kind": "hail_mail",
+                "local_prefix_user": head,
+                "local_prefix_org": "acme",
+            },
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+        assert created.status_code == 201, created.text
+
+    resp = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"local_prefix_user": "alice"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == (
+        "hail-mail user prefix 'alice' is already taken; "
+        "choose a different local_prefix_user"
+    )
+
+
+async def test_patch_hail_mail_tail_cannot_claim_a_retired_address(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "acme",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert created.status_code == 201, created.text
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="alice",
+            local_prefix_org="globex",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"local_prefix_org": "globex"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == (
+        "hail-mail address 'alice+globex@mail.hail.so' is already taken; "
+        "choose a different local_prefix_org"
+    )
+
+
+async def test_patch_hail_mail_tail_only_keeps_the_head(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "acme",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert created.status_code == 201, created.text
+
+    resp = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"local_prefix_org": "sales"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["domain"] == "alice+sales@mail.hail.so"
 
 
 # --------------------------------------------------------------------------- #
@@ -696,7 +834,47 @@ async def test_default_from_shows_the_unminted_hail_mail_address(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["items"] == []
-    assert body["default_from"] == f"admin+{org_prefix_from_id(org_id)}@mail.hail.so"
+    token = org_prefix_from_id(org_id)
+    assert body["default_from"] == f"admin-{token}+{token}@mail.hail.so"
+
+
+async def test_default_from_is_null_when_another_org_retired_the_pinned_head(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    async_session: AsyncSession,
+) -> None:
+    """The send would refuse this address, so the preview must not show it."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="team",
+            local_prefix_org="shared",
+            organization_id=uuid.uuid4(),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.json()["default_from"] is None
+
+    async_session.add(
+        RetiredHailMailAddress(
+            local_prefix_user="team",
+            local_prefix_org="old",
+            organization_id=org_id,
+            retired_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.get("/email-domains", headers=headers)
+
+    assert resp.json()["default_from"] == "team+shared@mail.hail.so"
 
 
 async def test_default_from_is_null_while_a_custom_domain_is_pending(
@@ -736,11 +914,11 @@ async def test_default_from_is_null_when_another_org_owns_the_hail_mail_address(
     so the preview must go quiet in exactly the case the send path rejects.
     """
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
-    monkeypatch.setattr(settings, "hail_mail_from", "admin+shared@mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
     _, _, plain_a = org_and_key
     _, _, plain_b = await insert_org_and_key(async_session)
 
-    # Org A sends first and claims admin+shared@mail.hail.so.
+    # Org A sends first and claims team+shared@mail.hail.so.
     claimed = await client.post(
         "/emails",
         json={
@@ -752,7 +930,7 @@ async def test_default_from_is_null_when_another_org_owns_the_hail_mail_address(
         headers={"Authorization": f"Bearer {plain_a}"},
     )
     assert claimed.status_code == 201, claimed.text
-    assert claimed.json()["from_address"] == "admin+shared@mail.hail.so"
+    assert claimed.json()["from_address"] == "team+shared@mail.hail.so"
 
     headers_b = {"Authorization": f"Bearer {plain_b}"}
     listed = await client.get("/email-domains", headers=headers_b)
@@ -1154,42 +1332,6 @@ async def test_email_domain_custom_create_writes_audit_log(
 
 
 @pytest.mark.asyncio
-async def test_patch_duplicate_prefix_returns_409(
-    client: httpx.AsyncClient,
-    org_and_key: tuple,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
-    _, _, plain = org_and_key
-    headers = {"Authorization": f"Bearer {plain}"}
-    r1 = await client.post(
-        "/email-domains",
-        json={
-            "kind": "hail_mail",
-            "local_prefix_user": "a",
-            "local_prefix_org": "acme",
-        },
-        headers=headers,
-    )
-    r2 = await client.post(
-        "/email-domains",
-        json={
-            "kind": "hail_mail",
-            "local_prefix_user": "b",
-            "local_prefix_org": "acme",
-        },
-        headers=headers,
-    )
-    assert r1.status_code == 201 and r2.status_code == 201
-
-    resp = await client.patch(
-        f"/email-domains/{r2.json()['id']}",
-        json={"local_prefix_user": "a"},  # collides with r1's address
-        headers=headers,
-    )
-    assert resp.status_code == 409
-
-
 async def test_duplicate_custom_domain_direct_insert_raises_integrity_error(
     client: httpx.AsyncClient,
     org_and_key: tuple,

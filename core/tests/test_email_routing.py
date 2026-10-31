@@ -1,16 +1,18 @@
 import re
 
+import pytest
 from hailhq.core.email_routing import (
     HAIL_MAIL_PREFIX_PATTERN,
     HailMailRecipient,
     classify_hail_mail_recipient,
 )
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 
 
 def test_classify_full_address():
     r = classify_hail_mail_recipient("alice+acme@mail.hail.so", "mail.hail.so")
     assert r == HailMailRecipient(
-        user_prefix="alice", org_prefix="acme", base_domain="mail.hail.so"
+        user_prefix="alice", tail="acme", base_domain="mail.hail.so"
     )
 
 
@@ -26,13 +28,50 @@ def test_unknown_domain_returns_none():
     )
 
 
-def test_missing_plus_returns_none():
-    assert classify_hail_mail_recipient("alice@mail.hail.so", "mail.hail.so") is None
+def test_address_without_plus_routes_on_the_head():
+    r = classify_hail_mail_recipient("alice@mail.hail.so", "mail.hail.so")
+    assert r == HailMailRecipient(
+        user_prefix="alice", tail="", base_domain="mail.hail.so"
+    )
 
 
-def test_postmaster_returns_none():
+def test_any_tail_routes_on_the_head():
+    for tail in ("sales", "a.b_c", "x" * 40, ""):
+        r = classify_hail_mail_recipient(f"alice+{tail}@mail.hail.so", "mail.hail.so")
+        assert r == HailMailRecipient(
+            user_prefix="alice", tail=tail, base_domain="mail.hail.so"
+        )
+
+
+@pytest.mark.parametrize("role", sorted(ROLE_MAILBOXES))
+def test_bare_role_name_returns_none(role):
+    # A certificate authority can validate the base domain through these
+    # names, so they must never reach a tenant that holds the same head.
+    assert classify_hail_mail_recipient(f"{role}@mail.hail.so", "mail.hail.so") is None
     assert (
-        classify_hail_mail_recipient("postmaster@mail.hail.so", "mail.hail.so") is None
+        classify_hail_mail_recipient(f"{role.upper()}@mail.hail.so", "mail.hail.so")
+        is None
+    )
+    # An empty tail is the same as no tail.
+    assert classify_hail_mail_recipient(f"{role}+@mail.hail.so", "mail.hail.so") is None
+
+
+def test_tail_stops_at_the_next_plus():
+    r = classify_hail_mail_recipient("alice+globex+promo@mail.hail.so", "mail.hail.so")
+    assert r.tail == "globex"
+
+
+def test_empty_tail_before_a_second_plus_is_bare():
+    r = classify_hail_mail_recipient("alice++b@mail.hail.so", "mail.hail.so")
+    assert r.tail == ""
+    assert classify_hail_mail_recipient("admin++@mail.hail.so", "mail.hail.so") is None
+    assert classify_hail_mail_recipient("admin++b@mail.hail.so", "mail.hail.so") is None
+
+
+def test_role_name_with_a_tail_is_a_tenant_alias():
+    r = classify_hail_mail_recipient("admin+acme@mail.hail.so", "mail.hail.so")
+    assert r == HailMailRecipient(
+        user_prefix="admin", tail="acme", base_domain="mail.hail.so"
     )
 
 
@@ -46,10 +85,10 @@ def test_invalid_prefix_returns_none():
     assert (
         classify_hail_mail_recipient("-alice+acme@mail.hail.so", "mail.hail.so") is None
     )
-    # too long org prefix (>20 chars)
+    # too long head (>20 chars)
     twenty_one = "a" * 21
     assert (
-        classify_hail_mail_recipient(f"alice+{twenty_one}@mail.hail.so", "mail.hail.so")
+        classify_hail_mail_recipient(f"{twenty_one}+acme@mail.hail.so", "mail.hail.so")
         is None
     )
 
@@ -77,4 +116,3 @@ def test_mixed_case_local_part_routes():
     r = classify_hail_mail_recipient("Alice+Acme@MAIL.HAIL.SO", "mail.hail.so")
     assert r is not None
     assert r.user_prefix == "alice"
-    assert r.org_prefix == "acme"

@@ -144,7 +144,7 @@ class Settings(BaseSettings):
     # Shortcut for self-hosters running a SINGLE org: one full address the
     # server splits into the user/org prefix pair internally. Wins over the
     # per-org derived org prefix when set. Example:
-    #   HAIL_MAIL_FROM=admin+selfhost@mail.hail.so
+    #   HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
     # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
     # SES-verified parent); each side of the ``+`` must match the
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
@@ -153,10 +153,10 @@ class Settings(BaseSettings):
     hail_mail_from: str = ""
 
     # Default USER prefix for ``POST /email-domains`` (``kind='hail_mail'``)
-    # when the request omits ``local_prefix_user``. The ORG prefix is never a
-    # deploy-wide constant, it is derived per-org from the organization id
-    # (see ``hailhq.core.hail_mail.org_prefix_from_id``) so two orgs can never
-    # share an address. Must match
+    # when the request omits ``local_prefix_user``. Hail appends a per-org
+    # token (see ``hailhq.core.hail_mail.default_user_prefix``), because one
+    # org only may hold a user prefix. The ORG prefix is never a deploy-wide
+    # constant, it is derived per-org from the organization id. Must match
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
 

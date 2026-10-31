@@ -1,10 +1,12 @@
 """Hail-mail address derivation shared across the API and workers.
 
-The org side of a hail-mail address (``<user>+<org>@<base>``) is derived
-deterministically from the organization id rather than from a human name or
-an operator-wide constant. That guarantees every org gets a globally-unique
-prefix by construction — the inbound routing key ``(local_prefix_user,
-local_prefix_org)`` can never collide across orgs.
+A hail-mail address is ``<head>+<tail>@<base>``. The head names the mailbox:
+inbound mail routes on it alone, and one row per deployment may hold it. The
+tail is an alias.
+
+The default tail is derived deterministically from the organization id rather
+than from a human name or an operator-wide constant. A default head adds the
+same token, so two orgs never compete for one head.
 
 The TypeScript mirror lives in hail-website ``lib/org-mail-prefix.ts``; keep
 the encoding identical so both sides mint the same address for a given org:
@@ -23,6 +25,47 @@ import uuid
 # byte-prefix truncation collides for ids that differ only in low bytes.
 _ORG_PREFIX_BYTES = 5
 
+# Longest prefix the LOCAL_PREFIX rule accepts.
+_PREFIX_MAX_LEN = 20
+
+# Mailbox names that belong to the operator of the base domain, never a
+# tenant. RFC 2142 keeps some of them, and certificate authorities prove
+# control of a domain by mailing others. No new row may use one as a head,
+# and a bare ``<name>@<base>`` is never routed. An older row keeps its head
+# and receives ``<name>+<tail>@<base>`` only.
+ROLE_MAILBOXES = frozenset(
+    {
+        "abuse",
+        "admin",
+        "administrator",
+        "ftp",
+        "hostmaster",
+        "info",
+        "is",
+        "it",
+        "mailer-daemon",
+        "marketing",
+        "mis",
+        "news",
+        "noc",
+        "postmaster",
+        "root",
+        "sales",
+        "security",
+        "ssl-admin",
+        "ssl-administrator",
+        "ssladmin",
+        "ssladministrator",
+        "sslwebmaster",
+        "support",
+        "sysadmin",
+        "usenet",
+        "uucp",
+        "webmaster",
+        "www",
+    }
+)
+
 
 def org_prefix_from_id(org_id: uuid.UUID | str) -> str:
     """Derive a stable 8-char base32 org prefix from an organization id."""
@@ -30,3 +73,9 @@ def org_prefix_from_id(org_id: uuid.UUID | str) -> str:
         org_id = uuid.UUID(str(org_id))
     digest = hashlib.sha256(org_id.bytes).digest()[:_ORG_PREFIX_BYTES]
     return base64.b32encode(digest).decode("ascii").lower()
+
+
+def default_user_prefix(prefix: str, org_id: uuid.UUID | str) -> str:
+    """``<prefix>-<org token>``: a shared default head made unique per org."""
+    token = org_prefix_from_id(org_id)
+    return f"{prefix[: _PREFIX_MAX_LEN - len(token) - 1].rstrip('-')}-{token}"

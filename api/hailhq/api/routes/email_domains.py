@@ -60,7 +60,7 @@ from hailhq.core.dns_lookup import (
     resolve_zone_ns,
     ses_inbound_host,
 )
-from hailhq.core.email_sender import from_address_for
+from hailhq.core.email_sender import from_address_for, head_retired_by_other_org
 from hailhq.core.forward_targets import (
     MAX_PENDING_TARGETS,
     ConfirmBudgetExceeded,
@@ -68,7 +68,7 @@ from hailhq.core.forward_targets import (
     PendingLimitExceeded,
     sync_targets,
 )
-from hailhq.core.hail_mail import org_prefix_from_id
+from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
 from hailhq.core.models import Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
@@ -170,7 +170,7 @@ def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 f"HAIL_MAIL_FROM local-part {local!r} must be "
-                "<user>+<org> (e.g. admin+selfhost)"
+                "<user>+<org> (e.g. hi+selfhost)"
             ),
         )
     if not LOCAL_PREFIX.match(user) or not LOCAL_PREFIX.match(org):
@@ -195,7 +195,9 @@ def resolve_hail_mail_prefixes(
 
     1. Explicit ``body_user`` (the POST body's ``local_prefix_user``).
     2. ``HAIL_MAIL_FROM`` env var (single-shot ``<user>+<org>@<base>``).
-    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var.
+    3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var, plus a per-org token: one
+       row per deployment may hold a user prefix, so a shared value would
+       409 every org after the first.
 
     Org-prefix precedence:
 
@@ -214,11 +216,16 @@ def resolve_hail_mail_prefixes(
     if settings.hail_mail_from:
         env_user, env_org = _parse_hail_mail_from(settings.hail_mail_from)
 
-    user = body_user or env_user or settings.hail_mail_default_user_prefix
+    default = settings.hail_mail_default_user_prefix
+    user = (
+        body_user
+        or env_user
+        or (default and default_user_prefix(default, organization_id))
+    )
     org = body_org or env_org or org_prefix_from_id(organization_id)
     if user in RESERVED_USER_PREFIXES:
         raise unprocessable(
-            f"user prefix {user!r} is reserved for Hail's own sender address",
+            f"user prefix {user!r} is reserved",
             loc=["body", "local_prefix_user"],
         )
     if not user:
@@ -231,6 +238,20 @@ def resolve_hail_mail_prefixes(
             ),
         )
     return user, org
+
+
+HAIL_MAIL_EXISTS_DETAIL = (
+    "this organization already has a hail-mail address; "
+    "change it with PATCH /email-domains/{id}"
+)
+
+
+def taken_user_prefix_detail(user_prefix: str) -> str:
+    """409 text for a user prefix another hail-mail row already holds."""
+    return (
+        f"hail-mail user prefix {user_prefix!r} is already taken; "
+        "choose a different local_prefix_user"
+    )
 
 
 def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
@@ -256,10 +277,13 @@ def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
 async def verified_senders(
     db: AsyncSession, organization_id: UUID
 ) -> list[EmailDomain]:
-    """Every verified identity the org can send through, oldest first.
+    """The verified identities a ``from``-less send picks from, oldest first.
 
-    Ordered by ``created_at`` so a single-identity org resolves the same
-    row on every retry.
+    A verified custom domain wins: every org holds a hail-mail address by
+    default, so an org that verified its own domain means to send from it.
+    The hail-mail address is a candidate only with no verified custom domain,
+    and stays available through an explicit ``from``. Ordered by ``created_at``
+    so a single-identity org resolves the same row on every retry.
     """
     stmt = (
         select(EmailDomain)
@@ -267,7 +291,8 @@ async def verified_senders(
         .where(EmailDomain.verification_status == "verified")
         .order_by(EmailDomain.created_at.asc())
     )
-    return list((await db.execute(stmt)).scalars().all())
+    verified = list((await db.execute(stmt)).scalars().all())
+    return [sd for sd in verified if sd.kind == "custom"] or verified
 
 
 async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str | None:
@@ -286,7 +311,7 @@ async def preview_default_from(db: AsyncSession, organization_id: UUID) -> str |
     """The address a ``from``-less send would use right now, or ``None``.
 
     ``None`` means "a ``from``-less send will not go out": the org owns
-    several verified identities and must name one (``resolve_sender``
+    several verified custom domains and must name one (``resolve_sender``
     raises 422), it owns none that can send yet, or the hail-mail address
     it would mint belongs to another tenant (409). Mirrors
     ``resolve_sender`` case for case — the two must not drift, which is
@@ -316,8 +341,8 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         # hail-mail. Not an error for a read; there simply is no default.
         return None
 
-    # The hail-mail prefix pair is unique across the whole deployment, not
-    # per org. ``HAIL_MAIL_FROM`` pins one pair for every tenant, so on a
+    # The hail-mail user prefix is unique across the whole deployment, not
+    # per org. ``HAIL_MAIL_FROM`` pins one for every tenant, so on a
     # multi-tenant deployment the first org to send claims it and the mint
     # 409s for everyone else (emails.py, the IntegrityError branch). Report
     # no default rather than an address the send would refuse.
@@ -326,11 +351,12 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
             select(EmailDomain.organization_id).where(
                 EmailDomain.kind == "hail_mail",
                 EmailDomain.local_prefix_user == user_prefix,
-                EmailDomain.local_prefix_org == org_prefix,
             )
         )
     ).scalar_one_or_none()
     if owner is not None and owner != organization_id:
+        return None
+    if await head_retired_by_other_org(db, user_prefix, organization_id):
         return None
     return address
 
@@ -389,9 +415,19 @@ async def create_email_domain(
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
+            existing = await db.execute(
+                select(EmailDomain.id).where(
+                    EmailDomain.organization_id == principal.organization_id,
+                    EmailDomain.kind == "hail_mail",
+                )
+            )
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=f"hail-mail address {address!r} is already registered",
+                detail=(
+                    HAIL_MAIL_EXISTS_DETAIL
+                    if existing.first() is not None
+                    else taken_user_prefix_detail(user_prefix)
+                ),
             ) from exc
         await db.refresh(sd)
         actor_user_id, actor_kind = actor_of(principal)
@@ -785,6 +821,7 @@ async def patch_email_domain(
                 loc=["body", "local_prefix_user"],
             )
         new_user = body.local_prefix_user or sd.local_prefix_user
+        head_changed = new_user != sd.local_prefix_user
         new_org = body.local_prefix_org or sd.local_prefix_org
         assert new_user is not None and new_org is not None
         new_address = compose_hail_mail_address(new_user, new_org)
@@ -860,7 +897,10 @@ async def patch_email_domain(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    f"hail-mail address {updates.get('domain')!r} is already registered"
+                    taken_user_prefix_detail(updates["local_prefix_user"])
+                    if head_changed
+                    else f"hail-mail address {updates['domain']!r} is already "
+                    "taken; choose a different local_prefix_org"
                 ),
             ) from exc
         raise unprocessable("patch violates a domain check constraint") from exc

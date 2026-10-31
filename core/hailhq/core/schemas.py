@@ -9,6 +9,7 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
@@ -1217,8 +1218,9 @@ LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 # User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
 # of every forward and system mail; ``forwarder`` was its old name. Org
 # prefixes are free text, so without this another org could own the
-# address a tenant's forwards come from and receive its bounces.
-RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"})
+# address a tenant's forwards come from and receive its bounces. Role names
+# belong to the operator of the base domain.
+RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"}) | ROLE_MAILBOXES
 
 
 def _normalize_domain(addr: str) -> str:
@@ -1308,9 +1310,11 @@ class EmailDomainCreate(BaseModel):
     local_prefix_user: str | None = Field(
         default=None,
         description=(
-            "User-chosen local-part prefix for a hail_mail address. Only "
+            "User-chosen local-part prefix for a hail_mail address. One "
+            "organization only may hold it; a taken prefix returns 409. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_USER_PREFIX if omitted."
+            "HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if "
+            "omitted."
         ),
     )
     local_prefix_org: str | None = Field(
@@ -1318,7 +1322,7 @@ class EmailDomainCreate(BaseModel):
         description=(
             "Org-chosen local-part prefix for a hail_mail address. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted."
+            "a prefix derived from the organization id if omitted."
         ),
     )
 
@@ -1351,9 +1355,7 @@ class EmailDomainCreate(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @model_validator(mode="after")
@@ -1409,7 +1411,7 @@ class EmailDomainPatch(BaseModel):
 
     local_prefix_user: str | None = Field(
         default=None,
-        description="New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+        description="New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
     )
     local_prefix_org: str | None = Field(
         default=None,
@@ -1452,9 +1454,7 @@ class EmailDomainPatch(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @field_validator("forward_to")
@@ -1704,14 +1704,15 @@ class EmailDomainListResponse(BaseModel):
         description="Opaque cursor for the next page. Null when there are no more results.",
     )
     # The address a send with no ``from`` goes out as. ``None`` when such a
-    # send would be rejected: several verified identities (name one), or
+    # send would be rejected: several verified custom domains (name one), or
     # none that can send yet. Computed across the whole org, not the page.
     default_from: str | None = Field(
         default=None,
         description=(
-            "The From address used when a send omits 'from'. Null when no "
-            "such default can be resolved (e.g. multiple verified "
-            "identities, or none that can send yet). Computed across the "
+            "The From address used when a send omits 'from'. A verified "
+            "custom domain wins over the hail-mail address. Null when no "
+            "such default can be resolved (e.g. multiple verified custom "
+            "domains, or none that can send yet). Computed across the "
             "whole organization, not just this page."
         ),
     )

@@ -627,9 +627,10 @@ async def agent_send_email(
         )
 
     try:
-        # A voice agent cannot name a sending domain mid-call, so this path
-        # keeps the old "oldest verified wins" pick that POST /emails now
-        # refuses. Public callers get the 422 and choose for themselves.
+        # A voice agent cannot name a sending domain mid-call. With several
+        # verified custom domains this path takes the oldest, where POST
+        # /emails returns 422 and the caller chooses. A verified custom domain
+        # still wins over the hail-mail address, as it does on POST /emails.
         sd = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)

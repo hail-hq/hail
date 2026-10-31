@@ -12,7 +12,11 @@ session and the operator's hail-mail config.
 
 from __future__ import annotations
 
-from hailhq.core.models import EmailDomain
+from uuid import UUID
+
+from hailhq.core.models import EmailDomain, RetiredHailMailAddress
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Local-part used when the caller names no address and the identity is a
 # custom domain (a hail-mail row already carries a full address).
@@ -38,3 +42,24 @@ def from_address_for(sd: EmailDomain, explicit: str | None = None) -> str:
 
 
 __all__ = ["DEFAULT_LOCAL_PART", "from_address_for"]
+
+
+async def head_retired_by_other_org(
+    db: AsyncSession, head: str, organization_id: UUID
+) -> bool:
+    """Would the ``email_domains`` guard trigger refuse this head for this org?
+
+    Only the org that gave a head up last may take it back.
+    """
+    last_holder = (
+        await db.execute(
+            select(RetiredHailMailAddress.organization_id)
+            .where(RetiredHailMailAddress.local_prefix_user == head)
+            .order_by(
+                RetiredHailMailAddress.retired_at.desc(),
+                RetiredHailMailAddress.organization_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return last_holder is not None and last_holder != organization_id
