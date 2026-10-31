@@ -759,7 +759,7 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
 
 
-def test_0070_report_date_indexes(empty_db: str) -> None:
+def test_0071_report_date_indexes(empty_db: str) -> None:
     """A cross-organization read by date needs an index that starts with the
     date. Downgrade removes them."""
     names = (

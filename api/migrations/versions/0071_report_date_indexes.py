@@ -5,16 +5,16 @@ The existing date indexes start with organization_id, so that read scans the
 whole table. Built CONCURRENTLY so writes do not block; that cannot run in a
 transaction, hence the autocommit block.
 
-Revision ID: 0070
-Revises: 0069
+Revision ID: 0071
+Revises: 0070
 """
 
 from __future__ import annotations
 
 from alembic import op
 
-revision: str = "0070"
-down_revision: str | None = "0069"
+revision: str = "0071"
+down_revision: str | None = "0070"
 branch_labels = None
 depends_on = None
 
