@@ -614,13 +614,12 @@ async def test_thread_follows_references_and_matches_ses_ids(async_session):
 
 
 @pytest.mark.asyncio
-async def test_a_row_no_agent_wrote_stays_out_of_the_thread(async_session):
-    """Public metadata could once name a trusted row."""
+async def test_a_row_the_org_wrote_stays_in_the_thread(async_session):
+    """No agent wrote it, so the proven-row rule does not apply, and the walk
+    continues past it."""
     org, _agent, domain = await _seed(async_session)
-    first = _row(org, domain, body_text="First")
-    async_session.add(first)
-    await async_session.flush()
-    forged = _row(
+    first = _row(org, domain, message_id="<a@x.co>", body_text="First")
+    wrote = _row(
         org,
         domain,
         direction="outbound",
@@ -628,8 +627,8 @@ async def test_a_row_no_agent_wrote_stays_out_of_the_thread(async_session):
         from_address=ADDRESS,
         to_addresses=[MEMBER],
         provider_message_id="ses-z",
-        body_text="Planted",
-        metadata_={"reply_to_email_id": str(first.id)},
+        in_reply_to="<a@x.co>",
+        body_text="Written by a person",
     )
     now = _row(
         org,
@@ -637,9 +636,10 @@ async def test_a_row_no_agent_wrote_stays_out_of_the_thread(async_session):
         references_ids=["<ses-z@eu-west-1.amazonses.com>"],
         body_text="Now",
     )
-    async_session.add_all([forged, now])
+    async_session.add_all([first, wrote, now])
     await async_session.commit()
-    assert await email_agent.email_thread(async_session, now) == [now]
+    thread = await email_agent.email_thread(async_session, now)
+    assert {r.body_text for r in thread} == {"First", "Written by a person", "Now"}
 
 
 @pytest.mark.asyncio
@@ -716,11 +716,12 @@ async def test_a_reply_to_unproven_mail_stays_out_of_the_thread(async_session, l
     ids=["no-link", "bad-link", "unknown-row"],
 )
 @pytest.mark.asyncio
-async def test_outbound_mail_with_no_trusted_link_stays_out(async_session, metadata):
-    org, _agent, domain = await _seed(async_session)
+async def test_an_agent_row_with_no_trusted_link_stays_out(async_session, metadata):
+    org, agent, domain = await _seed(async_session)
     sent = _row(
         org,
         domain,
+        agent_id=agent.id,
         direction="outbound",
         status="sent",
         from_address=ADDRESS,
@@ -742,13 +743,14 @@ async def test_outbound_mail_with_no_trusted_link_stays_out(async_session, metad
 
 @pytest.mark.asyncio
 async def test_a_reply_to_another_senders_mail_stays_out(async_session):
-    org, _agent, domain = await _seed(async_session)
+    org, agent, domain = await _seed(async_session)
     theirs = _row(org, domain, from_address="ceo@example.com", body_text="Theirs")
     async_session.add(theirs)
     await async_session.flush()
     sent = _row(
         org,
         domain,
+        agent_id=agent.id,
         direction="outbound",
         status="sent",
         from_address=ADDRESS,
@@ -1092,6 +1094,97 @@ async def test_stamp_never_touches_an_outbound_row(async_session):
     await email_agent.stamp_skip(async_session, row.id, "no_agent")
     await async_session.refresh(row)
     assert row.metadata_ == {}
+
+
+def _queued_reply(org, agent, domain, inbound, **over) -> Email:
+    fields = {
+        "agent_id": agent.id,
+        "direction": "outbound",
+        "status": "queued",
+        "from_address": ADDRESS,
+        "to_addresses": [MEMBER],
+        "metadata_": {"reply_to_email_id": str(inbound.id)},
+    }
+    return _row(org, domain, **{**fields, **over})
+
+
+@pytest.mark.asyncio
+async def test_a_skip_fails_a_reply_left_queued(async_session):
+    org, agent, domain = await _seed(async_session)
+    inbound = _row(org, domain)
+    async_session.add(inbound)
+    await async_session.flush()
+    reply = _queued_reply(org, agent, domain, inbound)
+    async_session.add(reply)
+    await async_session.commit()
+    await email_agent.stamp_skip(async_session, inbound.id, "no_agent")
+    await async_session.refresh(reply)
+    assert reply.status == "failed" and reply.end_reason == "no_agent"
+    assert reply.failed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_expiry_fails_a_reply_left_queued(async_session):
+    org, agent, domain = await _seed(async_session)
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    inbound = _row(
+        org,
+        domain,
+        agent_id=agent.id,
+        agent_reply_state="pending",
+        requested_at=old,
+    )
+    async_session.add(inbound)
+    await async_session.flush()
+    reply = _queued_reply(org, agent, domain, inbound, requested_at=old)
+    young = _queued_reply(org, agent, domain, inbound, to_addresses=["o@x.co"])
+    async_session.add_all([reply, young])
+    await async_session.commit()
+    assert await email_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(reply)
+    await async_session.refresh(young)
+    assert reply.status == "failed" and reply.end_reason == "expired"
+    assert young.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_a_reply_left_queued_after_the_last_attempt_fails(async_session):
+    """The worker died mid-send on its last claim, so no skip path ran."""
+    org, agent, domain = await _seed(async_session)
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    inbound = _row(org, domain, agent_id=agent.id, agent_reply_state="failed")
+    async_session.add(inbound)
+    await async_session.flush()
+    reply = _queued_reply(org, agent, domain, inbound, requested_at=old)
+    async_session.add(reply)
+    await async_session.commit()
+    assert await email_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(reply)
+    assert reply.status == "failed" and reply.end_reason == "expired"
+
+
+@pytest.mark.asyncio
+async def test_a_wait_for_a_running_send_is_not_an_attempt(async_session):
+    await _seed(async_session)
+    row = await _ingest(async_session, _raw())
+    row.agent_reply_attempts = email_agent.MAX_ATTEMPTS - 1
+    await async_session.commit()
+    claimed = await email_agent.claim_pending_reply(async_session)
+    assert claimed.attempt == email_agent.MAX_ATTEMPTS
+
+    state = await email_agent.retry_reply(
+        async_session, claimed, delay=timedelta(seconds=120)
+    )
+    assert state == "pending"
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "pending"
+    assert row.agent_reply_attempts == email_agent.MAX_ATTEMPTS - 1
+    assert row.agent_reply_available_at > datetime.now(timezone.utc)
+    # The wait stays claimable when it ends.
+    row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await async_session.commit()
+    again = await email_agent.claim_pending_reply(async_session)
+    assert again is not None and again.attempt == email_agent.MAX_ATTEMPTS
 
 
 @pytest.mark.asyncio

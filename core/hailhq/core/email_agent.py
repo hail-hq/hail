@@ -351,6 +351,18 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
         .where(*base, Email.agent_reply_attempts >= MAX_ATTEMPTS)
         .values(agent_reply_state="failed")
     )
+    # Nothing retries a reply this old, so none may stay queued forever.
+    await db.execute(
+        update(Email)
+        .where(
+            Email.direction == "outbound",
+            Email.status == "queued",
+            Email.agent_id.is_not(None),
+            Email.metadata_["reply_to_email_id"].astext.is_not(None),
+            Email.requested_at < cutoff,
+        )
+        .values(status="failed", end_reason="expired", failed_at=now)
+    )
 
 
 async def claim_pending_reply(db: AsyncSession) -> ClaimedEmailReply | None:
@@ -411,7 +423,8 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedEmailReply | None:
 async def stamp_skip(db: AsyncSession, email_id: uuid.UUID, reason: str) -> None:
     """Say why a row got no reply. A sender refusal also keeps the row out of
     later chats (``_trusted_inbound``), and no funds raises the console's
-    out-of-credit alert."""
+    out-of-credit alert. A reply left queued will not be retried now, so it is
+    marked failed; a send still running overwrites that with its result."""
     row = await db.get(Email, email_id)
     if row is None or row.direction != "inbound":
         return
@@ -423,6 +436,22 @@ async def stamp_skip(db: AsyncSession, email_id: uuid.UUID, reason: str) -> None
             reasons.append(reason)
         meta["suppressed_reasons"] = reasons
     row.metadata_ = meta
+    prior = await prior_reply(db, row)
+    if prior is not None and prior.status == "queued":
+        await db.execute(
+            update(Email)
+            .where(
+                Email.id == prior.id,
+                Email.status == "queued",
+                Email.requested_at == prior.requested_at,
+            )
+            .values(
+                status="failed",
+                end_reason=reason,
+                failed_at=datetime.now(timezone.utc),
+            )
+            .execution_options(synchronize_session=False)
+        )
     await db.commit()
 
 
@@ -451,14 +480,17 @@ async def finish_reply(
 async def retry_reply(
     db: AsyncSession, claimed: ClaimedEmailReply, *, delay: timedelta | None = None
 ) -> str | None:
-    """A transient error: back to ``pending`` after a backoff, or ``failed``
-    once ``MAX_ATTEMPTS`` claims are used. None when the claim lost the row.
-    ``delay`` replaces the backoff when the caller knows how long to wait."""
-    if claimed.attempt >= MAX_ATTEMPTS:
+    """Back to ``pending`` after a backoff, or ``failed`` once ``MAX_ATTEMPTS``
+    claims are used. None when the claim lost the row.
+
+    ``delay`` means an earlier send may still be running, so nothing failed: the
+    row waits that long, and this claim does not count as an attempt.
+    """
+    waiting = delay is not None
+    if not waiting and claimed.attempt >= MAX_ATTEMPTS:
         await finish_reply(db, claimed.email, "failed", attempt=claimed.attempt)
         return "failed"
     wait = delay or RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
-    retry_at = datetime.now(timezone.utc) + wait
     result = await db.execute(
         update(Email)
         .where(
@@ -466,7 +498,11 @@ async def retry_reply(
             Email.agent_reply_state == "processing",
             Email.agent_reply_attempts == claimed.attempt,
         )
-        .values(agent_reply_state="pending", agent_reply_available_at=retry_at)
+        .values(
+            agent_reply_state="pending",
+            agent_reply_available_at=datetime.now(timezone.utc) + wait,
+            agent_reply_attempts=claimed.attempt - 1 if waiting else claimed.attempt,
+        )
     )
     await db.commit()
     return "pending" if result.rowcount else None  # type: ignore[attr-defined]
@@ -521,12 +557,11 @@ def _answered_id(row: Email) -> uuid.UUID | None:
 async def _answers_trusted(
     db: AsyncSession, email: Email, sender: str, rows: Sequence[Email]
 ) -> list[Email]:
-    """``rows`` without any outbound row that answers something unproven. A reply
-    to forged mail says what the forger asked for, so it stays out too."""
+    """``rows`` without any agent row that answers something unproven. A reply to
+    forged mail says what the forger asked for, so it stays out too. An outbound
+    row with no agent was written by the org, so it stays in."""
     answered = {
-        r.id: _answered_id(r) if r.agent_id else None
-        for r in rows
-        if r.direction == "outbound"
+        r.id: _answered_id(r) for r in rows if r.direction == "outbound" and r.agent_id
     }
     ids = {i for i in answered.values() if i is not None}
     trusted: set[uuid.UUID] = set()
@@ -538,7 +573,7 @@ async def _answers_trusted(
             func.lower(Email.from_address) == sender,
         )
         trusted = set((await db.execute(stmt)).scalars().all())
-    return [r for r in rows if r.direction != "outbound" or answered[r.id] in trusted]
+    return [r for r in rows if r.id not in answered or answered[r.id] in trusted]
 
 
 async def email_thread(db: AsyncSession, email: Email) -> list[Email]:

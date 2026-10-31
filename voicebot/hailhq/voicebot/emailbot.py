@@ -125,12 +125,12 @@ async def _prepare(
     again, and the route delivers the stored text."""
     email = claimed.email
     async with session_scope() as db:
-        prior = await prior_reply(db, email)
-        refusal = await run_refusal(db, claimed.domain, email, check_cap=prior is None)
+        # The route reads the rules for a reply that exists, and owns its row.
+        if await prior_reply(db, email) is not None:
+            return None
+        refusal = await run_refusal(db, claimed.domain, email)
         if refusal is not None:
             return refusal
-        if prior is not None:
-            return None
         trust = await sender_trust(db, email)
         thread = await email_thread(db, email)
         # A send from an earlier attempt: no tools, so a reworded message cannot
@@ -258,7 +258,7 @@ async def _reply_claimed(
         return True
     state = str(result.get("state") or "failed")
     if state == "retry":
-        # Failed once the attempts run out, in retry_reply.
+        # A send failure uses up an attempt. A wait for a running send does not.
         wait = result.get("retry_after_seconds")
         logger.info("email_id=%s reply retry: %s", email.id, result.get("reason"))
         await _settle(

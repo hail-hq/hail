@@ -106,6 +106,15 @@ def upgrade() -> None:
         ["requested_at"],
         postgresql_where=sa.text("agent_reply_state IN ('pending','processing')"),
     )
+    # The worker fails replies left queued on every poll; keep that scan cheap.
+    op.create_index(
+        "emails_agent_reply_queued_idx",
+        "emails",
+        ["requested_at"],
+        postgresql_where=sa.text(
+            "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
+        ),
+    )
     # The thread cap counts one agent's recent replies.
     op.create_index(
         "emails_agent_thread_idx",
@@ -117,6 +126,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("emails_agent_thread_idx", table_name="emails")
+    op.drop_index("emails_agent_reply_queued_idx", table_name="emails")
     op.drop_index("emails_agent_reply_pending_idx", table_name="emails")
     op.drop_constraint("emails_agent_reply_state_check", "emails", type_="check")
     op.drop_column("emails", "agent_reply_available_at")
