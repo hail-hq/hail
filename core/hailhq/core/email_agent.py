@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any, Literal
 
+from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.directory import is_verified_member
 from hailhq.core.email_mime import ParsedMime
@@ -52,7 +53,6 @@ __all__ = [
     "email_thread",
     "finish_reply",
     "is_authenticated",
-    "note_no_funds",
     "proves_sender",
     "queue_decision",
     "replies_in_thread",
@@ -63,7 +63,7 @@ __all__ = [
     "run_refusal",
     "sender_refusal",
     "sender_trust",
-    "thread_cap_reached",
+    "stamp_skip",
     "thread_lock_key",
     "tool_sends_for_reply",
 ]
@@ -75,16 +75,14 @@ MAX_EMAIL_CHARS = 6000
 MAX_HTML_CHARS = 200_000
 # Texts and emails one reply run may send, so one email cannot spend without limit.
 MAX_TOOL_SENDS = 3
-# Replies to one unproven From address per REPLY_CAP_WINDOW. A separate budget:
-# anyone can write a From, so forged mail must not use up the real sender's.
-MAX_UNVERIFIED_REPLIES_PER_THREAD = 5
 # SES caps a header value at 995 characters.
 MAX_HEADER_CHARS = 900
 
 ReplyState = Literal["done", "skipped", "failed"]
 
 _NO_REPLY_LOCAL = re.compile(
-    r"^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounces?)([+.\-_].*)?$"
+    r"^(no[-_]?reply|do[-_]?not[-_]?reply|mailer[-_]?daemon|postmaster|bounces?)"
+    r"([+.\-_].*)?$"
 )
 _MESSAGE_ID = re.compile(r"^<[!-;=?-~]+@[!-;=?-~]+>$")
 # Why a stored row stays out of the chat: nothing proved who wrote it, or it was
@@ -121,9 +119,9 @@ def answers_emails(agent: Agent | None) -> bool:
 
 
 def proves_sender(parsed: ParsedMime, dmarc_verdict: str | None) -> bool:
-    """One ``From`` address and a DMARC ``PASS``. Ingest stores the answer in
-    ``emails.from_verified``."""
-    return parsed.from_count == 1 and dmarc_verdict == "PASS"
+    """One well-formed ``From`` address and a DMARC ``PASS``. Ingest stores the
+    answer in ``emails.from_verified``."""
+    return parsed.from_count == 1 and parsed.from_clean and dmarc_verdict == "PASS"
 
 
 def is_authenticated(email: Email) -> bool:
@@ -150,59 +148,44 @@ def _sender_blocked(
 
 
 async def sender_refusal(
-    db: AsyncSession,
-    domain: EmailDomain,
-    *,
-    sender: str,
-    dmarc_verdict: str | None,
-    verified: bool,
+    db: AsyncSession, domain: EmailDomain, *, sender: str, verified: bool
 ) -> str | None:
     """Why this sender may not reach the agent, or None. Fails closed.
 
     DMARC ``PASS`` is the only proof of a ``From`` address. SES reports ``GRAY``
     when any SPF or DKIM check passed for a domain with no policy or ``p=none``,
     aligned or not, so a forger with a valid signature of their own gets
-    ``GRAY``. ``members`` accepts nothing less than proof. ``anyone`` lets
-    unproven mail through for a plain reply, with no tools and no history.
+    ``GRAY``. Unproven mail gets no reply under any scope: a reply to a forged
+    ``From`` would reach an innocent third party.
     """
-    if dmarc_verdict == "FAIL":
+    if not verified:
         return "sender_not_verified"
     if domain.email_agent_scope == "anyone":
         return None
-    if not verified:
-        return "sender_not_verified"
     if not await is_verified_member(db, domain.organization_id, sender):
         return "sender_not_member"
     return None
 
 
 async def replies_in_thread(
-    db: AsyncSession, organization_id: uuid.UUID, sender: str, *, verified: bool
+    db: AsyncSession, organization_id: uuid.UUID, sender: str
 ) -> int:
-    """Agent sends for this sender within ``REPLY_CAP_WINDOW``, in one budget.
-    ``verified`` counts replies to proven mail and tool sends in any channel: a
-    run that only uses tools still counts. Otherwise it counts replies to
-    unproven mail, which has no tools."""
+    """Agent sends for this sender within ``REPLY_CAP_WINDOW``: replies, and
+    tool sends in any channel. A run that only uses tools still counts."""
     since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
-    reply = and_(
-        Email.metadata_["reply_to_email_id"].astext.is_not(None),
-        Email.metadata_["sender_verified"].astext == ("true" if verified else "false"),
-        sender == any_(Email.to_addresses),
-    )
     emails = select(func.count(Email.id)).where(
         Email.organization_id == organization_id,
         Email.direction == "outbound",
         Email.agent_id.is_not(None),
         Email.requested_at >= since,
-        (
-            or_(reply, Email.metadata_["thread_sender"].astext == sender)
-            if verified
-            else reply
+        or_(
+            and_(
+                Email.metadata_["reply_to_email_id"].astext.is_not(None),
+                sender == any_(Email.to_addresses),
+            ),
+            Email.metadata_["thread_sender"].astext == sender,
         ),
     )
-    total = int((await db.execute(emails)).scalar_one() or 0)
-    if not verified:
-        return total
     texts = select(func.count(Sms.id)).where(
         Sms.organization_id == organization_id,
         Sms.direction == "outbound",
@@ -210,43 +193,33 @@ async def replies_in_thread(
         Sms.requested_at >= since,
         Sms.metadata_["thread_sender"].astext == sender,
     )
+    total = int((await db.execute(emails)).scalar_one() or 0)
     return total + int((await db.execute(texts)).scalar_one() or 0)
 
 
-async def thread_cap_reached(
-    db: AsyncSession, organization_id: uuid.UUID, sender: str, *, verified: bool
-) -> bool:
-    limit = MAX_REPLIES_PER_THREAD if verified else MAX_UNVERIFIED_REPLIES_PER_THREAD
-    count = await replies_in_thread(db, organization_id, sender, verified=verified)
-    return count >= limit
-
-
 async def run_refusal(
-    db: AsyncSession, domain: EmailDomain, email: Email
+    db: AsyncSession, domain: EmailDomain, email: Email, *, check_cap: bool = True
 ) -> str | None:
-    """Why this row must not be answered now, or None. Scope and cap can change
-    between ingest and a claim, and the model costs money."""
+    """Why this row must not be answered now, or None. Scope, cap, and funds
+    can change between ingest and a claim, and the model costs money.
+    ``check_cap`` is off when the reply already exists and only needs sending."""
     sender = normalize_address(email.from_address)
-    verified = is_authenticated(email)
     refusal = await sender_refusal(
-        db,
-        domain,
-        sender=sender,
-        dmarc_verdict=email.dmarc_verdict,
-        verified=verified,
+        db, domain, sender=sender, verified=is_authenticated(email)
     )
     if refusal is not None:
         return refusal
-    if await thread_cap_reached(db, email.organization_id, sender, verified=verified):
-        return "thread_cap"
+    if check_cap:
+        count = await replies_in_thread(db, email.organization_id, sender)
+        if count >= MAX_REPLIES_PER_THREAD:
+            return "thread_cap"
+    if not await has_funds(db, email.organization_id):
+        return "insufficient_funds"
     return None
 
 
 async def sender_trust(db: AsyncSession, email: Email) -> SenderTrust:
-    """What the prompt may say about the sender. A member is told apart under
-    every scope, and only a proven ``From`` can be a member."""
-    if not is_authenticated(email):
-        return "unverified"
+    """What the prompt may say about a proven sender."""
     sender = normalize_address(email.from_address)
     member = await is_verified_member(db, email.organization_id, sender)
     return "member" if member else "outside"
@@ -287,15 +260,13 @@ async def queue_decision(
     sender = normalize_address(parsed.from_address or "")
     if _sender_blocked(sender, domain, recipients, base_domain):
         return skip("sender_blocked")
-    if parsed.from_count != 1:
-        return skip("sender_not_verified")
-    verified = proves_sender(parsed, dmarc_verdict)
     refusal = await sender_refusal(
-        db, domain, sender=sender, dmarc_verdict=dmarc_verdict, verified=verified
+        db, domain, sender=sender, verified=proves_sender(parsed, dmarc_verdict)
     )
     if refusal is not None:
         return skip(refusal)
-    if await thread_cap_reached(db, domain.organization_id, sender, verified=verified):
+    count = await replies_in_thread(db, domain.organization_id, sender)
+    if count >= MAX_REPLIES_PER_THREAD:
         return skip("thread_cap")
     if not funded:
         return skip("insufficient_funds")
@@ -318,7 +289,12 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     await db.execute(
         update(Email)
         .where(*base, Email.requested_at < cutoff)
-        .values(agent_reply_state="skipped")
+        .values(
+            agent_reply_state="skipped",
+            metadata_=Email.metadata_.op("||")(
+                func.jsonb_build_object("agent_skip_reason", "expired")
+            ),
+        )
     )
     await db.execute(
         update(Email)
@@ -379,22 +355,47 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedEmailReply | None:
                 email=email, agent=agent, domain=domain, attempt=attempt
             )
         # Routing changed between ingest and now: drop it and take the next row.
-        await finish_reply(db, email, "skipped")
+        await finish_reply(db, email, "skipped", reason="no_agent")
+
+
+async def stamp_skip(db: AsyncSession, email_id: uuid.UUID, reason: str) -> None:
+    """Say why a row got no reply. A sender refusal also keeps the row out of
+    later chats (``_trusted_inbound``), and no funds raises the console's
+    out-of-credit alert."""
+    row = await db.get(Email, email_id)
+    if row is None or row.direction != "inbound":
+        return
+    meta = dict(row.metadata_ or {})
+    meta["agent_skip_reason"] = reason
+    if reason == "insufficient_funds":
+        reasons = list(meta.get("suppressed_reasons") or [])
+        if reason not in reasons:
+            reasons.append(reason)
+        meta["suppressed_reasons"] = reasons
+    row.metadata_ = meta
+    await db.commit()
 
 
 async def finish_reply(
-    db: AsyncSession, email: Email, state: ReplyState, *, attempt: int | None = None
+    db: AsyncSession,
+    email: Email,
+    state: ReplyState,
+    *,
+    attempt: int | None = None,
+    reason: str | None = None,
 ) -> None:
-    """Record the final state. With ``attempt`` it applies only while that
-    claim still owns the row."""
+    """Record the final state, and with ``reason`` why it was skipped. With
+    ``attempt`` it applies only while that claim still owns the row."""
     stmt = update(Email).where(Email.id == email.id)
     if attempt is not None:
         stmt = stmt.where(
             Email.agent_reply_state == "processing",
             Email.agent_reply_attempts == attempt,
         )
-    await db.execute(stmt.values(agent_reply_state=state))
+    result = await db.execute(stmt.values(agent_reply_state=state))
     await db.commit()
+    if reason is not None and result.rowcount:  # type: ignore[attr-defined]
+        await stamp_skip(db, email.id, reason)
 
 
 async def retry_reply(db: AsyncSession, claimed: ClaimedEmailReply) -> str | None:
@@ -415,18 +416,6 @@ async def retry_reply(db: AsyncSession, claimed: ClaimedEmailReply) -> str | Non
     )
     await db.commit()
     return "pending" if result.rowcount else None  # type: ignore[attr-defined]
-
-
-async def note_no_funds(db: AsyncSession, email: Email) -> None:
-    """Mark the row so the console shows the same alert as at ingest."""
-    meta = dict(email.metadata_ or {})
-    reasons = list(meta.get("suppressed_reasons") or [])
-    if "insufficient_funds" not in reasons:
-        reasons.append("insufficient_funds")
-    meta["suppressed_reasons"] = reasons
-    meta["agent_skip_reason"] = "insufficient_funds"
-    email.metadata_ = meta
-    await db.commit()
 
 
 def thread_lock_key(email: Email) -> str:
@@ -498,9 +487,9 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
     """The thread up to and including ``email``, oldest first, at most
     ``CHAT_LIMIT`` rows.
 
-    An unproven sender gets no history: anyone can write their ``From``. A proven
-    sender gets rows with this sender only, because ``References`` is written by
-    the sender and could name someone else's message.
+    No reply goes to an unproven sender, and this stays closed for one anyway. A
+    proven sender gets rows with this sender only, because ``References`` is
+    written by the sender and could name someone else's message.
     """
     if not is_authenticated(email):
         return [email]
@@ -523,7 +512,9 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
                 and_(Email.direction == "outbound", sender == any_(Email.to_addresses)),
             ),
         )
-        rows = (await db.execute(stmt.limit(CHAT_LIMIT))).scalars().all()
+        # Newest first, so a long thread keeps its recent mail.
+        newest = stmt.order_by(Email.requested_at.desc()).limit(CHAT_LIMIT)
+        rows = (await db.execute(newest)).scalars().all()
         rows = await _answers_trusted(db, email, sender, rows)
         frontier = [r for r in rows if r.id not in seen]
         seen.update({r.id: r for r in frontier})

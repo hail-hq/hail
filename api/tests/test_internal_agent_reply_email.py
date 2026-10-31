@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core import email_agent, hmac_signing
@@ -174,8 +174,138 @@ async def test_a_retry_does_not_send_twice(client, async_session, email_mock) ->
     _org, _agent, _domain, inbound = await _seed(async_session)
     first = await _reply(client, inbound.id)
     second = await _reply(client, inbound.id)
+    assert second["state"] == "done"
     assert second["reply_id"] == first["reply_id"]
     assert email_mock.send_email.await_count == 1
+
+
+async def test_a_failed_reply_is_delivered_again(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    send = email_mock.send_email.side_effect
+    email_mock.send_email.side_effect = RuntimeError("down")
+    first = await _reply(client, inbound.id)
+    assert first["state"] == "failed"
+
+    email_mock.send_email.side_effect = send
+    second = await _reply(client, inbound.id)
+    assert second["state"] == "done"
+    assert second["reply_id"] == first["reply_id"]
+    async_session.expire_all()
+    row = await async_session.get(Email, uuid.UUID(first["reply_id"]))
+    assert row.status == "sent"
+    assert row.end_reason is None and row.failed_at is None
+
+
+async def _prior_reply(session, org, agent, domain, inbound, *, status, age):
+    row = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        agent_id=agent.id,
+        from_address=ADDRESS,
+        to_addresses=[MEMBER],
+        subject="Re: Question",
+        body_text="Written earlier.",
+        status=status,
+        requested_at=datetime.now(timezone.utc) - age,
+        metadata_={"reply_to_email_id": str(inbound.id)},
+    )
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def test_a_young_queued_reply_is_left_to_finish(
+    client, async_session, email_mock
+) -> None:
+    """The original may still be in the provider call."""
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="queued", age=timedelta(0)
+    )
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "retry" and data["reason"] == "in_flight"
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_stale_queued_reply_is_delivered(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session,
+        org,
+        agent,
+        domain,
+        inbound,
+        status="queued",
+        age=timedelta(minutes=5),
+    )
+    data = await _reply(client, inbound.id, "Different text.")
+    assert data["state"] == "done" and data["reply_id"] == str(row.id)
+    kwargs = email_mock.send_email.await_args.kwargs
+    assert kwargs["body_text"] == "Written earlier."
+
+
+async def test_a_bounced_reply_is_final(client, async_session, email_mock) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="bounced", age=timedelta(0)
+    )
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "failed" and data["reason"] == "bounced"
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_redelivery_does_not_count_its_own_row_against_the_cap(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    for _ in range(email_agent.MAX_REPLIES_PER_THREAD - 1):
+        async_session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                from_address=ADDRESS,
+                to_addresses=[MEMBER],
+                subject="Re: Question",
+                body_text="Hello",
+                status="sent",
+                metadata_={"reply_to_email_id": str(uuid.uuid4())},
+            )
+        )
+    await _prior_reply(
+        async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
+    )
+    assert (await _reply(client, inbound.id))["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    ("setup", "reason"),
+    [
+        ({"credits": 0}, "insufficient_funds"),
+        ({"dmarc": "GRAY"}, "sender_not_verified"),
+        ({"sender": "stranger@example.net"}, "sender_not_member"),
+    ],
+)
+async def test_every_refusal_is_stamped(
+    client, async_session, email_mock, setup, reason
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session, **setup)
+    assert (await _reply(client, inbound.id))["reason"] == reason
+    await async_session.refresh(inbound)
+    assert inbound.metadata_["agent_skip_reason"] == reason
+
+
+async def test_a_removed_route_is_stamped(client, async_session, email_mock) -> None:
+    _org, _agent, domain, inbound = await _seed(async_session)
+    domain.email_agent_id = None
+    await async_session.commit()
+    await _reply(client, inbound.id)
+    await async_session.refresh(inbound)
+    assert inbound.metadata_["agent_skip_reason"] == "no_agent"
 
 
 async def test_the_reply_goes_to_from_never_reply_to(
@@ -269,10 +399,7 @@ async def test_the_thread_cap_holds_at_send(client, async_session, email_mock) -
                 subject="Re: Question",
                 body_text="Hello",
                 status="sent",
-                metadata_={
-                    "reply_to_email_id": str(uuid.uuid4()),
-                    "sender_verified": True,
-                },
+                metadata_={"reply_to_email_id": str(uuid.uuid4())},
             )
         )
     await async_session.commit()
@@ -299,14 +426,13 @@ async def test_unsigned_requests_are_refused(client, async_session) -> None:
 
 
 def _tool(inbound_id, **extra) -> bytes:
-    return json.dumps(
-        {
-            "inbound_email_id": str(inbound_id),
-            "tool_invocation_id": str(uuid.uuid4()),
-            "recipient_name": "Ada Lovelace",
-            **extra,
-        }
-    ).encode()
+    fields = {
+        "inbound_email_id": str(inbound_id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "recipient_name": "Ada Lovelace",
+        **extra,
+    }
+    return json.dumps(fields).encode()
 
 
 async def _tool_email(client, inbound_id, **extra):
@@ -360,11 +486,43 @@ async def test_tool_sms_reaches_a_member_by_name(
 async def test_a_retried_run_does_not_send_twice(
     client, async_session, email_mock
 ) -> None:
+    """The tool sends the same id for the same message."""
     _org, _agent, _domain, inbound = await _seed(async_session)
-    await _tool_email(client, inbound.id)
-    data = await _tool_email(client, inbound.id, subject="Note again")
-    assert data["ok"] is True
+    invocation = str(uuid.uuid4())
+    await _tool_email(client, inbound.id, tool_invocation_id=invocation)
+    data = await _tool_email(client, inbound.id, tool_invocation_id=invocation)
+    assert data == {"ok": True, "spoken": "Email sent."}
     assert email_mock.send_email.await_count == 1
+
+
+async def test_two_messages_to_one_person_both_go(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    await _tool_email(client, inbound.id, subject="First")
+    await _tool_email(client, inbound.id, subject="Second")
+    assert email_mock.send_email.await_count == 2
+
+
+async def test_two_texts_to_one_person_both_go(
+    client, async_session, sms_mock, add_phone_number
+) -> None:
+    org, _agent, _domain, inbound = await _seed(async_session)
+    await add_phone_number(async_session, org, "+14155550100")
+    await _tool_sms(client, inbound.id, body="First")
+    await _tool_sms(client, inbound.id, body="Second")
+    assert sms_mock.send_sms.await_count == 2
+
+
+async def test_a_failed_send_can_be_corrected(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    send = email_mock.send_email.side_effect
+    email_mock.send_email.side_effect = RuntimeError("down")
+    assert (await _tool_email(client, inbound.id, subject="First"))["ok"] is False
+    email_mock.send_email.side_effect = send
+    assert (await _tool_email(client, inbound.id, subject="Better"))["ok"] is True
 
 
 async def test_tool_sends_stop_at_the_limit(client, async_session, email_mock) -> None:
@@ -424,24 +582,16 @@ async def test_the_server_refuses_tools_for_an_unproven_sender(
     sms_mock.send_sms.assert_not_awaited()
 
 
-async def test_an_unproven_sender_can_get_a_plain_reply(
-    client, async_session, email_mock
+@pytest.mark.parametrize("verdict", ["GRAY", "PROCESSING_FAILED", None])
+async def test_an_unproven_sender_gets_no_reply_under_anyone(
+    client, async_session, email_mock, verdict
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(
-        async_session, scope="anyone", dmarc="GRAY", sender="stranger@example.net"
-    )
-    assert (await _reply(client, inbound.id))["state"] == "done"
-
-
-async def test_a_reply_records_which_budget_it_spends(
-    client, async_session, email_mock
-) -> None:
-    _org, _agent, _domain, inbound = await _seed(
-        async_session, scope="anyone", dmarc="GRAY", sender="stranger@example.net"
+        async_session, scope="anyone", dmarc=verdict, sender="stranger@example.net"
     )
     data = await _reply(client, inbound.id)
-    reply = await async_session.get(Email, uuid.UUID(data["reply_id"]))
-    assert reply.metadata_["sender_verified"] is False
+    assert data["state"] == "skipped" and data["reason"] == "sender_not_verified"
+    email_mock.send_email.assert_not_awaited()
 
 
 async def test_a_pass_alone_is_not_the_stamp(client, async_session, email_mock) -> None:
@@ -535,18 +685,18 @@ async def test_tools_read_the_scope_again(client, async_session, email_mock) -> 
     email_mock.send_email.assert_not_awaited()
 
 
-async def test_tool_unknown_name_and_no_funds(
-    client, async_session, email_mock
-) -> None:
+async def test_tool_refuses_without_funds(client, async_session, email_mock) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session, credits=0)
     assert (await _tool_email(client, inbound.id))["ok"] is False
     email_mock.send_email.assert_not_awaited()
-    raw = _tool(inbound.id, subject="s", body_text="b")
-    raw = raw.replace(b"Ada Lovelace", b"Nobody")
-    resp = await client.post(
-        "/internal/agent/email-run/send-email", content=raw, headers=_signed(raw)
-    )
-    assert "couldn't find Nobody" in resp.json()["spoken"]
+
+
+async def test_tool_says_when_a_name_is_unknown(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(async_session)
+    data = await _tool_email(client, inbound.id, recipient_name="Nobody")
+    assert "couldn't find Nobody" in data["spoken"]
 
 
 async def test_tool_sms_with_no_phone_says_so(client, async_session, sms_mock) -> None:

@@ -1702,3 +1702,86 @@ async def test_deleting_the_agent_clears_the_route(
     assert resp.status_code == 204, resp.text
     body = (await client.get(f"/email-domains/{domain_id}", headers=headers)).json()
     assert body["email_agent_id"] is None
+
+
+async def _custom_domain_and_agent(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    headers: dict[str, str],
+    org_id: uuid.UUID,
+    *,
+    status: str,
+    inbound: bool,
+) -> tuple[str, str]:
+    domain = EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain="acme.example",
+        verification_status=status,
+        provider="ses",
+        inbound_enabled=inbound,
+        forward_to=["ops@example.com"] if inbound else None,
+    )
+    async_session.add(domain)
+    await async_session.commit()
+    agent = await client.post(
+        "/agents", json={"name": "Inbox", "system_prompt": "Help."}, headers=headers
+    )
+    return str(domain.id), agent.json()["id"]
+
+
+@pytest.mark.parametrize(
+    ("status", "inbound", "code", "text"),
+    [
+        ("verified", True, 200, ""),
+        (
+            "pending",
+            True,
+            422,
+            "verify this domain before an agent can answer its mail",
+        ),
+        (
+            "verified",
+            False,
+            422,
+            "turn on inbound for this domain before an agent can answer its mail",
+        ),
+    ],
+)
+async def test_patch_needs_a_custom_domain_that_receives(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple,
+    status: str,
+    inbound: bool,
+    code: int,
+    text: str,
+) -> None:
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _custom_domain_and_agent(
+        client, async_session, headers, org_id, status=status, inbound=inbound
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id},
+        headers=headers,
+    )
+    assert resp.status_code == code, resp.text
+    assert text in resp.text
+
+
+async def test_clearing_the_route_needs_nothing_from_a_custom_domain(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple,
+) -> None:
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, _agent = await _custom_domain_and_agent(
+        client, async_session, headers, org_id, status="pending", inbound=False
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}", json={"email_agent_id": None}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text

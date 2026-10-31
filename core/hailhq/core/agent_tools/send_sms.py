@@ -81,7 +81,13 @@ async def _execute_for_email(ctx: ToolContext, args: dict[str, Any]) -> str:
         "/internal/agent/email-run/send-sms",
         {
             "inbound_email_id": str(ctx.inbound_email_id),
-            "tool_invocation_id": str(uuid.uuid4()),
+            # Same message, same id: a retried run cannot send it twice.
+            "tool_invocation_id": str(
+                uuid.uuid5(
+                    ctx.inbound_email_id,
+                    f"send_sms\x00{recipient_name}\x00{body_text}",
+                )
+            ),
             "recipient_name": recipient_name,
             "body": body_text,
         },

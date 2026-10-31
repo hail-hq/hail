@@ -376,9 +376,9 @@ func newEmailDomainRouteCmd(opts *Options) *cobra.Command {
 		Long: `hail email domain route — make an agent answer inbound mail.
 
 --scope members (default): verified members of the organization whose mail
-passes DMARC. --scope anyone: every sender that passes the spam checks, unless
-DMARC fails. With anyone, a stranger whose mail passes DMARC can make the agent
-use its tools. Other senders get a plain reply with no tools.`,
+passes DMARC. --scope anyone: every sender whose mail passes DMARC and the spam
+checks. With anyone, a stranger can make the agent use its tools. Mail without
+a DMARC pass gets no reply. A custom domain must be verified with inbound on.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := uuid.Parse(args[0])

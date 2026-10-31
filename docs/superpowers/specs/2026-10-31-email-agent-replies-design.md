@@ -12,6 +12,9 @@ texts to one. The agent reads the thread and answers by email.
 - `agents.email_enabled` (default true) says whether the agent answers email.
 - `PATCH /email-domains/{id}` sets both fields. The agent must be live, in the
   organization, and have `email_enabled`.
+- A custom domain must be verified with inbound on, or the PATCH returns 422. A
+  hail-mail address always receives mail, so it does not need `inbound_enabled`:
+  the agent route is its own switch.
 
 ## Who gets a reply
 
@@ -22,42 +25,44 @@ only when all of these hold:
 2. The domain has an agent that answers email.
 3. It has no `Auto-Submitted` (other than `no`), `Precedence: bulk|list|junk`,
    `List-Id`, or `List-Unsubscribe` header.
-4. It has one `From` address and an envelope sender. That address is not
+4. It has an envelope sender. The `From` address is not
    `noreply`-style or a mailer daemon, and not an address on the hail-mail base
    domain, and not one of the message's own recipients.
-5. Scope `members`: the sender is a verified login email of an org member, and
-   the DMARC verdict is `PASS`. Any other verdict gets no reply. SES reports
-   `GRAY` when only an unaligned SPF or DKIM check passed, so `GRAY` does not
-   prove the `From` address.
-6. Scope `anyone`: the DMARC verdict is not `FAIL`, so a forged `From` does not
-   turn a reply into mail to a third party. Only a proven sender counts: other
-   verdicts may get a plain reply, with no tools and no thread history.
-7. The sender is under the thread cap. A proven sender has 20 agent sends in 24
-   hours, counting replies and tool sends in any channel. Unproven mail has its
-   own budget of 5 replies per `From` address, so forged mail cannot use up the
-   real sender's budget.
+5. The sender is proven, under both scopes: one well-formed `From` address and a
+   DMARC `PASS`. Other mail gets no reply. A reply to a forged `From` would reach
+   an innocent third party. SES reports `GRAY` when only an unaligned SPF or DKIM
+   check passed, so `GRAY` does not prove the `From` address. A `From` header with
+   defects, or whose angle-bracket address differs from the parsed one, is not
+   proven: `alice@member.com <evil@attacker.com>` parses to alice.
+6. Scope `members`: the sender is a verified login email of an org member.
+7. The sender is under the thread cap: 20 agent sends in 24 hours, counting
+   replies and tool sends in any channel.
 8. The org has funds.
 
-Rows that fail get `agent_reply_state = 'skipped'` and `metadata.agent_skip_reason`.
+Rows that fail get `agent_reply_state = 'skipped'` and `metadata.agent_skip_reason`,
+on every path: ingest, a claim, expiry, the worker, and the reply route. A row
+refused for its sender stays out of later chats.
 With no funds, `suppressed_reasons` also gets `insufficient_funds`, the reason
 the console already shows on inbound mail. The row stays stored and visible.
 
-The rules run again before the model is called, and when the reply is sent:
-routing, scope, funds, and the suppression gate can change while the model writes.
+The rules run again before the model is called, funds included, and when the reply
+is sent: routing, scope, funds, and the suppression gate can change while the model
+writes.
 
 ## Replies
 
-The voicebot's text worker also claims email rows, with the same lease, attempts,
-and backoff as texts. The chat is the agent's instructions plus the thread: rows
+Tasks beside the voicebot's text worker claim email rows, so a slow email cannot
+delay a text. They use the same lease, attempts, and backoff. The chat is the agent's instructions plus the thread: rows
 linked by `In-Reply-To` and `References`, and only rows with this same sender, so
 a forged `References` header cannot read another thread. Inbound rows join the
 chat only with `emails.from_verified`, and not when they were spam, a virus, or
 skipped for their sender. Ingest sets `from_verified` for one `From` address with
 DMARC `PASS`, and nothing else sets it. An outbound row joins only if it answers
-a row that qualifies, so a reply to forged mail stays out. An unproven sender
-gets no history at all.
+a row that qualifies. The newest rows win when a thread is long.
 
-`POST /internal/agent/reply-email` sends one reply per inbound row, with
+`POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
+the earlier row: a sent one is done, and a failed one is delivered again, as is a
+queued one past a 60-second grace. The reply carries
 `In-Reply-To`, `References`, `Re:`, and `Auto-Submitted: auto-replied`. It goes
 out from the hail-mail address, or `noreply@` on a custom domain: `To` and `Cc`
 are sender-written, so they do not choose the `From`. The reply goes to `From`,
@@ -69,16 +74,12 @@ write audit action `agent.email.reply`.
 ## Tools
 
 The owner chose full capability, with `anyone` as an explicit opt-in that states
-the risk. A run with a proven sender (a verified member, or DMARC `PASS` under
-`anyone`) gets every tool the agent allows that works outside a call:
-`list_contacts`, `send_email`, and `send_sms`, each aimed at a member by directory
-name. Call-only tools do not apply. Addresses never reach the model, each reply
-may make at most 3 sends, and tool sends count toward the thread cap. A retried
-run does not repeat a send to the same person.
-
-An unverified run gets no tools. The worker leaves them out, and
-`/internal/agent/email-run/*` refuses them on the server, so this does not rest on
-prompt text.
+the risk. Every run has a proven sender, so it gets every tool the agent allows
+that works outside a call: `list_contacts`, `send_email`, and `send_sms`, each
+aimed at a member by directory name. Call-only tools do not apply. Addresses never
+reach the model, each reply may make at most 3 sends, and tool sends count toward
+the thread cap. A send's id comes from its message: a retried run cannot repeat
+it, and a different message to the same person still goes.
 
 Email text is untrusted. The prompt says so, and scope `members` is the default.
 
