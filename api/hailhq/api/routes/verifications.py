@@ -1488,21 +1488,19 @@ async def _reject_row(
     wording on the row, the carrier's own text in the audit row), discard
     the draft so nothing of the customer's is left at the carrier, and audit
     it as a system action (no person rejected it). If the discard fails the
-    row is left as it was and tried again next tick; the sweeper never dies
-    on carrier trouble."""
+    row keeps its state and its refs and is tried again next tick; the
+    sweeper never dies on carrier trouble."""
+    # Saved before the discard: what check() or submit() wrote into the refs
+    # in place (a filed campaign is billed) must survive a failed discard,
+    # or a restart during it.
+    _keep_refs(row, provider)
+    await db.commit()
     await _rate_before_wipe(db, row, provider)
-    refs = copy.deepcopy(row.provider_refs)
     try:
         await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
         await db.rollback()
-        # The rollback drops what check() or submit() wrote into the refs in
-        # place (a filed campaign is billed): save it for the next try.
-        await db.refresh(row)
-        row.provider_refs = refs
-        _keep_refs(row, provider)
-        await db.commit()
         return
     row.state, row.rejection_reason = "rejected", reason
     row.provider_refs = _wiped_refs(row)

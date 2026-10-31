@@ -2106,6 +2106,41 @@ async def test_a_failed_discard_keeps_the_ids_check_wrote(
     assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
 
 
+@pytest.mark.parametrize(
+    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+)
+async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
+    client, org_and_key, carrier, async_session, fail
+) -> None:
+    """A refused submit that billed something keeps its id when the discard
+    fails, and when the process stops during the discard (a restart): the
+    id is saved before the discard starts."""
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def refuse(refs):
+        refs["filed_id"] = "F1"
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def cut(refs):
+        raise fail
+
+    carrier.submit, carrier.discard = refuse, cut
+    registry = lambda name, purpose="number": carrier if name == "fake" else None
+    if isinstance(fail, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await sweep_verifications(async_session, registry)
+        await async_session.rollback()
+    else:
+        await sweep_verifications(async_session, registry)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
 async def test_response_carries_purpose_number_by_default(
     client, org_and_key, carrier
 ) -> None:
