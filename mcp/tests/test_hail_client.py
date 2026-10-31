@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -10,6 +12,7 @@ import respx
 from hailhq.mcp.hail_client import HailClient
 from pydantic import ValidationError
 
+_AGENT_ID = "22222222-2222-4222-8222-222222222222"
 _BASE_URL = "http://hail-test"
 _API_KEY = "test-key"
 
@@ -184,8 +187,6 @@ async def test_create_agent_sends_handover_contacts(client: HailClient) -> None:
     contact_id = str(uuid4())
 
     def handler(request: httpx.Request) -> httpx.Response:
-        import json
-
         captured["body"] = json.loads(request.content)
         return httpx.Response(201, json=_agent_response(contact_id))
 
@@ -211,3 +212,52 @@ async def test_create_agent_rejects_empty_handover_note(client: HailClient) -> N
             handover_contacts=[{"contact_id": str(uuid4()), "note": ""}],
         )
     assert not route.called
+
+
+def _email_domain_handler(seen: dict[str, Any]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        now = "2026-10-31T00:00:00+00:00"
+        return httpx.Response(
+            200,
+            json={
+                "id": str(uuid4()),
+                "organization_id": str(uuid4()),
+                "kind": "hail_mail",
+                "domain": "amber-heron+acme@mail.hail.so",
+                "local_prefix_user": "amber-heron",
+                "local_prefix_org": "acme",
+                "verification_status": "verified",
+                "dns_records": [],
+                "mail_from_domain": None,
+                "provider": "ses",
+                "verified_at": now,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "body"),
+    [
+        ({"clear_agent": True}, {"email_agent_id": None}),
+        ({"email_agent_id": _AGENT_ID, "clear_agent": True}, {"email_agent_id": None}),
+        ({"email_agent_id": _AGENT_ID}, {"email_agent_id": _AGENT_ID}),
+        ({"email_agent_scope": "anyone"}, {"email_agent_scope": "anyone"}),
+    ],
+    ids=["clear", "clear-wins", "set", "scope"],
+)
+@respx.mock
+async def test_route_email_domain_body(
+    client: HailClient, kwargs: dict[str, Any], body: dict[str, Any]
+) -> None:
+    domain_id = str(uuid4())
+    seen: dict[str, Any] = {}
+    respx.patch(f"{_BASE_URL}/email-domains/{domain_id}").mock(
+        side_effect=_email_domain_handler(seen)
+    )
+    await client.route_email_domain(domain_id, **kwargs)
+    assert seen == body

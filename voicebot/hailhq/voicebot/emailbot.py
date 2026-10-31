@@ -30,6 +30,7 @@ from hailhq.core.email_agent import (
     claim_pending_reply,
     email_thread,
     finish_reply,
+    prior_reply,
     retry_reply,
     run_refusal,
     sender_trust,
@@ -120,7 +121,10 @@ async def _prepare(
     for one."""
     email = claimed.email
     async with session_scope() as db:
-        refusal = await run_refusal(db, claimed.domain, email)
+        # A retry whose reply already exists was under the cap when it was
+        # written, the same rule as the reply route.
+        prior = await prior_reply(db, email)
+        refusal = await run_refusal(db, claimed.domain, email, check_cap=prior is None)
         if refusal is not None:
             return refusal
         trust = await sender_trust(db, email)

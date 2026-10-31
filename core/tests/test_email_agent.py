@@ -460,6 +460,44 @@ async def test_tool_texts_count_toward_the_cap(async_session):
 
 
 @pytest.mark.asyncio
+async def test_a_run_can_leave_out_its_own_tool_sends(async_session):
+    org, agent, domain = await _seed(async_session)
+    run = uuid.uuid4()
+    for inbound in (run, run, uuid.uuid4()):
+        meta = {"thread_sender": MEMBER, "inbound_email_id": str(inbound)}
+        async_session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_=meta,
+            )
+        )
+        async_session.add(
+            Sms(
+                organization_id=org,
+                provider="twilio",
+                from_e164="+14155550100",
+                to_e164="+33612345678",
+                direction="outbound",
+                status="sent",
+                body="x",
+                agent_id=agent.id,
+                metadata_=meta,
+            )
+        )
+    await async_session.commit()
+    count = email_agent.replies_in_thread
+    assert await count(async_session, org, MEMBER) == 6
+    assert await count(async_session, org, MEMBER, excluding_run=run) == 2
+
+
+@pytest.mark.asyncio
 async def test_old_replies_leave_the_cap(async_session):
     org, agent, domain = await _seed(async_session)
     old = datetime.now(timezone.utc) - timedelta(hours=25)

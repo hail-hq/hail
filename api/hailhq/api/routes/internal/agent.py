@@ -57,6 +57,7 @@ from hailhq.core.email_agent import (
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
     answers_emails,
+    prior_reply,
     reply_from_address,
     reply_references,
     reply_subject,
@@ -640,21 +641,7 @@ async def agent_reply_email(
         {"key": email_thread_lock_key(inbound)},
     )
     # Idempotent per inbound row: the worker retries with the same email_id.
-    prior = (
-        (
-            await db.execute(
-                select(Email)
-                .where(
-                    Email.organization_id == org,
-                    Email.direction == "outbound",
-                    Email.metadata_["reply_to_email_id"].astext == str(inbound.id),
-                )
-                .order_by(Email.requested_at)
-            )
-        )
-        .scalars()
-        .first()
-    )
+    prior = await prior_reply(db, inbound)
     if prior is not None and prior.status not in ("queued", "failed"):
         # Not just "sent": see the same reasoning in agent_send_email below.
         ok = prior.status != "bounced"
@@ -783,7 +770,7 @@ async def _email_run(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
-    refusal = await run_refusal(db, domain, inbound)
+    refusal = await run_refusal(db, domain, inbound, count_own_sends=True)
     if refusal == "thread_cap":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     if refusal == "insufficient_funds":

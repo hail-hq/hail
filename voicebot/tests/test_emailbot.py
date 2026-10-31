@@ -247,6 +247,63 @@ async def test_a_proven_outside_sender_is_framed_and_keeps_tools(
     assert llm.calls[0]["tools"]
 
 
+async def _fill_cap(session, email_id, *, meta) -> None:
+    row = await session.get(Email, email_id)
+    for _ in range(MAX_REPLIES_PER_THREAD):
+        session.add(
+            Email(
+                organization_id=row.organization_id,
+                email_domain_id=row.email_domain_id,
+                agent_id=row.agent_id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_={"thread_sender": MEMBER, **meta},
+            )
+        )
+    await session.commit()
+
+
+async def test_a_retry_with_its_reply_written_passes_a_full_cap(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    await _fill_cap(async_session, email_id, meta={})
+    row = await async_session.get(Email, email_id)
+    async_session.add(
+        Email(
+            organization_id=row.organization_id,
+            email_domain_id=row.email_domain_id,
+            agent_id=row.agent_id,
+            from_address=ADDRESS,
+            to_addresses=[MEMBER],
+            subject="Re: Question",
+            body_text="Written earlier.",
+            status="failed",
+            metadata_={"reply_to_email_id": str(email_id)},
+        )
+    )
+    await async_session.commit()
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert api.post.await_args.args[0] == "/internal/agent/reply-email"
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_retried_runs_own_sends_do_not_stop_it(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    await _fill_cap(async_session, email_id, meta={"inbound_email_id": str(email_id)})
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "done"
+
+
 async def test_an_unproven_row_never_reaches_the_model(
     async_session, monkeypatch
 ) -> None:

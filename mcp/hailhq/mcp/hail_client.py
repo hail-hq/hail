@@ -315,7 +315,9 @@ class HailClient:
     ) -> dict[str, Any]:
         """PATCH /email-domains/{id} — which agent answers mail, and whom."""
         body: dict[str, Any] = {}
-        if email_agent_id is not None or clear_agent:
+        if clear_agent:
+            body["email_agent_id"] = None
+        elif email_agent_id is not None:
             body["email_agent_id"] = email_agent_id
         if email_agent_scope is not None:
             body["email_agent_scope"] = email_agent_scope

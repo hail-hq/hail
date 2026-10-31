@@ -37,7 +37,7 @@ from hailhq.core.text_agent import (
     REPLY_CAP_WINDOW,
     RETRY_BACKOFF,
 )
-from sqlalchemy import and_, any_, func, or_, select, update
+from sqlalchemy import and_, any_, func, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("hailhq.core.email_agent")
@@ -53,6 +53,7 @@ __all__ = [
     "email_thread",
     "finish_reply",
     "is_authenticated",
+    "prior_reply",
     "proves_sender",
     "queue_decision",
     "replies_in_thread",
@@ -168,11 +169,23 @@ async def sender_refusal(
 
 
 async def replies_in_thread(
-    db: AsyncSession, organization_id: uuid.UUID, sender: str
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    sender: str,
+    *,
+    excluding_run: uuid.UUID | None = None,
 ) -> int:
     """Agent sends for this sender within ``REPLY_CAP_WINDOW``: replies, and
-    tool sends in any channel. A run that only uses tools still counts."""
+    tool sends in any channel. A run that only uses tools still counts.
+    ``excluding_run`` leaves out the tool sends of that inbound email's run."""
     since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
+
+    def not_this_run(model: type[Email | Sms]):
+        if excluding_run is None:
+            return true()
+        run = model.metadata_["inbound_email_id"].astext
+        return run.is_distinct_from(str(excluding_run))
+
     emails = select(func.count(Email.id)).where(
         Email.organization_id == organization_id,
         Email.direction == "outbound",
@@ -183,7 +196,10 @@ async def replies_in_thread(
                 Email.metadata_["reply_to_email_id"].astext.is_not(None),
                 sender == any_(Email.to_addresses),
             ),
-            Email.metadata_["thread_sender"].astext == sender,
+            and_(
+                Email.metadata_["thread_sender"].astext == sender,
+                not_this_run(Email),
+            ),
         ),
     )
     texts = select(func.count(Sms.id)).where(
@@ -192,17 +208,43 @@ async def replies_in_thread(
         Sms.agent_id.is_not(None),
         Sms.requested_at >= since,
         Sms.metadata_["thread_sender"].astext == sender,
+        not_this_run(Sms),
     )
     total = int((await db.execute(emails)).scalar_one() or 0)
     return total + int((await db.execute(texts)).scalar_one() or 0)
 
 
+async def prior_reply(db: AsyncSession, email: Email) -> Email | None:
+    """The reply already written for this inbound row, or None. Its existence
+    means a retry: the row was under the cap when the reply was written."""
+    stmt = (
+        select(Email)
+        .where(
+            Email.organization_id == email.organization_id,
+            Email.direction == "outbound",
+            Email.metadata_["reply_to_email_id"].astext == str(email.id),
+        )
+        .order_by(Email.requested_at)
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 async def run_refusal(
-    db: AsyncSession, domain: EmailDomain, email: Email, *, check_cap: bool = True
+    db: AsyncSession,
+    domain: EmailDomain,
+    email: Email,
+    *,
+    check_cap: bool = True,
+    count_own_sends: bool = False,
 ) -> str | None:
     """Why this row must not be answered now, or None. Scope, cap, and funds
     can change between ingest and a claim, and the model costs money.
-    ``check_cap`` is off when the reply already exists and only needs sending."""
+
+    ``check_cap`` is off when the reply already exists and only needs sending.
+    The run's own tool sends do not stop its one reply, so they count only with
+    ``count_own_sends``: the tool routes use it, and a tool send cannot take the
+    last slot twice.
+    """
     sender = normalize_address(email.from_address)
     refusal = await sender_refusal(
         db, domain, sender=sender, verified=is_authenticated(email)
@@ -210,7 +252,12 @@ async def run_refusal(
     if refusal is not None:
         return refusal
     if check_cap:
-        count = await replies_in_thread(db, email.organization_id, sender)
+        count = await replies_in_thread(
+            db,
+            email.organization_id,
+            sender,
+            excluding_run=None if count_own_sends else email.id,
+        )
         if count >= MAX_REPLIES_PER_THREAD:
             return "thread_cap"
     if not await has_funds(db, email.organization_id):
