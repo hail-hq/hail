@@ -2151,13 +2151,13 @@ def register_tools(
     )
     async def list_agents_tool(ctx: Context) -> dict[str, Any]:
         """List the workspace's saved agents: the brains that answer calls
-        and texts on its numbers, and that ``place_call`` can use via
-        ``agent_id``.
+        and texts on its numbers and mail to its addresses, and that
+        ``place_call`` can use via ``agent_id``.
 
         Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
         "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
         "max_duration_seconds", "handover_max_duration_seconds", "voice_enabled",
-        "sms_enabled", "status", "handover_contacts"}, ...]}``.
+        "sms_enabled", "email_enabled", "status", "handover_contacts"}, ...]}``.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -2951,7 +2951,7 @@ def register_tools(
 
         Returns the ``AgentResponse`` as a dict (``name``, ``system_prompt``,
         ``first_message``, ``ai_disclosure``, ``voice_config``, ``tools``,
-        ``voice_enabled``, ``sms_enabled``, ``status``, ...), or
+        ``voice_enabled``, ``sms_enabled``, ``email_enabled``, ``status``, ...), or
         ``{"error": "<message>"}``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:

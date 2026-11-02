@@ -93,6 +93,9 @@ MAX_HTML_CHARS = 200_000
 MAX_TOOL_SENDS = 3
 # SES caps a header value at 995 characters.
 MAX_HEADER_CHARS = 900
+# Newest ids read from one email's headers when finding its thread. The sender
+# writes them, and asyncpg takes at most 32767 query arguments.
+MAX_REFERENCED_IDS = 100
 # Same cap as POST /emails. An inbound subject has no cap of its own.
 MAX_SUBJECT_CHARS = 998
 
@@ -540,7 +543,7 @@ def thread_lock_key(email: Email) -> str:
 
 
 def _referenced_ids(email: Email) -> list[str]:
-    ids = list(email.references_ids or [])
+    ids = list(email.references_ids or [])[-MAX_REFERENCED_IDS:]
     if email.in_reply_to:
         ids.append(email.in_reply_to.strip())
     return ids
@@ -763,11 +766,15 @@ def reply_references(email: Email) -> tuple[str | None, list[str] | None]:
         return None, None
     chain = [r for r in (email.references_ids or []) if _usable_id(r)]
     chain.append(message_id)
-    while len(" ".join(chain)) > MAX_HEADER_CHARS and len(chain) > 2:
-        del chain[1]
-    if len(" ".join(chain)) > MAX_HEADER_CHARS:
-        chain = chain[-1:]
-    return message_id, chain
+    # One pass: the sender sets how many ids there are.
+    length = len(" ".join(chain))
+    cut = 1
+    while length > MAX_HEADER_CHARS and cut < len(chain) - 1:
+        length -= len(chain[cut]) + 1
+        cut += 1
+    if length > MAX_HEADER_CHARS:
+        return message_id, chain[-1:]
+    return message_id, chain[:1] + chain[cut:]
 
 
 async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:

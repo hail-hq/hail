@@ -1104,6 +1104,43 @@ def test_reply_references_fit_one_header():
     assert chain[0] == ids[0] and chain[-1] == "<last@x.co>"
 
 
+def test_reply_references_keep_the_first_and_newest_ids():
+    ids = [f"<{i}@x.co>" for i in range(1000)]
+    _, chain = email_agent.reply_references(
+        Email(message_id="<last@x.co>", references_ids=ids)
+    )
+    assert chain[0] == ids[0]
+    assert chain[1:-1] == ids[-len(chain) + 2 :]
+    assert chain[-1] == "<last@x.co>"
+    assert len(" ".join(chain)) <= email_agent.MAX_HEADER_CHARS
+
+
+def test_a_reply_with_two_long_ids_keeps_the_last_one():
+    first = f"<{'a' * 500}@x.co>"
+    last = f"<{'b' * 500}@x.co>"
+    assert email_agent.reply_references(
+        Email(message_id=last, references_ids=[first])
+    ) == (last, [last])
+
+
+@pytest.mark.asyncio
+async def test_a_huge_references_header_cannot_break_the_thread_lookup(async_session):
+    """The sender writes the list, and asyncpg takes 32767 query arguments."""
+    org, _agent, domain = await _seed(async_session)
+    earlier = _row(org, domain, message_id="<newest@example.com>", body_text="Before")
+    now = _row(
+        org,
+        domain,
+        message_id="<now@example.com>",
+        references_ids=[f"<{i}@x.co>" for i in range(40_000)]
+        + ["<newest@example.com>"],
+    )
+    async_session.add_all([earlier, now])
+    await async_session.commit()
+    thread = await email_agent.email_thread(async_session, now)
+    assert next(r.body_text for r in thread) == "Before"
+
+
 def test_reply_from_address_ignores_sender_written_headers():
     assert (
         email_agent.reply_from_address(EmailDomain(kind="hail_mail", domain=ADDRESS))

@@ -14,7 +14,6 @@ tools: the model could reword a message, and it would go out twice.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import timedelta
 from typing import Any
@@ -44,15 +43,18 @@ from hailhq.core.telemetry_identity import (
     resolve_identity,
     tag_context,
 )
-from hailhq.voicebot.chat_loop import MAX_TOOL_ROUNDS, run_chat
+from hailhq.voicebot.chat_loop import (
+    LLM_TIMEOUT_SECONDS,
+    MAX_TOOL_ROUNDS,
+    run_chat,
+    tool_args,
+)
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
 
 logger = logging.getLogger("hailhq.voicebot.emailbot")
 
-# Per model call. One reply may make MAX_TOOL_ROUNDS of them.
-LLM_TIMEOUT_SECONDS = 30.0
 TOOL_FAILED = "That did not work."
 
 __all__ = ["TOOL_FAILED", "generate_reply", "reply_once"]
@@ -78,13 +80,7 @@ async def _run_tool(
     if spec is None:
         return TOOL_FAILED, True
     try:
-        args = json.loads(call.arguments or "{}")
-    except ValueError:
-        args = {}
-    if not isinstance(args, dict):
-        args = {}
-    try:
-        return str(await spec.execute(tctx, args) or ""), False
+        return str(await spec.execute(tctx, tool_args(call)) or ""), False
     except Exception:
         logger.exception("email agent tool %s failed", call.name)
         return TOOL_FAILED, True

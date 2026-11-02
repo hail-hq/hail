@@ -225,6 +225,13 @@ async def _prior_send(
     ).scalar_one_or_none()
 
 
+def _ambiguous_recipient(name: str) -> AgentSendResponse:
+    return AgentSendResponse(
+        ok=False,
+        spoken=f"More than one person is named {name}, so I can't pick a recipient.",
+    )
+
+
 async def _deny(
     org_id: UUID,
     *,
@@ -754,7 +761,7 @@ async def agent_reply_email(
         from_name=agent.name,
         to_addresses=[recipient],
         subject=reply_subject(inbound.subject),
-        body_text=body.body[:EMAIL_MAX_REPLY_CHARS],
+        body_text=body.body,
         status="queued",
         provider="ses",
         in_reply_to=in_reply_to,
@@ -815,20 +822,52 @@ def _email_run_meta(
     }
 
 
+def _replayed_send(prior: Email | Sms) -> AgentSendResponse:
+    """The answer for a send that already has a row. See agent_send_email for
+    why a queued row counts as sent."""
+    if isinstance(prior, Email):
+        ok = prior.status not in ("failed", "bounced")
+        return AgentSendResponse(
+            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+        )
+    ok = prior.status not in ("failed", "undelivered")
+    return AgentSendResponse(
+        ok=ok, spoken=_SPOKEN_SMS_SENT_MEMBER if ok else _SPOKEN_SMS_FAILED
+    )
+
+
 async def _email_run(
-    db: AsyncSession, body: AgentEmailRunBase, *, action: str, resource_type: str
+    db: AsyncSession,
+    body: AgentEmailRunBase,
+    *,
+    model: type[Email | Sms],
+    action: str,
+    resource_type: str,
 ) -> tuple[Email, Agent] | AgentSendResponse:
     """Everything a tool send in an email run must pass before it picks a
     recipient. Only a claimed row runs tools. Scope, funds, and the thread cap
-    are read again under the thread lock."""
-    routed = await _routed_email(db, body.inbound_email_id)
-    if routed is None or routed[0].agent_reply_state != "processing":
+    are read again under the thread lock.
+
+    The retry of a send is answered first, under the lock, so it sees the row: a
+    send can take the last slot of the cap, or outlive the claim, and the retry
+    must still learn that it went out.
+    """
+    inbound = await db.get(Email, body.inbound_email_id)
+    if inbound is None or inbound.direction != "inbound":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
-    inbound, domain, agent = routed
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
+    prior = await _prior_send(
+        db, model, inbound.organization_id, body.tool_invocation_id
+    )
+    if prior is not None:
+        return _replayed_send(prior)
+    routed = await _routed_email(db, body.inbound_email_id)
+    if routed is None or inbound.agent_reply_state != "processing":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
+    inbound, domain, agent = routed
     refusal = await run_refusal(db, domain, inbound, count_own_sends=True)
     if refusal == "thread_cap":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
@@ -853,21 +892,13 @@ async def agent_email_run_send_email(
 ) -> AgentSendResponse:
     """The ``send_email`` tool in an email run: a member by directory name."""
     run = await _email_run(
-        db, body, action="agent.email.blocked", resource_type="email"
+        db, body, model=Email, action="agent.email.blocked", resource_type="email"
     )
     if isinstance(run, AgentSendResponse):
         return run
     inbound, agent = run
     org = inbound.organization_id
     meta = _email_run_meta(body, agent, inbound)
-
-    # The tool derives the id from the message: a retried run lands here.
-    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
-    if prior is not None:
-        ok = prior.status not in ("failed", "bounced")
-        return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
-        )
 
     matches = await resolve_member_emails(db, org, body.recipient_name)
     if not matches:
@@ -876,13 +907,7 @@ async def agent_email_run_send_email(
             spoken=f"I couldn't find {body.recipient_name} in the directory.",
         )
     if len(matches) > 1:
-        return AgentSendResponse(
-            ok=False,
-            spoken=(
-                f"More than one person is named {body.recipient_name}, so I "
-                "can't pick a recipient."
-            ),
-        )
+        return _ambiguous_recipient(body.recipient_name)
     recipient = matches[0]
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
@@ -964,19 +989,14 @@ async def agent_email_run_send_sms(
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentSendResponse:
     """The ``send_sms`` tool in an email run: a member by directory name."""
-    run = await _email_run(db, body, action="agent.sms.blocked", resource_type="sms")
+    run = await _email_run(
+        db, body, model=Sms, action="agent.sms.blocked", resource_type="sms"
+    )
     if isinstance(run, AgentSendResponse):
         return run
     inbound, agent = run
     org = inbound.organization_id
     meta = _email_run_meta(body, agent, inbound)
-
-    prior = await _prior_send(db, Sms, org, body.tool_invocation_id)
-    if prior is not None:
-        ok = prior.status not in ("failed", "undelivered")
-        return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_SMS_SENT_MEMBER if ok else _SPOKEN_SMS_FAILED
-        )
 
     matches = await resolve_member_phones(db, org, body.recipient_name)
     if not any(matches):
@@ -985,13 +1005,7 @@ async def agent_email_run_send_sms(
             spoken=f"I couldn't find a number for {body.recipient_name}.",
         )
     if len(matches) > 1:
-        return AgentSendResponse(
-            ok=False,
-            spoken=(
-                f"More than one person is named {body.recipient_name}, so I "
-                "can't pick a recipient."
-            ),
-        )
+        return _ambiguous_recipient(body.recipient_name)
     recipient = matches[0]
     assert recipient is not None
 
@@ -1143,13 +1157,7 @@ async def agent_send_email(
             spoken=f"I couldn't find {body.recipient_name} in the directory.",
         )
     if len(matches) > 1:
-        return AgentSendResponse(
-            ok=False,
-            spoken=(
-                f"More than one person is named {body.recipient_name}, so I "
-                "can't pick a recipient."
-            ),
-        )
+        return _ambiguous_recipient(body.recipient_name)
     recipient = matches[0]
 
     gate = await check_email_allowed(db, org, [recipient])

@@ -154,7 +154,6 @@ needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`. It answers
 retried up to 3 times with backoff; a text still unanswered after
 `HAIL_TEXT_REPLY_MAX_AGE_SECONDS` is skipped.
 
-
 ## Answer email with an agent
 
 ```bash

@@ -17,7 +17,7 @@ async def email_run_tools(agent: Agent, session: AsyncSession) -> list[ToolSpec]
     """``agents.tools``: NULL means every tool, a list names the allowed ones."""
     specs: list[ToolSpec] = []
     for spec in (
-        list_contacts.SPEC,
+        list_contacts.EMAIL_RUN_SPEC,
         send_email.EMAIL_RUN_SPEC,
         send_sms.EMAIL_RUN_SPEC,
     ):
