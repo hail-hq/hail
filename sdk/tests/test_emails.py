@@ -341,6 +341,19 @@ async def test_emails_delete_suppression_not_found_raises(
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize(
+    "address", ["<a@b.co>", "a,b@c.co", "a;b@c.co", "a@b.co,c@d.co", "a@b.co\n"]
+)
+def test_email_create_rejects_a_malformed_recipient(address: str) -> None:
+    with pytest.raises(ValueError, match="invalid email"):
+        EmailCreate(
+            to=[address],
+            subject="hi",
+            body_text="body",
+            recipient_consent=True,
+        )
+
+
 def test_email_create_rejects_invalid_recipient() -> None:
     with pytest.raises(ValueError, match="invalid email"):
         EmailCreate(

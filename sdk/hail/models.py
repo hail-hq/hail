@@ -401,7 +401,7 @@ class EventStreamResponse(BaseModel):
 # by hand; codegen will replace this once openapi → SDK is wired.
 # --------------------------------------------------------------------------- #
 
-EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+EMAIL_ADDR = re.compile(r"^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+\Z")
 
 
 def _normalize_domain(addr: str) -> str:

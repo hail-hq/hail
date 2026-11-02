@@ -1204,9 +1204,10 @@ class EventStreamResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 
 # A liberal regex — RFC 5322 in full is a tarpit. This catches the obvious
-# mistakes (no @, whitespace, missing TLD) without rejecting things SES
-# would accept. SES does its own validation at send time.
-EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+# mistakes (no @, whitespace, list separators or angle brackets, missing TLD)
+# without rejecting things SES would accept. SES does its own validation at
+# send time. ``\Z`` because ``$`` would let a trailing newline through.
+EMAIL_ADDR = re.compile(r"^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+\Z")
 DOMAIN_NAME = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 )

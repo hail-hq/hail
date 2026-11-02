@@ -280,3 +280,42 @@ def test_email_create_strips_from_name_before_length_check() -> None:
         recipient_consent=True,
     )
     assert email.from_name == "Acme"
+
+
+MALFORMED_ADDRESSES = ["<a@b.co>", "a,b@c.co", "a;b@c.co", "a@b.co,c@d.co", "a@b.co\n"]
+
+
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_email_create_refuses_a_malformed_recipient(address):
+    with pytest.raises(ValidationError, match="invalid email address"):
+        EmailCreate(to=[address], subject="hi", body_text="hi", recipient_consent=True)
+
+
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_email_create_refuses_a_malformed_sender(address):
+    with pytest.raises(ValidationError, match="must be a valid email address"):
+        EmailCreate(
+            **{"from": address},
+            to=["a@b.co"],
+            subject="hi",
+            body_text="hi",
+            recipient_consent=True,
+        )
+
+
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_contact_refuses_a_malformed_email(address):
+    from hailhq.core.schemas import ContactCreate
+
+    with pytest.raises(ValidationError, match="must be a valid email address"):
+        ContactCreate(name="Bob", email=address)
+
+
+@pytest.mark.parametrize(
+    "address", ["a+tag@sub.example.co", "o'brien@example.com", "a.b_c-d@example.co"]
+)
+def test_email_create_keeps_accepting_normal_addresses(address):
+    email = EmailCreate(
+        to=[address], subject="hi", body_text="hi", recipient_consent=True
+    )
+    assert email.to == [address]
