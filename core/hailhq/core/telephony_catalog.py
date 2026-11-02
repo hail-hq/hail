@@ -14,7 +14,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["by_request_row", "capabilities", "sells_in"]
+__all__ = ["by_request_row", "capabilities", "monthly_price", "sells_in"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -32,6 +32,11 @@ def _path(provider: str) -> Path:
 def _load(provider: str) -> dict[tuple[str, str], dict]:
     raw = json.loads(_path(provider).read_text())
     return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+
+
+@lru_cache(maxsize=8)
+def _capability_fees(path: Path) -> tuple[dict, ...]:
+    return tuple(json.loads(path.read_text()).get("capability_monthly_fees", []))
 
 
 def capabilities(
@@ -101,10 +106,9 @@ def monthly_price(provider: str, base_cents: int, selected: list[str]) -> dict:
     """
     from hailhq.core.carrier_offer import cents
 
-    catalog = json.loads(_path(provider).read_text())
     fees = sum(
         cents(fee["usd_per_month"])
-        for fee in catalog.get("capability_monthly_fees", [])
+        for fee in _capability_fees(_path(provider))
         if set(selected).intersection(fee["capabilities"])
     )
     return {

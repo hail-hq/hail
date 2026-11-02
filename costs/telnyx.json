@@ -2791,7 +2791,11 @@
       "ZA:national",
       "ZA:toll_free"
     ],
-    "sms_registration_required": []
+    "sms_registration_required": [
+      "PR",
+      "US",
+      "VI"
+    ]
   },
   "capability_monthly_fees": [
     {

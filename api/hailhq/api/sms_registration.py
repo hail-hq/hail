@@ -17,6 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+# What makes a number eligible for a US SMS registration.
+_ELIGIBLE_NUMBER = (
+    PhoneNumber.provisioning_state == "active",
+    PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
+    PhoneNumber.number_type == "local",
+    PhoneNumber.capabilities.any("sms"),
+    PhoneNumber.provider_resource_id.is_not(None),
+)
+
 
 async def registered_numbers(
     db: AsyncSession, row: CarrierVerification
@@ -31,11 +40,7 @@ async def registered_numbers(
                 .where(
                     PhoneNumber.organization_id == row.organization_id,
                     PhoneNumber.provider == row.provider,
-                    PhoneNumber.provisioning_state == "active",
-                    PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
-                    PhoneNumber.number_type == "local",
-                    PhoneNumber.capabilities.any("sms"),
-                    PhoneNumber.provider_resource_id.is_not(None),
+                    *_ELIGIBLE_NUMBER,
                 )
                 .order_by(
                     PhoneNumber.acquired_at.nulls_last(),
@@ -177,12 +182,8 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
         .where(
             PhoneNumber.organization_id == CarrierVerification.organization_id,
             PhoneNumber.provider == CarrierVerification.provider,
-            PhoneNumber.provisioning_state == "active",
-            PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
-            PhoneNumber.number_type == "local",
-            PhoneNumber.capabilities.any("sms"),
             PhoneNumber.sms_registration_id.is_(None),
-            PhoneNumber.provider_resource_id.is_not(None),
+            *_ELIGIBLE_NUMBER,
         )
         .exists()
     )
@@ -223,7 +224,9 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
             organization_id, verification_id = row.organization_id, row.id
             await db.commit()
             total += attached
-            if attached or failed:
+            # A refused number retries on every pass: _attach logs each failure,
+            # and the audit trail records only numbers that moved.
+            if attached:
                 await write_audit_log(
                     organization_id,
                     None,

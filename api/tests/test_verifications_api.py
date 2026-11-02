@@ -4614,3 +4614,34 @@ async def test_background_retries_a_refused_territory_campaign_link(
     assert str(territory.sms_registration_id) == vid
     await verifications_routes.sweep_verifications(async_session, registry)
     assert attempts == 2
+
+
+async def test_background_audits_only_numbers_that_attached(
+    client, org_and_key, sms_carrier, async_session, us_number, monkeypatch
+):
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    await _approved_sms_row(client, key, async_session, sms_carrier)
+    territory = await _us_number(
+        async_session, org_id, "+13405550101", resource="PN-refused-territory"
+    )
+    territory.country_code = "VI"
+    await async_session.commit()
+
+    async def refused(refs, *, provider_resource_id, e164):
+        raise RuntimeError("carrier refused")
+
+    def registry(name, purpose="number"):
+        return sms_carrier if purpose == "sms" else None
+
+    async def audit_rows() -> int:
+        result = await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.sms_attached")
+        )
+        return len(result.scalars().all())
+
+    before = await audit_rows()
+    monkeypatch.setattr(sms_carrier, "attach_number", refused)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert await audit_rows() == before
