@@ -8,15 +8,16 @@ name: costs-refresh
 #   ANTHROPIC_API_KEY   a dedicated key with a low monthly spend limit
 #
 # Security notes:
-#   - The agent reads untrusted web pages. It has no shell, it can edit only
-#     the four data files, and WebFetch reaches only the vendor sites listed
-#     in .github/prompts/costs-refresh-settings.json. WebSearch stays open.
-#   - Only the agent step and the secret check see the key. The job has a
+#   - The agent reads untrusted web pages. It runs with --restricted: no
+#     shell, and file tools only inside the repo. It can edit only the four
+#     data files, and WebFetch reaches only the sites listed in
+#     .github/prompts/costs-refresh-settings.json. WebSearch stays open.
+#   - Only the agent steps and the secret check see the key. The job has a
 #     read-only token, and the checkout keeps no credentials.
-#   - Only the diff of the four data files leaves the job. The job that can
-#     write to the repo never runs the agent.
-#   - The PR body comes from the agent, so it gets a warning line and its
-#     @mentions are neutralized.
+#   - Only the diff of the four data files and the report leave the job. The
+#     job that can write to the repo never runs the agent.
+#   - The PR body comes from the agent, so its text sits in a code fence.
+#     Mentions, links, and closing keywords in it do nothing.
 #   - The budget and the agent timeout cap the cost of one run. The job limit
 #     is longer, so a timed-out run still exports what it finished.
 on:
@@ -37,6 +38,7 @@ jobs:
     timeout-minutes: 180
     outputs:
       ready: ${{ steps.export.outputs.ready }}
+      branch: ${{ steps.export.outputs.branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,85 +70,97 @@ jobs:
           # A budget stop or timeout exits non-zero. Keep going: the steps
           # below save the finished rows and fail the job at the end.
           set +e
-          timeout --signal=INT 150m claude --safe-mode -p "$(cat /tmp/prompt.md)" \
-            --model claude-sonnet-5-5 \
-            --max-budget-usd 30 \
-            --tools 'Read,Grep,Glob,Edit,WebFetch,WebSearch' \
-            --settings .github/prompts/costs-refresh-settings.json \
-            --permission-mode dontAsk \
-            --permission-prompts none \
-            --output-format json > /tmp/out/claude.json
+          scripts/costs/run-refresh-agent.sh /tmp/prompt.md 30 150 /tmp/claude.json
           echo "exit=$?" >> "$GITHUB_OUTPUT"
       - name: Validate
-        id: validate
+        id: first_check
         continue-on-error: true
+        shell: bash
+        run: scripts/costs/check-refresh.sh 2>&1 | tee /tmp/check.log
+      - name: Repair what validation found
+        id: repair
+        if: steps.first_check.outcome == 'failure'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          pnpm exec prettier --write costs/llm.json costs/stt.json costs/tts.json costs/sms.json
-          pnpm costs:validate
-          pnpm costs:featured
-          node --test scripts/costs/*.test.mjs
-          for f in costs/llm.json costs/stt.json costs/tts.json; do
-            dupes=$(jq -c '[.models[] | .aliases // [] | .[]] | group_by(.) | map(select(length > 1) | .[0])' "$f")
-            unresolved=$(jq -c '(.models | map(.model_id)) as $ids | [.models[] | select(.replaced_by_model_id != null) | select((.replaced_by_model_id as $r | $ids | index($r)) == null) | .model_id]' "$f")
-            if [ "$dupes" != "[]" ] || [ "$unresolved" != "[]" ]; then
-              echo "::error file=$f::aliases: $dupes ; replaced_by: $unresolved"
-              exit 1
-            fi
-          done
-          pnpm site:build
+          { cat .github/prompts/costs-refresh-repair.md; tail -n 80 /tmp/check.log; } > /tmp/repair.md
+          scripts/costs/run-refresh-agent.sh /tmp/repair.md 3 15 /tmp/repair.json || true
+      - name: Validate the repair
+        id: second_check
+        if: steps.first_check.outcome == 'failure'
+        continue-on-error: true
+        run: scripts/costs/check-refresh.sh
       - name: Export the diff and the report
         id: export
         if: always()
         env:
           AGENT_EXIT: ${{ steps.agent.outputs.exit }}
-          VALIDATE: ${{ steps.validate.outcome }}
+          FIRST_CHECK: ${{ steps.first_check.outcome }}
+          SECOND_CHECK: ${{ steps.second_check.outcome }}
         run: |
           mkdir -p /tmp/out
           git diff -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json > /tmp/out/refresh.patch
-          field() { jq -r "$1" /tmp/out/claude.json 2>/dev/null || echo "$2"; }
+          field() {
+            local value
+            value=$(jq -r "$1" /tmp/claude.json 2>/dev/null || true)
+            echo "${value:-$2}"
+          }
           is_error=$(field '.is_error // false' true)
           [ "$AGENT_EXIT" = "0" ] && [ "$is_error" = "false" ] && agent_ok=true || agent_ok=false
+          [ "$FIRST_CHECK" = "success" ] || [ "$SECOND_CHECK" = "success" ] && valid=true || valid=false
           {
-            echo "> An agent wrote this report after reading untrusted web pages. Check the diff before you merge."
+            echo "> An agent wrote the report below after reading untrusted web pages. Check the diff before you merge."
             echo
             if [ "$agent_ok" != "true" ]; then
-              echo "**The agent did not finish** (exit ${AGENT_EXIT:-none}). This report can be missing, and some providers were not checked."
+              echo "**The agent did not finish** (exit ${AGENT_EXIT:-none}). The report can be missing, and some providers were not checked."
+              echo
+            fi
+            if [ "$FIRST_CHECK" != "success" ]; then
+              echo "**A repair pass ran**, because the first validation failed. Its edits are in the diff."
               echo
             fi
             echo "Rows with a new check date: $(grep -c '^+ *\"last_verified\"' /tmp/out/refresh.patch)."
-            echo
-            # Backticks stop an @name in the agent's text from notifying anyone.
-            field '.result // "The run gave no report."' "The run gave no report." \
-              | sed -E 's/(^|[^[:alnum:]`])@([[:alnum:]-]+)/\1`@\2`/g'
-            echo
-            echo "---"
-            echo
-            echo "Estimated cost: \$$(field '.total_cost_usd // 0' 0). Validation: ${VALIDATE}."
-            echo
+            echo "Estimated cost: \$$(field '.total_cost_usd // 0' 0), not counting a repair pass. Validation passed: ${valid}."
             echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            # The fence keeps mentions, links, and closing keywords inert.
+            echo '~~~~~~~~ text'
+            field '.result // "The run gave no report."' "The run gave no report." | sed -E 's/~{8,}/~~~/g'
+            echo '~~~~~~~~'
           } > /tmp/out/summary.md
           cat /tmp/out/summary.md >> "$GITHUB_STEP_SUMMARY"
-          echo "agent_ok=$agent_ok" >> "$GITHUB_OUTPUT"
-          if [ "$VALIDATE" = "success" ] && [ -s /tmp/out/refresh.patch ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "agent_ok=$agent_ok"
+            echo "valid=$valid"
+            # A partial run must not replace a complete PR that is still open.
+            if [ "$agent_ok" = "true" ]; then
+              echo "branch=costs/weekly-refresh"
+            else
+              echo "branch=costs/partial-refresh-$(date -u +%F)"
+            fi
+            if [ "$valid" = "true" ] && [ -s /tmp/out/refresh.patch ]; then
+              echo "ready=true"
+            else
+              echo "ready=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: costs-refresh
-          path: /tmp/out/
+          path: |
+            /tmp/out/refresh.patch
+            /tmp/out/summary.md
           if-no-files-found: warn
           retention-days: 7
       - name: Fail the run if the agent or the checks failed
         if: always()
         env:
           AGENT_OK: ${{ steps.export.outputs.agent_ok }}
-          VALIDATE: ${{ steps.validate.outcome }}
+          VALID: ${{ steps.export.outputs.valid }}
         run: |
-          if [ "$AGENT_OK" != "true" ] || [ "$VALIDATE" != "success" ]; then
-            echo "::error::Agent finished: ${AGENT_OK:-false}. Validation: ${VALIDATE:-skipped}."
+          if [ "$AGENT_OK" != "true" ] || [ "$VALID" != "true" ]; then
+            echo "::error::Agent finished: ${AGENT_OK:-false}. Validation passed: ${VALID:-false}."
             exit 1
           fi
 
@@ -173,7 +187,7 @@ jobs:
       - name: Open PR
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: costs/weekly-refresh
+          branch: ${{ needs.refresh.outputs.branch }}
           base: main
           add-paths: |
             costs/llm.json

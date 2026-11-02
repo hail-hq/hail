@@ -75,7 +75,19 @@
       "WebFetch(domain:vonage.com)",
       "WebFetch(domain:*.vonage.com)",
       "WebFetch(domain:x.ai)",
-      "WebFetch(domain:*.x.ai)"
+      "WebFetch(domain:*.x.ai)",
+      "WebFetch(domain:huggingface.co)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:deepmind.google)",
+      "WebFetch(domain:*.deepmind.google)",
+      "WebFetch(domain:fireworks.ai)",
+      "WebFetch(domain:*.fireworks.ai)",
+      "WebFetch(domain:hume.ai)",
+      "WebFetch(domain:*.hume.ai)",
+      "WebFetch(domain:lmnt.com)",
+      "WebFetch(domain:*.lmnt.com)",
+      "WebFetch(domain:resemble.ai)",
+      "WebFetch(domain:*.resemble.ai)"
     ],
     "deny": [
       "Read(//proc/**)",
