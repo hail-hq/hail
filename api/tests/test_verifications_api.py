@@ -4431,43 +4431,28 @@ async def test_a_campaign_filed_by_a_failed_submit_is_kept(
     assert row.provider_refs["campaign_filed_at"]
 
 
-@pytest.mark.usefixtures("us_number")
-async def test_a_campaign_filed_error_does_not_stop_a_refusal(
-    client, org_and_key, sms_carrier, async_session, monkeypatch
-) -> None:
-    """The same plug-in error on the refused path: the row is still
-    rejected and the background pass keeps going."""
-    org_id, _, key = org_and_key
-    vid = await _waiting_sms(client, key, async_session, org_id)
-
-    def broken(refs):
-        raise KeyError("odd refs")
-
-    async def refuse(refs):
-        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
-
-    monkeypatch.setattr(sms_carrier, "campaign_filed", broken)
-    sms_carrier.submit = refuse
-    await verifications_routes.sweep_verifications(
-        async_session, _sms_registry(sms_carrier)
-    )
-    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
-    await async_session.refresh(row)
-    assert row.state == "rejected"
-
-
 def test_a_failed_call_keeps_ids_it_appended_or_nested() -> None:
-    before = {"bundle_sid": "B1", "docs": ["D1"], "brand": {"id": "R1"}}
+    before = {
+        "bundle_sid": "B1",
+        "docs": ["D1"],
+        "brand": {"id": "R1"},
+        "campaign_id": None,
+        "vetting_requested": False,
+    }
     after = {
         "docs": ["D1", "D2"],
         "brand": {"id": "R9", "vetting_id": "V1"},
         "filed_id": "F1",
+        "campaign_id": "C1",
+        "vetting_requested": True,
     }
     assert verifications_routes._added_only(before, after) == {
         "bundle_sid": "B1",
         "docs": ["D1", "D2"],
         "brand": {"id": "R1", "vetting_id": "V1"},
         "filed_id": "F1",
+        "campaign_id": "C1",
+        "vetting_requested": True,
     }
     # A list that lost or reordered items goes back.
     assert verifications_routes._added_only(

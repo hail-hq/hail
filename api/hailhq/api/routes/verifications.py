@@ -531,25 +531,21 @@ async def _poll_and_apply(
 
 def _campaign_filed(provider: object, refs: dict | None) -> bool:
     """``SmsRegistrationProvider.campaign_filed``; False for any other
-    plug-in, or none. Plug-in code: an error is logged and reads as not
-    filed, so it never turns a carrier call that worked into a failure."""
+    plug-in, or none."""
     if not isinstance(provider, SmsRegistrationProvider):
         return False
-    try:
-        return provider.campaign_filed(refs)
-    except Exception:
-        logger.exception("campaign_filed failed for %s", provider.name)
-        return False
+    return provider.campaign_filed(refs)
 
 
 def _added_only(before: dict, after: dict) -> dict:
-    """``before`` plus the ids ``after`` added: new keys, items appended
-    to a list, and the same inside nested dicts. Keys removed or changed
-    go back to their ``before`` value."""
-    out = copy.deepcopy(before)
+    """``before`` (a private copy) plus the ids ``after`` added: new keys,
+    empty values filled in (None, False, ""), items appended to a list, and
+    the same inside nested dicts. Keys removed or changed go back to their
+    ``before`` value."""
+    out = dict(before)
     for key, new in after.items():
         old = before.get(key)
-        if key not in before:
+        if key not in before or (old in (None, False, "") and new):
             out[key] = new
         elif isinstance(old, list) and isinstance(new, list):
             if new[: len(old)] == old:
@@ -594,7 +590,11 @@ async def _plugin_call(
         row.provider_refs.update(kept)
         raise
     finally:
-        _stamp_campaign_filed(provider, row.provider_refs)
+        try:
+            _stamp_campaign_filed(provider, row.provider_refs)
+        except Exception:
+            # Plug-in code: never turn a call that worked into a failure.
+            logger.exception("campaign stamp failed for %s", row.id)
         if row.provider_refs != before:
             flag_modified(row, "provider_refs")
 
