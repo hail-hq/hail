@@ -87,11 +87,8 @@ def test_enabled_worker_reuses_api_image_without_ports_or_provider_credentials(
     assert worker["cpus"] == 0.25
     assert set(worker["environment"]) == {
         "DATABASE_URL",
-        "HAIL_ACTIVITY_DIGEST_ENABLED",
         "HAIL_ACTIVITY_DIGEST_API_URL",
         "HAIL_ACTIVITY_DIGEST_API_KEY",
-        "HAIL_ACTIVITY_DIGEST_FROM",
         "HAIL_ACTIVITY_DIGEST_TO",
     }
-    assert worker["environment"]["HAIL_ACTIVITY_DIGEST_ENABLED"] == "false"
     assert worker["environment"]["HAIL_ACTIVITY_DIGEST_API_URL"] == "http://api:8080/v1"

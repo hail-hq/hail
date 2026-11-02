@@ -7,7 +7,7 @@ from hailhq.api.activity_digest.worker import Result, ReviewRequired
 
 
 def test_disabled_one_shot_does_not_require_database_or_network(monkeypatch, capsys):
-    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "false")
+    monkeypatch.delenv("HAIL_ACTIVITY_DIGEST_API_KEY", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     monkeypatch.setattr(
@@ -20,7 +20,6 @@ def test_disabled_one_shot_does_not_require_database_or_network(monkeypatch, cap
 
 
 def test_invalid_config_logs_the_error_kind_without_the_secret(monkeypatch, caplog):
-    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "true")
     monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_API_KEY", "do-not-log-this-key")
     monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_API_URL", "not-a-url")
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
@@ -32,7 +31,7 @@ def test_invalid_config_logs_the_error_kind_without_the_secret(monkeypatch, capl
 
 def test_one_shot_keeps_default_signal_handling(monkeypatch):
     handlers = []
-    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "false")
+    monkeypatch.delenv("HAIL_ACTIVITY_DIGEST_API_KEY", raising=False)
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     monkeypatch.setattr(
         asyncio.SelectorEventLoop,
@@ -45,16 +44,16 @@ def test_one_shot_keeps_default_signal_handling(monkeypatch):
 
 def test_one_shot_logs_the_review_code(monkeypatch, caplog):
     async def needs_review(args):
-        raise ReviewRequired("sender_not_verified")
+        raise ReviewRequired("recipient_invalid")
 
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     monkeypatch.setattr(command, "execute", needs_review)
     assert command.main() == 1
-    assert "requires_review code=sender_not_verified" in caplog.text
+    assert "requires_review code=recipient_invalid" in caplog.text
 
 
 def test_missing_settings_log_a_stable_code(monkeypatch, caplog):
-    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_ENABLED", "true")
+    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_API_KEY", "test-key")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     assert command.main() == 1

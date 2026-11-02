@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -40,10 +40,8 @@ class DigestSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="HAIL_ACTIVITY_DIGEST_", populate_by_name=True, extra="ignore"
     )
-    enabled: bool = False
     api_url: str = "http://api:8080/v1"
     api_key: SecretStr = SecretStr("")
-    from_address: str = Field(default="", validation_alias="HAIL_ACTIVITY_DIGEST_FROM")
     to_address: str = Field(default="", validation_alias="HAIL_ACTIVITY_DIGEST_TO")
     database_url: SecretStr = Field(
         default=SecretStr(""), validation_alias="DATABASE_URL"
@@ -57,14 +55,13 @@ class DigestSettings(BaseSettings):
             raise ValueError("Hail API URL must be an HTTP URL")
         return canonical_url(value)
 
+    @property
+    def enabled(self) -> bool:
+        return bool(self.api_key.get_secret_value())
+
     def validate_send(self):
-        if not self.api_key.get_secret_value():
-            raise ReviewRequired("api_key_missing")
         if not re.fullmatch(r"[^@\s,<>]+@hail\.so", self.to_address.lower()):
             raise ReviewRequired("recipient_invalid")
-        # Stricter than EmailCreate, so a bad sender fails at startup.
-        if not re.fullmatch(r"[^@\s,<>]+@[^@\s,<>]+\.[^@\s,<>]+", self.from_address):
-            raise ReviewRequired("sender_invalid")
 
 
 @dataclass(frozen=True)
@@ -119,28 +116,6 @@ class DigestClient:
         body = await self.request("whoami")
         return str(UUID(body["organization_id"]))
 
-    async def verify_sender(self):
-        cursor = None
-        seen = set()
-        sender = self.config.from_address.casefold()
-        while True:
-            params = {"limit": 200, **({"cursor": cursor} if cursor else {})}
-            body = await self.request(f"email-domains?{urlencode(params)}")
-            for item in body["items"]:
-                if item["verification_status"] != "verified":
-                    continue
-                domain = item["domain"].casefold()
-                if (item["kind"] == "hail_mail" and domain == sender) or (
-                    item["kind"] == "custom" and domain == sender.split("@")[1]
-                ):
-                    return
-            cursor = body.get("next_cursor")
-            if not cursor:
-                raise ReviewRequired("sender_not_verified")
-            if cursor in seen:
-                raise ReviewRequired("sender_pagination_invalid")
-            seen.add(cursor)
-
     async def send(self, payload: EmailCreate, key: str) -> str:
         body = await self.request(
             "emails",
@@ -192,10 +167,8 @@ class DigestService:
         html = render_html(text, window)
         if preview:
             return Result("preview", window.date, preview=(text, html))
-        await self.client.verify_sender()
         payload = EmailCreate.model_validate(
             {
-                "from": self.config.from_address,
                 "from_name": "Hail",
                 "to": [self.config.to_address],
                 "subject": f"Hail daily activity · {window.date}",

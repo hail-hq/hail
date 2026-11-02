@@ -100,7 +100,7 @@ def main():
     mode.add_argument(
         "--once",
         action="store_true",
-        help="One due check. Sending still requires the enabled flag.",
+        help="One due check. Sending still requires the API key.",
     )
     mode.add_argument(
         "--preview",

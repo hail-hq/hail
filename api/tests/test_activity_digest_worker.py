@@ -19,6 +19,7 @@ from hailhq.api.activity_digest.worker import (
     SendInProgress,
 )
 from hailhq.core.schemas import EmailCreate
+from pydantic import SecretStr
 
 NOW = datetime(2026, 10, 29, 9, tzinfo=timezone.utc)
 ORG = str(uuid4())
@@ -28,10 +29,8 @@ EMAIL_ID = str(uuid4())
 @pytest.fixture
 def setup():
     config = DigestSettings(
-        enabled=True,
         api_url="http://api:8080/v1/",
         api_key="test-key",
-        from_address="reports@mail.hail.so",
         to_address="r@hail.so",
     )
     data = ActivityData(
@@ -59,29 +58,13 @@ def setup():
     return config, repository
 
 
-def transport_handler(
-    requests, *, send_status=202, sender_status="verified", fail_send=False
-):
+def transport_handler(requests, *, send_status=202, fail_send=False):
     def handle(request):
         requests.append(request)
         path = request.url.path.removeprefix("/v1")
         if path == "/whoami":
             return httpx.Response(
                 200, json={"organization_id": ORG, "auth_kind": "apikey"}
-            )
-        if path == "/email-domains":
-            return httpx.Response(
-                200,
-                json={
-                    "items": [
-                        {
-                            "kind": "hail_mail",
-                            "domain": "reports@mail.hail.so",
-                            "verification_status": sender_status,
-                        }
-                    ],
-                    "next_cursor": None,
-                },
             )
         if path == "/emails":
             # Use the real public request schema. The wrong message_type
@@ -97,7 +80,7 @@ def transport_handler(
 
 async def test_disabled_mode_has_no_network_or_database_access(setup):
     config, repository = setup
-    config.enabled = False
+    config.api_key = SecretStr("")
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: pytest.fail("network access"))
     ) as http:
@@ -141,7 +124,7 @@ async def test_public_api_payload_and_key_match_the_existing_report_receipts(set
     assert body["message_type"] == "informational"
     assert body["recipient_consent"] is True
     assert body["to"] == ["r@hail.so"]
-    assert body["from"] == "reports@mail.hail.so"
+    assert "from" not in body
     assert body["metadata"]["hail_report"] == "daily_activity"
     assert body["metadata"]["report_key"] == send.headers["idempotency-key"]
     assert body["body_html"]
@@ -223,25 +206,7 @@ async def test_recipient_is_one_internal_address(setup, recipient):
     repository.snapshot.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "sender",
-    [
-        "",
-        "reports@hail",
-        "reports hail.so",
-        "<reports@hail.so>",
-        "a,b@hail.so",
-        "reports@hail.so\n",
-    ],
-)
-def test_an_invalid_sender_fails_validation(setup, sender):
-    config, _ = setup
-    config.from_address = sender
-    with pytest.raises(ReviewRequired, match="sender_invalid"):
-        config.validate_send()
-
-
-@pytest.mark.parametrize("status", [300, 301, 303, 304, 308, 401, 403, 404])
+@pytest.mark.parametrize("status", [300, 301, 303, 304, 308, 401, 403, 404, 422])
 async def test_a_rejected_read_requires_review(setup, status):
     config, repository = setup
     async with httpx.AsyncClient(
@@ -294,21 +259,6 @@ async def test_a_stuck_send_stops_retrying(setup, minutes, error):
         client.send = AsyncMock(side_effect=SendInProgress("api_status_409"))
         with pytest.raises(error):
             await DigestService(config, repository, client).run_once(now)
-
-
-async def test_unverified_sender_never_sends(setup):
-    config, repository = setup
-    requests = []
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            transport_handler(requests, sender_status="pending")
-        )
-    ) as http:
-        with pytest.raises(ReviewRequired, match="sender"):
-            await DigestService(
-                config, repository, DigestClient(config, http)
-            ).run_once(NOW)
-    assert not any(r.method == "POST" for r in requests)
 
 
 async def test_ambiguous_send_is_not_retried_inside_the_run(setup):
