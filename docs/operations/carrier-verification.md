@@ -92,6 +92,13 @@ curl -s "$HAIL_API_URL/verifications" -H "Authorization: Bearer $HAIL_API_KEY"
 
 ## US SMS registration (`purpose=sms`)
 
+US local numbers and local numbers in AS, GU, MP, PR and VI share this registration.
+Keep `country_code=US` on the campaign request and pass the local number's `number_id`.
+The number keeps its actual country code. A business campaign covers the organization's
+local texting numbers on that carrier. A person's campaign still holds only one number.
+Texts between these domestic destinations require approval before sending. Buying a number
+without identity documents does not remove the separate texting registration requirement.
+
 Runnable example:
 
 ```bash

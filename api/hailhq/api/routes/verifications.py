@@ -73,6 +73,7 @@ from hailhq.core.providers.verification import (
     length_problems,
 )
 from hailhq.core.schemas import VerificationResponse
+from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -163,7 +164,7 @@ async def _sms_carriers(
     query = select(PhoneNumber.provider).where(
         PhoneNumber.organization_id == organization_id,
         PhoneNumber.provisioning_state == "active",
-        PhoneNumber.country_code == "US",
+        PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
         PhoneNumber.number_type == "local",
         PhoneNumber.capabilities.any("sms"),
     )

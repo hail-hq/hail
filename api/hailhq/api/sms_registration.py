@@ -9,6 +9,7 @@ from uuid import UUID
 
 from hailhq.core.models import CarrierVerification, PhoneNumber
 from hailhq.core.providers.verification.base import SmsRegistrationProvider
+from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +30,7 @@ async def registered_numbers(
                     PhoneNumber.organization_id == row.organization_id,
                     PhoneNumber.provider == row.provider,
                     PhoneNumber.provisioning_state == "active",
-                    PhoneNumber.country_code == "US",
+                    PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
                     PhoneNumber.number_type == "local",
                     PhoneNumber.capabilities.any("sms"),
                     PhoneNumber.provider_resource_id.is_not(None),
@@ -148,7 +149,7 @@ async def approved_registration(
 async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) -> None:
     """A newly active US long code joins the org's approved registration, when
     there is one. Failures are logged; the number still works for voice."""
-    if number.country_code != "US" or number.number_type != "local":
+    if number.country_code not in US_SMS_COUNTRY_CODES or number.number_type != "local":
         return
     if number.provider_resource_id is None or number.organization_id is None:
         return

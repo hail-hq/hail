@@ -4460,3 +4460,80 @@ def test_a_failed_call_keeps_ids_it_appended_or_nested() -> None:
     assert verifications_routes._added_only(
         {"docs": ["D1", "D2"]}, {"docs": ["D2"]}
     ) == {"docs": ["D1", "D2"]}
+
+
+@pytest.mark.parametrize(
+    "country,e164",
+    [
+        ("VI", "+13405550100"),
+        ("PR", "+17875550100"),
+        ("GU", "+16715550100"),
+        ("MP", "+16705550100"),
+        ("AS", "+16845550100"),
+    ],
+)
+async def test_territory_only_org_can_register_and_attach_numbers(
+    client, org_and_key, sms_carrier, async_session, country, e164
+):
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id, e164, resource="PN-territory")
+    number.country_code = country
+    await async_session.commit()
+    requirements = await client.get(
+        "/verifications/requirements",
+        params={
+            "subject_type": "business",
+            "country_code": "US",
+            "number_type": "local",
+            "purpose": "sms",
+            "number_id": str(number.id),
+        },
+        headers=_auth(key),
+    )
+    assert requirements.status_code == 200, requirements.text
+    filed = await _post_sms(client, key, provider="", number_id=str(number.id))
+    assert filed.status_code == 201, filed.text
+    vid = filed.json()["id"]
+    assert filed.json()["country_code"] == "US"
+    sms_carrier.remote_status = ProviderStatus(state="approved")
+    verifications_routes._last_polled.clear()
+    approved = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert approved.json()["state"] == "approved", approved.text
+    await async_session.refresh(number)
+    assert str(number.sms_registration_id) == vid
+    assert [resource for _, resource, _ in sms_carrier.attached] == ["PN-territory"]
+
+
+@pytest.mark.parametrize(
+    "subject_type,expected_attached", [("business", True), ("person", False)]
+)
+async def test_late_territory_number_respects_campaign_number_limit(
+    client,
+    org_and_key,
+    sms_carrier,
+    async_session,
+    us_number,
+    subject_type,
+    expected_attached,
+):
+    from hailhq.api import sms_registration
+
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type=subject_type
+    )
+    later = await _us_number(
+        async_session, org_id, "+13405550101", resource="PN-later-territory"
+    )
+    later.country_code = "VI"
+    await async_session.commit()
+    await sms_registration.attach_if_registered(
+        async_session,
+        later,
+        lambda name, purpose="number": sms_carrier if purpose == "sms" else None,
+    )
+    assert (later.sms_registration_id is not None) is expected_attached
+    if expected_attached:
+        assert str(later.sms_registration_id) == vid
