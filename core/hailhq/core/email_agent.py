@@ -230,7 +230,6 @@ async def replies_in_thread(
         Email.direction == "outbound",
         Email.agent_id.is_not(None),
         Email.requested_at >= since,
-        _may_have_reached_someone(),
         or_(
             and_(
                 Email.metadata_["reply_to_email_id"].astext.is_not(None),
