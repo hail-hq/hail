@@ -115,11 +115,11 @@ def upgrade() -> None:
             "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
         ),
     )
-    # The thread cap counts one agent's recent replies.
+    # The thread cap counts an org's recent agent sends, for any agent.
     op.create_index(
         "emails_agent_thread_idx",
         "emails",
-        ["organization_id", "agent_id", "requested_at"],
+        ["organization_id", "requested_at"],
         postgresql_where=sa.text("agent_id IS NOT NULL"),
     )
 

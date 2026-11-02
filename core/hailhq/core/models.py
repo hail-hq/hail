@@ -1542,7 +1542,6 @@ class Email(Base):
         Index(
             "emails_agent_thread_idx",
             "organization_id",
-            "agent_id",
             "requested_at",
             postgresql_where=text("agent_id IS NOT NULL"),
         ),

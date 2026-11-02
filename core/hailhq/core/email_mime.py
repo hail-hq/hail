@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from email import message_from_bytes, policy
+from email import errors, message_from_bytes, policy
 from email.message import Message
 from email.utils import getaddresses
 
@@ -39,16 +39,20 @@ class ParsedMime:
     attachments: list[ParsedAttachment] = field(default_factory=list)
     # How many addresses the From header holds. Only one can be verified.
     from_count: int = 1
-    # False when the header parsed with defects, or its angle-bracket address is
-    # not the address parsed. The parser and DMARC may then read different names.
+    # False when the header parsed with defects (a dot in a display name aside),
+    # or its angle-bracket address is not the address parsed. The parser and DMARC
+    # may then read different names.
     from_clean: bool = True
     # True for mail no person wrote: auto-replies, lists, bulk. No agent answers it.
     auto_generated: bool = False
 
 
-_BULK_PRECEDENCE = frozenset({"bulk", "list", "junk"})
+_BULK_PRECEDENCE = frozenset({"auto_reply", "bulk", "list", "junk"})
 _LIST_HEADERS = ("List-Id", "List-Unsubscribe")
 _ANGLE_ADDRESS = re.compile(r"<([^<>]*)>")
+# What the parser says about "Dr. Ada <ada@example.com>". Common in real mail,
+# and only the display name is affected.
+_DOTTED_NAME = "period in 'phrase'"
 
 
 def _addresses(msg: Message, header: str) -> list[str]:
@@ -75,6 +79,12 @@ def _auto_generated(msg: Message) -> bool:
     return any(msg.get(name) is not None for name in _LIST_HEADERS)
 
 
+def _harmless_defect(defect: Exception) -> bool:
+    return isinstance(defect, errors.ObsoleteHeaderDefect) and (
+        str(defect) == _DOTTED_NAME
+    )
+
+
 def _from_clean(msg: Message, parsed: str) -> bool:
     """One well-formed ``From`` header that means ``parsed`` and nothing else.
 
@@ -82,7 +92,9 @@ def _from_clean(msg: Message, parsed: str) -> bool:
     while the mail really comes from the attacker's domain.
     """
     headers = msg.get_all("From") or []
-    if len(headers) != 1 or getattr(headers[0], "defects", ()):
+    if len(headers) != 1:
+        return False
+    if not all(_harmless_defect(d) for d in getattr(headers[0], "defects", ())):
         return False
     raw = next(value for name, value in msg.raw_items() if name.lower() == "from")
     return all(

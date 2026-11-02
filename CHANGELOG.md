@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Email agents: route an address to an agent with `email_agent_id`, and the agent answers inbound mail in the thread. `email_agent_scope` is `members` by default or `anyone`. CLI: `hail email domain route`. MCP: `route_email_domain`.
+- Email agents: route an address to an agent, and it answers inbound mail in the thread.
 
 ### Fixed
 

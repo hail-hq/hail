@@ -7141,8 +7141,8 @@ components:
             - type: "null"
           title: In Reply To
           description:
-            RFC 5322 In-Reply-To header. Inbound emails only; null on outbound
-            rows.
+            RFC 5322 In-Reply-To header. Set on inbound emails and agent
+            replies; null on other outbound rows.
         references_ids:
           anyOf:
             - items:
@@ -7151,8 +7151,8 @@ components:
             - type: "null"
           title: References Ids
           description:
-            RFC 5322 References header, split into ids. Inbound emails
-            only; null on outbound rows.
+            RFC 5322 References header, split into ids. Set on inbound
+            emails and agent replies; null on other outbound rows.
         spam_verdict:
           anyOf:
             - type: string

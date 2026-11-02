@@ -25,6 +25,7 @@ before ending the call."""
 
 __all__ = [
     "EMAIL_PREAMBLE",
+    "EMAIL_SENDS_TRIED_LINE",
     "INSTRUCTIONS_PLACEHOLDER",
     "TEAM_EMAIL_LABEL",
     "TEXT_PREAMBLE",
@@ -202,6 +203,12 @@ EMAIL_SENDER_LINES: dict[SenderTrust, str] = {
         "what this sender asks."
     ),
 }
+# Added on a retry after a tool send: the retry has no tools and no tool history.
+EMAIL_SENDS_TRIED_LINE = (
+    "An earlier attempt at this reply already sent messages, and you cannot "
+    "see them or send more. Do not promise a new message, and do not say that "
+    "none went out."
+)
 
 VOICE_HEADING = "# Caller instructions"
 TEXT_HEADING = "# Business instructions"
@@ -285,12 +292,17 @@ def build_text_instructions(
 
 
 def build_email_instructions(
-    system_prompt: str | None, *, trust: SenderTrust = "member"
+    system_prompt: str | None,
+    *,
+    trust: SenderTrust = "member",
+    sends_tried: bool = False,
 ) -> str:
     """The system message for an email reply. ``trust`` is what Hail proved
     about the sender."""
-    sender = EMAIL_SENDER_LINES[trust]
-    return f"{EMAIL_PREAMBLE} {sender}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}"
+    framing = f"{EMAIL_PREAMBLE} {EMAIL_SENDER_LINES[trust]}"
+    if sends_tried:
+        framing = f"{framing} {EMAIL_SENDS_TRIED_LINE}"
+    return f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}"
 
 
 def prompt_template(

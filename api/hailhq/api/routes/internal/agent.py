@@ -895,7 +895,7 @@ async def agent_email_run_send_email(
         )
     recipient = matches[0]
 
-    if await tool_sends_for_reply(db, inbound.id) >= MAX_TOOL_SENDS:
+    if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
@@ -989,7 +989,7 @@ async def agent_email_run_send_sms(
         )
 
     matches = await resolve_member_phones(db, org, body.recipient_name)
-    if not matches:
+    if not any(matches):
         return AgentSendResponse(
             ok=False,
             spoken=f"I couldn't find a number for {body.recipient_name}.",
@@ -1003,8 +1003,9 @@ async def agent_email_run_send_sms(
             ),
         )
     recipient = matches[0]
+    assert recipient is not None
 
-    if await tool_sends_for_reply(db, inbound.id) >= MAX_TOOL_SENDS:
+    if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
     gate = await check_sms_allowed(db, org, recipient)
     if not gate.allowed:

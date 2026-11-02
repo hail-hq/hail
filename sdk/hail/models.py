@@ -558,12 +558,15 @@ class EmailAttachmentUploadResponse(BaseModel):
 class EmailResponse(EmailSummary):
     body_text: str | None = None
     body_html: str | None = None
-    # Inbound-only metadata. Outbound rows leave these all null/empty.
+    # Inbound metadata. Outbound rows leave these null/empty, except that an
+    # agent's reply carries in_reply_to and references_ids.
     # Defaults match the outbound shape so existing serializations keep
     # working. Mirrors ``core/hailhq/core/schemas.py:EmailResponse``.
     message_id: str | None = None
     in_reply_to: str | None = None
     references_ids: list[str] | None = None
+    agent_id: UUID | None = None
+    agent_reply_state: str | None = None
     spam_verdict: str | None = None
     virus_verdict: str | None = None
     dkim_verdict: str | None = None
