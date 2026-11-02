@@ -111,6 +111,19 @@ def test_a_hash_in_a_url_is_read_the_way_sqlalchemy_reads_it():
     assert dict(parsed.query) == {"password": "ab#c", "sslmode": "require"}
 
 
+def test_a_question_mark_in_a_password_is_not_the_query():
+    parsed = make_url(to_async_url("postgres://u:p?w@h/db?sslmode=require"))
+    assert (parsed.password, parsed.host) == ("p?w", "h")
+    assert dict(parsed.query) == {"ssl": "require"}
+
+
+def test_a_trailing_newline_in_the_url_is_ignored():
+    url = "postgres://u:p@h/db?pgbouncer=true&sslmode=require\n"
+    assert dict(make_url(to_async_url(url)).query) == {"ssl": "require"}
+    assert dict(make_url(to_sync_url(url)).query) == {"sslmode": "require"}
+    assert engine_options(url) != {}
+
+
 def test_pgbouncer_flag_turns_off_prepared_statements():
     assert engine_options("postgres://u:p@h/db?pgbouncer=true&sslmode=require") == {
         "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}

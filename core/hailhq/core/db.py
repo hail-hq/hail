@@ -61,22 +61,25 @@ _NOT_FOR_LIBPQ = ("pgbouncer", "prepared_statement_cache_size")
 
 def _rewrite_scheme(url: str, target_prefix: str) -> str:
     """Strip whichever Postgres scheme alias ``url`` starts with and prepend ``target_prefix``."""
+    url = url.strip()
     for alias in _SCHEME_ALIASES:
         if url.startswith(alias):
             return target_prefix + url[len(alias) :]
     return url
 
 
-def _query(url: str) -> str:
-    """Return the query of ``url``, read the way SQLAlchemy reads it: all text
-    after the ``?``. ``urlsplit`` would stop at a ``#``, even one in a password."""
-    return url.partition("?")[2]
+def _split_query(url: str) -> tuple[str, str]:
+    """Split ``url`` the way SQLAlchemy does: the query is all text after the
+    first ``?`` past the credentials. ``urlsplit`` would stop at a ``#``, even
+    one in a password, and ``urlunsplit`` would drop the ``//`` of a URL with
+    no host."""
+    url = url.strip()
+    start = url.find("@") + 1
+    base, _, query = url[start:].partition("?")
+    return url[:start] + base, query
 
 
-def _with_query(url: str, query: str) -> str:
-    """Replace the query of ``url``. ``urlunsplit`` would drop the ``//`` of a
-    URL with no host, because it does not know these schemes."""
-    base = url.partition("?")[0]
+def _with_query(base: str, query: str) -> str:
     return f"{base}?{query}" if query else base
 
 
@@ -101,10 +104,10 @@ def to_async_url(url: str) -> str:
     managed-Postgres URLs from Neon, Supabase, Heroku, etc. work unchanged.
     """
     rewritten = _rewrite_scheme(url, "postgresql+asyncpg://")
-    query = _query(rewritten)
+    base, query = _split_query(rewritten)
     if not query:
         return rewritten
-    return _with_query(rewritten, _sanitize_asyncpg_query(query))
+    return _with_query(base, _sanitize_asyncpg_query(query))
 
 
 def to_sync_url(url: str) -> str:
@@ -113,11 +116,12 @@ def to_sync_url(url: str) -> str:
     Also drops the params libpq rejects. Every other param keeps its exact text.
     """
     rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
-    params = _query(rewritten).split("&")
+    base, query = _split_query(rewritten)
+    params = query.split("&")
     kept = [param for param in params if param.split("=")[0] not in _NOT_FOR_LIBPQ]
     if len(kept) == len(params):
         return rewritten
-    return _with_query(rewritten, "&".join(kept))
+    return _with_query(base, "&".join(kept))
 
 
 def engine_options(url: str) -> dict:
@@ -128,7 +132,7 @@ def engine_options(url: str) -> dict:
     prepared statement would be missing there. With both caches at 0,
     asyncpg sends unnamed statements only.
     """
-    query = dict(parse_qsl(_query(url)))
+    query = dict(parse_qsl(_split_query(url)[1]))
     if query.get("pgbouncer", "").lower() != "true":
         return {}
     return {
