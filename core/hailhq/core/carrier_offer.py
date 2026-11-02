@@ -120,6 +120,10 @@ class CarrierOffer(QuoteOffer):
     in ``number_offers.offer`` and read back by the purchase flow. Never
     returned by the public API (see ``QuoteOffer``)."""
 
+    monthly_price_version: Literal[1, 2] = 1
+    base_monthly_cents: int | None = Field(default=None, ge=1)
+    capability_monthly_cents: int = Field(default=0, ge=0)
+
     provider: Literal["twilio", "telnyx", "didww"] = Field(
         description="Carrier supplying this exact number."
     )

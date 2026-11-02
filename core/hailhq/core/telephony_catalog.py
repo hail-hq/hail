@@ -91,3 +91,25 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
     sells it by request only (support orders it by hand), else None."""
     row = _load(provider).get((country_code, number_type))
     return row if row and row.get("by_request") else None
+
+
+def monthly_price(provider: str, base_cents: int, selected: list[str]) -> dict:
+    """Complete purchase rental, keeping base and selected capability fees separate.
+
+    Inventory prices exclude these provider-published capability fees. Each
+    fee is charged once even when several of its capabilities are selected.
+    """
+    from hailhq.core.carrier_offer import cents
+
+    catalog = json.loads(_path(provider).read_text())
+    fees = sum(
+        cents(fee["usd_per_month"])
+        for fee in catalog.get("capability_monthly_fees", [])
+        if set(selected).intersection(fee["capabilities"])
+    )
+    return {
+        "monthly_price_version": 2,
+        "base_monthly_cents": base_cents,
+        "capability_monthly_cents": fees,
+        "monthly_cents": base_cents + fees,
+    }

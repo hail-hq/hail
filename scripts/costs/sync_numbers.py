@@ -797,6 +797,8 @@ def write_catalog(path: Path, provider: str, numbers: list[dict]) -> dict:
         "provider": provider,
         "numbers": numbers,
     }
+    if "capability_monthly_fees" in existing:
+        out["capability_monthly_fees"] = existing["capability_monthly_fees"]
     if existing.get("a2p_10dlc"):
         out["a2p_10dlc"] = existing["a2p_10dlc"]
     out["regulatory"] = regulatory_block(existing, numbers, provider)

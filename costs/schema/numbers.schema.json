@@ -53,6 +53,49 @@
           }
         }
       }
+    },
+    "capability_monthly_fees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capabilities",
+          "usd_per_month",
+          "source_url",
+          "last_verified",
+          "effective_from"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "voice",
+                "sms",
+                "mms",
+                "fax"
+              ]
+            }
+          },
+          "usd_per_month": {
+            "$ref": "#/$defs/decimal"
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "last_verified": {
+            "$ref": "#/$defs/date"
+          },
+          "effective_from": {
+            "$ref": "#/$defs/date",
+            "description": "Prospective Hail billing start. Existing calendar periods beginning before this day retain their previous capability cost; new purchases include the fee immediately."
+          }
+        }
+      }
     }
   },
   "$defs": {

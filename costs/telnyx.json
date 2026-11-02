@@ -2792,5 +2792,17 @@
       "ZA:toll_free"
     ],
     "sms_registration_required": []
-  }
+  },
+  "capability_monthly_fees": [
+    {
+      "capabilities": [
+        "sms",
+        "mms"
+      ],
+      "usd_per_month": "0.10",
+      "source_url": "https://telnyx.com/pricing/numbers",
+      "last_verified": "2026-11-02",
+      "effective_from": "2026-11-02"
+    }
+  ]
 }

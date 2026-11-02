@@ -758,3 +758,18 @@ def test_twilio_pricing_probe_4xx_leaves_the_country_unobserved():
     )
     assert rows == [] and skipped == []
     assert observed == {f"BG:{t}" for t in sync.NUMBER_TYPES}
+
+
+def test_sync_preserves_capability_fees_as_separate_source(tmp_path):
+    path = tmp_path / "telnyx.json"
+    fees = [
+        {
+            "capabilities": ["sms", "mms"],
+            "usd_per_month": "0.10",
+            "source_url": "https://telnyx.com/pricing/numbers",
+            "last_verified": "2026-11-02",
+            "effective_from": "2026-11-02",
+        }
+    ]
+    path.write_text(json.dumps({"capability_monthly_fees": fees}))
+    assert sync.write_catalog(path, "telnyx", [])["capability_monthly_fees"] == fees
