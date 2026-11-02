@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from hailhq.api.audit import write_audit_log
+from hailhq.core.db import org_lock
 from hailhq.core.models import CarrierVerification, PhoneNumber
 from hailhq.core.providers.verification.base import SmsRegistrationProvider
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
@@ -162,3 +164,78 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
         return  # a person's registration holds one number only
     await _attach(row, provider, number)
+
+
+async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
+    """Repair missing campaign links, including numbers held before territory support.
+
+    Only an existing approved campaign is used; this never files a new brand
+    or campaign. The org lock serializes repair with cancellation and release.
+    """
+    missing_number = (
+        select(PhoneNumber.id)
+        .where(
+            PhoneNumber.organization_id == CarrierVerification.organization_id,
+            PhoneNumber.provider == CarrierVerification.provider,
+            PhoneNumber.provisioning_state == "active",
+            PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
+            PhoneNumber.number_type == "local",
+            PhoneNumber.capabilities.any("sms"),
+            PhoneNumber.sms_registration_id.is_(None),
+            PhoneNumber.provider_resource_id.is_not(None),
+        )
+        .exists()
+    )
+    ids = (
+        (
+            await db.execute(
+                select(CarrierVerification.id).where(
+                    CarrierVerification.purpose == "sms",
+                    CarrierVerification.state == "approved",
+                    missing_number,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    total = 0
+    for registration_id in ids:
+        try:
+            row = await db.get(CarrierVerification, registration_id)
+            if row is None:
+                continue
+            await org_lock(db, row.organization_id)
+            await db.refresh(row)
+            if row.state != "approved":
+                await db.commit()
+                continue
+            provider = registry(row.provider, "sms")
+            attached = failed = 0
+            if isinstance(provider, SmsRegistrationProvider):
+                for number in await registered_numbers(db, row):
+                    if number.sms_registration_id is not None:
+                        continue
+                    if await _attach(row, provider, number):
+                        attached += 1
+                    else:
+                        failed += 1
+            organization_id, verification_id = row.organization_id, row.id
+            await db.commit()
+            total += attached
+            if attached or failed:
+                await write_audit_log(
+                    organization_id,
+                    None,
+                    "verification.sms_attached",
+                    "carrier_verification",
+                    verification_id,
+                    {"numbers": attached, "failed": failed},
+                    actor_kind="system",
+                )
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "SMS campaign repair failed for registration %s", registration_id
+            )
+    return total

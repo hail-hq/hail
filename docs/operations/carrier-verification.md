@@ -98,6 +98,8 @@ The number keeps its actual country code. A business campaign covers the organiz
 local texting numbers on that carrier. A person's campaign still holds only one number.
 Texts between these domestic destinations require approval before sending. Buying a number
 without identity documents does not remove the separate texting registration requirement.
+The verification worker also repairs missing links to already-approved campaigns. It retries
+carrier failures and preserves the one-number limit for a person. It does not file new campaigns.
 
 Runnable example:
 

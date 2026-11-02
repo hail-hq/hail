@@ -37,6 +37,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.sms_registration import (
     attach_org_numbers,
     detach_org_numbers,
+    reconcile_approved_registrations,
     registered_numbers,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -1683,6 +1684,7 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         await _refresh(db, row, registry)
         if row.state != before:
             refreshed += 1
+    await reconcile_approved_registrations(db, registry)
     return {"submitted": submitted, "refreshed": refreshed}
 
 

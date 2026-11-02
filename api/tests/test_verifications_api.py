@@ -4537,3 +4537,80 @@ async def test_late_territory_number_respects_campaign_number_limit(
     assert (later.sms_registration_id is not None) is expected_attached
     if expected_attached:
         assert str(later.sms_registration_id) == vid
+
+
+@pytest.mark.parametrize(
+    "subject_type,keep_primary,expected",
+    [("business", True, True), ("person", True, False), ("person", False, True)],
+)
+async def test_background_repairs_existing_territory_campaign_links(
+    client,
+    org_and_key,
+    sms_carrier,
+    async_session,
+    us_number,
+    subject_type,
+    keep_primary,
+    expected,
+):
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type=subject_type
+    )
+    if not keep_primary:
+        us_number.provisioning_state = "released"
+    territory = await _us_number(
+        async_session, org_id, "+13405550101", resource="PN-existing-territory"
+    )
+    territory.country_code = "VI"
+    await async_session.commit()
+    sms_carrier.attached.clear()
+
+    def registry(name, purpose="number"):
+        return sms_carrier if purpose == "sms" else None
+
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await async_session.refresh(territory)
+    assert (territory.sms_registration_id is not None) is expected
+    if expected:
+        assert str(territory.sms_registration_id) == vid
+        assert [r for _, r, _ in sms_carrier.attached] == ["PN-existing-territory"]
+    calls = len(sms_carrier.attached)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert len(sms_carrier.attached) == calls
+
+
+async def test_background_retries_a_refused_territory_campaign_link(
+    client, org_and_key, sms_carrier, async_session, us_number, monkeypatch
+):
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = await _approved_sms_row(client, key, async_session, sms_carrier)
+    territory = await _us_number(
+        async_session, org_id, "+13405550101", resource="PN-retry-territory"
+    )
+    territory.country_code = "VI"
+    await async_session.commit()
+    attach = sms_carrier.attach_number
+    attempts = 0
+
+    async def flaky(refs, *, provider_resource_id, e164):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("carrier unavailable")
+        await attach(refs, provider_resource_id=provider_resource_id, e164=e164)
+
+    def registry(name, purpose="number"):
+        return sms_carrier if purpose == "sms" else None
+
+    monkeypatch.setattr(sms_carrier, "attach_number", flaky)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await async_session.refresh(territory)
+    assert territory.sms_registration_id is None
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await async_session.refresh(territory)
+    assert str(territory.sms_registration_id) == vid
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert attempts == 2
