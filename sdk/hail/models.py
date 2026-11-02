@@ -692,7 +692,8 @@ class EmailDomainPatch(BaseModel):
       ``webhook_url`` (empty string clears it; the server returns the new
       plaintext secret once when set), ``forward_rate_per_hour``.
     * Agent route — ``email_agent_id`` (null stops replies) and
-      ``email_agent_scope`` (``members`` or ``anyone``).
+      ``email_agent_scope`` (``members`` or ``anyone``). A new agent starts
+      at ``members`` unless the call names a scope.
     """
 
     model_config = ConfigDict(extra="forbid")

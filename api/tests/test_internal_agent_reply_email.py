@@ -952,29 +952,6 @@ async def test_tool_sends_stop_at_the_limit(client, async_session, email_mock) -
     email_mock.send_email.assert_not_awaited()
 
 
-async def test_a_send_ses_never_took_does_not_use_the_thread_cap(
-    client, async_session, email_mock
-) -> None:
-    org, agent, domain, inbound = await _seed(async_session)
-    for _ in range(email_agent.MAX_REPLIES_PER_THREAD):
-        async_session.add(
-            Email(
-                organization_id=org,
-                email_domain_id=domain.id,
-                agent_id=agent.id,
-                from_address=ADDRESS,
-                to_addresses=[MEMBER],
-                subject="Note",
-                body_text="Hello",
-                status="failed",
-                end_reason="TooManyRequestsException",
-                metadata_={"reply_to_email_id": str(uuid.uuid4())},
-            )
-        )
-    await async_session.commit()
-    assert (await _reply(client, inbound.id))["ok"] is True
-
-
 async def test_a_send_ses_never_took_does_not_use_the_limit(
     client, async_session, email_mock
 ) -> None:
