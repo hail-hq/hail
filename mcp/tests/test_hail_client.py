@@ -244,11 +244,10 @@ def _email_domain_handler(seen: dict[str, Any]):
     ("kwargs", "body"),
     [
         ({"clear_agent": True}, {"email_agent_id": None}),
-        ({"email_agent_id": _AGENT_ID, "clear_agent": True}, {"email_agent_id": None}),
         ({"email_agent_id": _AGENT_ID}, {"email_agent_id": _AGENT_ID}),
         ({"email_agent_scope": "anyone"}, {"email_agent_scope": "anyone"}),
     ],
-    ids=["clear", "clear-wins", "set", "scope"],
+    ids=["clear", "set", "scope"],
 )
 @respx.mock
 async def test_route_email_domain_body(

@@ -632,6 +632,8 @@ async def route_email_domain(
     domain_id_ = _as_uuid(domain_id)
     if domain_id_ is None:
         return _not_uuid("domain_id")
+    if clear_agent and email_agent_id is not None:
+        return {"error": "use email_agent_id or clear_agent, not both"}
     try:
         return await client.route_email_domain(
             domain_id_,
@@ -2312,8 +2314,8 @@ def register_tools(
         """Choose which agent answers mail to an address, and who it answers.
 
         ``email_agent_id`` makes the agent reply to inbound mail;
-        ``clear_agent=True`` stops that. ``email_agent_scope`` is
-        ``"members"`` (the default: verified members of the workspace whose
+        ``clear_agent=True`` stops that, and sending both is an error.
+        ``email_agent_scope`` is ``"members"`` (the default: verified members of the workspace whose
         mail passes DMARC) or ``"anyone"`` (every sender whose mail passes
         DMARC and the spam checks). With ``"anyone"``, a stranger can make the
         agent use its tools, so ask your user before you set it. Mail without
