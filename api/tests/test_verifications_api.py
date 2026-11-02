@@ -2079,6 +2079,56 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     ).scalar_one_or_none() is None
 
 
+async def test_a_check_that_fails_partway_keeps_only_the_ids_it_added(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def check(refs):
+        refs["filed_id"] = "F1"
+        refs.pop("bundle_sid")
+        raise RuntimeError("carrier down")
+
+    carrier.check = check
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
+async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+
+    async def discard(refs):
+        refs["deleting_id"] = "D1"
+        refs["bundle_sid"] = "changed"
+        raise RuntimeError("carrier down")
+
+    carrier.discard = discard
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "deleting_id": "D1"}
+
+
 @pytest.mark.parametrize(
     "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
 )
@@ -4089,6 +4139,48 @@ async def test_admin_approve_shows_the_refusal_of_a_row_waiting_again(
         app.dependency_overrides.pop(require_superadmin, None)
     assert resp.status_code == 409, resp.text
     assert "nope" in resp.json()["detail"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_reject_leaves_a_row_that_changed_while_it_was_rated(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """Rating commits, which ends the row lock. A row the background pass
+    moved on in that gap is not discarded or rejected: the admin gets 409."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def submit_meanwhile(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state = "submitting"
+            await other.commit()
+
+    discarded: list[dict] = []
+
+    async def discard(refs):
+        discarded.append(refs)
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", submit_meanwhile)
+    sms_carrier.discard = discard
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 409, resp.text
+    assert discarded == []
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitting" and row.provider_refs["campaign_id"] == "C1"
 
 
 @pytest.mark.usefixtures("us_number")

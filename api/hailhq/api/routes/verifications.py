@@ -21,6 +21,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -438,7 +439,8 @@ async def _fetch_status(
     if provider is None:
         return None
     try:
-        return await provider.status(row.provider_refs)
+        async with _plugin_call(row, provider):
+            return await provider.status(row.provider_refs)
     except Exception:
         logger.warning("verification status poll failed", exc_info=True)
         return None
@@ -550,12 +552,32 @@ def _stamp_campaign_filed(provider: object, refs: dict) -> None:
 
 
 def _keep_refs(row: CarrierVerification, provider: object) -> None:
-    """After plug-in calls that may write into ``row.provider_refs`` in
-    place (check, submit): stamp a filed campaign, and mark the column
-    changed so the next commit saves it (JSONB does not track in-place
-    changes)."""
+    """Stamp a filed campaign and mark the refs changed, so the next commit
+    saves them (JSONB does not track in-place changes)."""
     _stamp_campaign_filed(provider, row.provider_refs)
     flag_modified(row, "provider_refs")
+
+
+@asynccontextmanager
+async def _plugin_call(
+    row: CarrierVerification, provider: object
+) -> AsyncIterator[None]:
+    """Around every plug-in call that may write into ``row.provider_refs``
+    in place (check, submit, status, discard). After it: stamp a filed
+    campaign, and mark the refs changed when they did, so the caller's next
+    commit saves them. When the call raises partway, only the ids it added
+    are kept (one it filed may be billed); keys it removed or changed go
+    back to what they were. The caller commits."""
+    before = copy.deepcopy(row.provider_refs)
+    try:
+        yield
+    except Exception:
+        row.provider_refs.update(before)
+        raise
+    finally:
+        _stamp_campaign_filed(provider, row.provider_refs)
+        if row.provider_refs != before:
+            flag_modified(row, "provider_refs")
 
 
 def _notify_billing(rows: list[CarrierVerification]) -> None:
@@ -1376,11 +1398,10 @@ async def _submit_row(
     approved_by = actor_user_id if actor_kind == "superadmin" else None
     row.state, row.updated_at = "submitting", datetime.now(timezone.utc)
     row.approved_by = approved_by
-    _keep_refs(row, provider)  # what check() wrote just before
     await db.commit()
-    sent = copy.deepcopy(row.provider_refs)
     try:
-        await provider.submit(row.provider_refs)
+        async with _plugin_call(row, provider):
+            await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
         # The same draft would be refused on every retry: reject it so the
         # customer sees why and can start again. If the discard fails, wait
@@ -1390,7 +1411,6 @@ async def _submit_row(
             row,
             provider,
             exc.problems,
-            baseline=sent,
             kept_state="awaiting_review",
         )
         if outcome != "rejected":
@@ -1402,7 +1422,6 @@ async def _submit_row(
         return False
     except Exception:
         logger.exception("verification submit failed for %s", row.id)
-        _keep_refs(row, provider)
         row.state, row.updated_at = "awaiting_review", datetime.now(timezone.utc)
         row.approved_by = None
         await db.commit()
@@ -1410,7 +1429,6 @@ async def _submit_row(
         return False
     now = datetime.now(timezone.utc)
     row.state, row.submitted_at, row.updated_at = "submitted", now, now
-    _keep_refs(row, provider)
     await db.commit()
     _notify_if_changed(row, before)
     await write_audit_log(
@@ -1449,14 +1467,10 @@ async def _lock_waiting(
 
 
 async def _save_refs(
-    db: AsyncSession,
-    row: CarrierVerification,
-    provider: VerificationProvider,
-    before: BillingView,
+    db: AsyncSession, row: CarrierVerification, before: BillingView
 ) -> None:
-    """Commit what a plug-in call wrote into the refs before it failed (an
-    id it filed may be billed), and ping the rater when they changed."""
-    _keep_refs(row, provider)
+    """Commit what a plug-in call kept in the refs before it failed (an id
+    it filed may be billed), and ping the rater when they changed."""
     await db.commit()
     _notify_if_changed(row, before)
 
@@ -1476,15 +1490,14 @@ async def _retry_submit(
         return False
     before = _billing_view(row)
     try:
-        problems = await provider.check(row.provider_refs)
+        async with _plugin_call(row, provider):
+            problems = await provider.check(row.provider_refs)
     except Exception:
         logger.exception("verification check failed for %s", row.id)
-        await _save_refs(db, row, provider, before)
+        await _save_refs(db, row, before)
         return False
     if problems:
-        outcome = await _refuse_row(
-            db, row, provider, problems, baseline=before[1]
-        )  # pings when rejected
+        outcome = await _refuse_row(db, row, provider, problems)  # pings when rejected
         if outcome != "rejected":
             _notify_if_changed(row, before)
         return False
@@ -1504,7 +1517,6 @@ async def _refuse_row(
     provider: VerificationProvider,
     problems: list[Problem],
     *,
-    baseline: dict,
     kept_state: str | None = None,
 ) -> RejectOutcome:
     """Reject a draft the carrier refused, with its per-field reasons."""
@@ -1517,9 +1529,29 @@ async def _refuse_row(
             f"{p.field}: {p.message}" if p.field else p.message for p in problems
         ),
         carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
-        baseline=baseline,
         kept_state=kept_state,
     )
+
+
+async def _relock(
+    db: AsyncSession, row: CarrierVerification, state: str, changed_at: datetime
+) -> bool:
+    """Lock the row again after a commit ended its lock, waiting for a poll
+    that holds it, and reload it. False when it changed meanwhile (its
+    state or ``updated_at`` differ): leave it as it is."""
+    relocked = (
+        await db.execute(
+            select(CarrierVerification)
+            .where(
+                CarrierVerification.id == row.id,
+                CarrierVerification.state == state,
+                CarrierVerification.updated_at == changed_at,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    return relocked is not None
 
 
 # What _reject_row did: 'rejected'; 'kept' (the discard failed, the row
@@ -1534,7 +1566,6 @@ async def _reject_row(
     reason: str,
     carrier_reason: str | None = None,
     *,
-    baseline: dict,
     kept_state: str | None = None,
 ) -> RejectOutcome:
     """The carrier refused the draft before submission: record why (Hail's
@@ -1543,48 +1574,28 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row keeps its refs, moves to ``kept_state`` (default: keeps its state)
     and is tried again next tick; the sweeper never dies on carrier trouble.
-    ``baseline``: the refs before the plug-in call that refused.
     """
     state, changed_at = row.state, row.updated_at
-    # Compared on a copy: flagging the row unsaved would make the lock
-    # query below write the refs before it checks the row.
-    stamped = copy.deepcopy(row.provider_refs)
-    _stamp_campaign_filed(provider, stamped)
-    rate = row.purpose == "sms" and _campaign_filed(provider, stamped)
-    if rate or stamped != baseline:
-        # Saved before the discard: the ids the plug-in wrote (a filed
+    rate = row.purpose == "sms" and _campaign_filed(provider, row.provider_refs)
+    if rate or db.is_modified(row):
+        # Saved before the discard: the ids the plug-in call wrote (a filed
         # campaign is billed) must survive a failed discard, or a restart
-        # during it. The commit ends the row lock.
-        _keep_refs(row, provider)
+        # during it. The commit ends the row lock. Nothing changed: nothing
+        # is written, so the lock query cannot write stale refs.
         await db.commit()
     if rate:
         # The rater charges the review by the campaign id: before the wipe.
         await rate_sms_registration(str(row.id))
-    # Lock the row (again after a commit; the submit path holds no lock),
-    # waiting for a poll that holds it. Leave it when it changed meanwhile.
-    relocked = (
-        await db.execute(
-            select(CarrierVerification)
-            .where(
-                CarrierVerification.id == row.id,
-                CarrierVerification.state == state,
-                CarrierVerification.updated_at == changed_at,
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if relocked is None:
+    # Lock the row (again after a commit; the submit path holds no lock).
+    if not await _relock(db, row, state, changed_at):
         await db.rollback()
         await db.refresh(row)
         return "moved"
-    saved = copy.deepcopy(row.provider_refs)
     try:
-        await provider.discard(row.provider_refs)
+        async with _plugin_call(row, provider):
+            await provider.discard(row.provider_refs)
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
-        # The refs as saved: discard() may have changed them in place.
-        row.provider_refs = saved
         if kept_state is not None:
             row.state, row.approved_by = kept_state, None
             row.updated_at = datetime.now(timezone.utc)
@@ -1984,13 +1995,14 @@ async def admin_approve(
     provider = _provider_or_404(registry, row.provider, row.purpose)
     before = _billing_view(row)
     try:
-        problems = await provider.check(row.provider_refs)
+        async with _plugin_call(row, provider):
+            problems = await provider.check(row.provider_refs)
     except Exception as exc:
         logger.exception("verification check failed")
-        await _save_refs(db, row, provider, before)
+        await _save_refs(db, row, before)
         raise _carrier_unavailable() from exc
     if problems:
-        await _save_refs(db, row, provider, before)
+        await _save_refs(db, row, before)
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
@@ -2029,7 +2041,16 @@ async def admin_reject(
 ) -> AdminVerification:
     row = await _admin_row(db, verification_id)
     provider = registry(row.provider, row.purpose)
+    state, changed_at = row.state, row.updated_at
     await _rate_before_wipe(db, row, provider)
+    # Rating commits, which ends the row lock: lock it again, and leave a
+    # row that changed meanwhile (the background pass submitted it, say).
+    if not await _relock(db, row, state, changed_at):
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="this verification changed meanwhile; reload and try again",
+        )
     if provider is not None:
         await provider.discard(row.provider_refs)
     row.state, row.rejection_reason = "rejected", body.reason
