@@ -100,6 +100,8 @@ Texts between these domestic destinations require approval before sending. Buyin
 without identity documents does not remove the separate texting registration requirement.
 The verification worker also repairs missing links to already-approved campaigns. It retries
 carrier failures and preserves the one-number limit for a person. It does not file new campaigns.
+A repair writes a `verification.sms_attached` audit row only when a number attached. A pass that
+only failed leaves the warning log.
 
 Runnable example:
 

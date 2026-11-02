@@ -4628,11 +4628,15 @@ async def test_background_audits_only_numbers_that_attached(
     territory.country_code = "VI"
     await async_session.commit()
 
+    attach = sms_carrier.attach_number
+    attempts = 0
+
     async def refused(refs, *, provider_resource_id, e164):
+        nonlocal attempts
+        attempts += 1
         raise RuntimeError("carrier refused")
 
-    def registry(name, purpose="number"):
-        return sms_carrier if purpose == "sms" else None
+    registry = _sms_registry(sms_carrier)
 
     async def audit_rows() -> int:
         result = await async_session.execute(
@@ -4644,7 +4648,12 @@ async def test_background_audits_only_numbers_that_attached(
     monkeypatch.setattr(sms_carrier, "attach_number", refused)
     await verifications_routes.sweep_verifications(async_session, registry)
     await verifications_routes.sweep_verifications(async_session, registry)
+    assert attempts == 2
     assert await audit_rows() == before
+
+    monkeypatch.setattr(sms_carrier, "attach_number", attach)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert await audit_rows() == before + 1
 
 
 async def test_a_superadmin_reject_whose_discard_fails_answers_502(
