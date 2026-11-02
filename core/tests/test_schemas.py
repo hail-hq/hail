@@ -298,9 +298,8 @@ MALFORMED_ADDRESSES = [
     "x:a@b.co",
     "a\\b@c.co",
     "a@b..co",
-    ".a@b.co",
-    "a..b@c.co",
     "a@-b.co",
+    "a@b.co.",
     '"a,b"@c.co',
 ]
 NORMAL_ADDRESSES = [
@@ -311,6 +310,12 @@ NORMAL_ADDRESSES = [
     "a@xn--bcher-kva.example",
     "a@b\u00fccher.example",
     "m\u00fcller@example.de",
+    "mu\u0308ller@example.de",
+    "\u0939\u093f\u0928\u094d\u0926\u0940@example.in",
+    "\u0e1e\u0e34\u0e21\u0e1e\u0e4c@example.th",
+    "a@example.\u092d\u093e\u0930\u0924",
+    "a.@docomo.ne.jp",
+    "a..b@docomo.ne.jp",
 ]
 
 
@@ -347,7 +352,7 @@ def test_contact_refuses_a_malformed_email(model, address):
         model(name="Bob", email=address)
 
 
-# forward targets are stripped before they are stored, so a newline is harmless.
+# forward targets are stripped first, so a trailing newline is not refused.
 @pytest.mark.parametrize(
     "address", [a for a in MALFORMED_ADDRESSES if not a.endswith("\n")]
 )
@@ -356,8 +361,8 @@ def test_forward_to_refuses_a_malformed_address(address):
         EmailDomainPatch(forward_to=[address])
 
 
-def test_forward_to_keeps_the_address_it_was_given():
-    assert EmailDomainPatch(forward_to=[" a@b.co "]).forward_to == [" a@b.co "]
+def test_forward_to_returns_the_stripped_address():
+    assert EmailDomainPatch(forward_to=["a@b.co\n"]).forward_to == ["a@b.co"]
 
 
 @pytest.mark.parametrize("address", NORMAL_ADDRESSES)

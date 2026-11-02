@@ -401,10 +401,11 @@ class EventStreamResponse(BaseModel):
 # by hand; codegen will replace this once openapi → SDK is wired.
 # --------------------------------------------------------------------------- #
 
-_LOCAL_ATOM = r"[\w!#$%&'*+/=?^`{|}~-]+"
-_DOMAIN_LABEL = r"[^\W_](?:[\w-]*[^\W_])?"
+_NON_ASCII = "¡-\U0010ffff"
+_LOCAL_PART = rf"[A-Za-z0-9.!#$%&'*+/=?^_`{{|}}~{_NON_ASCII}-]+"
+_DOMAIN_LABEL = rf"[\w{_NON_ASCII}](?:[\w{_NON_ASCII}-]*[\w{_NON_ASCII}])?"
 EMAIL_ADDR = re.compile(
-    rf"^{_LOCAL_ATOM}(?:\.{_LOCAL_ATOM})*@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
+    rf"^(?!.*\s){_LOCAL_PART}@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
 )
 
 
