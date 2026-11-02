@@ -13,6 +13,11 @@ from uuid import UUID
 
 import boto3
 import pytest
+from botocore.exceptions import (
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+)
 from botocore.stub import ANY, Stubber
 from hailhq.core.providers.email import SesEmailProvider
 from hailhq.core.providers.email.base import (
@@ -21,6 +26,7 @@ from hailhq.core.providers.email.base import (
     ProviderIdentity,
     ProviderSendResult,
 )
+from hailhq.core.providers.email.ses import SES_MAX_ATTEMPTS
 
 FULL_DOCUMENT_HTML = "<!DOCTYPE html><html><head></head><body><p>x</p></body></html>"
 ORG_ID = UUID("6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b")
@@ -850,3 +856,63 @@ async def test_credential_readiness_bounds_hung_resolution_and_reuses_result(
         assert calls == 2  # a completed lookup can be refreshed
     finally:
         release.set()
+
+
+class FailingClient:
+    """Raises each failure in turn, then returns a MessageId."""
+
+    def __init__(self, *failures: Exception) -> None:
+        self.failures = list(failures)
+        self.calls = 0
+
+    def send_email(self, **kwargs):
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return {"MessageId": "msg-1"}
+
+
+async def _send(client) -> ProviderSendResult:
+    return await SesEmailProvider(client=client).send_email(
+        from_address="a@example.com",
+        to_addresses=["b@example.com"],
+        subject="Hi",
+        body_text="Hello",
+        body_html=None,
+        organization_id=ORG_ID,
+    )
+
+
+@pytest.fixture()
+def no_wait(monkeypatch):
+    monkeypatch.setattr("hailhq.core.providers.email.ses.random.random", lambda: 0)
+
+
+async def test_a_throttled_send_is_tried_again(
+    ses_client, stub: Stubber, no_wait
+) -> None:
+    stub.add_client_error("send_email", service_error_code="TooManyRequestsException")
+    stub.add_response("send_email", {"MessageId": "msg-1"})
+    result = await _send(ses_client)
+    assert result.provider_message_id == "msg-1"
+
+
+async def test_a_connect_timeout_stops_after_the_last_attempt(no_wait) -> None:
+    client = FailingClient(*(ConnectTimeoutError(endpoint_url="x") for _ in range(9)))
+    with pytest.raises(ConnectTimeoutError):
+        await _send(client)
+    assert client.calls == SES_MAX_ATTEMPTS
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ReadTimeoutError(endpoint_url="x"),
+        ConnectionClosedError(endpoint_url="x"),
+    ],
+)
+async def test_a_send_ses_may_have_taken_is_not_repeated(failure, no_wait) -> None:
+    client = FailingClient(failure)
+    with pytest.raises(type(failure)):
+        await _send(client)
+    assert client.calls == 1
