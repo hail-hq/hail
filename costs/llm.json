@@ -2195,12 +2195,13 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
+      "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
-      "notes": "New model, on Meta Model API in preview. Meta's most capable model. Muse Wonder Full is Muse Code only and has no API row. Contributor mode is not offered. Standard mode price from https://dev.meta.ai/docs/pricing-rate-limits ; OpenRouter agrees. Input is text, image, video, audio, and PDF; output is text; context 1,048,576 tokens (https://dev.meta.ai/docs/models). Meta publishes no separate output limit, so max_output_tokens defaults to the context window. Reasoning tokens bill at the output rate (https://dev.meta.ai/docs/reasoning). No long-context premium. Web search costs $2.50 per 1,000 queries. Knowledge cutoff and batch prices not published."
+      "notes": "New model, on Meta Model API in preview. Meta's most capable model. Muse Wonder Full is Muse Code only and has no API row. Contributor mode is not offered. Standard mode price from https://dev.meta.ai/docs/pricing-rate-limits ; OpenRouter agrees. Input is text, image, video, audio, and PDF; output is text; context 1,048,576 tokens (https://dev.meta.ai/docs/models). Meta publishes no separate output limit, so max_output_tokens defaults to the context window. Reasoning tokens bill at the output rate (https://dev.meta.ai/docs/reasoning). No long-context premium. Web search costs $2.50 per 1,000 queries. Knowledge cutoff and batch prices not published. The vendor publishes no max output, so max_output_tokens is a default and confidence is medium."
     },
     {
       "provider": "Meta",
@@ -2225,12 +2226,13 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
+      "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://dev.meta.ai/docs/pricing-rate-limits",
-      "notes": "New model on Meta Model API, recommended by Meta for new work. Meta warns that audio input on this version is not fully supported and quality may be degraded. The contributor variant muse-spark-1.3-contributor trades data use for $0.10/$0.20 and is not recorded. Standard mode price from https://dev.meta.ai/docs/pricing-rate-limits ; OpenRouter agrees. Input is text, image, video, audio, and PDF; output is text; context 1,048,576 tokens (https://dev.meta.ai/docs/models). Meta publishes no separate output limit, so max_output_tokens defaults to the context window. Reasoning tokens bill at the output rate (https://dev.meta.ai/docs/reasoning). No long-context premium. Web search costs $2.50 per 1,000 queries. Knowledge cutoff and batch prices not published."
+      "notes": "New model on Meta Model API, recommended by Meta for new work. Meta warns that audio input on this version is not fully supported and quality may be degraded. The contributor variant muse-spark-1.3-contributor trades data use for $0.10/$0.20 and is not recorded. Standard mode price from https://dev.meta.ai/docs/pricing-rate-limits ; OpenRouter agrees. Input is text, image, video, audio, and PDF; output is text; context 1,048,576 tokens (https://dev.meta.ai/docs/models). Meta publishes no separate output limit, so max_output_tokens defaults to the context window. Reasoning tokens bill at the output rate (https://dev.meta.ai/docs/reasoning). No long-context premium. Web search costs $2.50 per 1,000 queries. Knowledge cutoff and batch prices not published. The vendor publishes no max output, so max_output_tokens is a default and confidence is medium."
     },
     {
       "provider": "Mistral",
@@ -2256,13 +2258,13 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "bedrock", "vertex", "azure"],
       "deprecated_at": "2026-02-27",
-      "replaced_by_model_id": "mistral-medium-3-5",
+      "replaced_by_model_id": "mistral-large-4",
       "last_verified": "2026-11-02",
       "last_changed_at": "2024-11-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://mistral.ai/news/mistral-large-2407",
-      "notes": "La Plateforme rates ($2.00 / $6.00 per MTok) are the row's structured price. Multi-host availability: Bedrock (mistral.mistral-large-2407-v1:0 in us-west-2), Vertex AI, Azure AI Foundry, IBM watsonx. Bedrock published the 24.07 build only, not 24.11. Deprecated on La Plateforme 2026-02-27; retirement 2026-05-31 per Mistral's legacy table has now passed (re-verified 2026-07-13 via docs.mistral.ai/getting-started/models/models_overview) so the model_id should be treated as fully retired/non-callable, not merely deprecated. `mistral-large-latest` moved to Mistral Large 3 (mistral-large-2512, added to this dataset) so the alias was removed from this row to avoid a duplicate. Mistral's own deprecation table lists Mistral Medium 3.5 (mistral-medium-3-5) as the recommended alternative, not Large 3; replaced_by_model_id follows the vendor's stated alternative. Text-only; no vision (Pixtral Large was the multimodal sibling, also retired). max_output_tokens not published on the model card; defaulted to 8192. Batch API is a 50% discount where available but per-model availability is not confirmed from a single primary source on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-02-27, retired 2026-05-31, alternative still Mistral Medium 3.5; no field changes. Re-verified 2026-11-02: retired 2026-05-31 per Mistral's legacy model table. $2/$6 is frozen as last published; no live Mistral page shows it. mistral-medium-3-5 is itself deprecated (2026-10-31, retires 2027-04-30), but Mistral's legacy table still names it here."
+      "notes": "La Plateforme rates ($2.00 / $6.00 per MTok) are the row's structured price. Multi-host availability: Bedrock (mistral.mistral-large-2407-v1:0 in us-west-2), Vertex AI, Azure AI Foundry, IBM watsonx. Bedrock published the 24.07 build only, not 24.11. Deprecated on La Plateforme 2026-02-27; retirement 2026-05-31 per Mistral's legacy table has now passed (re-verified 2026-07-13 via docs.mistral.ai/getting-started/models/models_overview) so the model_id should be treated as fully retired/non-callable, not merely deprecated. `mistral-large-latest` moved to Mistral Large 3 (mistral-large-2512, added to this dataset) so the alias was removed from this row to avoid a duplicate. Mistral's own deprecation table lists Mistral Medium 3.5 (mistral-medium-3-5) as the recommended alternative, not Large 3; replaced_by_model_id follows the vendor's stated alternative. Text-only; no vision (Pixtral Large was the multimodal sibling, also retired). max_output_tokens not published on the model card; defaulted to 8192. Batch API is a 50% discount where available but per-model availability is not confirmed from a single primary source on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-02-27, retired 2026-05-31, alternative still Mistral Medium 3.5; no field changes. Re-verified 2026-11-02: retired 2026-05-31 per Mistral's legacy model table. $2/$6 is frozen as last published; no live Mistral page shows it. Mistral's legacy table names mistral-medium-3-5, which is itself deprecated (2026-10-31, retires 2027-04-30), so replaced_by_model_id points to its replacement, mistral-large-4."
     },
     {
       "provider": "Mistral",
@@ -2287,13 +2289,13 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["native"],
       "deprecated_at": "2026-05-22",
-      "replaced_by_model_id": "mistral-medium-3-5",
+      "replaced_by_model_id": "mistral-large-4",
       "last_verified": "2026-11-02",
       "last_changed_at": "2025-05-07",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://mistral.ai/news/mistral-medium-3",
-      "notes": "La Plateforme rates ($0.40 / $2.00 per MTok) are the row's structured price; unchanged this pass. Mistral's launch post (2025-05-07) lists La Plateforme and Amazon SageMaker at GA with IBM watsonx, NVIDIA NIM, Azure AI Foundry, and Google Cloud Vertex as forthcoming; SageMaker is not in the deployment_options enum and Bedrock has not been confirmed, so deployment_options is restricted to native. Optimized for agentic and coding use cases. Deprecated on La Plateforme 2026-05-22 per docs.mistral.ai's legacy table; retirement 2026-08-31 has now passed, so the model_id should be treated as fully retired/non-callable, not merely deprecated. Alternative is Mistral Medium 3.5 (mistral-medium-3-5). `mistral-medium-latest` alias moved to the new Medium 3.5 row and was removed here to avoid a duplicate. max_output_tokens not published on the model card; defaulted to 8192. Batch API discount per-model availability not confirmed on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-05-22, retirement 2026-08-31 has now passed (model no longer listed on mistral.ai/pricing/api), alternative still Mistral Medium 3.5; no price field changes. Re-verified 2026-11-02: retired 2026-08-31 per Mistral's legacy model table. The launch post still shows $0.40/$2.00; the pricing page omits this model. mistral-medium-3-5 is itself deprecated (2026-10-31, retires 2027-04-30), but Mistral's legacy table still names it here."
+      "notes": "La Plateforme rates ($0.40 / $2.00 per MTok) are the row's structured price; unchanged this pass. Mistral's launch post (2025-05-07) lists La Plateforme and Amazon SageMaker at GA with IBM watsonx, NVIDIA NIM, Azure AI Foundry, and Google Cloud Vertex as forthcoming; SageMaker is not in the deployment_options enum and Bedrock has not been confirmed, so deployment_options is restricted to native. Optimized for agentic and coding use cases. Deprecated on La Plateforme 2026-05-22 per docs.mistral.ai's legacy table; retirement 2026-08-31 has now passed, so the model_id should be treated as fully retired/non-callable, not merely deprecated. Alternative is Mistral Medium 3.5 (mistral-medium-3-5). `mistral-medium-latest` alias moved to the new Medium 3.5 row and was removed here to avoid a duplicate. max_output_tokens not published on the model card; defaulted to 8192. Batch API discount per-model availability not confirmed on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-05-22, retirement 2026-08-31 has now passed (model no longer listed on mistral.ai/pricing/api), alternative still Mistral Medium 3.5; no price field changes. Re-verified 2026-11-02: retired 2026-08-31 per Mistral's legacy model table. The launch post still shows $0.40/$2.00; the pricing page omits this model. Mistral's legacy table names mistral-medium-3-5, which is itself deprecated (2026-10-31, retires 2027-04-30), so replaced_by_model_id points to its replacement, mistral-large-4."
     },
     {
       "provider": "Mistral",
@@ -2382,13 +2384,13 @@
       "reasoning_tokens_billed": false,
       "deployment_options": ["native", "bedrock"],
       "deprecated_at": "2026-02-27",
-      "replaced_by_model_id": "mistral-medium-3-5",
+      "replaced_by_model_id": "mistral-large-4",
       "last_verified": "2026-11-02",
       "last_changed_at": "2024-11-18",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://mistral.ai/news/pixtral-large",
-      "notes": "La Plateforme rates ($2.00 / $6.00 per MTok) are the row's structured price; pricing parity with Mistral Large 2 since Pixtral Large is the multimodal 124B-parameter open-weight model built on top of Mistral Large 2. Vision-capable: handles documents, charts, and natural images alongside text. Context window 128K (131072 tokens). Bedrock publishes the 25.02 refresh (`mistral.pixtral-large-2502-v1:0`, also routed via `us.mistral.pixtral-large-2502-v1:0`), not the 24.11 build. Deprecated on La Plateforme 2026-02-27; retirement 2026-05-31 per Mistral's legacy table has now passed (re-verified 2026-07-13) so the model_id should be treated as fully retired/non-callable. Mistral's stated alternative is Mistral Medium 3.5 (mistral-medium-3-5, added to this dataset this pass); Pixtral as a standalone product line has been discontinued, its vision capability absorbed into Large 3 / Medium 3.5. `pixtral-large-latest` alias is likely non-functional post-retirement but is left on this row since nothing else claims it. max_output_tokens not published on the model card; defaulted to 8192. Vertex/Azure availability not confirmed for Pixtral Large on this date. Batch API discount per-model availability not confirmed on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-02-27, retired 2026-05-31, alternative still Mistral Medium 3.5; no field changes. Re-verified 2026-11-02: retired on Mistral 2026-05-31. Still sold on Bedrock (mistral.pixtral-large-2502-v1:0) at the row's $2/$6, per the AWS price list. mistral-medium-3-5 is itself deprecated (2026-10-31, retires 2027-04-30), but Mistral's legacy table still names it here."
+      "notes": "La Plateforme rates ($2.00 / $6.00 per MTok) are the row's structured price; pricing parity with Mistral Large 2 since Pixtral Large is the multimodal 124B-parameter open-weight model built on top of Mistral Large 2. Vision-capable: handles documents, charts, and natural images alongside text. Context window 128K (131072 tokens). Bedrock publishes the 25.02 refresh (`mistral.pixtral-large-2502-v1:0`, also routed via `us.mistral.pixtral-large-2502-v1:0`), not the 24.11 build. Deprecated on La Plateforme 2026-02-27; retirement 2026-05-31 per Mistral's legacy table has now passed (re-verified 2026-07-13) so the model_id should be treated as fully retired/non-callable. Mistral's stated alternative is Mistral Medium 3.5 (mistral-medium-3-5, added to this dataset this pass); Pixtral as a standalone product line has been discontinued, its vision capability absorbed into Large 3 / Medium 3.5. `pixtral-large-latest` alias is likely non-functional post-retirement but is left on this row since nothing else claims it. max_output_tokens not published on the model card; defaulted to 8192. Vertex/Azure availability not confirmed for Pixtral Large on this date. Batch API discount per-model availability not confirmed on this date, so batch fields are unset. Knowledge cutoff not published by Mistral. Re-verified 2026-09-02 via mistral.ai/pricing/api and docs.mistral.ai/getting-started/models/models_overview: still deprecated 2026-02-27, retired 2026-05-31, alternative still Mistral Medium 3.5; no field changes. Re-verified 2026-11-02: retired on Mistral 2026-05-31. Still sold on Bedrock (mistral.pixtral-large-2502-v1:0) at the row's $2/$6, per the AWS price list. Mistral's legacy table names mistral-medium-3-5, which is itself deprecated (2026-10-31, retires 2027-04-30), so replaced_by_model_id points to its replacement, mistral-large-4."
     },
     {
       "provider": "Mistral",
@@ -2428,6 +2430,7 @@
       "provider_url": "https://mistral.ai",
       "model_id": "mistral-large-4",
       "display_name": "Mistral Large 4",
+      "featured": true,
       "model_family": "Mistral Large",
       "aliases": ["mistral-large-4-0"],
       "context_window": 1048576,
@@ -2447,12 +2450,13 @@
       "supports_pdf": false,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
+      "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.mistral.ai/inference/pricing",
-      "notes": "New model, released 2026-10-06, status Public Preview. Mistral's legacy table names it as the replacement for mistral-large-2512 and mistral-medium-3-5. API names mistral-large-4 and mistral-large-4-0 and 1M context per https://docs.mistral.ai/models/mistral-large-4-0.md . Rates $0.70/$2.10 per MTok, cached input $0.07, on the pricing page and the model card; OpenRouter agrees. mistral-large-latest still points to Mistral Large 3 on its model card, so it is not an alias here. max_output_tokens not published on the model card; defaulted to 8192 as on sibling rows. Reasoning effort is low, medium, or high (https://docs.mistral.ai/studio/conversations/reasoning.md); higher effort adds token usage, so reasoning_tokens_billed is true. Batch fields unset, as on sibling rows, because no per-model batch rate was confirmed. Knowledge cutoff not published."
+      "notes": "New model, released 2026-10-06, status Public Preview. Mistral's legacy table names it as the replacement for mistral-large-2512 and mistral-medium-3-5. API names mistral-large-4 and mistral-large-4-0 and 1M context per https://docs.mistral.ai/models/mistral-large-4-0.md . Rates $0.70/$2.10 per MTok, cached input $0.07, on the pricing page and the model card; OpenRouter agrees. mistral-large-latest still points to Mistral Large 3 on its model card, so it is not an alias here. max_output_tokens not published on the model card; defaulted to 8192 as on sibling rows. Reasoning effort is low, medium, or high (https://docs.mistral.ai/studio/conversations/reasoning.md); higher effort adds token usage, so reasoning_tokens_billed is true. Batch fields unset, as on sibling rows, because no per-model batch rate was confirmed. Knowledge cutoff not published. The vendor publishes no max output, so max_output_tokens is a default and confidence is medium."
     },
     {
       "provider": "Mistral",
@@ -3058,12 +3062,13 @@
       "supports_pdf": true,
       "reasoning_tokens_billed": true,
       "deployment_options": ["native"],
+      "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://docs.x.ai/developers/pricing",
-      "notes": "New model. xAI now recommends it for code and chat (https://docs.x.ai/developers/models.md). Rates $2.00/$6.00 per MTok, cached input $0.50; prompts at or above 200K tokens bill $4.00/$12.00, cached $1.00, per https://docs.x.ai/developers/pricing and https://docs.x.ai/developers/models/grok-4.7.md . OpenRouter x-ai/grok-4.7 agrees on the base rates. Batch is 20% off: $1.60/$4.80, cached $0.40. The schema has no tiered batch field. Context 500,000 tokens. xAI publishes no separate output limit, so max_output_tokens defaults to the context window. Knowledge cutoff May 2026 per xAI, recorded as the last day of that month. supports_pdf from the OpenRouter file input modality, as on sibling xAI rows. The US regional endpoint costs 1.1x. Grok 4.7 Fast is not on the public API."
+      "notes": "New model. xAI now recommends it for code and chat (https://docs.x.ai/developers/models.md). Rates $2.00/$6.00 per MTok, cached input $0.50; prompts at or above 200K tokens bill $4.00/$12.00, cached $1.00, per https://docs.x.ai/developers/pricing and https://docs.x.ai/developers/models/grok-4.7.md . OpenRouter x-ai/grok-4.7 agrees on the base rates. Batch is 20% off: $1.60/$4.80, cached $0.40. The schema has no tiered batch field. Context 500,000 tokens. xAI publishes no separate output limit, so max_output_tokens defaults to the context window. Knowledge cutoff May 2026 per xAI, recorded as the last day of that month. supports_pdf from the OpenRouter file input modality, as on sibling xAI rows. The US regional endpoint costs 1.1x. Grok 4.7 Fast is not on the public API. The vendor publishes no max output, so max_output_tokens is a default and confidence is medium."
     },
     {
       "provider": "xAI",
