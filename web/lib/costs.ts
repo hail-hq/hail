@@ -18,7 +18,13 @@ export const stt = sttJson as CostsFile<STTRow>;
 export const tts = ttsJson as CostsFile<TTSRow>;
 export const numberCatalogs = [twilioJson, telnyxJson, didwwJson] as NumberCatalogFile[];
 
-const cents = (usd: string) => Math.round(Number(usd) * 100);
+/** Rounds half up from the digits, like cents() in core/hailhq/core/carrier_offer.py.
+ * Number("1.005") * 100 is 100.49..., which would round down. */
+function cents(usd: string) {
+  const [whole, fraction = ''] = usd.split('.');
+  const rounded = (fraction[2] ?? '0') >= '5' ? 1 : 0;
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0').slice(0, 2)) + rounded;
+}
 
 /** The real monthly price of a number with everything it can do switched on.
  * Same rule as monthly_price in core/hailhq/core/telephony_catalog.py: each fee
