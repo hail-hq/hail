@@ -37,6 +37,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.sms_registration import (
     attach_org_numbers,
     detach_org_numbers,
+    reconcile_approved_registrations,
     registered_numbers,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -73,6 +74,7 @@ from hailhq.core.providers.verification import (
     length_problems,
 )
 from hailhq.core.schemas import VerificationResponse
+from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -163,7 +165,7 @@ async def _sms_carriers(
     query = select(PhoneNumber.provider).where(
         PhoneNumber.organization_id == organization_id,
         PhoneNumber.provisioning_state == "active",
-        PhoneNumber.country_code == "US",
+        PhoneNumber.country_code.in_(US_SMS_COUNTRY_CODES),
         PhoneNumber.number_type == "local",
         PhoneNumber.capabilities.any("sms"),
     )
@@ -1685,6 +1687,7 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         await _refresh(db, row, registry)
         if row.state != before:
             refreshed += 1
+    await reconcile_approved_registrations(db, registry)
     return {"submitted": submitted, "refreshed": refreshed}
 
 

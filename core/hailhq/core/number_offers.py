@@ -133,8 +133,10 @@ def by_request_offers(
                 e164=None,
                 country_code=country,
                 number_type=kind,
-                capabilities=[c for c in ("voice", "sms") if has[c]],
-                monthly_cents=cents(row["usd_per_month"]),
+                capabilities=[c for c in capabilities if has[c]],
+                **telephony_catalog.monthly_price(
+                    name, cents(row["usd_per_month"]), capabilities
+                ),
                 setup_cents=cents(row.get("setup_usd") or 0),
                 readiness="verification_required" if needs else "ready",
                 regulatory_friction="unknown" if needs else "none",

@@ -14,7 +14,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["by_request_row", "capabilities", "sells_in"]
+__all__ = ["by_request_row", "capabilities", "monthly_price", "sells_in"]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -32,6 +32,11 @@ def _path(provider: str) -> Path:
 def _load(provider: str) -> dict[tuple[str, str], dict]:
     raw = json.loads(_path(provider).read_text())
     return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+
+
+@lru_cache(maxsize=8)
+def _capability_fees(path: Path) -> tuple[dict, ...]:
+    return tuple(json.loads(path.read_text()).get("capability_monthly_fees", []))
 
 
 def capabilities(
@@ -91,3 +96,24 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
     sells it by request only (support orders it by hand), else None."""
     row = _load(provider).get((country_code, number_type))
     return row if row and row.get("by_request") else None
+
+
+def monthly_price(provider: str, base_cents: int, selected: list[str]) -> dict:
+    """Complete purchase rental, keeping base and selected capability fees separate.
+
+    Inventory prices exclude these provider-published capability fees. Each
+    fee is charged once even when several of its capabilities are selected.
+    """
+    from hailhq.core.carrier_offer import cents
+
+    fees = sum(
+        cents(fee["usd_per_month"])
+        for fee in _capability_fees(_path(provider))
+        if set(selected).intersection(fee["capabilities"])
+    )
+    return {
+        "monthly_price_version": 2,
+        "base_monthly_cents": base_cents,
+        "capability_monthly_cents": fees,
+        "monthly_cents": base_cents + fees,
+    }

@@ -28,6 +28,8 @@ Schemas are served at their `$id` URLs:
 
 Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`; the weekly workflow, secrets, merge rules and PR review steps are in [docs/operations/number-catalog-sync.md](../docs/operations/number-catalog-sync.md). See the JSON Schemas above for the exact shape per category.
 
+Number catalog `usd_per_month` is the base rental. Optional provider-level `capability_monthly_fees` are additional monthly costs for selected capabilities. Each entry applies once when any listed capability is selected; SMS and MMS can share one fee. Keep source and verification fields with the fee. `effective_from` is Hail's prospective start for existing calendar billing periods, not a claimed carrier price-change date. New purchases include the fee immediately. The sync preserves this separately sourced block and never folds it into base rental.
+
 Canonical fetch pattern:
 
 ```bash
