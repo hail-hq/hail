@@ -880,9 +880,9 @@ async def patch_email_domain(
                     loc=["body", "email_agent_id"],
                 )
         updates["email_agent_id"] = body.email_agent_id
-        # A new route starts at members: an old "anyone" was chosen for another
-        # agent, and a cleared or deleted route leaves it on the row.
-        if sd.email_agent_id is None and body.email_agent_id is not None:
+        # A new agent starts at members: an old "anyone" was chosen for the
+        # agent before it, and a cleared or deleted route leaves it on the row.
+        if body.email_agent_id not in (None, sd.email_agent_id):
             updates["email_agent_scope"] = "members"
     if body.email_agent_scope is not None:
         updates["email_agent_scope"] = body.email_agent_scope

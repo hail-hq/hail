@@ -99,45 +99,35 @@ def upgrade() -> None:
         "agent_reply_state IS NULL OR agent_reply_state IN "
         "('pending','processing','done','skipped','failed')",
     )
-    # Built CONCURRENTLY so reads and sends on emails do not block.
-    # That cannot run in a transaction, hence the autocommit block.
-    with op.get_context().autocommit_block():
-        # The worker claims pending and expired-lease rows; keep that scan cheap.
-        op.create_index(
-            "emails_agent_reply_pending_idx",
-            "emails",
-            ["requested_at"],
-            postgresql_where=sa.text("agent_reply_state IN ('pending','processing')"),
-            postgresql_concurrently=True,
-        )
-        # The worker fails replies left queued on every poll; keep that scan cheap.
-        op.create_index(
-            "emails_agent_reply_queued_idx",
-            "emails",
-            ["requested_at"],
-            postgresql_where=sa.text(
-                "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
-            ),
-            postgresql_concurrently=True,
-        )
-        # The thread cap counts an org's recent agent sends, for any agent.
-        op.create_index(
-            "emails_agent_thread_idx",
-            "emails",
-            ["organization_id", "requested_at"],
-            postgresql_where=sa.text("agent_id IS NOT NULL"),
-            postgresql_concurrently=True,
-        )
+    # The worker claims pending and expired-lease rows; keep that scan cheap.
+    op.create_index(
+        "emails_agent_reply_pending_idx",
+        "emails",
+        ["requested_at"],
+        postgresql_where=sa.text("agent_reply_state IN ('pending','processing')"),
+    )
+    # The worker fails replies left queued on every poll; keep that scan cheap.
+    op.create_index(
+        "emails_agent_reply_queued_idx",
+        "emails",
+        ["requested_at"],
+        postgresql_where=sa.text(
+            "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
+        ),
+    )
+    # The thread cap counts an org's recent agent sends, for any agent.
+    op.create_index(
+        "emails_agent_thread_idx",
+        "emails",
+        ["organization_id", "requested_at"],
+        postgresql_where=sa.text("agent_id IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        for name in (
-            "emails_agent_thread_idx",
-            "emails_agent_reply_queued_idx",
-            "emails_agent_reply_pending_idx",
-        ):
-            op.drop_index(name, table_name="emails", postgresql_concurrently=True)
+    op.drop_index("emails_agent_thread_idx", table_name="emails")
+    op.drop_index("emails_agent_reply_queued_idx", table_name="emails")
+    op.drop_index("emails_agent_reply_pending_idx", table_name="emails")
     op.drop_constraint("emails_agent_reply_state_check", "emails", type_="check")
     op.drop_column("emails", "agent_reply_available_at")
     op.drop_column("emails", "agent_reply_attempts")

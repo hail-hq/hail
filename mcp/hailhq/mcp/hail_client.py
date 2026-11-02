@@ -315,8 +315,6 @@ class HailClient:
     ) -> dict[str, Any]:
         """PATCH /email-domains/{id} — which agent answers mail, and whom."""
         body: dict[str, Any] = {}
-        if clear_agent and email_agent_id is not None:
-            raise ValueError("use email_agent_id or clear_agent, not both")
         if clear_agent:
             body["email_agent_id"] = None
         elif email_agent_id is not None:
