@@ -8,7 +8,7 @@ Some rows store a promotional or introductory price, because that is what the ve
 
 - Add an optional `promo_ends_at` date to the `llm`, `stt`, and `tts` schemas.
 - The date is the last day the promotional price applies.
-- `scripts/costs/check-stale.mjs` lists a row the day after that date, in its own section, and exits 1. The weekly `costs-stale.yml` run then opens or updates the tracking issue.
+- `scripts/costs/check-stale.mjs` lists a row once that date has passed, in its own section, and exits 1. The weekly `costs-stale.yml` run then opens or updates the tracking issue, and comments on it for each newly ended promotion so the owner is notified.
 - A row whose date has passed stays listed until a pass records the list price and removes the field.
 
 ## Limits
