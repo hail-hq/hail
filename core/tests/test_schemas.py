@@ -365,7 +365,10 @@ def test_email_create_keeps_accepting_normal_addresses(address):
     assert _email(to=[address]).to == [address]
 
 
-@pytest.mark.parametrize("number", ["+14155551234\n", "14155551234"])
+@pytest.mark.parametrize(
+    "number",
+    ["+14155551234\n", "14155551234", "+1\u0664\u0661\u0665\u0665\u0665\u0661\u0662"],
+)
 def test_contact_refuses_a_malformed_phone_number(number):
     with pytest.raises(ValidationError):
         ContactCreate(name="Bob", phone_e164=number)

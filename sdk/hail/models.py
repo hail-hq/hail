@@ -23,7 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}\Z")
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}\Z")
 
 
 def _e164_or_error(v: str | None) -> str | None:
