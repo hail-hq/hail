@@ -4454,6 +4454,8 @@ def test_a_failed_call_keeps_ids_it_appended_or_nested() -> None:
         "campaign_id": "C1",
         "vetting_requested": True,
     }
+    # A zero is a value, not an empty one: a change to it goes back.
+    assert verifications_routes._added_only({"step": 0}, {"step": 3}) == {"step": 0}
     # A list that lost or reordered items goes back.
     assert verifications_routes._added_only(
         {"docs": ["D1", "D2"]}, {"docs": ["D2"]}

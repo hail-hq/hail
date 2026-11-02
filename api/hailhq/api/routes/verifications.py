@@ -545,7 +545,10 @@ def _added_only(before: dict, after: dict) -> dict:
     out = dict(before)
     for key, new in after.items():
         old = before.get(key)
-        if key not in before or (old in (None, False, "") and new):
+        # ``is`` for None and False: ``0 in (False,)`` is True, so a zero
+        # would count as empty.
+        empty = old is None or old is False or old == ""
+        if key not in before or (empty and new):
             out[key] = new
         elif isinstance(old, list) and isinstance(new, list):
             if new[: len(old)] == old:
