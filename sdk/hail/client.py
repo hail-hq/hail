@@ -599,9 +599,12 @@ class _EmailDomainsResource:
         returns it once in the response's ``webhook_secret``.
 
         ``email_agent_id`` makes an agent answer mail to this address;
-        ``clear_email_agent=True`` stops that. ``email_agent_scope`` is
-        ``"members"`` (verified org members) or ``"anyone"``.
+        ``clear_email_agent=True`` stops that, and passing both raises
+        ``ValueError``. ``email_agent_scope`` is ``"members"`` (verified org
+        members) or ``"anyone"``.
         """
+        if clear_email_agent and email_agent_id is not None:
+            raise ValueError("use email_agent_id or clear_email_agent, not both")
         body: dict[str, Any] = {}
         if local_prefix_user is not None:
             body["local_prefix_user"] = local_prefix_user
