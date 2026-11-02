@@ -3,6 +3,7 @@ workers: each brings its own LLM, tools, and tool runner."""
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -16,12 +17,23 @@ from livekit.agents.llm import (
 
 logger = logging.getLogger("hailhq.voicebot.chat_loop")
 
+# Per model call. One reply may make MAX_TOOL_ROUNDS of them.
+LLM_TIMEOUT_SECONDS = 30.0
 # Model calls per reply. The last one may not call a tool, so it writes text.
 MAX_TOOL_ROUNDS = 3
 # What the model reads when a tool call fails or names a tool it does not have.
 TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 
 ToolRunner = Callable[[FunctionToolCall], Awaitable[tuple[str, bool]]]
+
+
+def tool_args(call: FunctionToolCall) -> dict[str, Any]:
+    """The call's arguments. Malformed ones are no arguments."""
+    try:
+        args = json.loads(call.arguments or "{}")
+    except ValueError:
+        return {}
+    return args if isinstance(args, dict) else {}
 
 
 def chat_context(messages: list[dict[str, Any]]) -> ChatContext:

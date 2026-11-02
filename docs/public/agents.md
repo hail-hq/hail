@@ -158,7 +158,6 @@ the text up, it is skipped before the model runs, with
 `metadata.skipped_reason: "insufficient_funds"`. If credits run out while the
 model writes, the text is skipped without that key.
 
-
 ## Answer email with an agent
 
 ```bash

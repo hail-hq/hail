@@ -18,7 +18,6 @@ Process model: this thread is the only DB user in the worker's main process
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 from pathlib import Path
@@ -48,7 +47,13 @@ from hailhq.core.text_agent import (
 )
 from hailhq.core.threads import ThreadScope
 from hailhq.voicebot import emailbot
-from hailhq.voicebot.chat_loop import MAX_TOOL_ROUNDS, TOOL_APOLOGY, run_chat
+from hailhq.voicebot.chat_loop import (
+    LLM_TIMEOUT_SECONDS,
+    MAX_TOOL_ROUNDS,
+    TOOL_APOLOGY,
+    run_chat,
+    tool_args,
+)
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
@@ -56,8 +61,6 @@ from livekit.agents.llm import FunctionToolCall
 logger = logging.getLogger("hailhq.voicebot.textbot")
 
 POLL_SECONDS = 2.0
-# Per model call. One reply may make MAX_TOOL_ROUNDS of them.
-LLM_TIMEOUT_SECONDS = 30.0
 
 __all__ = [
     "MAX_TOOL_ROUNDS",
@@ -90,13 +93,7 @@ async def _run_tool(call: FunctionToolCall, tctx: ToolContext) -> tuple[str, boo
     if call.name != THREAD_HISTORY.name:
         return TOOL_APOLOGY, True
     try:
-        args = json.loads(call.arguments or "{}")
-    except ValueError:
-        args = {}
-    if not isinstance(args, dict):
-        args = {}
-    try:
-        return await THREAD_HISTORY.execute(tctx, args), False
+        return await THREAD_HISTORY.execute(tctx, tool_args(call)), False
     except Exception:
         logger.exception("text agent tool %s failed", call.name)
         return TOOL_APOLOGY, True

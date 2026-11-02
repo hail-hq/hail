@@ -1,10 +1,10 @@
 """send_sms — text the person on this call. outbound_send tier.
 
-The only possible recipient is the call counterpart: org members carry
-no phone numbers (the better-auth users table has none), and raw numbers
-are never accepted as parameters. Recipient resolution, the compliance
-gate, the per-call cap, and billing all run server-side in
-``/internal/agent/send-sms``.
+On a call, the only possible recipient is the call counterpart. In an email
+run, it is a directory member named by the model. Raw numbers are never
+accepted as parameters. Recipient resolution, the compliance gate, the per-call
+cap, and billing all run server-side in ``/internal/agent/send-sms`` and
+``/internal/agent/email-run/send-sms``.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from hailhq.core.agent_tools.send_email import MAX_RECIPIENT_NAME_CHARS
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
@@ -19,7 +20,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MAX_BODY_CHARS = 480  # ~3 SMS segments; the internal route imports this as its cap
-MAX_RECIPIENT_NAME_CHARS = 200
 
 _UNAVAILABLE = "Text messaging is not available right now."
 
@@ -65,9 +65,7 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
 async def _execute_for_email(ctx: ToolContext, args: dict[str, Any]) -> str:
     """An email run has no one on a call: the recipient is a directory name,
     and the route resolves the number. The model never sees or supplies one."""
-    if ctx.inbound_email_id is None:
-        return _UNAVAILABLE
-    if ctx.api is None:
+    if ctx.inbound_email_id is None or ctx.api is None:
         return _UNAVAILABLE
     recipient_name = str(args.get("recipient_name", "")).strip()[
         :MAX_RECIPIENT_NAME_CHARS

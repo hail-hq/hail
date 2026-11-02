@@ -23,7 +23,7 @@ only when all of these hold:
 
 1. The mail is not spam or a virus, and the org is under its inbound cap.
 2. The domain has an agent that answers email.
-3. It has no `Auto-Submitted` (other than `no`), `Precedence: bulk|list|junk`,
+3. It has no `Auto-Submitted` (other than `no`), `Precedence: auto_reply|bulk|list|junk`,
    `List-Id`, or `List-Unsubscribe` header.
 4. It has an envelope sender. The `From` address is not
    `noreply`-style or a mailer daemon, and not an address on the hail-mail base
@@ -69,10 +69,10 @@ text, never as an `assistant` turn. The newest rows win when a thread is long.
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
 the earlier row: a sent one is done, a failed one is delivered again if SES took
 nothing, and so is a
-queued one past a 180-second grace. A resend first claims the row by resetting
+queued one past a 240-second grace. A resend first claims the row by resetting
 `requested_at`, guarded on the old status and time, so a retry during a slow resend
 waits. The send writes its result only while that claim holds. SES calls have a
-total budget of 141 seconds, under the grace. A failure that proves SES took
+total budget of 213 seconds, under the grace. A failure that proves SES took
 nothing (throttling, limits, connect timeouts, endpoint connection errors) comes
 back as `retry`, and the worker marks the row failed only after its last attempt.
 A wait for a send still running is not an attempt. A skip marks a reply left queued

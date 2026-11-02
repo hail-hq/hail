@@ -832,6 +832,47 @@ async def test_a_retried_run_does_not_send_twice(
     assert email_mock.send_email.await_count == 1
 
 
+async def test_a_retry_learns_its_send_took_the_last_slot(
+    client, async_session, email_mock
+) -> None:
+    """The client retries a slow send, and that send filled the thread cap."""
+    org, agent, domain, inbound = await _seed(async_session)
+    await _fill_cap(async_session, org, agent, domain, inbound, own=0)
+    row = (
+        (await async_session.execute(select(Email).where(Email.subject == "Note")))
+        .scalars()
+        .first()
+    )
+    invocation = str(uuid.uuid4())
+    row.metadata_ = {**row.metadata_, "tool_invocation_id": invocation}
+    await async_session.commit()
+    data = await _tool_email(client, inbound.id, tool_invocation_id=invocation)
+    assert data == {"ok": True, "spoken": "Email sent."}
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_retry_learns_its_send_outlived_the_claim(
+    client, async_session, email_mock, sms_mock, add_phone_number
+) -> None:
+    org, _agent, _domain, inbound = await _seed(async_session)
+    await add_phone_number(async_session, org, "+14155550100")
+    email_id, sms_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await _tool_email(client, inbound.id, tool_invocation_id=email_id)
+    await _tool_sms(client, inbound.id, tool_invocation_id=sms_id)
+    inbound.agent_reply_state = "done"
+    await async_session.commit()
+    assert await _tool_email(client, inbound.id, tool_invocation_id=email_id) == {
+        "ok": True,
+        "spoken": "Email sent.",
+    }
+    assert await _tool_sms(client, inbound.id, tool_invocation_id=sms_id) == {
+        "ok": True,
+        "spoken": "Text message sent.",
+    }
+    assert email_mock.send_email.await_count == 1
+    assert sms_mock.send_sms.await_count == 1
+
+
 async def test_two_messages_to_one_person_both_go(
     client, async_session, email_mock
 ) -> None:

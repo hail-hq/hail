@@ -6,6 +6,7 @@ LLM (they could be read aloud or leak into the stored transcript).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import uuid
 from typing import Any
@@ -64,4 +65,14 @@ SPEC = ToolSpec(
     risk_tier="read_only",
     is_available=_always,
     execute=_execute,
+)
+
+# In an email run there is no call. The rest of the spec is the same.
+EMAIL_RUN_SPEC = dataclasses.replace(
+    SPEC,
+    description=(
+        "List the people you may send messages to: members of the organization "
+        "you work for. Shows names and whether each person can receive email or "
+        "text, never their actual addresses."
+    ),
 )
