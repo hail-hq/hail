@@ -21,6 +21,7 @@ export type CommonFields = {
   model_id: string;
   display_name: string;
   featured?: boolean;
+  promo_ends_at?: string;
   last_verified: string;
   last_changed_at: string;
   verification_method: VerificationMethod;

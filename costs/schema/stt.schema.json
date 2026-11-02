@@ -118,6 +118,11 @@
             "tokens_per_day": { "type": "integer", "minimum": 0 }
           }
         },
+        "promo_ends_at": {
+          "type": "string",
+          "format": "date",
+          "description": "Last day the row's promotional price applies. Set only when a structured price field holds a promotional or introductory rate. check-stale lists the row the day after this date."
+        },
         "deprecated_at": { "type": "string", "format": "date" },
         "replaced_by_model_id": { "type": "string", "minLength": 1 },
         "confidence": { "enum": ["high", "medium", "low"] },

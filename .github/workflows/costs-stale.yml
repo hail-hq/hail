@@ -41,7 +41,7 @@ jobs:
             const report = fs.readFileSync(process.env.REPORT_PATH, 'utf-8');
             const title = 'Model costs: stale rows';
             const body = [
-              'The weekly costs-stale workflow found rows whose `last_verified` is older than 30 days.',
+              'The weekly costs-stale workflow found rows whose `last_verified` is older than 30 days, or whose promotion has ended.',
               '',
               'Pick one off this list, verify the price against the provider\'s pricing page, and open a PR bumping `last_verified` (and any changed fields).',
               '',

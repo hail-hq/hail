@@ -48,6 +48,8 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 6. **Field order convention** (refer to "Field order" below). Match it exactly.
 7. **No destructive git in the shared tree.** In the default model of this runbook, every provider-agent edits the **same** working tree. Thus a subagent must never run a git command that reverts or discards the tree — `git checkout`, `git restore`, `git stash`, `git reset` — and must never run `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the full file and silently erases the in-flight edits of every other provider — one such error caused the loss of a full LLM sweep. Repair broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never with git. Leave the files modified but unstaged. Produce a commit message. Let the operator commit. (A separate git worktree for each provider makes git safe for each agent. But then you must add a step to collate the single-file edit of each worktree back. Thus the default is one shared tree plus sequential dispatch.)
 
+**Promotions.** When a structured price field holds a promotional or introductory rate, set `promo_ends_at` to the last day that rate applies. When the promotion ends, record the list price and remove the field. `costs-stale.yml` lists a row the day after its `promo_ends_at`, so a pass can fix it before the row goes stale. For the design, refer to [`docs/superpowers/specs/2026-11-02-costs-promo-end-date-design.md`](../superpowers/specs/2026-11-02-costs-promo-end-date-design.md).
+
 ## Per-row data model (cheat sheet)
 
 LLM rows (`costs/llm.json`):
@@ -70,6 +72,8 @@ per_search_usd.
 Optional (v2.2): audio_input_per_mtok_usd, aggregators[].
 
 Optional (v2.3): featured.
+
+Optional (v2.4): promo_ends_at.
 ```
 
 STT rows (`costs/stt.json`):
@@ -88,6 +92,8 @@ time_to_first_word_ms, aliases[], deployment_options[], aggregators[],
 free_tier, deprecated_at, replaced_by_model_id, confidence, notes.
 
 Optional (v2.3): featured.
+
+Optional (v2.4): promo_ends_at.
 ```
 
 TTS rows (`costs/tts.json`):
@@ -105,6 +111,8 @@ aliases[], deployment_options[], aggregators[], free_tier, deprecated_at,
 replaced_by_model_id, confidence, notes.
 
 Optional (v2.3): featured.
+
+Optional (v2.4): promo_ends_at.
 ```
 
 Authoritative source: [`costs/schema/llm.schema.json`](../../costs/schema/llm.schema.json), [`costs/schema/stt.schema.json`](../../costs/schema/stt.schema.json), [`costs/schema/tts.schema.json`](../../costs/schema/tts.schema.json).
@@ -132,6 +140,7 @@ supports_audio_in, supports_audio_out, supports_pdf,
 reasoning_tokens_billed,
 deployment_options, aggregators (when set),
 free_tier (when set),
+promo_ends_at (when set),
 deprecated_at, replaced_by_model_id (when present),
 confidence (when non-default),
 last_verified, last_changed_at, verification_method, verified_by,
@@ -152,6 +161,7 @@ min_billed_seconds, max_audio_minutes_per_file, concurrent_streams_included (whe
 wer_benchmark (when set), time_to_first_word_ms (when set),
 deployment_options, aggregators (when set),
 free_tier (when set),
+promo_ends_at (when set),
 deprecated_at, replaced_by_model_id (when present),
 confidence (when non-default),
 last_verified, last_changed_at, verification_method, verified_by,
@@ -174,6 +184,7 @@ output_formats (when set), sample_rates_hz (when set),
 time_to_first_byte_ms (when set),
 deployment_options, aggregators (when set),
 free_tier (when set),
+promo_ends_at (when set),
 deprecated_at, replaced_by_model_id (when present),
 confidence (when non-default),
 last_verified, last_changed_at, verification_method, verified_by,

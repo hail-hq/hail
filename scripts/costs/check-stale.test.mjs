@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findStale, rowsForFile } from './check-stale.mjs';
+import { findEndedPromos, findStale, rowsForFile } from './check-stale.mjs';
 
 const today = new Date('2026-05-05T00:00:00Z');
 
@@ -49,4 +49,18 @@ test('rowsForFile flattens telephony across both arrays', () => {
 
 test('rowsForFile throws on an unknown data file', () => {
   assert.throws(() => rowsForFile('mystery.json', { foo: [] }), /unknown costs file/);
+});
+
+test('lists a row the day after its promotion ends', () => {
+  const rows = [{ model_id: 'ended', promo_ends_at: '2026-05-04' }];
+  assert.equal(findEndedPromos(rows, today).length, 1);
+});
+
+test('keeps a row on the last day of its promotion', () => {
+  const rows = [{ model_id: 'last-day', promo_ends_at: '2026-05-05' }];
+  assert.deepEqual(findEndedPromos(rows, today), []);
+});
+
+test('ignores rows with no promotion', () => {
+  assert.deepEqual(findEndedPromos([{ model_id: 'list-price' }], today), []);
 });
