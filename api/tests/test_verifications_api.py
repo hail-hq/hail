@@ -4460,3 +4460,88 @@ def test_a_failed_call_keeps_ids_it_appended_or_nested() -> None:
     assert verifications_routes._added_only(
         {"docs": ["D1", "D2"]}, {"docs": ["D2"]}
     ) == {"docs": ["D1", "D2"]}
+
+
+async def test_a_superadmin_reject_whose_discard_fails_answers_502(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+
+    async def boom(refs):
+        refs["filed_id"] = "F1"  # half done
+        raise RuntimeError("carrier down")
+
+    carrier.discard = boom
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 502, resp.text
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.reject")
+        )
+    ).scalar_one_or_none() is None
+
+
+async def test_a_status_poll_that_fails_partway_keeps_only_the_ids_it_added(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+
+    async def status(refs):
+        refs["campaign_id"] = "C1"
+        refs.pop("bundle_sid")
+        raise RuntimeError("carrier down")
+
+    carrier.status = status
+    verifications_routes._last_polled.clear()
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitted"
+    assert row.provider_refs == {"bundle_sid": "B1", "campaign_id": "C1"}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 20_000)
+    sms_carrier.campaign_key = "campaign_id"
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+
+    async def status(refs):
+        refs["campaign_id"] = "C1"
+        raise RuntimeError("carrier down")
+
+    sms_carrier.status = status
+    verifications_routes._last_polled.clear()
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs["campaign_id"] == "C1"
+    assert row.provider_refs["campaign_filed_at"]
