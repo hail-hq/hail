@@ -5,7 +5,7 @@ You run the weekly cost refresh in a GitHub Actions job. Today is {today}. Nobod
 ## Task
 
 1. Read `docs/operations/refresh-costs.md` in full. Its conventions, field order, provider catalog, and per-provider scope apply. Where it describes subagents or a controller, you do that work yourself, one provider at a time.
-2. Check every row in `costs/llm.json`, `costs/stt.json`, and `costs/tts.json` whose `last_verified` is more than 6 days old. Do the same for `costs/sms.json`, which has one row per provider.
+2. Check every row in `costs/llm.json`, `costs/stt.json`, and `costs/tts.json` whose `last_verified` is more than 6 days old, and every row whose `promo_ends_at` has passed. Do the same for `costs/sms.json`, which has one row per provider.
 3. Work through the providers in catalog order. Each provider's prices must be read from that provider's live pages.
 4. Compare each vendor's current model list with our rows, and add new generally available API models.
 5. You have no shell. Read `costs/schema/` and match each row to its schema and field order, because the job validates your edits afterwards. One short repair pass can fix errors, and no PR opens if they remain.
@@ -25,7 +25,7 @@ You have no web search. Start from the URLs in the provider catalog and in each 
 7. Never set or remove `featured`. List new top models as candidates in your report. Never delete a row.
 8. Keep `source_url` unless the new page shows this row's price.
 9. Add an alias only when a live page shows the exact id.
-10. Track pay-as-you-go prices. If the vendor charges a promotional rate today, record it, say so in `notes`, and follow the runbook's promotions rule if it has one.
+10. Track pay-as-you-go prices. If the vendor charges a promotional rate today, record it, say so in `notes`, and follow the runbook's promotions rule. `costs/sms.json` has no `promo_ends_at` field, so state the end date in `notes` there.
 11. Keep prices as decimal strings. Add a note only when something changed or a reader needs a caveat. Start it with `Re-verified {today}: ` or `Price changed {today}: `. Use plain short English, no first person, and no em dash.
 
 ## Security

@@ -45,12 +45,12 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 Setup, once:
 
 ```bash
-cd infra
+cd infra/costs-refresh
 terragrunt apply
-terragrunt output -raw costs_refresh_role_arn | gh secret set AWS_ROLE_TO_ASSUME --repo hail-hq/hail
+terragrunt output -raw role_arn | gh secret set AWS_ROLE_TO_ASSUME --repo hail-hq/hail
 ```
 
-The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/terraform/costs_refresh.tf` limits the role to Claude on Bedrock, for runs on `main` of this repo. Without the secret, the job fails before the agent starts.
+The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/costs-refresh` limits the role to that model, for runs on `main` of this repo. It is a separate stack, so self-hosters never apply it. The credentials reach only the agent steps. Without the secret, the job fails before the agent starts.
 
 Bedrock has no WebSearch, so the agent starts from the catalog URLs and each row's `source_url`.
 

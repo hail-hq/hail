@@ -56,8 +56,3 @@ output "ses_tracking_domain_dkim_records" {
     }
   ]
 }
-
-output "costs_refresh_role_arn" {
-  description = "Set as the AWS_ROLE_TO_ASSUME repo secret for costs-refresh.yml."
-  value       = aws_iam_role.costs_refresh.arn
-}

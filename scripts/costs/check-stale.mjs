@@ -113,7 +113,7 @@ async function main() {
   const lines = buildReport(perFile.flat(), maxAge);
 
   if (lines.length === 0) {
-    console.log(`No stale rows (max age: ${maxAge} days).`);
+    console.log(`No stale rows or ended promotions (max age: ${maxAge} days).`);
     process.exit(0);
   }
 
