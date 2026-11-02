@@ -436,12 +436,15 @@ async def _fetch_status(
     row: CarrierVerification, registry: Registry
 ) -> ProviderStatus | None:
     """Ask the carrier about a verification. None when there is nothing to
-    apply."""
+    apply. An SMS plug-in files the campaign inside status() and stores its
+    id in the refs: ``_plugin_call`` stamps it, and keeps only the ids a
+    failed call added."""
     provider = registry(row.provider, row.purpose)
     if provider is None:
         return None
     try:
-        return await provider.status(row.provider_refs)
+        async with _plugin_call(row, provider):
+            return await provider.status(row.provider_refs)
     except Exception:
         logger.warning("verification status poll failed", exc_info=True)
         return None
@@ -516,12 +519,10 @@ async def _poll_and_apply(
     refs_before: dict,
 ) -> bool:
     """Apply a fetched status. True when the row needs a commit: its state
-    changed, or the plug-in wrote new ids into ``provider_refs`` (an SMS
-    plug-in creates the campaign inside status() and stores its id there;
-    the JSONB column does not track in-place changes, so mark it)."""
+    changed, or a plug-in call (status, attaching numbers) wrote new ids
+    into ``provider_refs`` (the JSONB column does not track in-place
+    changes, so mark it)."""
     status = await _settle_sms_approval(db, row, status, registry)
-    if row.purpose == "sms":
-        _stamp_campaign_filed(registry(row.provider, row.purpose), row.provider_refs)
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
@@ -578,18 +579,20 @@ async def _plugin_call(
     row: CarrierVerification, provider: object
 ) -> AsyncIterator[None]:
     """Around each plug-in call whose writes into ``row.provider_refs`` (in
-    place) outlive it: check, submit, and the discard of a refused draft.
-    After it: stamp a filed campaign, and mark the refs changed when they
-    did, so the caller's next commit saves them (JSONB does not track
-    in-place changes). When the call raises partway, only the ids it added
-    are kept (``_added_only``; one it filed may be billed). The caller
-    commits; on a cancel (a restart) nothing does, and they are lost.
-    Status polls keep their own rule (``_poll_and_apply``); a cancel or
-    reject wipes the refs."""
+    place) outlive it: check, submit, status, and the discard of a refused
+    draft or a superadmin reject. After it: stamp a filed campaign, and
+    mark the refs changed when they did, so the caller's next commit saves
+    them (JSONB does not track in-place changes). When the call raises
+    partway, only the ids it added are kept (``_added_only``; one it filed
+    may be billed). The caller commits. A cancel (a restart) commits
+    nothing, so the refs are left as they are (a plug-in thread may still
+    be writing them).
+    A customer cancel and the create rollback are not wrapped: the refs are
+    wiped or rolled back right after."""
     before = copy.deepcopy(row.provider_refs)
     try:
         yield
-    except BaseException:
+    except Exception:
         kept = _added_only(before, row.provider_refs)
         row.provider_refs.clear()
         row.provider_refs.update(kept)
@@ -2081,7 +2084,18 @@ async def admin_reject(
             detail="this verification changed meanwhile; reload and try again",
         )
     if provider is not None:
-        await provider.discard(row.provider_refs)
+        before = _billing_view(row)
+        try:
+            async with _plugin_call(row, provider):
+                await provider.discard(row.provider_refs)
+        except Exception as exc:
+            # The row keeps its state and its refs; reject again later.
+            # Touched, so the background pass waits before it retries a
+            # submit the admin meant to stop.
+            logger.exception("verification discard failed for %s", row.id)
+            row.updated_at = datetime.now(timezone.utc)
+            await _commit_and_notify(db, row, before)
+            raise _carrier_unavailable() from exc
     row.state, row.rejection_reason = "rejected", body.reason
     row.provider_refs = _wiped_refs(row)
     row.updated_at = datetime.now(timezone.utc)

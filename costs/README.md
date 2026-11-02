@@ -103,6 +103,7 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 2. Edit the relevant file in this directory (e.g. `llm.json`).
 3. Update `last_verified` to today's date (ISO `YYYY-MM-DD`) — when you last _checked_ the price.
 4. If the price actually changed, also update `last_changed_at` to today's date. Otherwise leave it alone.
+   If the price is promotional, set `promo_ends_at` to its last day. When the promotion ends, record the list price and remove the field.
 5. Set `verified_by` to your GitHub handle.
 6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source).
 7. Update `source_url` if it has changed.
@@ -111,7 +112,7 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 
 ## Refresh cadence
 
-A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
+A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old, and rows whose `promo_ends_at` has passed. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
 
 ## Adding a new provider or model
 
