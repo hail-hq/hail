@@ -240,7 +240,9 @@ async def test_a_young_queued_reply_is_left_to_finish(
     )
     data = await _reply(client, inbound.id)
     assert data["state"] == "retry" and data["reason"] == "in_flight"
-    assert 0 < data["retry_after_seconds"] <= 180
+    assert (
+        0 < data["retry_after_seconds"] <= internal_agent._QUEUED_GRACE.total_seconds()
+    )
     email_mock.send_email.assert_not_awaited()
 
 
