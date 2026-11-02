@@ -585,26 +585,22 @@ def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> 
 
 
 async def _rate_before_wipe(
-    db: AsyncSession,
-    row: CarrierVerification,
-    provider: object,
-) -> bool:
+    db: AsyncSession, row: CarrierVerification, provider: object
+) -> None:
     """Before ``provider_refs`` is emptied: the rater charges the carrier
     review by the campaign id in the refs, so let it read them first. A
     campaign's ping when it was filed can be lost; once the id is gone,
     neither a ping nor the rater's sweep can charge it. Awaited, not
     fire-and-forget, so the rater reads before the wipe is committed.
 
-    Commits first, which ends any row lock; True when it did. Never call it
-    while holding the organization's lock (``org_lock``): the rater takes
-    the same lock."""
+    Commits first. Never call it while holding the organization's lock
+    (``org_lock``): the rater takes the same lock."""
     if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
-        return False
+        return
     # Saved with the stamp, so the rater reads a campaign filed just now.
     _keep_refs(row, provider)
     await db.commit()
     await rate_sms_registration(str(row.id))
-    return True
 
 
 async def _audit_carrier_rejection(
@@ -1364,7 +1360,8 @@ async def _submit_row(
     discard failed; as it is when it changed meanwhile).
     Never raises for carrier trouble: creation must still answer 201 and the
     sweeper must keep going. With ``raise_refused`` a refusal re-raises
-    SubmitRefused after the row is rejected, so a superadmin sees why.
+    SubmitRefused after the row is rejected (or kept), so a superadmin sees
+    why.
 
     The row is saved as 'submitting' before the carrier call so a crash in
     between cannot submit twice; _refresh settles a stuck 'submitting' row.
@@ -1390,9 +1387,9 @@ async def _submit_row(
         outcome = await _refuse_row(  # pings when rejected
             db, row, provider, exc.problems, kept_state="awaiting_review"
         )
-        if outcome == "kept":
+        if outcome != "rejected":
             _notify_if_changed(row, before)
-        elif outcome == "rejected" and raise_refused:
+        if outcome != "moved" and raise_refused:
             raise
         return False
     except Exception:
@@ -1443,6 +1440,19 @@ async def _lock_waiting(
     ).scalar_one_or_none()
 
 
+async def _save_refs(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider,
+    before: BillingView,
+) -> None:
+    """Commit what a plug-in call wrote into the refs before it failed (an
+    id it filed may be billed), and ping the rater when they changed."""
+    _keep_refs(row, provider)
+    await db.commit()
+    _notify_if_changed(row, before)
+
+
 async def _retry_submit(
     db: AsyncSession, verification_id: UUID, registry: Registry
 ) -> bool:
@@ -1461,7 +1471,7 @@ async def _retry_submit(
         problems = await provider.check(row.provider_refs)
     except Exception:
         logger.exception("verification check failed for %s", row.id)
-        await db.rollback()
+        await _save_refs(db, row, provider, before)
         return False
     if problems:
         await _refuse_row(db, row, provider, problems)
@@ -1518,13 +1528,26 @@ async def _reject_row(
     and is tried again next tick; the sweeper never dies on carrier trouble.
     """
     state, changed_at = row.state, row.updated_at
-    # Saved before the discard: the ids the plug-in wrote (a filed campaign
-    # is billed) must survive a failed discard, or a restart during it.
-    if not await _rate_before_wipe(db, row, provider):
-        _keep_refs(row, provider)
+    with db.no_autoflush:
+        stored = (
+            await db.execute(
+                select(CarrierVerification.provider_refs).where(
+                    CarrierVerification.id == row.id
+                )
+            )
+        ).scalar_one()
+    _keep_refs(row, provider)
+    rate = row.purpose == "sms" and _campaign_filed(provider, row.provider_refs)
+    if rate or row.provider_refs != stored:
+        # Saved before the discard: the ids the plug-in wrote (a filed
+        # campaign is billed) must survive a failed discard, or a restart
+        # during it. The commit ends the row lock.
         await db.commit()
-    # The commit ended the row lock: lock the row again (waiting for a poll
-    # that holds it), and leave it when it changed meanwhile.
+    if rate:
+        # The rater charges the review by the campaign id: before the wipe.
+        await rate_sms_registration(str(row.id))
+    # Lock the row (again after a commit; the submit path holds no lock),
+    # waiting for a poll that holds it. Leave it when it changed meanwhile.
     relocked = (
         await db.execute(
             select(CarrierVerification)
@@ -1950,8 +1973,10 @@ async def admin_approve(
         problems = await provider.check(row.provider_refs)
     except Exception as exc:
         logger.exception("verification check failed")
+        await _save_refs(db, row, provider, before)
         raise _carrier_unavailable() from exc
     if problems:
+        await _save_refs(db, row, provider, before)
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
