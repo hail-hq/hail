@@ -1614,10 +1614,19 @@ async def test_a_new_route_starts_at_members(
     resp = await client.patch(url, json={"email_agent_id": agent_id}, headers=headers)
     assert resp.json()["email_agent_scope"] == "members"
 
-    # A second route to the same address keeps what the owner chose.
+    # The same agent keeps what the owner chose.
     await client.patch(url, json={"email_agent_scope": "anyone"}, headers=headers)
     resp = await client.patch(url, json={"email_agent_id": agent_id}, headers=headers)
     assert resp.json()["email_agent_scope"] == "anyone"
+
+    # Another agent does not.
+    other = await client.post(
+        "/agents", json={"name": "Other", "system_prompt": "Help."}, headers=headers
+    )
+    resp = await client.patch(
+        url, json={"email_agent_id": other.json()["id"]}, headers=headers
+    )
+    assert resp.json()["email_agent_scope"] == "members"
 
     # A named scope wins on a new route.
     await client.patch(url, json={"email_agent_id": None}, headers=headers)

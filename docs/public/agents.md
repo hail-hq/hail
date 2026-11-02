@@ -173,7 +173,7 @@ Send `null` to stop replies. The agent must be `live` with `email_enabled: true`
 - `anyone`: every sender. A stranger can then make the agent use its tools, so choose this
   only for an agent that is safe to reach from the internet.
 
-A new route starts at `members` unless the call names a scope.
+A new agent on an address starts at `members` unless the call names a scope.
 
 Under both, the mail must pass DMARC (`dmarc_verdict: PASS`) with one well-formed `From`
 address, because anyone can write a `From` header. Other mail gets no reply, so a sender on a

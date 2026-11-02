@@ -1463,7 +1463,8 @@ class EmailDomainPatch(BaseModel):
             "organization whose mail passes DMARC. 'anyone': every sender whose "
             "mail passes DMARC and the spam and header rules; such a sender can "
             "make the agent use its tools. Mail without a DMARC pass gets no "
-            "reply. Omit to leave unchanged."
+            "reply. Omit to leave unchanged, except that a new agent starts at "
+            "'members'."
         ),
     )
 

@@ -654,6 +654,8 @@ async def route_email_domain(
     domain_id_ = _as_uuid(domain_id)
     if domain_id_ is None:
         return _not_uuid("domain_id")
+    if clear_agent and email_agent_id is not None:
+        return {"error": "use email_agent_id or clear_agent, not both"}
     try:
         return await client.route_email_domain(
             domain_id_,
@@ -663,8 +665,6 @@ async def route_email_domain(
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
-    except ValueError as exc:
-        return {"error": str(exc)}
     except HailAPIError as exc:
         return _format_api_error(exc)
 
@@ -2551,7 +2551,8 @@ def register_tools(
         DMARC and the spam checks). With ``"anyone"``, a stranger can make the
         agent use its tools, so ask your user before you set it. Mail without
         a DMARC pass gets no reply. A custom domain must be verified with
-        inbound on. A field left out keeps its value. ``domain_id`` comes from
+        inbound on. A field left out keeps its value, except that a new agent
+        starts at ``"members"``. ``domain_id`` comes from
         ``list_email_domains``.
 
         Returns the updated ``EmailDomainResponse`` as a dict, or
