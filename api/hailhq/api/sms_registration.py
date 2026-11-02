@@ -137,7 +137,9 @@ async def _attach(
         logger.warning(
             "SMS registration attach failed for number %s", number.id, exc_info=True
         )
-        await _record_refusal(row, number, str(exc)[:500] or repr(exc))
+        # A failed re-attach leaves a number on the registration: it still texts.
+        if number.sms_registration_id != row.id:
+            await _record_refusal(row, number, str(exc)[:500] or repr(exc))
         return False
     number.sms_registration_id = row.id
     service = (row.provider_refs or {}).get("messaging_service_sid")
@@ -236,6 +238,9 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
         return
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
         return  # a person's registration holds one number only
+    # Read under the org lock: the background pass may have changed these
+    # while this request waited for it.
+    await db.refresh(number, ["provisioning_metadata", "sms_registration_id"])
     await _attach(row, provider, number)
 
 

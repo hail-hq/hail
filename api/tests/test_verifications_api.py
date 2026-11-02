@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from hailhq.api import verification_decisions
+from hailhq.api import sms_registration, verification_decisions
 from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
@@ -23,6 +23,7 @@ from hailhq.api.routes.verifications import (
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import sms_registration_fees, telephony_catalog
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
+from hailhq.core.db import session_scope
 from hailhq.core.models import (
     AccountCredit,
     AuditLog,
@@ -48,7 +49,7 @@ from hailhq.core.providers.verification.base import (
     VALUE_NOT_ACCEPTED,
 )
 from hailhq.core.providers.verification.forms import display_name
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .conftest import insert_org_and_key
 
@@ -3048,6 +3049,87 @@ async def test_enable_sms_tries_a_refused_number_during_its_wait(
     await async_session.refresh(number)
     assert number.sms_registration_id is not None
     assert "sms_attach_refused" not in number.provisioning_metadata
+
+
+async def test_a_failed_reattach_of_an_attached_number_is_not_a_refusal(
+    client, org_and_key, sms_carrier, async_session, sms_mock, monkeypatch
+) -> None:
+    from hailhq.api.routes import numbers as numbers_routes
+
+    org_id, _, key = org_and_key
+    number = await _us_number(async_session, org_id, provider="twilio")
+    row = CarrierVerification(
+        organization_id=org_id,
+        provider="twilio",
+        purpose="sms",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        state="approved",
+        provider_refs={"campaign_sid": "QE1", "messaging_service_sid": "MG1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.flush()
+    number.sms_registration_id = row.id
+    await async_session.commit()
+    monkeypatch.setattr(
+        numbers_routes,
+        "get_verification_provider",
+        lambda name, purpose="number": sms_carrier if purpose == "sms" else None,
+    )
+    sms_carrier.attach_error = RuntimeError("carrier down")
+
+    resp = await client.post(f"/numbers/{number.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    await async_session.refresh(number)
+    assert number.sms_registration_id == row.id
+    assert "sms_attach_refused" not in number.provisioning_metadata
+    assert await _audits(async_session, "verification.sms_attach_refused") == []
+
+
+async def test_attach_reads_the_retry_state_under_the_lock(
+    org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The request loaded the number, then the background pass refused it.
+    org_id, _, _ = org_and_key
+    number = await _us_number(async_session, org_id, provider="twilio")
+    row = CarrierVerification(
+        organization_id=org_id,
+        provider="twilio",
+        purpose="sms",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        state="approved",
+        provider_refs={"campaign_sid": "QE1", "messaging_service_sid": "MG1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    state = {
+        "registration_id": str(row.id),
+        "wait_hours": 1,
+        "retry_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+    }
+    async with session_scope() as other:
+        await other.execute(
+            update(PhoneNumber)
+            .where(PhoneNumber.id == number.id)
+            .values(provisioning_metadata={"sms_attach_refused": state, "kept": 1})
+        )
+        await other.commit()
+    sms_carrier.attach_error = RuntimeError("carrier refused")
+
+    await sms_registration.attach_if_registered(
+        async_session, number, lambda name, purpose="number": sms_carrier
+    )
+    await async_session.commit()
+
+    await async_session.refresh(number)
+    assert number.provisioning_metadata["kept"] == 1
+    assert number.provisioning_metadata["sms_attach_refused"]["wait_hours"] == 2
+    assert await _audits(async_session, "verification.sms_attach_refused") == []
 
 
 @pytest.mark.usefixtures("us_number")
