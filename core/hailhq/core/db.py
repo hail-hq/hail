@@ -8,6 +8,7 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode
@@ -55,6 +56,9 @@ _LIBPQ_TO_ASYNCPG: dict[str, str | None] = {
     "krbsrvname": None,
 }
 
+# The credentials group of SQLAlchemy's URL pattern.
+_CREDENTIALS = re.compile(r"[^:]+://[^:/]*(?::[^@]*)?@")
+
 # Query params meant for asyncpg URLs. ``psycopg.connect`` rejects them.
 _NOT_FOR_LIBPQ = ("pgbouncer", "prepared_statement_cache_size")
 
@@ -74,7 +78,8 @@ def _split_query(url: str) -> tuple[str, str]:
     one in a password, and ``urlunsplit`` would drop the ``//`` of a URL with
     no host."""
     url = url.strip()
-    start = url.find("@") + 1
+    credentials = _CREDENTIALS.match(url)
+    start = credentials.end() if credentials else 0
     base, _, query = url[start:].partition("?")
     return url[:start] + base, query
 

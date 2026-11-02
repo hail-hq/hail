@@ -134,6 +134,7 @@ class DigestService:
         self.config = config
         self.repository = repository
         self.client = client
+        self.in_progress_since: dict[str, datetime] = {}
 
     async def run_once(self, now: datetime, *, preview=False) -> Result:
         if not preview and not self.config.enabled:
@@ -188,7 +189,8 @@ class DigestService:
             email_id = await self.client.send(payload, key)
         except SendInProgress:
             # A crashed request can leave this state with no receipt.
-            if (now - window.end).total_seconds() > 900:
+            since = self.in_progress_since.setdefault(window.date, now)
+            if (now - since).total_seconds() > 900:
                 raise ReviewRequired("send_stuck") from None
             raise
         return Result("submitted", window.date, email_id)

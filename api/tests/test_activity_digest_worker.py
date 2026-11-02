@@ -247,18 +247,22 @@ async def test_only_a_409_with_retry_after_retries(setup, headers, error, code):
             await DigestClient(config, http).request("emails", payload={}, key="k")
 
 
-@pytest.mark.parametrize("minutes, error", [(5, SendInProgress), (16, ReviewRequired)])
-async def test_a_stuck_send_stops_retrying(setup, minutes, error):
+async def test_a_stuck_send_is_timed_from_the_first_in_progress_answer(setup):
     config, repository = setup
-    now = daily_window(NOW).end + timedelta(minutes=minutes)
+    late = daily_window(NOW).end + timedelta(hours=1)
     requests = []
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(transport_handler(requests))
     ) as http:
         client = DigestClient(config, http)
         client.send = AsyncMock(side_effect=SendInProgress("api_status_409"))
-        with pytest.raises(error):
-            await DigestService(config, repository, client).run_once(now)
+        service = DigestService(config, repository, client)
+        with pytest.raises(SendInProgress):
+            await service.run_once(late)
+        with pytest.raises(SendInProgress):
+            await service.run_once(late + timedelta(minutes=15))
+        with pytest.raises(ReviewRequired, match="send_stuck"):
+            await service.run_once(late + timedelta(minutes=16))
 
 
 async def test_ambiguous_send_is_not_retried_inside_the_run(setup):

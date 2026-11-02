@@ -97,6 +97,7 @@ async def read_activity(
               count(*)::int AS count
               FROM audit_log a WHERE occurred_at >= :start AND occurred_at < :end
                AND NOT (action = ANY(CAST(:creation_actions AS text[])))
+               AND action NOT LIKE '%.replayed'
              GROUP BY organization_id, action, source ORDER BY organization_id, action, source
             """),
                 params,
@@ -111,7 +112,7 @@ async def read_activity(
                 text(f"""
             SELECT m.organization_id AS org_id, max(k.last_request) AS last_at
               FROM api_keys k {_KEY_ORGANIZATION}
-             WHERE k.last_request >= :start AND k.last_request < :end
+             WHERE k.last_request >= :start
                AND k.key IS DISTINCT FROM :reporter_hash
              GROUP BY m.organization_id
             """),

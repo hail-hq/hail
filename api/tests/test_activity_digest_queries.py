@@ -163,6 +163,35 @@ async def test_access_uses_oldest_membership_and_excludes_the_reporting_key(
     ]
 
 
+async def test_a_key_used_after_the_window_keeps_its_access_line(digest_engine):
+    async with digest_engine.begin() as db:
+        await db.execute(
+            text("INSERT INTO members VALUES (:b,:user,'owner','2026-02-01')"),
+            {"b": B, "user": USER1},
+        )
+        await db.execute(
+            text("INSERT INTO api_keys VALUES (:user,'busy-key',:end)"),
+            {"user": str(USER1), "end": WINDOW.end},
+        )
+    async with digest_engine.connect() as db:
+        data = await read_activity(db, WINDOW, None)
+    assert [row["last_at"] for row in data.accesses] == [WINDOW.end]
+
+
+async def test_replayed_requests_are_not_setup_actions(digest_engine):
+    async with digest_engine.begin() as db:
+        await db.execute(
+            text(
+                """INSERT INTO audit_log (organization_id,resource_id,resource_type,action,actor_kind,occurred_at)
+                VALUES (:b,:b,'call','call.create.replayed','api_key',:start)"""
+            ),
+            {"b": B, "start": WINDOW.start},
+        )
+    async with digest_engine.connect() as db:
+        data = await read_activity(db, WINDOW, None)
+    assert data.actions == []
+
+
 async def test_receipts_are_scoped_to_workspace_and_key(digest_engine):
     async with digest_engine.begin() as db:
         await db.execute(

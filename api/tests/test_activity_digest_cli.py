@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import stat
@@ -58,6 +59,18 @@ def test_missing_settings_log_a_stable_code(monkeypatch, caplog):
     monkeypatch.setattr("sys.argv", ["activity-digest", "--once"])
     assert command.main() == 1
     assert "requires_review code=database_url_missing" in caplog.text
+
+
+async def test_the_worker_idles_on_bad_settings(monkeypatch, caplog):
+    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_API_KEY", "test-key")
+    monkeypatch.setenv("HAIL_ACTIVITY_DIGEST_TO", "someone@example.com")
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h/db")
+    args = argparse.Namespace(once=False, preview=False, output_dir=None)
+    task = asyncio.create_task(command.execute(args))
+    await asyncio.sleep(0.01)
+    assert not task.done()
+    assert "requires_review code=recipient_invalid" in caplog.text
+    task.cancel()
 
 
 def test_digest_engine_uses_the_url_options(monkeypatch):

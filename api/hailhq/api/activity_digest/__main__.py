@@ -48,7 +48,6 @@ def load_settings() -> DigestSettings:
 
 
 async def execute(args):
-    config = load_settings()
     one_shot = args.once or args.preview
     stop = asyncio.Event()
     if not one_shot:
@@ -57,15 +56,25 @@ async def execute(args):
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop.set)
+    try:
+        config = load_settings()
+        if config.enabled or args.preview:
+            if not config.database_url.get_secret_value():
+                raise ReviewRequired("database_url_missing")
+            if not args.preview:
+                config.validate_send()
+    except ReviewRequired as error:
+        if one_shot:
+            raise
+        # Log and idle. A restart loop here must not fail a deployment.
+        logger.error("activity_digest requires_review code=%s", error)
+        await stop.wait()
+        return 0
     if not config.enabled and not args.preview:
         print(json.dumps({"status": "disabled"}), flush=True)
         if not one_shot:
             await stop.wait()
         return 0
-    if not config.database_url.get_secret_value():
-        raise ReviewRequired("database_url_missing")
-    if not args.preview:
-        config.validate_send()
     database_url = config.database_url.get_secret_value()
     # A pooled connection would sit idle all day and hold a database slot.
     engine = create_async_engine(

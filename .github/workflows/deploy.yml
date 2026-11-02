@@ -182,7 +182,9 @@ jobs:
             assert_fresh api
             assert_fresh mcp
             assert_fresh voicebot "$new_voicebot"
-            assert_fresh activity-digest "" api
+            # The worker is optional, so a stale one only warns.
+            ( assert_fresh activity-digest "" api ) ||
+              echo "::warning::activity-digest did not pass the freshness check"
 
             $COMPOSE ps
 

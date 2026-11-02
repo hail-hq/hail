@@ -120,7 +120,7 @@ Inspect the receipt and API result before any separately approved recovery send.
 
 API 302, 307, 408, 429, and 5xx responses, network errors, and database errors retry after one minute.
 A 409 with a `Retry-After` header means the same daily key is still in progress. It retries too, so a later check can read the receipt.
-If that 409 continues 15 minutes past the report time, the worker logs `send_stuck` and closes the date. A crashed request can leave this state with no receipt.
+If that 409 continues for 15 minutes, the worker logs `send_stuck` and closes the date. A crashed request can leave this state with no receipt.
 If the API recorded the email as failed, the next check finds that receipt and closes the date without a second send.
 A 409 without `Retry-After`, such as the same daily key with a different body, closes the date. Inspect the `emails` rows for that key before any recovery send.
 Logs show a stable code or the error type, without customer data or credentials.

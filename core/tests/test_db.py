@@ -117,6 +117,19 @@ def test_a_question_mark_in_a_password_is_not_the_query():
     assert dict(parsed.query) == {"ssl": "require"}
 
 
+def test_an_at_sign_in_the_query_is_not_the_credentials():
+    url = "postgres://h/db?user=a@b.co&sslmode=require&pgbouncer=true"
+    assert dict(make_url(to_async_url(url)).query) == {
+        "user": "a@b.co",
+        "ssl": "require",
+    }
+    assert dict(make_url(to_sync_url(url)).query) == {
+        "user": "a@b.co",
+        "sslmode": "require",
+    }
+    assert engine_options(url) != {}
+
+
 def test_a_trailing_newline_in_the_url_is_ignored():
     url = "postgres://u:p@h/db?pgbouncer=true&sslmode=require\n"
     assert dict(make_url(to_async_url(url)).query) == {"ssl": "require"}

@@ -2,7 +2,7 @@
 
 **Goal:** Run the owner's daily activity email as a small Hail backend service.
 
-**Architecture:** A Python worker reuses the API image and the production Compose stack. An opt-in `activity-digest` profile controls the service. It reads a read-only database snapshot and sends through the Hail API on the Compose network. The website and GitHub Actions do not run the report.
+**Architecture:** A Python worker reuses the API image and the production Compose stack. The `activity-digest` service runs in every stack and idles until its API key is set. It reads a read-only database snapshot and sends through the Hail API on the Compose network. The website and GitHub Actions do not run the report.
 
 ## Requirements
 
@@ -33,7 +33,7 @@
 
 ## Task 3: Compose and handover
 
-- [x] Add an opt-in production service with restart policy, bounded logs, resource limits, minimal environment, and an API health dependency.
+- [x] Add a production service with restart policy, bounded logs, resource limits, minimal environment, and an API health dependency.
 - [x] Include the enabled worker in deployment freshness checks using the API image SHA.
 - [x] Document configuration, local preview, activation, failure recovery, stopping, and source limitations.
 - [x] Validate Compose, run applicable suites and lint, build the image, and inspect a fixture email.
@@ -42,7 +42,7 @@
 
 ## Review focus
 
-- Opt-in profiles must survive normal deployment and remain inactive by default.
+- The worker must survive normal deployment and send nothing until its API key is set.
 - A crash after API acceptance must not create a duplicate on restart.
 - Cached pre-send failures need review, not an automatic new idempotency key.
 - Report data must stay inside the approved internal recipient and private preview files.

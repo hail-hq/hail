@@ -42,6 +42,24 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 # are always >= 100, so 0 unambiguously means "another worker is running".
 _IN_FLIGHT_STATUS = 0
 
+# FastAPI does not infer a response from ``raise HTTPException``, so routes that
+# use ``idempotency_dep`` declare this for the generated spec.
+IDEMPOTENCY_CONFLICT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    409: {
+        "description": (
+            "Idempotency conflict. With a Retry-After header, the first request "
+            "with this key is still running, so retry after that many seconds. "
+            "Without it, the key was reused with a different request body."
+        ),
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {"type": "integer"},
+            }
+        },
+    }
+}
+
 _TTL = timedelta(hours=24)
 
 
@@ -244,17 +262,17 @@ async def idempotency_dep(
         request.state.idempotency_ctx = ctx
         return ctx
 
-    if existing.request_hash != request_hash:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="idempotency key reused with a different request body",
-        )
-
     if existing.response_status == _IN_FLIGHT_STATUS:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="request with this idempotency key is still processing",
             headers={"Retry-After": "5"},
+        )
+
+    if existing.request_hash != request_hash:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="idempotency key reused with a different request body",
         )
 
     ctx = IdempotencyContext(
@@ -271,6 +289,7 @@ async def idempotency_dep(
 
 
 __all__ = [
+    "IDEMPOTENCY_CONFLICT_RESPONSES",
     "IdempotencyContext",
     "cache_failure",
     "hash_request_body",
