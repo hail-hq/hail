@@ -44,11 +44,15 @@ from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
+
+_BIRD_ICON_URL = "https://hail.so/assets/brand/icons/icon-512.png"
+_SERVER_ICONS = [Icon(src=_BIRD_ICON_URL, mimeType="image/png", sizes=["512x512"])]
 
 _telemetry = configure_telemetry("hail-mcp")
 if _telemetry:
@@ -70,6 +74,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         )
         mcp_app: FastMCP = TaggedFastMCP(
             name="hail",
+            icons=_SERVER_ICONS,
             streamable_http_path="/",
             host="0.0.0.0",
             token_verifier=verifier,
@@ -80,7 +85,9 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         singleton: HailClient | None = None
     else:
         # static-key: pre-1c shape.
-        mcp_app = TaggedFastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
+        mcp_app = TaggedFastMCP(
+            name="hail", icons=_SERVER_ICONS, streamable_http_path="/", host="0.0.0.0"
+        )
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
@@ -89,6 +96,11 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
+
+    async def favicon(_request: Request) -> Response:
+        return RedirectResponse(
+            _BIRD_ICON_URL, headers={"Cache-Control": "public, max-age=3600"}
+        )
 
     async def glama_connector_claim(_request: Request) -> Response:
         return JSONResponse(
@@ -120,6 +132,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
+            Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
             *http_app.routes,
         ],
