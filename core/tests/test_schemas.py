@@ -5,7 +5,10 @@ from uuid import UUID, uuid4
 import pytest
 from hailhq.core.schemas import (
     CallCreate,
+    ContactCreate,
+    ContactPatch,
     EmailCreate,
+    EmailDomainPatch,
     EmailResponse,
     EmailSummary,
     LLMConfig,
@@ -282,40 +285,87 @@ def test_email_create_strips_from_name_before_length_check() -> None:
     assert email.from_name == "Acme"
 
 
-MALFORMED_ADDRESSES = ["<a@b.co>", "a,b@c.co", "a;b@c.co", "a@b.co,c@d.co", "a@b.co\n"]
+MALFORMED_ADDRESSES = [
+    "<a@b.co>",
+    "a,b@c.co",
+    "a;b@c.co",
+    "a@b.co,c@d.co",
+    "a@b.co\n",
+    "a\x00b@c.co",
+    "a@b\x7f.co",
+    '"a@b.co',
+    "(a@b.co",
+    "x:a@b.co",
+    "a\\b@c.co",
+    "a@b..co",
+    ".a@b.co",
+    "a..b@c.co",
+    "a@-b.co",
+    '"a,b"@c.co',
+]
+NORMAL_ADDRESSES = [
+    "a+tag@sub.example.co",
+    "o'brien@example.com",
+    "a.b_c-d@example.co",
+    "a@b.c",
+    "a@xn--bcher-kva.example",
+    "a@b\u00fccher.example",
+    "m\u00fcller@example.de",
+]
 
 
-@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
-def test_email_create_refuses_a_malformed_recipient(address):
-    with pytest.raises(ValidationError, match="invalid email address"):
-        EmailCreate(to=[address], subject="hi", body_text="hi", recipient_consent=True)
-
-
-@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
-def test_email_create_refuses_a_malformed_sender(address):
-    with pytest.raises(ValidationError, match="must be a valid email address"):
-        EmailCreate(
-            **{"from": address},
-            to=["a@b.co"],
-            subject="hi",
-            body_text="hi",
-            recipient_consent=True,
-        )
-
-
-@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
-def test_contact_refuses_a_malformed_email(address):
-    from hailhq.core.schemas import ContactCreate
-
-    with pytest.raises(ValidationError, match="must be a valid email address"):
-        ContactCreate(name="Bob", email=address)
-
-
-@pytest.mark.parametrize(
-    "address", ["a+tag@sub.example.co", "o'brien@example.com", "a.b_c-d@example.co"]
-)
-def test_email_create_keeps_accepting_normal_addresses(address):
-    email = EmailCreate(
-        to=[address], subject="hi", body_text="hi", recipient_consent=True
+def _email(**fields) -> EmailCreate:
+    return EmailCreate(
+        **{
+            "to": ["a@b.co"],
+            "subject": "hi",
+            "body_text": "hi",
+            "recipient_consent": True,
+            **fields,
+        }
     )
-    assert email.to == [address]
+
+
+@pytest.mark.parametrize("field", ["to", "cc", "bcc"])
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_email_create_refuses_a_malformed_recipient(field, address):
+    with pytest.raises(ValidationError, match="invalid email address"):
+        _email(**{field: [address]})
+
+
+@pytest.mark.parametrize("field", ["from", "reply_to"])
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_email_create_refuses_a_malformed_sender(field, address):
+    with pytest.raises(ValidationError, match="must be a valid email address"):
+        _email(**{field: address})
+
+
+@pytest.mark.parametrize("model", [ContactCreate, ContactPatch])
+@pytest.mark.parametrize("address", MALFORMED_ADDRESSES)
+def test_contact_refuses_a_malformed_email(model, address):
+    with pytest.raises(ValidationError, match="must be a valid email address"):
+        model(name="Bob", email=address)
+
+
+# forward targets are stripped before they are stored, so a newline is harmless.
+@pytest.mark.parametrize(
+    "address", [a for a in MALFORMED_ADDRESSES if not a.endswith("\n")]
+)
+def test_forward_to_refuses_a_malformed_address(address):
+    with pytest.raises(ValidationError, match="is not an email address"):
+        EmailDomainPatch(forward_to=[address])
+
+
+def test_forward_to_keeps_the_address_it_was_given():
+    assert EmailDomainPatch(forward_to=[" a@b.co "]).forward_to == [" a@b.co "]
+
+
+@pytest.mark.parametrize("address", NORMAL_ADDRESSES)
+def test_email_create_keeps_accepting_normal_addresses(address):
+    assert _email(to=[address]).to == [address]
+
+
+@pytest.mark.parametrize("number", ["+14155551234\n", "14155551234"])
+def test_contact_refuses_a_malformed_phone_number(number):
+    with pytest.raises(ValidationError):
+        ContactCreate(name="Bob", phone_e164=number)

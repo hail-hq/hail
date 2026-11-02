@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+E164 = re.compile(r"^\+[1-9]\d{1,14}\Z")
 
 
 def _e164_or_error(v: str | None) -> str | None:
@@ -1203,11 +1203,15 @@ class EventStreamResponse(BaseModel):
 # Email schemas.
 # --------------------------------------------------------------------------- #
 
-# A liberal regex — RFC 5322 in full is a tarpit. This catches the obvious
-# mistakes (no @, whitespace, list separators or angle brackets, missing TLD)
-# without rejecting things SES would accept. SES does its own validation at
-# send time. ``\Z`` because ``$`` would let a trailing newline through.
-EMAIL_ADDR = re.compile(r"^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+\Z")
+# An allowlist, because each field holds one plain address: atoms joined by
+# dots, then dotted domain labels. RFC 5322 in full is a tarpit, so quoted
+# local parts are refused. SES does its own validation at send time. ``\Z``
+# because ``$`` would let a trailing newline through.
+_LOCAL_ATOM = r"[\w!#$%&'*+/=?^`{|}~-]+"
+_DOMAIN_LABEL = r"[^\W_](?:[\w-]*[^\W_])?"
+EMAIL_ADDR = re.compile(
+    rf"^{_LOCAL_ATOM}(?:\.{_LOCAL_ATOM})*@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
+)
 DOMAIN_NAME = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 )
@@ -1464,8 +1468,7 @@ class EmailDomainPatch(BaseModel):
         if v is None:
             return v
         for addr in v:
-            local, sep, domain = addr.rpartition("@")
-            if not sep or not local or "." not in domain:
+            if not EMAIL_ADDR.match(addr.strip()):
                 raise ValueError(f"forward_to entry {addr!r} is not an email address")
         return v
 

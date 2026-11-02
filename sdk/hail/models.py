@@ -23,7 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+E164 = re.compile(r"^\+[1-9]\d{1,14}\Z")
 
 
 def _e164_or_error(v: str | None) -> str | None:
@@ -401,7 +401,11 @@ class EventStreamResponse(BaseModel):
 # by hand; codegen will replace this once openapi → SDK is wired.
 # --------------------------------------------------------------------------- #
 
-EMAIL_ADDR = re.compile(r"^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+\Z")
+_LOCAL_ATOM = r"[\w!#$%&'*+/=?^`{|}~-]+"
+_DOMAIN_LABEL = r"[^\W_](?:[\w-]*[^\W_])?"
+EMAIL_ADDR = re.compile(
+    rf"^{_LOCAL_ATOM}(?:\.{_LOCAL_ATOM})*@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
+)
 
 
 def _normalize_domain(addr: str) -> str:
