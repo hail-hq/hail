@@ -1378,6 +1378,7 @@ async def _submit_row(
     row.approved_by = approved_by
     _keep_refs(row, provider)  # what check() wrote just before
     await db.commit()
+    sent = copy.deepcopy(row.provider_refs)
     try:
         await provider.submit(row.provider_refs)
     except SubmitRefused as exc:
@@ -1385,11 +1386,18 @@ async def _submit_row(
         # customer sees why and can start again. If the discard fails, wait
         # for the next try, as when the carrier is down.
         outcome = await _refuse_row(  # pings when rejected
-            db, row, provider, exc.problems, kept_state="awaiting_review"
+            db,
+            row,
+            provider,
+            exc.problems,
+            baseline=sent,
+            kept_state="awaiting_review",
         )
         if outcome != "rejected":
             _notify_if_changed(row, before)
-        if outcome != "moved" and raise_refused:
+        # A row moved on is not the admin's refusal to see, unless it is
+        # waiting again: then the same draft would be refused again.
+        if raise_refused and (outcome != "moved" or row.state == "awaiting_review"):
             raise
         return False
     except Exception:
@@ -1474,7 +1482,11 @@ async def _retry_submit(
         await _save_refs(db, row, provider, before)
         return False
     if problems:
-        await _refuse_row(db, row, provider, problems)
+        outcome = await _refuse_row(
+            db, row, provider, problems, baseline=before[1]
+        )  # pings when rejected
+        if outcome != "rejected":
+            _notify_if_changed(row, before)
         return False
     return await _submit_row(
         db,
@@ -1491,6 +1503,8 @@ async def _refuse_row(
     row: CarrierVerification,
     provider: VerificationProvider,
     problems: list[Problem],
+    *,
+    baseline: dict,
     kept_state: str | None = None,
 ) -> RejectOutcome:
     """Reject a draft the carrier refused, with its per-field reasons."""
@@ -1503,6 +1517,7 @@ async def _refuse_row(
             f"{p.field}: {p.message}" if p.field else p.message for p in problems
         ),
         carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
+        baseline=baseline,
         kept_state=kept_state,
     )
 
@@ -1518,6 +1533,8 @@ async def _reject_row(
     provider: VerificationProvider,
     reason: str,
     carrier_reason: str | None = None,
+    *,
+    baseline: dict,
     kept_state: str | None = None,
 ) -> RejectOutcome:
     """The carrier refused the draft before submission: record why (Hail's
@@ -1526,22 +1543,19 @@ async def _reject_row(
     it as a system action (no person rejected it). If the discard fails the
     row keeps its refs, moves to ``kept_state`` (default: keeps its state)
     and is tried again next tick; the sweeper never dies on carrier trouble.
+    ``baseline``: the refs before the plug-in call that refused.
     """
     state, changed_at = row.state, row.updated_at
-    with db.no_autoflush:
-        stored = (
-            await db.execute(
-                select(CarrierVerification.provider_refs).where(
-                    CarrierVerification.id == row.id
-                )
-            )
-        ).scalar_one()
-    _keep_refs(row, provider)
-    rate = row.purpose == "sms" and _campaign_filed(provider, row.provider_refs)
-    if rate or row.provider_refs != stored:
+    # Compared on a copy: flagging the row unsaved would make the lock
+    # query below write the refs before it checks the row.
+    stamped = copy.deepcopy(row.provider_refs)
+    _stamp_campaign_filed(provider, stamped)
+    rate = row.purpose == "sms" and _campaign_filed(provider, stamped)
+    if rate or stamped != baseline:
         # Saved before the discard: the ids the plug-in wrote (a filed
         # campaign is billed) must survive a failed discard, or a restart
         # during it. The commit ends the row lock.
+        _keep_refs(row, provider)
         await db.commit()
     if rate:
         # The rater charges the review by the campaign id: before the wipe.
