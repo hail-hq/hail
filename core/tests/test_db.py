@@ -6,6 +6,7 @@ import asyncio
 from urllib.parse import parse_qs, urlsplit
 
 from hailhq.core.db import engine_options, to_async_url, to_sync_url
+from sqlalchemy.engine import make_url
 
 
 def test_to_async_url_rewrites_scheme_aliases():
@@ -97,13 +98,17 @@ def test_a_url_with_no_host_stays_valid():
     assert to_async_url(url).startswith("postgresql+asyncpg:///hail?host=")
 
 
-def test_a_rewritten_query_keeps_the_text_after_a_hash():
-    assert to_async_url("postgres://u:p@h/db?sslmode=require#tail") == (
-        "postgresql+asyncpg://u:p@h/db?ssl=require#tail"
+def test_a_hash_in_a_url_is_read_the_way_sqlalchemy_reads_it():
+    url = "postgres://u:p#w@h/db?sslmode=require&pgbouncer=true"
+    parsed = make_url(to_async_url(url))
+    assert parsed.password == "p#w"
+    assert dict(parsed.query) == {"ssl": "require"}
+    assert engine_options(url) != {}
+
+    parsed = make_url(
+        to_sync_url("postgres://u:p@h/db?password=ab#c&pgbouncer=true&sslmode=require")
     )
-    assert to_sync_url("postgres://u:p@h/db?pgbouncer=true&sslmode=require#tail") == (
-        "postgresql+psycopg://u:p@h/db?sslmode=require#tail"
-    )
+    assert dict(parsed.query) == {"password": "ab#c", "sslmode": "require"}
 
 
 def test_pgbouncer_flag_turns_off_prepared_statements():

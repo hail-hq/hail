@@ -1,14 +1,14 @@
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
 import pytest
 from hailhq.api.activity_digest.queries import Receipt
-from hailhq.api.activity_digest.report import ActivityData
+from hailhq.api.activity_digest.report import ActivityData, daily_window
 from hailhq.api.activity_digest.worker import (
     DigestClient,
     DigestService,
@@ -16,8 +16,8 @@ from hailhq.api.activity_digest.worker import (
     DigestWorker,
     RetryLater,
     ReviewRequired,
+    SendInProgress,
 )
-from hailhq.api.idempotency import STILL_PROCESSING
 from hailhq.core.schemas import EmailCreate
 
 NOW = datetime(2026, 10, 29, 9, tzinfo=timezone.utc)
@@ -241,7 +241,7 @@ def test_an_invalid_sender_fails_validation(setup, sender):
         config.validate_send()
 
 
-@pytest.mark.parametrize("status", [301, 308, 401, 403, 404])
+@pytest.mark.parametrize("status", [300, 301, 303, 304, 308, 401, 403, 404])
 async def test_a_rejected_read_requires_review(setup, status):
     config, repository = setup
     async with httpx.AsyncClient(
@@ -265,24 +265,35 @@ async def test_a_busy_api_retries_with_its_status_code(setup, status):
             ).run_once(NOW)
 
 
-async def test_a_send_still_in_progress_retries(setup):
+@pytest.mark.parametrize(
+    "headers, error, code",
+    [
+        ({"Retry-After": "5"}, SendInProgress, "api_status_409"),
+        ({}, ReviewRequired, "api_rejection_409"),
+    ],
+)
+async def test_only_a_409_with_retry_after_retries(setup, headers, error, code):
     config, _ = setup
-    answer = httpx.Response(409, json={"detail": STILL_PROCESSING})
+    answer = httpx.Response(409, headers=headers, json={"detail": "any text"})
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: answer)
     ) as http:
-        with pytest.raises(RetryLater, match="api_status_409"):
+        with pytest.raises(error, match=code):
             await DigestClient(config, http).request("emails", payload={}, key="k")
 
 
-async def test_a_reused_key_with_a_new_body_requires_review(setup):
-    config, _ = setup
-    answer = httpx.Response(409, json={"detail": "reused with a different body"})
+@pytest.mark.parametrize("minutes, error", [(5, SendInProgress), (16, ReviewRequired)])
+async def test_a_stuck_send_stops_retrying(setup, minutes, error):
+    config, repository = setup
+    now = daily_window(NOW).end + timedelta(minutes=minutes)
+    requests = []
     async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: answer)
+        transport=httpx.MockTransport(transport_handler(requests))
     ) as http:
-        with pytest.raises(ReviewRequired, match="api_rejection_409"):
-            await DigestClient(config, http).request("emails", payload={}, key="k")
+        client = DigestClient(config, http)
+        client.send = AsyncMock(side_effect=SendInProgress("api_status_409"))
+        with pytest.raises(error):
+            await DigestService(config, repository, client).run_once(now)
 
 
 async def test_unverified_sender_never_sends(setup):

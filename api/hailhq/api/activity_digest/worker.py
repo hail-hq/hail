@@ -14,7 +14,6 @@ from uuid import UUID
 
 import httpx
 from hailhq.api.auth import hash_key
-from hailhq.api.idempotency import STILL_PROCESSING
 from hailhq.core.schemas import EmailCreate
 from hailhq.core.urls import canonical_url, join_url
 from pydantic import Field, SecretStr, field_validator
@@ -31,6 +30,10 @@ class ReviewRequired(Exception):
 
 class RetryLater(Exception):
     """A stable diagnostic code for a failure the next check can clear."""
+
+
+class SendInProgress(RetryLater):
+    """The API is still running the first request for this daily key."""
 
 
 class DigestSettings(BaseSettings):
@@ -79,11 +82,10 @@ class Result:
         }
 
 
-def is_terminal(response: httpx.Response) -> bool:
-    status = response.status_code
-    if status == 409:
-        return STILL_PROCESSING not in response.text
-    return status in (301, 308) or (400 <= status < 500 and status not in (408, 429))
+def is_terminal(status: int) -> bool:
+    if 300 <= status < 400:
+        return status not in (302, 307)
+    return status < 500 and status not in (408, 429)
 
 
 class DigestClient:
@@ -103,7 +105,9 @@ class DigestClient:
             timeout=30,
         )
         if not response.is_success:
-            if is_terminal(response):
+            if response.status_code == 409 and "Retry-After" in response.headers:
+                raise SendInProgress("api_status_409")
+            if is_terminal(response.status_code):
                 # A bad key stays bad, and cached pre-send rejections can
                 # persist after a credit top-up.
                 # A new key could duplicate an ambiguously accepted email.
@@ -207,7 +211,13 @@ class DigestService:
                 },
             }
         )
-        email_id = await self.client.send(payload, key)
+        try:
+            email_id = await self.client.send(payload, key)
+        except SendInProgress:
+            # A crashed request can leave this state with no receipt.
+            if (now - window.end).total_seconds() > 900:
+                raise ReviewRequired("send_stuck") from None
+            raise
         return Result("submitted", window.date, email_id)
 
 

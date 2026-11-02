@@ -258,6 +258,7 @@ async def test_post_calls_idempotency_in_flight_returns_409(
     )
     assert resp.status_code == 409
     assert "still processing" in resp.json()["detail"]
+    assert resp.headers["Retry-After"] == "5"
 
 
 async def test_post_calls_idempotency_isolated_per_org(

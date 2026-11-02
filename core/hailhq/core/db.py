@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode
 from uuid import UUID
 
 import logfire
@@ -67,13 +67,17 @@ def _rewrite_scheme(url: str, target_prefix: str) -> str:
     return url
 
 
+def _query(url: str) -> str:
+    """Return the query of ``url``, read the way SQLAlchemy reads it: all text
+    after the ``?``. ``urlsplit`` would stop at a ``#``, even one in a password."""
+    return url.partition("?")[2]
+
+
 def _with_query(url: str, query: str) -> str:
     """Replace the query of ``url``. ``urlunsplit`` would drop the ``//`` of a
     URL with no host, because it does not know these schemes."""
-    base, _, rest = url.partition("?")
-    fragment = rest.partition("#")[2]
-    tail = f"#{fragment}" if fragment else ""
-    return f"{base}?{query}{tail}" if query else f"{base}{tail}"
+    base = url.partition("?")[0]
+    return f"{base}?{query}" if query else base
 
 
 def _sanitize_asyncpg_query(query: str) -> str:
@@ -97,10 +101,10 @@ def to_async_url(url: str) -> str:
     managed-Postgres URLs from Neon, Supabase, Heroku, etc. work unchanged.
     """
     rewritten = _rewrite_scheme(url, "postgresql+asyncpg://")
-    parts = urlsplit(rewritten)
-    if not parts.query:
+    query = _query(rewritten)
+    if not query:
         return rewritten
-    return _with_query(rewritten, _sanitize_asyncpg_query(parts.query))
+    return _with_query(rewritten, _sanitize_asyncpg_query(query))
 
 
 def to_sync_url(url: str) -> str:
@@ -109,7 +113,7 @@ def to_sync_url(url: str) -> str:
     Also drops the params libpq rejects. Every other param keeps its exact text.
     """
     rewritten = _rewrite_scheme(url, "postgresql+psycopg://")
-    params = urlsplit(rewritten).query.split("&")
+    params = _query(rewritten).split("&")
     kept = [param for param in params if param.split("=")[0] not in _NOT_FOR_LIBPQ]
     if len(kept) == len(params):
         return rewritten
@@ -124,7 +128,7 @@ def engine_options(url: str) -> dict:
     prepared statement would be missing there. With both caches at 0,
     asyncpg sends unnamed statements only.
     """
-    query = dict(parse_qsl(urlsplit(url).query))
+    query = dict(parse_qsl(_query(url)))
     if query.get("pgbouncer", "").lower() != "true":
         return {}
     return {
