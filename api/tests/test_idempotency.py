@@ -258,6 +258,19 @@ async def test_post_calls_idempotency_in_flight_returns_409(
     )
     assert resp.status_code == 409
     assert "still processing" in resp.json()["detail"]
+    assert resp.headers["Retry-After"] == "5"
+
+    # A changed body gets the same answer while the first request runs.
+    resp = await client.post(
+        "/calls",
+        json={**body, "system_prompt": "changed"},
+        headers={
+            "Authorization": f"Bearer {plain}",
+            "Idempotency-Key": "in-flight-key",
+        },
+    )
+    assert resp.status_code == 409
+    assert "still processing" in resp.json()["detail"]
 
 
 async def test_post_calls_idempotency_isolated_per_org(

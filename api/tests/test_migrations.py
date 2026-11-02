@@ -757,3 +757,9 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert rows == [(agent, contact)]
         assert _column_data_type(conn, "agent_handover_contacts", "user_id") is None
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
+
+
+def test_alembic_reads_a_percent_encoded_url(empty_db: str) -> None:
+    """ConfigParser treats ``%`` as interpolation, so env.py must escape it."""
+    separator = "&" if "?" in empty_db else "?"
+    _run_alembic(f"{empty_db}{separator}options=-c%20geqo%3Doff", ["current"])

@@ -24,6 +24,7 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES
 from hailhq.api.idempotency import (
+    IDEMPOTENCY_CONFLICT_RESPONSES,
     IdempotencyContext,
     cache_failure,
     idempotency_dep,
@@ -135,8 +136,10 @@ async def _get_org_number_or_404(
                 "expected_total_cents differs from the quoted total, or the "
                 "carrier rejected or failed the order. In the last case the credit "
                 "hold is refunded and the detail gives the reason. Also returned "
-                "when the quote's number was released since it was bought."
+                "when the quote's number was released since it was bought. "
+                + IDEMPOTENCY_CONFLICT_RESPONSES[409]["description"]
             ),
+            "headers": IDEMPOTENCY_CONFLICT_RESPONSES[409]["headers"],
         },
         503: {
             "description": (

@@ -77,6 +77,12 @@ services:
     ports: !override
       - "127.0.0.1:8081:8081"
 
+  activity-digest:
+    image: ghcr.io/hail-hq/hail-api:latest
+    build: !reset null
+    restart: unless-stopped
+    logging: *bounded-logging
+
 volumes:
   caddy-data:
   caddy-config:
