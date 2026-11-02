@@ -302,6 +302,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         documents,
         messaging_service_sid=None,
         kept_brand_id=None,
+        new_brand_funded=False,
     ) -> DraftResult:
         subject_type = requirements.subject_type
         problems = self._validate(fields, address, subject_type)
@@ -338,6 +339,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 and await self._reuse_brand(refs, fields, kept_brand_id)
             ):
                 return DraftResult(refs=refs)
+            # Telnyx bills a new brand once made, so stop before _build.
+            if kept_brand_id and not new_brand_funded:
+                return DraftResult(refs={}, needs_new_brand_credit=True)
             problems = await self._build(refs, fields, address, subject_type)
         except Exception as exc:
             refused = _refused(exc)
@@ -399,10 +403,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def _reuse_brand(self, refs, fields, brand_id) -> bool:
         """Put the kept brand in refs when Telnyx still holds it, confirmed,
         for the same person, with no campaign. False files a new brand
-        instead. A sole proprietor brand takes one campaign, and ``status``
-        would adopt one still listed (a failed campaign delete). A brand
-        that does not fit stays at Telnyx, which refuses to delete a brand
-        for 3 months after its campaign."""
+        instead, or stops with a 402 when the credit does not cover one
+        (``new_brand_funded``). A sole proprietor brand takes one campaign,
+        and ``status`` would adopt one still listed (a failed campaign
+        delete). A brand that does not fit stays at Telnyx, which refuses to
+        delete a brand for 3 months after its campaign."""
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{path_id(brand_id)}")
             if (

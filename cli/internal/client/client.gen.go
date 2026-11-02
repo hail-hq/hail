@@ -1970,10 +1970,10 @@ type EmailDomainCreate struct {
 	// Kind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
 	Kind EmailDomainCreateKind `json:"kind"`
 
-	// LocalPrefixOrg Org-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted.
+	// LocalPrefixOrg Org-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to a prefix derived from the organization id if omitted.
 	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
 
-	// LocalPrefixUser User-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX if omitted.
+	// LocalPrefixUser User-chosen local-part prefix for a hail_mail address. One organization only may hold it; a taken prefix returns 409. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if omitted.
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
@@ -2006,7 +2006,7 @@ type EmailDomainDnsCheckKind string
 
 // EmailDomainListResponse defines model for EmailDomainListResponse.
 type EmailDomainListResponse struct {
-	// DefaultFrom The From address used when a send omits 'from'. Null when no such default can be resolved (e.g. multiple verified identities, or none that can send yet). Computed across the whole organization, not just this page.
+	// DefaultFrom The From address used when a send omits 'from'. A verified custom domain wins over the hail-mail address. Null when no such default can be resolved (e.g. multiple verified custom domains, or none that can send yet). Computed across the whole organization, not just this page.
 	DefaultFrom *string `json:"default_from,omitempty"`
 
 	// Items Email domains in this page.
@@ -2047,7 +2047,7 @@ type EmailDomainPatch struct {
 	// LocalPrefixOrg New org local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
 	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
 
-	// LocalPrefixUser New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	// LocalPrefixUser New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 

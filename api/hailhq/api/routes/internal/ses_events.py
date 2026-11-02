@@ -150,7 +150,7 @@ async def receive_ses_event(
         org_rate_per_hour=settings.hail_inbound_org_rate_per_hour,
         funds_check=has_funds,
     )
-    for created_id, created_org_id in result.created_email_ids:
+    for created_id, created_org_id in result.billable_email_ids:
         await write_usage_event(
             organization_id=created_org_id,
             channel="email",

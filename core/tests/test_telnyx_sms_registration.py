@@ -568,7 +568,7 @@ KEPT_BRAND = {
 }
 
 
-async def _kept_draft(p):
+async def _kept_draft(p, **kwargs):
     req = await p.requirements("US", "local", "person")
     return await p.create_draft(
         organization_id="org1",
@@ -578,6 +578,7 @@ async def _kept_draft(p):
         address=ADDRESS,
         documents={},
         kept_brand_id="B9",
+        **kwargs,
     )
 
 
@@ -607,7 +608,8 @@ async def test_person_reuses_the_kept_brand_with_no_pin() -> None:
 )
 async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     calls: list = []
-    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    p = _provider(_kept_brand_handler(calls, brand))
+    draft = await _kept_draft(p, new_brand_funded=True)
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
     assert ("POST", "/v2/10dlc/brand") in calls
     assert ("POST", "/v2/10dlc/brand/B1/smsOtp") in calls
@@ -615,6 +617,44 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
     # The brand read decides it: no call to list its campaigns.
     assert not [c for c in calls if c[0] == "GET" and "/10dlc/campaign" in c[1]]
+
+
+async def test_a_reused_brand_files_when_a_new_brand_is_not_funded() -> None:
+    calls: list = []
+    p = _provider(_kept_brand_handler(calls, KEPT_BRAND))
+    draft = await _kept_draft(p, new_brand_funded=False)
+    assert draft.needs_new_brand_credit is False
+    assert draft.refs["brand_id"] == "B9" and draft.refs["brand_reused"] is True
+
+
+@pytest.mark.parametrize("brand", [{**KEPT_BRAND, "lastName": "Byron"}, None])
+async def test_a_brand_that_cannot_be_reused_without_credit_files_no_brand(
+    brand,
+) -> None:
+    calls: list = []
+    p = _provider(_kept_brand_handler(calls, brand))
+    draft = await _kept_draft(p, new_brand_funded=False)
+    assert draft.needs_new_brand_credit is True
+    assert draft.refs == {} and draft.problems == [] and draft.billed_refs == {}
+    assert ("POST", "/v2/10dlc/brand") not in calls
+
+
+async def test_a_caller_that_does_not_say_files_no_new_brand() -> None:
+    calls: list = []
+    brand = {**KEPT_BRAND, "lastName": "Byron"}
+    draft = await _kept_draft(_provider(_kept_brand_handler(calls, brand)))
+    assert draft.needs_new_brand_credit is True
+    assert ("POST", "/v2/10dlc/brand") not in calls
+
+
+async def test_changed_details_with_credit_file_a_new_brand() -> None:
+    calls: list = []
+    brand = {**KEPT_BRAND, "lastName": "Byron"}
+    p = _provider(_kept_brand_handler(calls, brand))
+    draft = await _kept_draft(p, new_brand_funded=True)
+    assert draft.needs_new_brand_credit is False
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+    assert ("POST", "/v2/10dlc/brand") in calls
 
 
 async def test_a_kept_brand_matches_a_mobile_in_any_format() -> None:
@@ -633,7 +673,7 @@ async def _lookup_answering(status: int):
             return httpx.Response(status, json={})
         return _kept_brand_handler(calls, KEPT_BRAND)(req)
 
-    return await _kept_draft(_provider(handler))
+    return await _kept_draft(_provider(handler), new_brand_funded=True)
 
 
 async def test_a_refused_lookup_files_a_new_brand() -> None:
@@ -651,7 +691,7 @@ async def test_a_failed_lookup_does_not_pay_for_a_new_brand(status) -> None:
 async def test_a_kept_brand_with_a_campaign_is_left_alone() -> None:
     calls: list = []
     handler = _kept_brand_handler(calls, KEPT_BRAND, [{"campaignId": "OLD"}])
-    draft = await _kept_draft(_provider(handler))
+    draft = await _kept_draft(_provider(handler), new_brand_funded=True)
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
     assert ("DELETE", "/v2/10dlc/brand/B9") not in calls
 

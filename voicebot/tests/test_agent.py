@@ -2462,3 +2462,43 @@ async def test_soft_cap_during_reply_check_unmutes_for_goodbye() -> None:
     )
     assert session.output.enabled == [True]
     assert ctx.delete_room_calls == 1
+
+
+async def test_speak_greeting_speaks_built_in_line_in_call_language():
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {"org_name": "Acme"}, language="sv")
+    assert session.say_calls == [
+        ("Hej, det här är en AI-assistent som ringer på uppdrag av Acme.", True)
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "direction": "inbound",
+            "org_name": "Acme",
+            "first_message": "Hej! Hur kan jag hjälpa dig?",
+        },
+        language="sv",
+    )
+    assert session.say_calls == [
+        ("Hej! Jag är en AI-assistent för Acme. Hur kan jag hjälpa dig?", False)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("message", "spoken"),
+    [
+        ("您好！请问有什么可以帮您？", "您好！ AI line. 请问有什么可以帮您？"),
+        ("请问有什么可以帮您？", "AI line. 请问有什么可以帮您？"),
+        ("こんにちは。", "こんにちは。 AI line."),
+        ("كيف يمكنني مساعدتك؟", "AI line. كيف يمكنني مساعدتك؟"),
+        ("नमस्ते। आप कैसे हैं?", "नमस्ते। AI line. आप कैसे हैं?"),
+        ("Πώς μπορώ να βοηθήσω;", "AI line. Πώς μπορώ να βοηθήσω;"),
+        ("Soy la Sra. García. ¿Le ayudo?", "Soy la Sra. García. AI line. ¿Le ayudo?"),
+    ],
+)
+def test_greeting_with_ai_line_in_other_languages(message, spoken):
+    from hailhq.voicebot.agent import greeting_with_ai_line
+
+    assert greeting_with_ai_line(message, "AI line.") == spoken

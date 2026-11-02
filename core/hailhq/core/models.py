@@ -4,9 +4,11 @@ from decimal import Decimal
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
     ARRAY,
+    DDL,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -1089,7 +1092,9 @@ class EmailDomain(Base):
       source of truth; ``domain`` is the computed full address kept in
       sync at write time. The parent base domain is pre-verified by the
       operator out-of-band, so these rows land at ``verified`` immediately
-      and ``dns_records`` stays empty.
+      and ``dns_records`` stays empty. ``local_prefix_user`` is the mailbox
+      and ``local_prefix_org`` an alias: inbound mail routes on the user
+      prefix alone.
     * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
       ``acme.com``). The prefix columns are both NULL.
       ``verification_status`` starts at ``pending`` and ``dns_records``
@@ -1186,7 +1191,7 @@ class EmailDomain(Base):
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
         # hail_mail rows are org-scoped by this constraint only (their global
-        # uniqueness is enforced on the prefix pair, not the domain column).
+        # uniqueness is enforced on the user prefix, not the domain column).
         UniqueConstraint(
             "organization_id", "domain", name="email_domains_org_domain_unique"
         ),
@@ -1200,19 +1205,153 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'custom'"),
         ),
-        # Hail-mail addresses route inbound mail by (user, org) prefix with
-        # no org scoping at lookup time (email_ingest matches the prefix
-        # pair, not the domain column) — the pair must be globally unique or
-        # org B could register org A's prefixes and intercept mail, even if
+        # Hail-mail addresses route inbound mail by the user prefix alone,
+        # with no org scoping at lookup time (email_ingest does not match the
+        # domain column) — the prefix must be globally unique or org B could
+        # register org A's prefix and intercept mail, even if
         # HAIL_MAIL_BASE_DOMAIN changed between the two registrations.
         Index(
-            "email_domains_hail_mail_prefix_uq",
+            "email_domains_hail_mail_head_uq",
             "local_prefix_user",
-            "local_prefix_org",
+            unique=True,
+            postgresql_where=text("kind = 'hail_mail'"),
+        ),
+        # One hail-mail address per org.
+        Index(
+            "email_domains_hail_mail_org_uq",
+            "organization_id",
             unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
         ),
     )
+
+
+class RetiredHailMailAddress(Base):
+    """A hail-mail address an org no longer holds.
+
+    The ``email_domains`` triggers below write these rows, so every writer is
+    covered: another org must never take a head and receive the mail still
+    sent to the old address. No FK to the org: the row must outlive it.
+    """
+
+    __tablename__ = "retired_hail_mail_addresses"
+
+    local_prefix_user: Mapped[str] = mapped_column(Text, primary_key=True)
+    local_prefix_org: Mapped[str] = mapped_column(Text, primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    retired_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+
+# Rules on a NEW head or tail only, so an older row with a role-name head keeps
+# working when its other columns change. A CHECK would run on every update of that row.
+# Error codes are the ones callers already handle: 23505 means "taken".
+_ROLE_MAILBOXES_SQL = ", ".join(f"'{name}'" for name in sorted(ROLE_MAILBOXES))
+EMAIL_DOMAINS_GUARD_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION email_domains_guard_hail_mail_head() RETURNS trigger AS $$
+DECLARE
+    newest_org uuid;
+    head_changed boolean;
+BEGIN
+    -- Claiming a head and releasing it must run one after the other. Otherwise
+    -- a claim can read no retirement record, then commit just after the release
+    -- and take the head. The lock is taken here, before the row changes: taken
+    -- only after the change, a release and a claim would deadlock on the unique
+    -- index. Heads are locked in sorted order for the same reason.
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.kind = 'hail_mail' THEN
+            PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+        END IF;
+        RETURN OLD;
+    END IF;
+    IF NEW.kind <> 'hail_mail'
+       OR (TG_OP = 'UPDATE'
+           AND NEW.local_prefix_user IS NOT DISTINCT FROM OLD.local_prefix_user
+           AND NEW.local_prefix_org IS NOT DISTINCT FROM OLD.local_prefix_org) THEN
+        RETURN NEW;
+    END IF;
+    head_changed := TG_OP = 'INSERT'
+        OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user;
+    IF head_changed AND NEW.local_prefix_user = ANY (ARRAY[{_ROLE_MAILBOXES_SQL}]) THEN
+        RAISE EXCEPTION USING ERRCODE = '23514',
+            MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is reserved';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext(head))
+       FROM (SELECT DISTINCT head
+               FROM unnest(ARRAY[OLD.local_prefix_user, NEW.local_prefix_user]) AS head
+              WHERE head IS NOT NULL
+              ORDER BY head) AS heads;
+    -- Only the org that gave the head up last may take it back.
+    IF head_changed THEN
+        SELECT r.organization_id INTO newest_org
+          FROM retired_hail_mail_addresses r
+         WHERE r.local_prefix_user = NEW.local_prefix_user
+         ORDER BY r.retired_at DESC, r.organization_id
+         LIMIT 1;
+        IF FOUND AND newest_org <> NEW.organization_id THEN
+            RAISE EXCEPTION USING ERRCODE = '23505',
+                MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is retired';
+        END IF;
+    END IF;
+    -- A new tail must not claim the exact address another org gave up: ingest
+    -- would then hold mail that was meant for that org.
+    IF EXISTS (
+           SELECT 1 FROM retired_hail_mail_addresses r
+            WHERE r.local_prefix_user = NEW.local_prefix_user
+              AND r.local_prefix_org = NEW.local_prefix_org
+              AND r.organization_id <> NEW.organization_id) THEN
+        RAISE EXCEPTION USING ERRCODE = '23505',
+            MESSAGE = 'hail-mail address ' || NEW.local_prefix_user || '+'
+                || NEW.local_prefix_org || ' is retired';
+    END IF;
+    RETURN NEW;
+END
+$$ LANGUAGE plpgsql
+"""
+EMAIL_DOMAINS_GUARD_TRIGGER = """
+CREATE OR REPLACE TRIGGER email_domains_guard_hail_mail_head
+BEFORE INSERT OR UPDATE OR DELETE ON email_domains
+FOR EACH ROW EXECUTE FUNCTION email_domains_guard_hail_mail_head()
+"""
+EMAIL_DOMAINS_RETIRE_FUNCTION = """
+CREATE OR REPLACE FUNCTION email_domains_retire_hail_mail() RETURNS trigger AS $$
+BEGIN
+    IF OLD.kind = 'hail_mail'
+       AND (TG_OP = 'DELETE'
+            OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user) THEN
+        -- The guard already holds this lock on any normal path. It stays here
+        -- so a release can never run unserialized, even with the guard disabled.
+        PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+        -- clock_timestamp, not now(): two rewrites in one transaction need an
+        -- order, and the newest record decides who may take the head back.
+        INSERT INTO retired_hail_mail_addresses
+            (local_prefix_user, local_prefix_org, organization_id, retired_at)
+        VALUES (OLD.local_prefix_user, OLD.local_prefix_org, OLD.organization_id,
+                clock_timestamp())
+        ON CONFLICT (local_prefix_user, local_prefix_org, organization_id)
+        DO UPDATE SET retired_at = EXCLUDED.retired_at;
+    END IF;
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql
+"""
+EMAIL_DOMAINS_RETIRE_TRIGGER = """
+CREATE OR REPLACE TRIGGER email_domains_retire_hail_mail
+AFTER UPDATE OR DELETE ON email_domains
+FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
+"""
+
+# Base.metadata.create_all (tests) must produce the same shape as the migration.
+for _statement in (
+    EMAIL_DOMAINS_GUARD_FUNCTION,
+    EMAIL_DOMAINS_GUARD_TRIGGER,
+    EMAIL_DOMAINS_RETIRE_FUNCTION,
+    EMAIL_DOMAINS_RETIRE_TRIGGER,
+):
+    event.listen(Base.metadata, "after_create", DDL(_statement))
 
 
 class EmailForwardTarget(Base):

@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
+
 ## [0.32.0] (2026-10-30)
 
 Email stops sending to addresses that hard bounce, complain or unsubscribe,
@@ -30,12 +34,17 @@ Database migrations run on deploy.
 ### Changed
 
 - Agent texts and emails are no longer limited to 5 per call; each is billed as usual.
+- **Breaking.** A hail-mail user prefix now belongs to one organization (`409` if taken), and mail to `<user>@` or `<user>+<any alias>@` reaches that organization.
+- **Breaking.** An organization holds one hail-mail address, role names such as `admin` cannot be new user prefixes, and an address given up stays out of reach of other organizations.
+- A send with no `from` now uses a verified custom domain over the hail-mail address.
+- Inbound email is free at zero balance: the message is still stored and shown, with no charge.
 - **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
 - **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
 - Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
 - US texting registration: on Telnyx, the website, company name, person name and email take at most 100 characters.
 - US texting registration: refusal and rejection messages no longer say "the carrier"; refusals name the 10DLC registry.
 - The time-limit goodbye and the goodbye when a call's own LLM keeps failing are spoken in the call's language.
+- The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
 - Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.
 
 ### Fixed

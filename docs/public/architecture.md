@@ -93,7 +93,7 @@ The two surfaces differ in the source of the prefixes and in the place where you
 | Auth                  | Shared `HAIL_API_KEY`; one sentinel "Self-hosted" org                                                                    | Per-user `hl_live_*` keys via the website's auth backend                                            |
 | Org concept           | None — single sentinel org                                                                                               | Real orgs with members                                                                              |
 | Hail-mail base domain | `HAIL_MAIL_BASE_DOMAIN` (operator's `.env`)                                                                              | `HAIL_MAIL_BASE_DOMAIN` (operator's deploy env)                                                     |
-| Hail-mail prefixes    | User prefix from `HAIL_MAIL_FROM` / `HAIL_MAIL_DEFAULT_USER_PREFIX` (`.env`); org prefix derived per-org from the org id | Same: user prefix from env, org prefix derived per-org; org admins override per-org via the console |
+| Hail-mail prefixes    | User prefix from `HAIL_MAIL_FROM` / `HAIL_MAIL_DEFAULT_USER_PREFIX` (`.env`); org prefix derived per-org from the org id | Same: user prefix from env plus a per-org token, org prefix derived per-org; org admins override per-org via the console |
 | Where edits land      | Restart with new `.env` values                                                                                           | `PATCH /email-domains/{id}` (console writes this)                                                   |
 | SES production access | Operator's AWS account                                                                                                   | Operator's AWS account                                                                              |
 | Billing               | Off — `usage_events` accumulates as raw analytics                                                                        | Cloud rater applies cents/unit, debits `account_credits`                                            |
@@ -105,8 +105,8 @@ Hail validates both prefixes against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1�
 `POST /emails` picks a sender in this order:
 
 1. An explicit `from` — it must match a `verified` row that the caller's org owns.
-2. The org's single verified domain. With two or more, there is no default: the request returns `422` listing them, and the caller must pass `from`.
-3. An auto-minted hail-mail row with the configured prefixes, if `HAIL_MAIL_BASE_DOMAIN` is set.
+2. The org's single verified custom domain, which wins over the hail-mail address. With two or more, there is no default: the request returns `422` listing them, and the caller must pass `from`.
+3. The org's hail-mail address, auto-minted with the configured prefixes if the org has none and `HAIL_MAIL_BASE_DOMAIN` is set.
 
 If none of those resolve, the request returns `503` with instructions on how to register a domain.
 
@@ -125,7 +125,7 @@ The Terraform provisions an S3 bucket, an SES Receipt Rule + Rule Set,
 and a small Lambda. The Lambda signs SES events and forwards them to
 Hail's `POST /internal/ses-events` endpoint. The API parses the raw MIME
 from S3 and routes the message to the owning org by the hail-mail
-local-part (`<user>+<org>@mail.hail.so`). It persists an `Email` row
+local-part: `<user>` before the plus names the mailbox, and any `+<alias>` is ignored. It persists an `Email` row
 with `direction='inbound'`. The background delivery worker fans out
 events to per-domain webhooks and org-wide subscriptions.
 
