@@ -8,7 +8,9 @@ texts to one. The agent reads the thread and answers by email.
 ## Routing
 
 - `email_domains.email_agent_id` names the agent. Null means no agent replies.
-- `email_domains.email_agent_scope` is `members` (default) or `anyone`.
+- `email_domains.email_agent_scope` is `members` (default) or `anyone`. A new route
+  starts at `members` unless the call names a scope. An old `anyone` was chosen for
+  another agent.
 - `agents.email_enabled` (default true) says whether the agent answers email.
 - `PATCH /email-domains/{id}` sets both fields. The agent must be live, in the
   organization, and have `email_enabled`.
@@ -24,7 +26,9 @@ only when all of these hold:
 1. The mail is not spam or a virus, and the org is under its inbound cap.
 2. The domain has an agent that answers email.
 3. It has no `Auto-Submitted` (other than `no`), `Precedence: auto_reply|bulk|list|junk`,
-   `List-Id`, or `List-Unsubscribe` header.
+   `List-Id`, or `List-Unsubscribe` header. Hail adds `List-Unsubscribe` to its own
+   sends to one person, so mail sent through Hail gets no reply. Newsletters often
+   carry only that header, so the rule stays.
 4. It has an envelope sender. The `From` address is not
    `noreply`-style or a mailer daemon, and not an address on the hail-mail base
    domain, and not one of the message's own recipients.
@@ -76,8 +80,8 @@ total budget of 213 seconds, under the grace. A failure that proves SES took
 nothing (throttling, limits, connect timeouts, endpoint connection errors) comes
 back as `retry`, and the worker marks the row failed only after its last attempt.
 A wait for a send still running is not an attempt. A skip marks a reply left queued
-as failed, and the worker fails any reply still queued past the max age, so none
-stays queued forever.
+as failed, and the worker fails any reply or tool send still queued past the max
+age, so none stays queued forever.
 Any other failure is final, read timeouts and closed connections included: SES may
 already have sent the message, and a resend could deliver it twice. When a reply row exists, the
 worker does not call the model or its tools again. The reply carries

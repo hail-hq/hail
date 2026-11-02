@@ -169,6 +169,8 @@ Send `null` to stop replies. The agent must be `live` with `email_enabled: true`
 - `anyone`: every sender. A stranger can then make the agent use its tools, so choose this
   only for an agent that is safe to reach from the internet.
 
+A new route starts at `members` unless the call names a scope.
+
 Under both, the mail must pass DMARC (`dmarc_verdict: PASS`) with one well-formed `From`
 address, because anyone can write a `From` header. Other mail gets no reply, so a sender on a
 domain with no DMARC policy gets none.
@@ -183,7 +185,8 @@ What happens on inbound mail:
    from the address itself, and a custom-domain reply from `noreply@<domain>`. The agent reads
    its instructions and the last 20 proven messages of the thread.
 3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
-   addresses. For one sender in any 24 hours, the agent sends at most 20 messages, counting
+   addresses. Mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
+   list mail. For one sender in any 24 hours, the agent sends at most 20 messages, counting
    replies and tool sends.
 4. With no credit, the mail is stored and the agent stays quiet. The row carries
    `suppressed_reasons: ["insufficient_funds"]`.

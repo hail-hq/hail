@@ -1314,6 +1314,57 @@ async def test_expiry_keeps_the_reason_on_a_row_with_null_metadata(async_session
 
 
 @pytest.mark.asyncio
+async def test_expiry_fails_a_tool_send_left_queued(async_session):
+    """The API stopped between the commit and the provider call."""
+    org, agent, domain = await _seed(async_session)
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    inbound = _row(org, domain, agent_id=agent.id, agent_reply_state="failed")
+    async_session.add(inbound)
+    await async_session.flush()
+    send = _queued_reply(
+        org,
+        agent,
+        domain,
+        inbound,
+        requested_at=old,
+        metadata_={"inbound_email_id": str(inbound.id)},
+    )
+    async_session.add(send)
+    await async_session.commit()
+    assert await email_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(send)
+    assert send.status == "failed" and send.end_reason == "expired"
+
+
+@pytest.mark.asyncio
+async def test_only_a_send_ses_never_took_is_left_out_of_the_count(async_session):
+    org, agent, domain = await _seed(async_session)
+    inbound = _row(org, domain, agent_id=agent.id, agent_reply_state="processing")
+    async_session.add(inbound)
+    await async_session.flush()
+    meta = {"inbound_email_id": str(inbound.id)}
+    for status, reason in (
+        ("failed", "TooManyRequestsException"),
+        ("failed", "ReadTimeoutError"),
+        ("failed", None),
+        ("sent", None),
+    ):
+        async_session.add(
+            _queued_reply(
+                org,
+                agent,
+                domain,
+                inbound,
+                status=status,
+                end_reason=reason,
+                metadata_=meta,
+            )
+        )
+    await async_session.commit()
+    assert await email_agent.tool_sends_for_reply(async_session, inbound) == 3
+
+
+@pytest.mark.asyncio
 async def test_a_reply_left_queued_after_the_last_attempt_fails(async_session):
     """The worker died mid-send on its last claim, so no skip path ran."""
     org, agent, domain = await _seed(async_session)

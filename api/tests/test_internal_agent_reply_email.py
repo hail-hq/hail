@@ -530,6 +530,30 @@ async def test_a_removed_route_does_not_leave_a_reply_queued(
     assert row.status == "failed" and row.end_reason == "no_agent"
 
 
+async def test_a_route_removed_during_a_send_leaves_that_send_alone(
+    client, async_session, email_mock
+) -> None:
+    """The retry arrives while SES still holds the first send."""
+    org, agent, domain, inbound = await _seed(async_session)
+    row = await _prior_reply(
+        async_session,
+        org,
+        agent,
+        domain,
+        inbound,
+        status="queued",
+        age=timedelta(seconds=1),
+    )
+    domain.email_agent_id = None
+    await async_session.commit()
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "retry" and data["reason"] == "in_flight"
+    await async_session.refresh(row)
+    await async_session.refresh(inbound)
+    assert row.status == "queued" and row.end_reason is None
+    assert "agent_skip_reason" not in inbound.metadata_
+
+
 async def test_a_bounced_reply_is_final(client, async_session, email_mock) -> None:
     org, agent, domain, inbound = await _seed(async_session)
     await _prior_reply(
@@ -926,6 +950,29 @@ async def test_tool_sends_stop_at_the_limit(client, async_session, email_mock) -
         "spoken": "That is the limit of messages for one email.",
     }
     email_mock.send_email.assert_not_awaited()
+
+
+async def test_a_send_ses_never_took_does_not_use_the_limit(
+    client, async_session, email_mock
+) -> None:
+    org, agent, domain, inbound = await _seed(async_session)
+    for i in range(email_agent.MAX_TOOL_SENDS):
+        async_session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                from_address=ADDRESS,
+                to_addresses=[f"other{i}@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="failed",
+                end_reason="TooManyRequestsException",
+                metadata_={"inbound_email_id": str(inbound.id)},
+            )
+        )
+    await async_session.commit()
+    assert (await _tool_email(client, inbound.id))["ok"] is True
 
 
 @pytest.mark.parametrize("state", ["pending", "done", "skipped", "failed", None])
