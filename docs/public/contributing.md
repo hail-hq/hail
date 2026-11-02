@@ -81,9 +81,10 @@ To update a price:
 1. Edit `costs/<category>.json` (for example `costs/llm.json`).
 2. Set `last_verified` to today (`YYYY-MM-DD`). Set `verified_by` to your GitHub handle.
 3. Update `source_url` if it has changed.
-4. Run `pnpm costs:validate` locally before you push.
+4. If the price is promotional, set `promo_ends_at` to its last day.
+5. Run `pnpm costs:validate` locally before you push.
 
-A weekly cron opens a tracking issue that lists rows older than 30 days — refer to [`costs-stale.yml`](https://github.com/hail-hq/hail/blob/main/.github/workflows/costs-stale.yml).
+A weekly cron opens a tracking issue that lists rows older than 30 days, and rows whose `promo_ends_at` has passed — refer to [`costs-stale.yml`](https://github.com/hail-hq/hail/blob/main/.github/workflows/costs-stale.yml).
 
 ## What we will not merge (v1)
 

@@ -168,11 +168,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "BE",
@@ -426,11 +427,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/cl",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "CO",
@@ -511,11 +513,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "CZ",
@@ -613,11 +616,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "EC",
@@ -767,11 +771,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-09-24",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-09-24",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "GB",
@@ -784,11 +789,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-09-24",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-09-24",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "GB",
@@ -801,11 +807,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-09-24",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-09-24",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "GD",
@@ -818,11 +825,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "GH",
@@ -853,11 +861,12 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "GR",
@@ -870,11 +879,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "HK",
@@ -983,17 +993,18 @@
       "number_type": "local",
       "display_name": "Indonesia local",
       "dial_code": "62",
-      "usd_per_month": "23.00",
+      "usd_per_month": "24.15",
       "voice": true,
       "sms": false,
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "last_verified": "2026-11-02",
+      "last_changed_at": "2026-11-02",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/en-us/voice/pricing/id",
+      "notes": "Price changed 2026-11-02: 23.00 to 24.15 on Twilio's public price list. The sync has no stock to observe for this row."
     },
     {
       "country_code": "ID",
@@ -1171,17 +1182,18 @@
       "number_type": "national",
       "display_name": "Japan national",
       "dial_code": "81",
-      "usd_per_month": "4.50",
+      "usd_per_month": "4.75",
       "voice": true,
       "sms": false,
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "last_verified": "2026-11-02",
+      "last_changed_at": "2026-11-02",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Price changed 2026-11-02: 4.50 to 4.75 on Twilio's public price list. The sync has no stock to observe for this row."
     },
     {
       "country_code": "JP",
@@ -1419,11 +1431,12 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "NL",
@@ -1589,11 +1602,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "PR",
@@ -1694,11 +1708,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "RO",
@@ -1884,11 +1899,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "UG",
@@ -1901,11 +1917,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "US",
@@ -1970,11 +1987,12 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "ZA",
@@ -1987,11 +2005,12 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-07-17",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/en-us/voice/pricing/za",
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
     },
     {
       "country_code": "ZA",
@@ -2017,7 +2036,7 @@
       "fee_kind": "carrier_passthrough",
       "direction": "outbound",
       "usd_per_message": "0.0035",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -2028,7 +2047,7 @@
       "fee_kind": "carrier_passthrough",
       "direction": "outbound",
       "usd_per_message": "0.0045",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
@@ -2038,12 +2057,13 @@
       "carrier": "Verizon",
       "fee_kind": "carrier_passthrough",
       "direction": "outbound",
-      "usd_per_message": "0.0045",
-      "last_verified": "2026-07-15",
-      "last_changed_at": "2026-07-15",
+      "usd_per_message": "0.005",
+      "last_verified": "2026-11-02",
+      "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "notes": "Price changed 2026-11-02: 0.0045 to 0.005 on Twilio's US SMS pricing page."
     },
     {
       "carrier": "Verizon",
@@ -2061,7 +2081,7 @@
       "fee_kind": "tcr_campaign_monthly",
       "direction": "na",
       "usd_per_month": "10.0",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-15",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",

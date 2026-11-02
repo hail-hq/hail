@@ -48,6 +48,47 @@ export function findStale(rows, maxAgeDays, now = new Date()) {
   });
 }
 
+export function findEndedPromos(rows, now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  return rows.filter((row) => row.promo_ends_at && row.promo_ends_at < today);
+}
+
+function rowLabel(row) {
+  const label =
+    row.model_id ||
+    row.display_name ||
+    row.carrier ||
+    [row.country_code, row.direction].filter(Boolean).join(' ') ||
+    '(row)';
+  return [row.provider, label].filter(Boolean).join(' / ');
+}
+
+export function buildReport(rows, maxAge, now = new Date()) {
+  const stale = findStale(rows, maxAge, now);
+  const endedPromos = findEndedPromos(rows, now);
+  const lines = [];
+
+  if (stale.length > 0) {
+    lines.push(`Found ${stale.length} stale row(s) (max age: ${maxAge} days):`, '');
+    for (const row of stale) {
+      const days = Math.floor(
+        (now.getTime() - new Date(row.last_verified + 'T00:00:00Z').getTime()) / MS_PER_DAY,
+      );
+      lines.push(`- [${row.category}] ${rowLabel(row)} — last verified ${row.last_verified} (${days} days ago)`);
+    }
+  }
+
+  if (endedPromos.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(`Found ${endedPromos.length} row(s) with an ended promotion:`, '');
+    for (const row of endedPromos) {
+      lines.push(`- [${row.category}] ${rowLabel(row)} — promotion ended ${row.promo_ends_at}`);
+    }
+  }
+
+  return lines;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const maxAgeIdx = args.indexOf('--max-age');
@@ -66,31 +107,17 @@ async function main() {
   const perFile = await Promise.all(
     files.map(async (file) => {
       const data = JSON.parse(await readFile(join(DATA_DIR, file), 'utf-8'));
-      const rows = rowsForFile(file, data);
-      return findStale(rows, maxAge);
+      return rowsForFile(file, data);
     }),
   );
-  const results = perFile.flat();
+  const lines = buildReport(perFile.flat(), maxAge);
 
-  if (results.length === 0) {
+  if (lines.length === 0) {
     console.log(`No stale rows (max age: ${maxAge} days).`);
     process.exit(0);
   }
 
-  console.log(`Found ${results.length} stale row(s) (max age: ${maxAge} days):\n`);
-  for (const row of results) {
-    const days = Math.floor(
-      (Date.now() - new Date(row.last_verified + 'T00:00:00Z').getTime()) / MS_PER_DAY,
-    );
-    const label =
-      row.model_id ||
-      row.display_name ||
-      row.carrier ||
-      [row.country_code, row.direction].filter(Boolean).join(' ') ||
-      '(row)';
-    const name = [row.provider, label].filter(Boolean).join(' / ');
-    console.log(`- [${row.category}] ${name} — last verified ${row.last_verified} (${days} days ago)`);
-  }
+  console.log(lines.join('\n'));
   process.exit(1);
 }
 
