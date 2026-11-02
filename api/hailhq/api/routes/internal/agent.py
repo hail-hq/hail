@@ -92,6 +92,7 @@ from hailhq.core.models import (
     Sms,
 )
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.sms_registration_gate import us_registration_block
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
@@ -129,17 +130,6 @@ _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
 # How long a queued reply counts as in flight. Past this the send is presumed
 # lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
 _QUEUED_GRACE = timedelta(seconds=240)
-# Failures that prove SES did not accept the message, so a resend cannot deliver
-# it twice. Anything else ends the reply: after a read timeout or a closed
-# connection SES may already have sent it.
-_RETRYABLE_SEND_FAILURES = frozenset(
-    {
-        "ConnectTimeoutError",
-        "EndpointConnectionError",
-        "LimitExceededException",
-        "TooManyRequestsException",
-    }
-)
 
 
 class AgentSendBase(BaseModel):
@@ -597,7 +587,7 @@ class AgentReplyEmailResponse(BaseModel):
 def _send_failure(reason: str, reply: Email) -> AgentReplyEmailResponse:
     """The worker keeps a safe failure for another attempt, and settles it as
     failed after its last one."""
-    state = "retry" if reason in _RETRYABLE_SEND_FAILURES else "failed"
+    state = "retry" if reason in SES_NOT_ACCEPTED_FAILURES else "failed"
     return AgentReplyEmailResponse(
         ok=False, state=state, reason=reason, reply_id=reply.id
     )
@@ -620,7 +610,7 @@ def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
     if row.status == "queued":
         return None
     if row.status == "failed":
-        if row.end_reason in _RETRYABLE_SEND_FAILURES:
+        if row.end_reason in SES_NOT_ACCEPTED_FAILURES:
             return None
         return AgentReplyEmailResponse(
             ok=False, state="failed", reason=row.end_reason, reply_id=row.id
