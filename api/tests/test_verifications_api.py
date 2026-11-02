@@ -2079,8 +2079,11 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     ).scalar_one_or_none() is None
 
 
-async def test_a_failed_discard_keeps_the_ids_check_wrote(
-    client, org_and_key, carrier, async_session
+@pytest.mark.parametrize(
+    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+)
+async def test_ids_check_wrote_survive_a_failed_or_cut_discard(
+    client, org_and_key, carrier, async_session, fail
 ) -> None:
     from hailhq.api.routes.verifications import sweep_verifications
 
@@ -2094,17 +2097,88 @@ async def test_a_failed_discard_keeps_the_ids_check_wrote(
         return [Problem(field="", message="document unreadable")]
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        refs.pop("bundle_sid")  # half done
+        raise fail
 
     carrier.check, carrier.discard = check, boom
+    registry = lambda name, purpose="number": carrier if name == "fake" else None
+    if isinstance(fail, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await sweep_verifications(async_session, registry)
+        await async_session.rollback()
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    if not isinstance(fail, asyncio.CancelledError):
+        await sweep_verifications(async_session, registry)
+        # The row in memory matches the saved one, not discard()'s half.
+        assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
+async def test_a_refused_submit_discards_the_refs_as_they_are_now(
+    client, org_and_key, carrier, async_session, session_factory
+) -> None:
+    """submit() wrote nothing; another writer changed the refs meanwhile.
+    The discard gets the new refs, and the old ones are not written back."""
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def refuse(refs):
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(vid))
+            row.provider_refs = {**row.provider_refs, "campaign_id": "C9"}
+            await other.commit()
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    carrier.submit = refuse
     await sweep_verifications(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
+    assert carrier.discarded == [{"bundle_sid": "B1", "campaign_id": "C9"}]
+
+
+@pytest.mark.parametrize(
+    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+)
+async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
+    client, org_and_key, carrier, async_session, fail
+) -> None:
+    """A refused submit that billed something keeps its id when the discard
+    fails, and when the process stops during the discard (a restart): the
+    id is saved before the discard starts."""
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def refuse(refs):
+        refs["filed_id"] = "F1"
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def stop(refs):
+        raise fail
+
+    carrier.submit, carrier.discard = refuse, stop
+    registry = lambda name, purpose="number": carrier if name == "fake" else None
+    if isinstance(fail, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await sweep_verifications(async_session, registry)
+        await async_session.rollback()
+    else:
+        await sweep_verifications(async_session, registry)
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "awaiting_review"
     assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    # A failed discard waits for the next try; a cut one is left
+    # 'submitting', for _refresh to settle.
+    cut_off = isinstance(fail, asyncio.CancelledError)
+    assert row.state == ("submitting" if cut_off else "awaiting_review")
 
 
 async def test_response_carries_purpose_number_by_default(
@@ -3726,6 +3800,295 @@ async def test_a_refused_retry_rates_the_campaign_before_its_id_is_wiped(
     await async_session.refresh(row)
     assert row.state == "rejected"
     assert [(v, r["campaign_id"]) for v, r in rated] == [(vid, "C1")]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refusal_leaves_a_row_cancelled_while_it_was_rated(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """Rating commits, which ends the row lock. A cancel in that gap wins:
+    the refusal neither discards nor rejects the row."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def cancel_meanwhile(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state, row.provider_refs = "cancelled", {}
+            await other.commit()
+
+    async def refuse(refs):
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    discarded: list[dict] = []
+
+    async def discard(refs):
+        discarded.append(refs)
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", cancel_meanwhile)
+    sms_carrier.check, sms_carrier.discard = refuse, discard
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and row.provider_refs == {}
+    assert discarded == []
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refusal_leaves_a_row_that_came_back_while_it_was_rated(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """A row that left and came back to the same state in that gap (an
+    approve that found the carrier down, say) is not rejected for the old
+    check."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    from datetime import datetime, timezone
+
+    async def round_trip(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.provider_refs = {**row.provider_refs, "campaign_id": "C2"}
+            row.updated_at = datetime.now(timezone.utc)
+            await other.commit()
+
+    async def refuse(refs):
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    discarded: list[dict] = []
+
+    async def discard(refs):
+        discarded.append(refs)
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", round_trip)
+    sms_carrier.check, sms_carrier.discard = refuse, discard
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs["campaign_id"] == "C2"
+    assert discarded == []
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refused_submit_keeps_a_filed_campaign_when_the_discard_fails(
+    client, org_and_key, sms_carrier, async_session, rated
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit, sms_carrier.discard = refuse, boom
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs["campaign_id"] == "C1"
+    assert [(v, r["campaign_id"]) for v, r in rated] == [(vid, "C1")]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_admin_approve_shows_a_row_cancelled_while_it_was_refused(
+    client,
+    org_and_key,
+    sms_carrier,
+    async_session,
+    monkeypatch,
+    session_factory,
+    pinged,
+) -> None:
+    """Not a 409 'refused': the row was cancelled, not rejected."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def cancel_meanwhile(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state, row.provider_refs = "cancelled", {}
+            await other.commit()
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", cancel_meanwhile)
+    sms_carrier.submit = refuse
+    pinged.clear()
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    assert pinged == [vid]  # submit() wrote new refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_admin_approve_shows_the_refusal_when_the_discard_fails(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED, raw="nope")])
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.submit, sms_carrier.discard = refuse, boom
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 409, resp.text
+    assert "nope" in resp.json()["detail"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("refused", [True, False])
+async def test_admin_approve_keeps_the_ids_a_failed_check_wrote(
+    client, org_and_key, sms_carrier, async_session, refused
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+
+    async def check(refs):
+        refs["filed_id"] = "F1"
+        if not refused:
+            raise RuntimeError("carrier down")
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    sms_carrier.check = check
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == (409 if refused else 502), resp.text
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review" and row.provider_refs["filed_id"] == "F1"
+
+
+async def test_a_sweeper_check_that_fails_keeps_the_ids_it_wrote(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def check(refs):
+        refs["filed_id"] = "F1"
+        raise RuntimeError("carrier down")
+
+    carrier.check = check
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_refused_retry_pings_the_rater_when_its_discard_fails(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+
+    async def check(refs):
+        refs["filed_id"] = "F1"
+        return [Problem(field="", message=NOT_ACCEPTED)]
+
+    async def boom(refs):
+        raise RuntimeError("carrier down")
+
+    sms_carrier.check, sms_carrier.discard = check, boom
+    pinged.clear()
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert pinged == [vid]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_admin_approve_shows_the_refusal_of_a_row_waiting_again(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """The row went back to waiting while the refusal was rated: the same
+    draft would be refused again, so the admin sees why (not 502)."""
+    from datetime import datetime, timezone
+
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def back_to_waiting(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state = "awaiting_review"
+            row.updated_at = datetime.now(timezone.utc)
+            await other.commit()
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED, raw="nope")])
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", back_to_waiting)
+    sms_carrier.submit = refuse
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 409, resp.text
+    assert "nope" in resp.json()["detail"]
 
 
 @pytest.mark.usefixtures("us_number")
