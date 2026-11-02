@@ -93,11 +93,13 @@ MAX_HTML_CHARS = 200_000
 MAX_TOOL_SENDS = 3
 # SES caps a header value at 995 characters.
 MAX_HEADER_CHARS = 900
+# Same cap as POST /emails. An inbound subject has no cap of its own.
+MAX_SUBJECT_CHARS = 998
 
 ReplyState = Literal["done", "skipped", "failed"]
 
 _NO_REPLY_LOCAL = re.compile(
-    r"^(no[-_]?reply|do[-_]?not[-_]?reply|mailer[-_]?daemon|postmaster|bounces?)"
+    r"^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|postmaster|bounces?)"
     r"([+.\-_].*)?$"
 )
 _MESSAGE_ID = re.compile(r"^<[!-;=?-~]+@[!-;=?-~]+>$")
@@ -701,15 +703,22 @@ def _plain_body(email: Email) -> str:
 
 
 def build_chat_messages(
-    agent: Agent, thread: list[Email], *, trust: SenderTrust
+    agent: Agent,
+    thread: list[Email],
+    *,
+    trust: SenderTrust,
+    sends_tried: bool = False,
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: the system message, then the thread. Mail from
     people is ``user``, labeled so the model reads it as mail, and only an
-    agent's own replies are ``assistant``."""
+    agent's own replies are ``assistant``. ``sends_tried`` means an earlier
+    attempt at this reply used the send tools, and the chat does not show them."""
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": build_email_instructions(agent.system_prompt, trust=trust),
+            "content": build_email_instructions(
+                agent.system_prompt, trust=trust, sends_tried=sends_tried
+            ),
         }
     ]
     for row in thread:
@@ -730,8 +739,8 @@ def build_chat_messages(
 def reply_subject(subject: str | None) -> str:
     clean = " ".join((subject or "").split())
     if clean.lower().startswith("re:"):
-        return clean
-    return f"Re: {clean}" if clean else "Re: your email"
+        return clean[:MAX_SUBJECT_CHARS]
+    return f"Re: {clean}"[:MAX_SUBJECT_CHARS] if clean else "Re: your email"
 
 
 def reply_from_address(domain: EmailDomain) -> str:
@@ -761,14 +770,15 @@ def reply_references(email: Email) -> tuple[str | None, list[str] | None]:
     return message_id, chain
 
 
-async def tool_sends_for_reply(db: AsyncSession, inbound_id: uuid.UUID) -> int:
+async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
     """Emails and texts this reply run sent with its tools."""
     total = 0
     for model in (Email, Sms):
         stmt = select(func.count(model.id)).where(
+            model.organization_id == inbound.organization_id,
             model.direction == "outbound",
             model.agent_id.is_not(None),
-            model.metadata_["inbound_email_id"].astext == str(inbound_id),
+            model.metadata_["inbound_email_id"].astext == str(inbound.id),
         )
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total

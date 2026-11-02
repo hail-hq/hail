@@ -1090,6 +1090,35 @@ async def test_tool_sms_with_no_phone_says_so(client, async_session, sms_mock) -
     assert data["ok"] is False and "couldn't find a number" in data["spoken"]
 
 
+async def test_tool_sms_refuses_a_name_two_members_share(
+    client, async_session, sms_mock
+) -> None:
+    """Only one has a phone, but the model may mean the other."""
+    org, _agent, _domain, inbound = await _seed(async_session)
+    uid = uuid.uuid4()
+    async_session.add(
+        User(
+            id=uid,
+            name="Ada Lovelace",
+            email="other-ada@example.com",
+            email_verified=True,
+            created_at=NOW,
+        )
+    )
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=uid,
+            organization_id=org,
+            role="member",
+            created_at=NOW,
+        )
+    )
+    await async_session.commit()
+    data = await _tool_sms(client, inbound.id)
+    assert data["ok"] is False and "More than one person" in data["spoken"]
+
+
 async def test_the_raw_request_cannot_name_an_address(client, async_session) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     raw = _tool(inbound.id, subject="s", body_text="b", to="x@evil.example")
@@ -1115,4 +1144,4 @@ async def test_sends_count_across_channels(async_session) -> None:
         )
     )
     await async_session.commit()
-    assert await email_agent.tool_sends_for_reply(async_session, inbound.id) == 1
+    assert await email_agent.tool_sends_for_reply(async_session, inbound) == 1

@@ -19,6 +19,7 @@ from hailhq.core.models import (
     Sms,
     User,
 )
+from hailhq.core.prompts import EMAIL_SENDS_TRIED_LINE
 from hailhq.core.providers.email.inbound.base import InboundMessage
 from sqlalchemy import select, text
 
@@ -167,6 +168,7 @@ async def test_bad_mail_is_stored_and_not_answered(async_session, message, reaso
         "Precedence: bulk",
         "Precedence: list",
         "Precedence: junk",
+        "Precedence: auto_reply",
         "List-Id: <news.example.com>",
         "List-Unsubscribe: <mailto:u@example.com>",
     ],
@@ -192,6 +194,8 @@ async def test_auto_submitted_no_is_a_person(async_session):
         "noreply@example.com",
         "no-reply@example.com",
         "no_reply@example.com",
+        "no.reply@example.com",
+        "do.not.reply@example.com",
         "do_not_reply@example.com",
         "mailer_daemon@example.com",
         "do-not-reply@example.com",
@@ -343,8 +347,14 @@ async def test_a_malformed_from_is_never_proven(async_session, sender, scope):
         (f"Ada Lovelace <{MEMBER}>", True),
         (f'"Lovelace, Ada" <{MEMBER}>', True),
         (f"Ada <{MEMBER.upper()}>", True),
+        (f"Dr. Ada Lovelace <{MEMBER}>", True),
+        (f"A. Lovelace <{MEMBER}>", True),
+        (f"Acme Inc. Support <{MEMBER}>", True),
         (f"{MEMBER} <evil@attacker.example>", False),
         (f"Ada <{MEMBER}> <evil@attacker.example>", False),
+        (f"Dr. Ada <evil@attacker.example> <{MEMBER}>", False),
+        (f"Dr. {MEMBER} evil@attacker.example", False),
+        (f"Dr. <@attacker.example:{MEMBER}>", False),
     ],
 )
 def test_from_clean(sender, clean):
@@ -1041,6 +1051,21 @@ def test_html_past_the_cap_is_not_read():
 )
 def test_reply_subject(subject, expected):
     assert email_agent.reply_subject(subject) == expected
+
+
+@pytest.mark.parametrize("subject", ["x" * 5000, "Re: " + "x" * 5000])
+def test_reply_subject_stays_under_the_send_cap(subject):
+    assert len(email_agent.reply_subject(subject)) == email_agent.MAX_SUBJECT_CHARS
+
+
+def test_chat_on_a_retry_says_sends_already_went_out():
+    agent = Agent(system_prompt="Help the team.")
+    plain = email_agent.build_chat_messages(agent, [], trust="member")
+    retried = email_agent.build_chat_messages(
+        agent, [], trust="member", sends_tried=True
+    )
+    assert EMAIL_SENDS_TRIED_LINE not in plain[0]["content"]
+    assert EMAIL_SENDS_TRIED_LINE in retried[0]["content"]
 
 
 def test_reply_references_chain_and_drop_bad_ids():

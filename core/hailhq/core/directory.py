@@ -117,16 +117,16 @@ async def resolve_member_emails(
 
 async def resolve_member_phones(
     session: AsyncSession, organization_id: uuid.UUID, name: str
-) -> list[str]:
+) -> list[str | None]:
     """Phone numbers of members matching ``name``, for agent sends. Same
-    policy as :func:`resolve_member_emails`."""
+    policy as :func:`resolve_member_emails`. A member with no phone stays in
+    the list as None, so a shared name stays ambiguous."""
     stmt = (
         select(User.phone_number)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
         .where(
             OrganizationMember.organization_id == organization_id,
             func.lower(User.name) == name.strip().lower(),
-            User.phone_number.is_not(None),
         )
     )
     return list((await session.execute(stmt)).scalars().all())

@@ -21,6 +21,7 @@ from hailhq.core.models import (
     OrganizationMember,
     User,
 )
+from hailhq.core.prompts import EMAIL_SENDS_TRIED_LINE
 from hailhq.voicebot import emailbot
 from hailhq.voicebot.pipeline import ProviderKeyError
 
@@ -390,6 +391,7 @@ async def test_a_retry_after_a_tool_send_has_no_tools(
     await emailbot.reply_once(api)
     assert len(llm.calls) == 1
     assert not llm.calls[0]["tools"]
+    assert EMAIL_SENDS_TRIED_LINE in llm.calls[0]["items"][0].text_content
     api.post.assert_awaited_once_with(
         "/internal/agent/reply-email", {"email_id": str(email_id), "body": "Done."}
     )

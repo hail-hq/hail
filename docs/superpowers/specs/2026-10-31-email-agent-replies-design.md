@@ -33,7 +33,8 @@ only when all of these hold:
    an innocent third party. SES reports `GRAY` when only an unaligned SPF or DKIM
    check passed, so `GRAY` does not prove the `From` address. A `From` header with
    defects, or whose angle-bracket address differs from the parsed one, is not
-   proven: `alice@member.com <evil@attacker.com>` parses to alice.
+   proven: `alice@member.com <evil@attacker.com>` parses to alice. A dot in an
+   unquoted display name (`Dr. Ada <ada@example.com>`) is not such a defect.
 6. Scope `members`: the sender is a verified login email of an org member.
 7. The sender is under the thread cap: 20 agent sends in 24 hours, counting
    replies and tool sends in any channel. The cap is read when a run starts.

@@ -2310,11 +2310,11 @@ class EmailResponse(EmailSummary):
     )
     in_reply_to: str | None = Field(
         default=None,
-        description="RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 In-Reply-To header. Set on inbound emails and agent replies; null on other outbound rows.",
     )
     references_ids: list[str] | None = Field(
         default=None,
-        description="RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 References header, split into ids. Set on inbound emails and agent replies; null on other outbound rows.",
     )
     agent_id: UUID | None = Field(
         default=None,

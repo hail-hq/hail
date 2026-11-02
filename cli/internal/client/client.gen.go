@@ -2430,7 +2430,7 @@ type EmailResponse struct {
 	// Id Unique identifier for this email.
 	Id openapi_types.UUID `json:"id"`
 
-	// InReplyTo RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.
+	// InReplyTo RFC 5322 In-Reply-To header. Set on inbound emails and agent replies; null on other outbound rows.
 	InReplyTo *string `json:"in_reply_to,omitempty"`
 
 	// LastEventAt When the most recent delivery event for this email occurred, ISO 8601 timestamp.
@@ -2454,7 +2454,7 @@ type EmailResponse struct {
 	// RawUrl API endpoint that redirects to the original MIME blob. Inbound emails only; null on outbound rows.
 	RawUrl *string `json:"raw_url,omitempty"`
 
-	// ReferencesIds RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.
+	// ReferencesIds RFC 5322 References header, split into ids. Set on inbound emails and agent replies; null on other outbound rows.
 	ReferencesIds *[]string `json:"references_ids,omitempty"`
 
 	// ReplyTo Reply-To email address, if set.
