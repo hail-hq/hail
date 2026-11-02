@@ -601,7 +601,8 @@ class _EmailDomainsResource:
         ``email_agent_id`` makes an agent answer mail to this address;
         ``clear_email_agent=True`` stops that, and passing both raises
         ``ValueError``. ``email_agent_scope`` is ``"members"`` (verified org
-        members) or ``"anyone"``.
+        members) or ``"anyone"``. A new agent starts at ``"members"`` unless
+        the same call names a scope.
         """
         if clear_email_agent and email_agent_id is not None:
             raise ValueError("use email_agent_id or clear_email_agent, not both")

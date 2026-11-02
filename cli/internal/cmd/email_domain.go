@@ -375,7 +375,7 @@ func newEmailDomainRouteCmd(opts *Options) *cobra.Command {
 		Short: "Choose which agent answers mail to this address, and who it answers",
 		Long: `hail email domain route: make an agent answer inbound mail.
 
-A new agent starts at members unless you pass --scope.
+A new agent starts at members unless the same call passes --scope.
 --scope members (default): verified members of the organization whose mail
 passes DMARC. --scope anyone: every sender whose mail passes DMARC and the spam
 checks. With anyone, a stranger can make the agent use its tools. Mail without
