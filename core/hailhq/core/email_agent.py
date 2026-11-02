@@ -216,7 +216,9 @@ async def replies_in_thread(
 ) -> int:
     """Agent sends for this sender within ``REPLY_CAP_WINDOW``: replies, and
     tool sends in any channel. A run that only uses tools still counts.
-    ``excluding_run`` leaves out the tool sends of that inbound email's run."""
+    ``excluding_run`` leaves out the tool sends of that inbound email's run.
+    Every reply row counts, because a later attempt can send a throttled one.
+    A tool email SES never took stays out: no attempt sends it again."""
     since = datetime.now(timezone.utc) - REPLY_CAP_WINDOW
 
     def not_this_run(model: type[Email | Sms]):
@@ -238,6 +240,7 @@ async def replies_in_thread(
             and_(
                 Email.metadata_["thread_sender"].astext == sender,
                 not_this_run(Email),
+                _may_have_reached_someone(),
             ),
         ),
     )
