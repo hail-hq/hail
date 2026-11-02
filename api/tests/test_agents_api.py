@@ -10,7 +10,8 @@ import httpx
 import pytest
 from hailhq.core import carrier_routing
 from hailhq.core.config import settings
-from hailhq.core.models import PhoneNumber
+from hailhq.core.models import AuditLog, EmailDomain, PhoneNumber
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key
@@ -297,6 +298,40 @@ async def test_delete_agent_detaches_numbers(
     assert row.voice_agent_id is None
     assert row.sms_agent_id is None
     assert row.inbound_registered_at is None
+
+
+async def test_delete_agent_records_the_email_route(
+    client: httpx.AsyncClient,
+    org,
+    async_session: AsyncSession,
+) -> None:
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    domain = EmailDomain(
+        organization_id=org_id,
+        kind="hail_mail",
+        domain="amber-heron-42+acme@mail.hail.so",
+        local_prefix_user="amber-heron-42",
+        local_prefix_org="acme",
+        provider="ses",
+        email_agent_id=uuid.UUID(agent["id"]),
+    )
+    async_session.add(domain)
+    await async_session.commit()
+
+    r = await client.delete(f"/agents/{agent['id']}", headers=headers)
+    assert r.status_code == 204
+    log = (
+        await async_session.execute(
+            select(AuditLog).where(
+                AuditLog.organization_id == org_id,
+                AuditLog.action == "agent.delete",
+            )
+        )
+    ).scalar_one()
+    assert log.payload["email_routes_detached"] == 1
+    await async_session.refresh(domain)
+    assert domain.email_agent_id is None
 
 
 async def test_release_unregisters_first(

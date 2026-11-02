@@ -759,12 +759,9 @@ async def agent_reply_email(
         await stamp_skip(db, body.email_id, reason or "refused")
         return AgentReplyEmailResponse(ok=False, state="skipped", reason=reason)
 
-    routed = await _routed_email(db, body.email_id)
-    if routed is None:
+    inbound = await db.get(Email, body.email_id)
+    if inbound is None or inbound.direction != "inbound":
         return await skip("no_agent")
-    inbound, domain, agent = routed
-    org = inbound.organization_id
-    recipient = normalize_address(inbound.from_address)
 
     # One request per thread at a time: a retry that races the original sees
     # the reply below, and the thread cap is exact.
@@ -772,6 +769,7 @@ async def agent_reply_email(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
+    await db.refresh(inbound)
     # Idempotent per inbound row: the worker retries with the same email_id.
     prior = await prior_reply(db, inbound)
     if prior is not None and (finished := _finished_reply(prior)) is not None:
@@ -782,6 +780,15 @@ async def agent_reply_email(
             # The original may still be in the provider call: sending now could
             # deliver twice. The worker comes back when the grace ends.
             return _in_flight(prior, _QUEUED_GRACE - age)
+
+    # After the checks above: the route can go while the first send is running,
+    # and that send must not be reported as skipped.
+    routed = await _routed_email(db, body.email_id)
+    if routed is None:
+        return await skip("no_agent")
+    inbound, domain, agent = routed
+    org = inbound.organization_id
+    recipient = normalize_address(inbound.from_address)
 
     refusal = await run_refusal(db, domain, inbound, check_cap=prior is None)
     if refusal is not None:
@@ -937,6 +944,7 @@ async def _email_run(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": email_thread_lock_key(inbound)},
     )
+    await db.refresh(inbound)
     prior = await _prior_send(
         db, model, inbound.organization_id, body.tool_invocation_id
     )

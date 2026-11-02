@@ -265,7 +265,7 @@ paths:
 
         for inbound and ring out again; numbers that routed texts to it go back
 
-        to webhooks only."
+        to webhooks only. Addresses it answered stop getting replies."
       operationId: delete_agent_v1_agents__agent_id__delete
       parameters:
         - name: agent_id

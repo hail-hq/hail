@@ -33,6 +33,7 @@ from hailhq.core.prompts import (
     SenderTrust,
     build_email_instructions,
 )
+from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.text_agent import (
     CHAT_LIMIT,
     CLAIM_LEASE,
@@ -385,7 +386,10 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
             Email.direction == "outbound",
             Email.status == "queued",
             Email.agent_id.is_not(None),
-            Email.metadata_["reply_to_email_id"].astext.is_not(None),
+            or_(
+                Email.metadata_["reply_to_email_id"].astext.is_not(None),
+                Email.metadata_["inbound_email_id"].astext.is_not(None),
+            ),
             Email.requested_at < cutoff,
         )
         .values(status="failed", end_reason="expired", failed_at=now)
@@ -778,7 +782,8 @@ def reply_references(email: Email) -> tuple[str | None, list[str] | None]:
 
 
 async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
-    """Emails and texts this reply run sent with its tools."""
+    """Emails and texts this reply run sent with its tools. An email that SES
+    proved it never took stays out: it went nowhere, so a retry may send it."""
     total = 0
     for model in (Email, Sms):
         stmt = select(func.count(model.id)).where(
@@ -787,5 +792,13 @@ async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
             model.agent_id.is_not(None),
             model.metadata_["inbound_email_id"].astext == str(inbound.id),
         )
+        if model is Email:
+            stmt = stmt.where(
+                or_(
+                    Email.status != "failed",
+                    Email.end_reason.is_(None),
+                    Email.end_reason.not_in(SES_NOT_ACCEPTED_FAILURES),
+                )
+            )
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total

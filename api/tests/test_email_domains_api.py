@@ -1594,6 +1594,41 @@ async def test_patch_routes_an_address_to_an_agent(
     assert resp.json()["email_agent_id"] is None
 
 
+async def test_a_new_route_starts_at_members(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An old "anyone" was chosen for the agent that was cleared."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(client, headers, monkeypatch)
+    url = f"/email-domains/{domain_id}"
+    await client.patch(
+        url,
+        json={"email_agent_id": agent_id, "email_agent_scope": "anyone"},
+        headers=headers,
+    )
+    await client.patch(url, json={"email_agent_id": None}, headers=headers)
+
+    resp = await client.patch(url, json={"email_agent_id": agent_id}, headers=headers)
+    assert resp.json()["email_agent_scope"] == "members"
+
+    # A second route to the same address keeps what the owner chose.
+    await client.patch(url, json={"email_agent_scope": "anyone"}, headers=headers)
+    resp = await client.patch(url, json={"email_agent_id": agent_id}, headers=headers)
+    assert resp.json()["email_agent_scope"] == "anyone"
+
+    # A named scope wins on a new route.
+    await client.patch(url, json={"email_agent_id": None}, headers=headers)
+    resp = await client.patch(
+        url,
+        json={"email_agent_id": agent_id, "email_agent_scope": "anyone"},
+        headers=headers,
+    )
+    assert resp.json()["email_agent_scope"] == "anyone"
+
+
 async def test_a_new_address_defaults_to_members(
     client: httpx.AsyncClient,
     org_and_key: tuple,
