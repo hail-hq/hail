@@ -156,7 +156,7 @@
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/llms/pricing.md",
+      "source_url": "https://www.assemblyai.com/pricing",
       "notes": "Superseded by explicit `universal-streaming-english` / `universal-streaming-multilingual` model_ids — the streaming AsyncAPI spec (docs.assemblyai.com) no longer enumerates a bare `universal-streaming` value. Price unchanged at $0.15/hr; treated as a rename, not a price change. confidence:medium because no explicit vendor deprecation notice was found, only enum absence. Re-verified 2026-11-02: still absent from AssemblyAI's pricing and models docs. Replacement unchanged."
     },
     {
@@ -214,7 +214,7 @@
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/llms/pricing.md",
+      "source_url": "https://www.assemblyai.com/pricing",
       "notes": "AssemblyAI's highest-accuracy pre-recorded model with native code-switching, documented at 18 languages per assemblyai.com/docs/getting-started/models and assemblyai.com/llms/models.md; unsupported languages fall back to Universal-2. Deprecated: the changelog entry \"Deprecated: universal-3-pro and universal for New and Inactive Accounts\" (2026-07-10) cut off new/inactive accounts; the entry \"Default speech model changing to Universal-3.5 Pro on September 2, 2026\" confirms requests pinned to `universal-3-pro` now return an error as of today (2026-09-02) instead of being auto-routed — hard cutover complete. Legacy request value `best` now routes to `universal-3-5-pro` (`nano` still routes to universal-2). Superseded by the `universal-3-5-pro` row at the same $0.21/hr price — a rename, not a price change. Featured flag kept per runbook policy (indexed compare pages stay live with a deprecation banner). Re-verified 2026-11-02: still absent from AssemblyAI's pricing docs. Replacement unchanged. The vendor scheduled the error cutover for 2026-09-02; whether it happened that day is not confirmed."
     },
     {
@@ -285,14 +285,14 @@
       "diarization": "extra-cost",
       "deployment_options": ["native"],
       "deprecated_at": "2026-07-19",
-      "replaced_by_model_id": "u3-rt-pro",
+      "replaced_by_model_id": "universal-3-6-pro",
       "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/llms/pricing.md",
-      "notes": "Real-time streaming tier for voice agents, now branded \"Universal-3.5 Pro Realtime\". Deprecated in this dataset 2026-07-19: for a second consecutive refresh (2026-07-13 and 2026-07-19) the pricing page and the assemblyai.com/llms/models.md quick reference both give `u3-rt-pro` (alias `u3-pro`) as the API identifier, and no vendor source uses the literal string `universal-3-pro-streaming`. This was the repeat confirmation the 2026-07-13 refresh required before renaming; superseded by the `u3-rt-pro` row at the same $0.45/hr price (a rename, not a price change). confidence:medium because this id was never published by the vendor, so there is no explicit vendor deprecation notice for it. Re-verified 2026-11-02: still absent from AssemblyAI's pricing and models docs. The same tier is now priced as universal-3-6-pro at $0.45/hr, which matches this row's rate."
+      "source_url": "https://www.assemblyai.com/pricing",
+      "notes": "Real-time streaming tier for voice agents, now branded \"Universal-3.5 Pro Realtime\". Deprecated in this dataset 2026-07-19: for a second consecutive refresh (2026-07-13 and 2026-07-19) the pricing page and the assemblyai.com/llms/models.md quick reference both give `u3-rt-pro` (alias `u3-pro`) as the API identifier, and no vendor source uses the literal string `universal-3-pro-streaming`. This was the repeat confirmation the 2026-07-13 refresh required before renaming; superseded by the `u3-rt-pro` row at the same $0.45/hr price (a rename, not a price change). confidence:medium because this id was never published by the vendor, so there is no explicit vendor deprecation notice for it. Re-verified 2026-11-02: still absent from AssemblyAI's pricing and models docs. The same tier is now priced as universal-3-6-pro at $0.45/hr, which matches this row's rate. replaced_by_model_id moved from u3-rt-pro, which is itself deprecated."
     },
     {
       "provider": "AssemblyAI",
@@ -326,14 +326,14 @@
       "diarization": "extra-cost",
       "deployment_options": ["native"],
       "deprecated_at": "2026-09-02",
-      "replaced_by_model_id": "universal-3-5-pro",
+      "replaced_by_model_id": "universal-3-6-pro",
       "confidence": "medium",
       "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/llms/models.md",
-      "notes": "Canonical id for the streaming tier this dataset previously tracked as `universal-3-pro-streaming` (GA 2026-03-03 per assemblyai.com/llms/models.md; `u3-pro` kept as a backward-compatible alias that routes here). Deprecated: the current dedicated streaming model-selection reference (docs/streaming/select-the-speech-model) lists only three available streaming models — `universal-3-5-pro` (recommended, also the default), `universal-streaming-english`, `universal-streaming-multilingual` — `u3-rt-pro`/`u3-pro` no longer appear. The streaming migration guide \"Universal Streaming to Universal-3.5 Pro Streaming\" and the async-migration changelog entry (\"u3-pro-rt (Universal-3 Pro Realtime) Redirected to universal-3-5-pro — no action required\") corroborate the same target id. Superseded by the `universal-3-5-pro` row at the same $0.45/hr price — a rename, not a price change. confidence:medium because, unlike the async id's explicit hard-error notice, no changelog entry states `u3-rt-pro` itself now errors — only that it redirects, so treat with the same caution as the prior `universal-streaming` rename. Re-verified 2026-11-02: AssemblyAI's models doc now recommends universal-3-6-pro for this id (same $0.45/hr). The changelog redirect to universal-3-5-pro still stands, so replaced_by_model_id is unchanged."
+      "source_url": "https://www.assemblyai.com/pricing",
+      "notes": "Canonical id for the streaming tier this dataset previously tracked as `universal-3-pro-streaming` (GA 2026-03-03 per assemblyai.com/llms/models.md; `u3-pro` kept as a backward-compatible alias that routes here). Deprecated: the current dedicated streaming model-selection reference (docs/streaming/select-the-speech-model) lists only three available streaming models — `universal-3-5-pro` (recommended, also the default), `universal-streaming-english`, `universal-streaming-multilingual` — `u3-rt-pro`/`u3-pro` no longer appear. The streaming migration guide \"Universal Streaming to Universal-3.5 Pro Streaming\" and the async-migration changelog entry (\"u3-pro-rt (Universal-3 Pro Realtime) Redirected to universal-3-5-pro — no action required\") corroborate the same target id. Superseded by the `universal-3-5-pro` row at the same $0.45/hr price — a rename, not a price change. confidence:medium because, unlike the async id's explicit hard-error notice, no changelog entry states `u3-rt-pro` itself now errors — only that it redirects, so treat with the same caution as the prior `universal-streaming` rename. Re-verified 2026-11-02: AssemblyAI's models doc now recommends universal-3-6-pro for this id (same $0.45/hr). replaced_by_model_id moved to it, because universal-3-5-pro now names two rows."
     },
     {
       "provider": "AssemblyAI",
@@ -776,8 +776,8 @@
       "display_name": "Rev.ai Whisper Fusion",
       "price_per_minute_usd": "0.005",
       "languages": ["en"],
-      "streaming": true,
-      "realtime": true,
+      "streaming": false,
+      "realtime": false,
       "diarization": "included",
       "deployment_options": ["native"],
       "deprecated_at": "2026-08-20",
@@ -786,8 +786,8 @@
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://docs.rev.ai/api/asynchronous/changelog",
-      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) — model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh. 2026-07-19 re-verify: still listed at $0.005/min on the pricing page (primary); `fusion` still an active `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated. 2026-08-11 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) now documents only `machine` (account default) and `machine_v2` (always routes to Reverb ASR) — `fusion`/`low_cost` are no longer named there (a docs restructuring), but `Whisper Fusion` remains listed and priced on the pricing page itself; not deprecated. 2026-09-02 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) still documents only `machine`/`machine_v2`, no `fusion` value; not deprecated — pricing page remains the authoritative listing for this product. Re-verified 2026-11-02: Rev deprecated the fusion transcriber on 2026-08-20 (docs.rev.ai/api/asynchronous/changelog) and removed it from rev.ai/pricing. $0.005/min is frozen as last listed (archived page, 2026-08-23). Rev recommends its default transcriber, which uses Reverb."
+      "source_url": "https://www.rev.ai/pricing",
+      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) — model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh. 2026-07-19 re-verify: still listed at $0.005/min on the pricing page (primary); `fusion` still an active `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated. 2026-08-11 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) now documents only `machine` (account default) and `machine_v2` (always routes to Reverb ASR) — `fusion`/`low_cost` are no longer named there (a docs restructuring), but `Whisper Fusion` remains listed and priced on the pricing page itself; not deprecated. 2026-09-02 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) still documents only `machine`/`machine_v2`, no `fusion` value; not deprecated — pricing page remains the authoritative listing for this product. Re-verified 2026-11-02: Rev deprecated the fusion transcriber on 2026-08-20 (docs.rev.ai/api/asynchronous/changelog) and removed it from rev.ai/pricing. $0.005/min is frozen as last listed (archived page, 2026-08-23). Rev recommends its default transcriber, which uses Reverb. Rev's changelog lists fusion as an asynchronous option and its streaming docs do not name it, so streaming and realtime are now false."
     },
     {
       "provider": "Rev.ai",
