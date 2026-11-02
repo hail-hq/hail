@@ -152,12 +152,12 @@
       "deprecated_at": "2026-07-02",
       "replaced_by_model_id": "universal-streaming-english",
       "confidence": "medium",
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-05",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "Superseded by explicit `universal-streaming-english` / `universal-streaming-multilingual` model_ids \u2014 the streaming AsyncAPI spec (docs.assemblyai.com) no longer enumerates a bare `universal-streaming` value. Price unchanged at $0.15/hr; treated as a rename, not a price change. confidence:medium because no explicit vendor deprecation notice was found, only enum absence."
+      "source_url": "https://www.assemblyai.com/llms/pricing.md",
+      "notes": "Superseded by explicit `universal-streaming-english` / `universal-streaming-multilingual` model_ids — the streaming AsyncAPI spec (docs.assemblyai.com) no longer enumerates a bare `universal-streaming` value. Price unchanged at $0.15/hr; treated as a rename, not a price change. confidence:medium because no explicit vendor deprecation notice was found, only enum absence. Re-verified 2026-11-02: still absent from AssemblyAI's pricing and models docs. Replacement unchanged."
     },
     {
       "provider": "AssemblyAI",
@@ -210,12 +210,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-07-10",
       "replaced_by_model_id": "universal-3-5-pro",
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "AssemblyAI's highest-accuracy pre-recorded model with native code-switching, documented at 18 languages per assemblyai.com/docs/getting-started/models and assemblyai.com/llms/models.md; unsupported languages fall back to Universal-2. Deprecated: the changelog entry \"Deprecated: universal-3-pro and universal for New and Inactive Accounts\" (2026-07-10) cut off new/inactive accounts; the entry \"Default speech model changing to Universal-3.5 Pro on September 2, 2026\" confirms requests pinned to `universal-3-pro` now return an error as of today (2026-09-02) instead of being auto-routed \u2014 hard cutover complete. Legacy request value `best` now routes to `universal-3-5-pro` (`nano` still routes to universal-2). Superseded by the `universal-3-5-pro` row at the same $0.21/hr price \u2014 a rename, not a price change. Featured flag kept per runbook policy (indexed compare pages stay live with a deprecation banner)."
+      "source_url": "https://www.assemblyai.com/llms/pricing.md",
+      "notes": "AssemblyAI's highest-accuracy pre-recorded model with native code-switching, documented at 18 languages per assemblyai.com/docs/getting-started/models and assemblyai.com/llms/models.md; unsupported languages fall back to Universal-2. Deprecated: the changelog entry \"Deprecated: universal-3-pro and universal for New and Inactive Accounts\" (2026-07-10) cut off new/inactive accounts; the entry \"Default speech model changing to Universal-3.5 Pro on September 2, 2026\" confirms requests pinned to `universal-3-pro` now return an error as of today (2026-09-02) instead of being auto-routed — hard cutover complete. Legacy request value `best` now routes to `universal-3-5-pro` (`nano` still routes to universal-2). Superseded by the `universal-3-5-pro` row at the same $0.21/hr price — a rename, not a price change. Featured flag kept per runbook policy (indexed compare pages stay live with a deprecation banner). Re-verified 2026-11-02: still absent from AssemblyAI's pricing docs. Replacement unchanged. The vendor scheduled the error cutover for 2026-09-02; whether it happened that day is not confirmed."
     },
     {
       "provider": "AssemblyAI",
@@ -287,12 +287,12 @@
       "deprecated_at": "2026-07-19",
       "replaced_by_model_id": "u3-rt-pro",
       "confidence": "medium",
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "Real-time streaming tier for voice agents, now branded \"Universal-3.5 Pro Realtime\". Deprecated in this dataset 2026-07-19: for a second consecutive refresh (2026-07-13 and 2026-07-19) the pricing page and the assemblyai.com/llms/models.md quick reference both give `u3-rt-pro` (alias `u3-pro`) as the API identifier, and no vendor source uses the literal string `universal-3-pro-streaming`. This was the repeat confirmation the 2026-07-13 refresh required before renaming; superseded by the `u3-rt-pro` row at the same $0.45/hr price (a rename, not a price change). confidence:medium because this id was never published by the vendor, so there is no explicit vendor deprecation notice for it."
+      "source_url": "https://www.assemblyai.com/llms/pricing.md",
+      "notes": "Real-time streaming tier for voice agents, now branded \"Universal-3.5 Pro Realtime\". Deprecated in this dataset 2026-07-19: for a second consecutive refresh (2026-07-13 and 2026-07-19) the pricing page and the assemblyai.com/llms/models.md quick reference both give `u3-rt-pro` (alias `u3-pro`) as the API identifier, and no vendor source uses the literal string `universal-3-pro-streaming`. This was the repeat confirmation the 2026-07-13 refresh required before renaming; superseded by the `u3-rt-pro` row at the same $0.45/hr price (a rename, not a price change). confidence:medium because this id was never published by the vendor, so there is no explicit vendor deprecation notice for it. Re-verified 2026-11-02: still absent from AssemblyAI's pricing and models docs. The same tier is now priced as universal-3-6-pro at $0.45/hr, which matches this row's rate."
     },
     {
       "provider": "AssemblyAI",
@@ -328,12 +328,12 @@
       "deprecated_at": "2026-09-02",
       "replaced_by_model_id": "universal-3-5-pro",
       "confidence": "medium",
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "Canonical id for the streaming tier this dataset previously tracked as `universal-3-pro-streaming` (GA 2026-03-03 per assemblyai.com/llms/models.md; `u3-pro` kept as a backward-compatible alias that routes here). Deprecated: the current dedicated streaming model-selection reference (docs/streaming/select-the-speech-model) lists only three available streaming models \u2014 `universal-3-5-pro` (recommended, also the default), `universal-streaming-english`, `universal-streaming-multilingual` \u2014 `u3-rt-pro`/`u3-pro` no longer appear. The streaming migration guide \"Universal Streaming to Universal-3.5 Pro Streaming\" and the async-migration changelog entry (\"u3-pro-rt (Universal-3 Pro Realtime) Redirected to universal-3-5-pro \u2014 no action required\") corroborate the same target id. Superseded by the `universal-3-5-pro` row at the same $0.45/hr price \u2014 a rename, not a price change. confidence:medium because, unlike the async id's explicit hard-error notice, no changelog entry states `u3-rt-pro` itself now errors \u2014 only that it redirects, so treat with the same caution as the prior `universal-streaming` rename."
+      "source_url": "https://www.assemblyai.com/llms/models.md",
+      "notes": "Canonical id for the streaming tier this dataset previously tracked as `universal-3-pro-streaming` (GA 2026-03-03 per assemblyai.com/llms/models.md; `u3-pro` kept as a backward-compatible alias that routes here). Deprecated: the current dedicated streaming model-selection reference (docs/streaming/select-the-speech-model) lists only three available streaming models — `universal-3-5-pro` (recommended, also the default), `universal-streaming-english`, `universal-streaming-multilingual` — `u3-rt-pro`/`u3-pro` no longer appear. The streaming migration guide \"Universal Streaming to Universal-3.5 Pro Streaming\" and the async-migration changelog entry (\"u3-pro-rt (Universal-3 Pro Realtime) Redirected to universal-3-5-pro — no action required\") corroborate the same target id. Superseded by the `universal-3-5-pro` row at the same $0.45/hr price — a rename, not a price change. confidence:medium because, unlike the async id's explicit hard-error notice, no changelog entry states `u3-rt-pro` itself now errors — only that it redirects, so treat with the same caution as the prior `universal-streaming` rename. Re-verified 2026-11-02: AssemblyAI's models doc now recommends universal-3-6-pro for this id (same $0.45/hr). The changelog redirect to universal-3-5-pro still stands, so replaced_by_model_id is unchanged."
     },
     {
       "provider": "AssemblyAI",
@@ -403,12 +403,12 @@
       "deployment_options": ["native"],
       "deprecated_at": "2026-07-02",
       "confidence": "medium",
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-26",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "OpenAI Whisper served via AssemblyAI's streaming infrastructure with 99+ language coverage. Published as $0.30/hr as of last verification, but no longer listed on the pricing page, docs/getting-started/models, the llms/models.md quick reference, or the changelog \u2014 still absent as of 2026-09-02, reconfirming silent discontinuation. No in-file replacement (no surviving streaming model offers 99+ language coverage); confidence:medium since no explicit vendor deprecation notice was found, only absence across all checked sources."
+      "notes": "OpenAI Whisper served via AssemblyAI's streaming infrastructure with 99+ language coverage. Published as $0.30/hr as of last verification, but no longer listed on the pricing page, docs/getting-started/models, the llms/models.md quick reference, or the changelog — still absent as of 2026-09-02, reconfirming silent discontinuation. No in-file replacement (no surviving streaming model offers 99+ language coverage); confidence:medium since no explicit vendor deprecation notice was found, only absence across all checked sources. Re-verified 2026-11-02: still absent from AssemblyAI's pricing page, pricing doc, and changelog. There is no explicit vendor notice."
     },
     {
       "provider": "Cartesia",
@@ -630,12 +630,12 @@
       "realtime": true,
       "diarization": "extra-cost",
       "deployment_options": ["azure"],
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
-      "notes": "Azure Speech Standard (S0) real-time speech-to-text. Published as $1.00/hr pay-as-you-go (= $0.016667/min), unchanged; custom real-time endpoint is $1.20/hr ($0.02/min). Commitment tiers reduce effective rate (2,000 hrs/mo $0.80/hr; 10,000 hrs/mo $0.65/hr; 50,000 hrs/mo $0.50/hr; 100,000 hrs/mo $0.40/hr \u2014 all confirmed unchanged via Retail Prices API). Enhanced add-on features on real-time (diarization, continuous language identification, pronunciation assessment) cost $0.30/hr per feature (= $0.005/min). Real-time diarization limited to 240 min/session. Languages: 100+ (139 locales per learn.microsoft.com language-support, up from 137 previously recorded). 2026-09-02 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched via WebFetch (per-hour figures still render client-side, page shows placeholder '$-' values), exact rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech To Text' $1.00/hr, 'S1 Custom Speech To Text' $1.20/hr, 'S1 Speech to Text Enhanced Feature Audio' $0.30/hr, all commitment-tier meters unchanged including newly-checked 100K tier at $0.40/hr), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no STT pricing changes; 2026 changes are SDK feature releases \u2014 multichannel audio, source-language autodetection \u2014 plus retirement of ConversationTranslator/MeetingTranscriber/Intent Recognition, none of which affect this row) and language-support docs. No new base STT pricing tiers found in the Retail Prices API catalog for productName 'Azure Speech'. All figures unchanged from 2026-08-11 pass; confidence high."
+      "source_url": "https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20armRegionName%20eq%20%27eastus%27",
+      "notes": "Azure Speech Standard (S0) real-time speech-to-text. Published as $1.00/hr pay-as-you-go (= $0.016667/min), unchanged; custom real-time endpoint is $1.20/hr ($0.02/min). Commitment tiers reduce effective rate (2,000 hrs/mo $0.80/hr; 10,000 hrs/mo $0.65/hr; 50,000 hrs/mo $0.50/hr; 100,000 hrs/mo $0.40/hr — all confirmed unchanged via Retail Prices API). Enhanced add-on features on real-time (diarization, continuous language identification, pronunciation assessment) cost $0.30/hr per feature (= $0.005/min). Real-time diarization limited to 240 min/session. Languages: 100+ (139 locales per learn.microsoft.com language-support, up from 137 previously recorded). 2026-09-02 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched via WebFetch (per-hour figures still render client-side, page shows placeholder '$-' values), exact rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech To Text' $1.00/hr, 'S1 Custom Speech To Text' $1.20/hr, 'S1 Speech to Text Enhanced Feature Audio' $0.30/hr, all commitment-tier meters unchanged including newly-checked 100K tier at $0.40/hr), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no STT pricing changes; 2026 changes are SDK feature releases — multichannel audio, source-language autodetection — plus retirement of ConversationTranslator/MeetingTranscriber/Intent Recognition, none of which affect this row) and language-support docs. No new base STT pricing tiers found in the Retail Prices API catalog for productName 'Azure Speech'. All figures unchanged from 2026-08-11 pass; confidence high. Re-verified 2026-11-02: Azure Retail Prices API (eastus) shows $1.00/hr = 0.016667/min, and the diarization add-on at $0.30/hr = 0.005/min. source_url moved to that API because the pricing page shows no figures without a browser."
     },
     {
       "provider": "Microsoft Azure",
@@ -648,12 +648,12 @@
       "realtime": false,
       "diarization": "included",
       "deployment_options": ["azure"],
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
-      "notes": "Azure Speech Standard (S0) batch transcription. Published as $0.18/hr (= $0.003/min); custom batch endpoint is $0.225/hr ($0.00375/min). Batch enhanced add-ons (diarization, continuous language identification) are included at no extra charge; diarization up to 240 min/file. Fast transcription is modelled as its own row (azure-speech-fast). 2026-09-02 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched via WebFetch (figures still render client-side, page shows placeholder '$-' values), exact rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech to Text Batch' $0.18/hr, 'S1 Custom Speech to Text Batch' $0.225/hr, unchanged), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no STT pricing changes or deprecations in 2026 releases; only SDK feature/retirement notes unrelated to batch pricing). No new batch STT tiers found in the Retail Prices API catalog. Figures unchanged from 2026-08-11 pass; confidence high."
+      "source_url": "https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20armRegionName%20eq%20%27eastus%27",
+      "notes": "Azure Speech Standard (S0) batch transcription. Published as $0.18/hr (= $0.003/min); custom batch endpoint is $0.225/hr ($0.00375/min). Batch enhanced add-ons (diarization, continuous language identification) are included at no extra charge; diarization up to 240 min/file. Fast transcription is modelled as its own row (azure-speech-fast). 2026-09-02 pass: azure.microsoft.com/en-us/pricing/details/speech/ fetched via WebFetch (figures still render client-side, page shows placeholder '$-' values), exact rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'S1 Speech to Text Batch' $0.18/hr, 'S1 Custom Speech to Text Batch' $0.225/hr, unchanged), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no STT pricing changes or deprecations in 2026 releases; only SDK feature/retirement notes unrelated to batch pricing). No new batch STT tiers found in the Retail Prices API catalog. Figures unchanged from 2026-08-11 pass; confidence high. Re-verified 2026-11-02: Azure Retail Prices API (eastus) shows $0.18/hr = 0.003/min. source_url moved to that API because the pricing page shows no figures without a browser."
     },
     {
       "provider": "Microsoft Azure",
@@ -667,12 +667,12 @@
       "diarization": "included",
       "max_audio_minutes_per_file": 300,
       "deployment_options": ["azure"],
-      "last_verified": "2026-09-02",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-07-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
-      "notes": "Azure Speech fast transcription: synchronous REST API (/speechtotext/transcriptions:transcribe) returning faster-than-real-time file transcription; not streaming. Published as $0.36/hr (= $0.006/min); custom fast transcription is $0.45/hr ($0.0075/min). Diarization included at no extra charge. Limits (S0): <500 MB and <5 hrs (300 min) per file, 600 requests/min. Supported across the 139-locale Azure STT locale set (fast transcription marked supported for the large majority; a handful of niche locales unsupported) per language-support docs. model_id is a Hail-coined tier slug \u2014 Azure exposes no stable model identifier. 2026-09-02 pass: rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'Fast Transcription Speech To Text' $0.36/hr, 'Custom - Fast Transcription' $0.45/hr, unchanged), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no fast-transcription pricing or limit changes in 2026 releases) and language-support docs. No new fast-transcription tiers found in the Retail Prices API catalog. Figures unchanged from 2026-08-11 pass; confidence high."
+      "source_url": "https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20armRegionName%20eq%20%27eastus%27",
+      "notes": "Azure Speech fast transcription: synchronous REST API (/speechtotext/transcriptions:transcribe) returning faster-than-real-time file transcription; not streaming. Published as $0.36/hr (= $0.006/min); custom fast transcription is $0.45/hr ($0.0075/min). Diarization included at no extra charge. Limits (S0): <500 MB and <5 hrs (300 min) per file, 600 requests/min. Supported across the 139-locale Azure STT locale set (fast transcription marked supported for the large majority; a handful of niche locales unsupported) per language-support docs. model_id is a Hail-coined tier slug — Azure exposes no stable model identifier. 2026-09-02 pass: rates re-confirmed via Azure Retail Prices API (prices.azure.com, eastus USD: 'Fast Transcription Speech To Text' $0.36/hr, 'Custom - Fast Transcription' $0.45/hr, unchanged), cross-verified via learn.microsoft.com/en-us/azure/ai-services/speech-service/releasenotes (no fast-transcription pricing or limit changes in 2026 releases) and language-support docs. No new fast-transcription tiers found in the Retail Prices API catalog. Figures unchanged from 2026-08-11 pass; confidence high. Re-verified 2026-11-02: Azure Retail Prices API (eastus) shows $0.36/hr = 0.006/min. A promotional meter at $0.10/hr is not recorded. source_url moved to that API because the pricing page shows no figures without a browser."
     },
     {
       "provider": "Google",
@@ -780,12 +780,14 @@
       "realtime": true,
       "diarization": "included",
       "deployment_options": ["native"],
-      "last_verified": "2026-09-02",
+      "deprecated_at": "2026-08-20",
+      "replaced_by_model_id": "reverb",
+      "last_verified": "2026-11-02",
       "last_changed_at": "2026-05-19",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.rev.ai/pricing",
-      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) \u2014 model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh. 2026-07-19 re-verify: still listed at $0.005/min on the pricing page (primary); `fusion` still an active `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated. 2026-08-11 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) now documents only `machine` (account default) and `machine_v2` (always routes to Reverb ASR) \u2014 `fusion`/`low_cost` are no longer named there (a docs restructuring), but `Whisper Fusion` remains listed and priced on the pricing page itself; not deprecated. 2026-09-02 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) still documents only `machine`/`machine_v2`, no `fusion` value; not deprecated \u2014 pricing page remains the authoritative listing for this product."
+      "source_url": "https://docs.rev.ai/api/asynchronous/changelog",
+      "notes": "Rev.ai's streaming transcription product, branded `Whisper Fusion` on the pricing page at $0.005/min; the parallel Whisper Large streaming tier is also $0.005/min. Free credits equivalent to 5 hours of Reverb ASR (cross-applicable across products). Reverb (batch) is modelled separately; see https://docs.rev.ai/ for the full API surface. English-primary; foreign language support is a distinct Reverb Foreign Language product line. 2026-07-13 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Note for context: the async job API's `transcriber` enum uses `fusion`/`machine`/`low_cost` rather than these marketing names (per docs.rev.ai, secondary) — model_id here follows this dataset's pricing-page-branding convention, unchanged from prior refresh. 2026-07-19 re-verify: still listed at $0.005/min on the pricing page (primary); `fusion` still an active `transcriber` value in the async job API reference (docs.rev.ai, secondary); no price change, not deprecated. 2026-08-11 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) now documents only `machine` (account default) and `machine_v2` (always routes to Reverb ASR) — `fusion`/`low_cost` are no longer named there (a docs restructuring), but `Whisper Fusion` remains listed and priced on the pricing page itself; not deprecated. 2026-09-02 re-verify: still listed at $0.005/min on the pricing page (primary); no price change. Secondary (docs.rev.ai/api/streaming/transcribers/) still documents only `machine`/`machine_v2`, no `fusion` value; not deprecated — pricing page remains the authoritative listing for this product. Re-verified 2026-11-02: Rev deprecated the fusion transcriber on 2026-08-20 (docs.rev.ai/api/asynchronous/changelog) and removed it from rev.ai/pricing. $0.005/min is frozen as last listed (archived page, 2026-08-23). Rev recommends its default transcriber, which uses Reverb."
     },
     {
       "provider": "Rev.ai",
