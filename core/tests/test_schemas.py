@@ -300,6 +300,11 @@ MALFORMED_ADDRESSES = [
     "a@b..co",
     "a@-b.co",
     "a@b.co.",
+    "a\u200b@b.co",
+    "a\u202e@b.co",
+    "a\u00ad@b.co",
+    "a\ufeff@b.co",
+    "a@b\u200b.co",
     '"a,b"@c.co',
 ]
 NORMAL_ADDRESSES = [

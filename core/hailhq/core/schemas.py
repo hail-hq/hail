@@ -1215,6 +1215,14 @@ _DOMAIN_LABEL = rf"[\w{_NON_ASCII}](?:[\w{_NON_ASCII}-]*[\w{_NON_ASCII}])?"
 EMAIL_ADDR = re.compile(
     rf"^(?!.*\s){_LOCAL_PART}@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
 )
+
+
+def is_email_address(value: str) -> bool:
+    """Whether ``value`` is one plain address. ``isprintable`` refuses the
+    invisible format characters that the regex's non-ASCII range lets through."""
+    return bool(EMAIL_ADDR.match(value)) and value.isprintable()
+
+
 DOMAIN_NAME = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 )
@@ -1473,7 +1481,7 @@ class EmailDomainPatch(BaseModel):
         out: list[str] = []
         for addr in v:
             stripped = addr.strip()
-            if not EMAIL_ADDR.match(stripped):
+            if not is_email_address(stripped):
                 raise ValueError(f"forward_to entry {addr!r} is not an email address")
             out.append(stripped)
         return out
@@ -1838,7 +1846,7 @@ class EmailCreate(ConsentAttestationMixin):
     def _validate_optional_email(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if not EMAIL_ADDR.match(v):
+        if not is_email_address(v):
             raise ValueError("must be a valid email address (local@domain.tld)")
         return _normalize_domain(v)
 
@@ -1849,7 +1857,7 @@ class EmailCreate(ConsentAttestationMixin):
             return v
         out: list[str] = []
         for addr in v:
-            if not EMAIL_ADDR.match(addr):
+            if not is_email_address(addr):
                 raise ValueError(
                     f"invalid email address {addr!r} (expected local@domain.tld)"
                 )
@@ -2399,7 +2407,7 @@ def _normalize_contact_email(v: str | None) -> str | None:
     no backfill."""
     if v is None:
         return v
-    if not EMAIL_ADDR.match(v):
+    if not is_email_address(v):
         raise ValueError("must be a valid email address (local@domain.tld)")
     return _normalize_domain(v).lower()
 
