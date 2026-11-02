@@ -128,7 +128,7 @@ _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
 # How long a queued reply counts as in flight. Past this the send is presumed
 # lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
-_QUEUED_GRACE = timedelta(seconds=180)
+_QUEUED_GRACE = timedelta(seconds=240)
 # Failures that prove SES did not accept the message, so a resend cannot deliver
 # it twice. Anything else ends the reply: after a read timeout or a closed
 # connection SES may already have sent it.

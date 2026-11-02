@@ -37,10 +37,11 @@ from hailhq.core.providers.email.base import (
 # timeout stays at 60 seconds for large attachment sends.
 SES_CONNECT_TIMEOUT_SECONDS = 10
 SES_READ_TIMEOUT_SECONDS = 60
-SES_MAX_ATTEMPTS = 2
-# Both attempts timing out, plus the one backoff between them (at most a second).
+SES_MAX_ATTEMPTS = 3
+# All attempts timing out, plus the two backoffs between them: at most 1 and 2
+# seconds, and botocore adds up to 5 more to each when SES sends a retry-after.
 SES_SEND_BUDGET_SECONDS = (
-    SES_MAX_ATTEMPTS * (SES_CONNECT_TIMEOUT_SECONDS + SES_READ_TIMEOUT_SECONDS) + 1
+    SES_MAX_ATTEMPTS * (SES_CONNECT_TIMEOUT_SECONDS + SES_READ_TIMEOUT_SECONDS) + 13
 )
 
 
