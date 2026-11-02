@@ -4,16 +4,21 @@ name: costs-refresh
 # docs/operations/refresh-costs.md. Claude Code reads vendor pricing pages,
 # edits costs/*.json, and a second job opens a PR for a person to review.
 #
+# It runs on Amazon Bedrock, never the Anthropic API.
+#
 # Required repo secret:
-#   ANTHROPIC_API_KEY   a dedicated key with a low monthly spend limit
+#   AWS_ROLE_TO_ASSUME   the costs_refresh_role_arn output of infra/terraform.
+#                        The role gets short-lived credentials through OIDC,
+#                        so the repo holds no AWS key.
 #
 # Security notes:
 #   - The agent reads untrusted web pages. It runs with --restricted: no
 #     shell, and file tools only inside the repo. It can edit only the four
 #     data files, and WebFetch reaches only the sites listed in
-#     .github/prompts/costs-refresh-settings.json. WebSearch stays open.
-#   - Only the agent steps and the secret check see the key. The job has a
-#     read-only token, and the checkout keeps no credentials.
+#     .github/prompts/costs-refresh-settings.json. Bedrock has no WebSearch.
+#   - The AWS role can only call Claude on Bedrock and read inference
+#     profiles. The job has a read-only GitHub token, and the checkout keeps
+#     no credentials.
 #   - Only the diff of the four data files and the report leave the job. The
 #     job that can write to the repo never runs the agent.
 #   - The PR body comes from the agent, so its text sits in a code fence.
@@ -35,6 +40,9 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the AWS role
     timeout-minutes: 210
     outputs:
       ready: ${{ steps.export.outputs.ready }}
@@ -54,16 +62,19 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
       - name: Check the secret is set
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ROLE: ${{ secrets.AWS_ROLE_TO_ASSUME }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY is not set (Settings → Secrets → Actions)"
+          if [ -z "$ROLE" ]; then
+            echo "::error::AWS_ROLE_TO_ASSUME is not set (Settings → Secrets → Actions)"
             exit 1
           fi
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: eu-central-1
+          role-duration-seconds: 14400
       - name: Run the refresh
         id: agent
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           mkdir -p /tmp/out
           sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh.md > /tmp/prompt.md
@@ -80,8 +91,6 @@ jobs:
       - name: Repair what validation found
         id: repair
         if: steps.first_check.outcome == 'failure'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           # A failure with no data edits is not the agent's to fix.
           if git diff --quiet -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json; then

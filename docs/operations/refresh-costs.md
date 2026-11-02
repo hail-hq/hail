@@ -33,7 +33,7 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 [`costs-refresh.yml`](../../.github/workflows/costs-refresh.yml) runs this pass every Monday at 05:00 UTC, and on demand from the Actions tab. It uses the prompt in [`.github/prompts/costs-refresh.md`](../../.github/prompts/costs-refresh.md).
 
 - The agent edits `costs/llm.json`, `costs/stt.json`, `costs/tts.json`, and `costs/sms.json`. A second job opens a PR on the branch `costs/weekly-refresh` and requests a review from the owner.
-- The agent reads untrusted web pages, so it runs with `--restricted --safe-mode --strict-mcp-config` and [`.github/prompts/costs-refresh-settings.json`](../../.github/prompts/costs-refresh-settings.json). It has no shell, it can edit only those four files, and it can fetch only the listed sites. A new vendor needs a line in that file. The `refresh` job has a read-only token.
+- The agent reads untrusted web pages, so it runs with `--restricted --safe-mode --strict-mcp-config` and [`.github/prompts/costs-refresh-settings.json`](../../.github/prompts/costs-refresh-settings.json). It has no shell, it can edit only those four files, and it can fetch only the listed sites. A new vendor needs a line in that file. The `refresh` job has a read-only GitHub token.
 - The agent stops at a $30 budget and a 150-minute timeout. If validation fails, a short repair pass ($3, 15 minutes) reads the errors and fixes the rows.
 - If the finished rows pass validation, a PR opens. After an early stop it uses a dated `costs/partial-refresh-*` branch, so it cannot replace a complete PR, and the run stays red. Its report can be missing, so check the diff by hand.
 - If validation still fails, no PR opens. The run's `costs-refresh` artifact holds the patch and the report for 7 days.
@@ -42,7 +42,17 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The PR comes from `GITHUB_TOKEN`, so `costs-validate.yml` does not run on it. The `refresh` job runs the schema, reference, featured, script test, and site build checks first.
 - `sms-registration.json` and `recording.json` are not covered. Refresh those by hand.
 
-Setup: add the repo secret `ANTHROPIC_API_KEY`. Use a dedicated key with a low monthly spend limit. Without the secret, the job fails before the agent starts.
+Setup, once:
+
+```bash
+cd infra
+terragrunt apply
+terragrunt output -raw costs_refresh_role_arn | gh secret set AWS_ROLE_TO_ASSUME --repo hail-hq/hail
+```
+
+The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/terraform/costs_refresh.tf` limits the role to Claude on Bedrock, for runs on `main` of this repo. Without the secret, the job fails before the agent starts.
+
+Bedrock has no WebSearch, so the agent starts from the catalog URLs and each row's `source_url`.
 
 To run the pass by hand instead, follow the procedure below.
 

@@ -12,7 +12,7 @@ You run the weekly cost refresh in a GitHub Actions job. Today is {today}. Nobod
 
 The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`), `sms-registration.json`, and `recording.json` are out of scope.
 
-You can fetch only the sites in `.github/prompts/costs-refresh-settings.json`. If a fetch is refused or a page shows no price, try the secondary source in the catalog. If that fails, defer the row. Do not ask for more access.
+You have no web search. Start from the URLs in the provider catalog and in each row's `source_url`, and follow links from those pages. You can fetch only the sites in `.github/prompts/costs-refresh-settings.json`. If a fetch is refused or a page shows no price, try the secondary source in the catalog. If that fails, defer the row. Do not ask for more access.
 
 ## Rules
 

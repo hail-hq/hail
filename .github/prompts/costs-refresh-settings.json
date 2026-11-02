@@ -1,7 +1,7 @@
 {
+  "skipWebFetchPreflight": true,
   "permissions": {
     "allow": [
-      "WebSearch",
       "Edit(costs/llm.json)",
       "Edit(costs/stt.json)",
       "Edit(costs/tts.json)",
