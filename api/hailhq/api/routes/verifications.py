@@ -77,7 +77,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm.attributes import flag_modified, get_history
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 logger = logging.getLogger(__name__)
@@ -531,10 +531,32 @@ async def _poll_and_apply(
 
 def _campaign_filed(provider: object, refs: dict | None) -> bool:
     """``SmsRegistrationProvider.campaign_filed``; False for any other
-    plug-in, or none."""
+    plug-in, or none. Plug-in code: an error is logged and reads as not
+    filed, so it never turns a carrier call that worked into a failure."""
     if not isinstance(provider, SmsRegistrationProvider):
         return False
-    return provider.campaign_filed(refs)
+    try:
+        return provider.campaign_filed(refs)
+    except Exception:
+        logger.exception("campaign_filed failed for %s", provider.name)
+        return False
+
+
+def _added_only(before: dict, after: dict) -> dict:
+    """``before`` plus the ids ``after`` added: new keys, items appended
+    to a list, and the same inside nested dicts. Keys removed or changed
+    go back to their ``before`` value."""
+    out = copy.deepcopy(before)
+    for key, new in after.items():
+        old = before.get(key)
+        if key not in before:
+            out[key] = new
+        elif isinstance(old, list) and isinstance(new, list):
+            if new[: len(old)] == old:
+                out[key] = new
+        elif isinstance(old, dict) and isinstance(new, dict):
+            out[key] = _added_only(old, new)
+    return out
 
 
 def _stamp_campaign_filed(provider: object, refs: dict) -> None:
@@ -559,21 +581,20 @@ async def _plugin_call(
     After it: stamp a filed campaign, and mark the refs changed when they
     did, so the caller's next commit saves them (JSONB does not track
     in-place changes). When the call raises partway, only the ids it added
-    are kept (one it filed may be billed); keys it removed or changed go
-    back to what they were. The caller commits. Status polls keep their
-    own rule (``_poll_and_apply``); a cancel or reject wipes the refs."""
+    are kept (``_added_only``; one it filed may be billed). The caller
+    commits; on a cancel (a restart) nothing does, and they are lost.
+    Status polls keep their own rule (``_poll_and_apply``); a cancel or
+    reject wipes the refs."""
     before = copy.deepcopy(row.provider_refs)
     try:
         yield
     except BaseException:
-        row.provider_refs.update(before)
+        kept = _added_only(before, row.provider_refs)
+        row.provider_refs.clear()
+        row.provider_refs.update(kept)
         raise
     finally:
-        try:
-            _stamp_campaign_filed(provider, row.provider_refs)
-        except Exception:
-            # Plug-in code: never turn a call that worked into a failure.
-            logger.exception("campaign stamp failed for %s", row.id)
+        _stamp_campaign_filed(provider, row.provider_refs)
         if row.provider_refs != before:
             flag_modified(row, "provider_refs")
 
@@ -1467,11 +1488,12 @@ async def _lock_waiting(
     ).scalar_one_or_none()
 
 
-async def _save_refs(
+async def _commit_and_notify(
     db: AsyncSession, row: CarrierVerification, before: BillingView
 ) -> None:
-    """Commit what a plug-in call kept in the refs before it failed (an id
-    it filed may be billed), and ping the rater when they changed."""
+    """Commit (after a failed plug-in call: the refs ``_plugin_call`` kept,
+    an id it filed may be billed), and ping the rater when the row
+    changed."""
     await db.commit()
     _notify_if_changed(row, before)
 
@@ -1495,7 +1517,7 @@ async def _retry_submit(
             problems = await provider.check(row.provider_refs)
     except Exception:
         logger.exception("verification check failed for %s", row.id)
-        await _save_refs(db, row, before)
+        await _commit_and_notify(db, row, before)
         return False
     if problems:
         outcome = await _refuse_row(db, row, provider, problems)  # pings when rejected
@@ -1578,7 +1600,7 @@ async def _reject_row(
     """
     state, changed_at = row.state, row.updated_at
     rate = row.purpose == "sms" and _campaign_filed(provider, row.provider_refs)
-    if rate or db.is_modified(row):
+    if rate or get_history(row, "provider_refs").has_changes():
         # Saved before the discard: the ids the plug-in call wrote (a filed
         # campaign is billed) must survive a failed discard, or a restart
         # during it. The commit ends the row lock. Nothing changed: nothing
@@ -2000,10 +2022,10 @@ async def admin_approve(
             problems = await provider.check(row.provider_refs)
     except Exception as exc:
         logger.exception("verification check failed")
-        await _save_refs(db, row, before)
+        await _commit_and_notify(db, row, before)
         raise _carrier_unavailable() from exc
     if problems:
-        await _save_refs(db, row, before)
+        await _commit_and_notify(db, row, before)
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
