@@ -2079,6 +2079,56 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     ).scalar_one_or_none() is None
 
 
+async def test_a_check_that_fails_partway_keeps_only_the_ids_it_added(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+
+    async def check(refs):
+        refs["filed_id"] = "F1"
+        refs.pop("bundle_sid")
+        raise RuntimeError("carrier down")
+
+    carrier.check = check
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+
+
+async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
+    client, org_and_key, carrier, async_session
+) -> None:
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+
+    async def discard(refs):
+        refs["deleting_id"] = "D1"
+        refs["bundle_sid"] = "changed"
+        raise RuntimeError("carrier down")
+
+    carrier.discard = discard
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "awaiting_review"
+    assert row.provider_refs == {"bundle_sid": "B1", "deleting_id": "D1"}
+
+
 @pytest.mark.parametrize(
     "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
 )
@@ -4092,6 +4142,80 @@ async def test_admin_approve_shows_the_refusal_of_a_row_waiting_again(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_superadmin_reject_leaves_a_row_that_changed_while_it_was_rated(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+) -> None:
+    """Rating commits, which ends the row lock. A row the background pass
+    moved on in that gap is not discarded or rejected: the admin gets 409."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _with_campaign(async_session, vid, "awaiting_review")
+
+    async def submit_meanwhile(verification_id: str) -> None:
+        async with session_factory() as other:
+            row = await other.get(CarrierVerification, uuid.UUID(verification_id))
+            row.state = "submitting"
+            await other.commit()
+
+    discarded: list[dict] = []
+
+    async def discard(refs):
+        discarded.append(refs)
+
+    monkeypatch.setattr(verifications_routes, "rate_sms_registration", submit_meanwhile)
+    sms_carrier.discard = discard
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 409, resp.text
+    assert discarded == []
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitting" and row.provider_refs["campaign_id"] == "C1"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_stamp_error_after_a_submit_does_not_undo_it(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    """The submit went through: a plug-in error while stamping the refs
+    after it must not put the row back to be submitted again."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+
+    armed: list[bool] = []
+    submit, campaign_filed = sms_carrier.submit, sms_carrier.campaign_filed
+
+    async def submit_then_arm(refs):
+        await submit(refs)
+        armed.append(True)
+
+    def broken_once(refs):
+        if armed:
+            armed.clear()
+            raise KeyError("odd refs")
+        return campaign_filed(refs)
+
+    monkeypatch.setattr(sms_carrier, "submit", submit_then_arm)
+    monkeypatch.setattr(sms_carrier, "campaign_filed", broken_once)
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitted"
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
     client, org_and_key, sms_carrier, async_session, pinged, rated
 ) -> None:
@@ -4305,3 +4429,34 @@ async def test_a_campaign_filed_by_a_failed_submit_is_kept(
     assert row.state == "awaiting_review"
     assert row.provider_refs["campaign_xyz"] == "C9"
     assert row.provider_refs["campaign_filed_at"]
+
+
+def test_a_failed_call_keeps_ids_it_appended_or_nested() -> None:
+    before = {
+        "bundle_sid": "B1",
+        "docs": ["D1"],
+        "brand": {"id": "R1"},
+        "campaign_id": None,
+        "vetting_requested": False,
+    }
+    after = {
+        "docs": ["D1", "D2"],
+        "brand": {"id": "R9", "vetting_id": "V1"},
+        "filed_id": "F1",
+        "campaign_id": "C1",
+        "vetting_requested": True,
+    }
+    assert verifications_routes._added_only(before, after) == {
+        "bundle_sid": "B1",
+        "docs": ["D1", "D2"],
+        "brand": {"id": "R1", "vetting_id": "V1"},
+        "filed_id": "F1",
+        "campaign_id": "C1",
+        "vetting_requested": True,
+    }
+    # A zero is a value, not an empty one: a change to it goes back.
+    assert verifications_routes._added_only({"step": 0}, {"step": 3}) == {"step": 0}
+    # A list that lost or reordered items goes back.
+    assert verifications_routes._added_only(
+        {"docs": ["D1", "D2"]}, {"docs": ["D2"]}
+    ) == {"docs": ["D1", "D2"]}
