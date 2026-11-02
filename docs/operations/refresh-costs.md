@@ -28,6 +28,20 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The same script runs every Monday in `costs-sync-numbers.yml` and opens a PR with the printed summary as its body.
 - Sources: Twilio `AvailablePhoneNumbers` (capabilities, address requirement), Pricing API, Regulations API; Telnyx `country_coverage`, `available_phone_numbers` (5-number price sample), `requirements?action=ordering`; DIDWW `did_groups` with `stock_keeping_units` (cheapest 0-channel SKU) and `address_requirement`.
 
+## Automated run
+
+[`costs-refresh.yml`](../../.github/workflows/costs-refresh.yml) runs this pass every Monday at 05:00 UTC, and on demand from the Actions tab. It uses the prompt in [`.github/prompts/costs-refresh.md`](../../.github/prompts/costs-refresh.md).
+
+- The agent edits `costs/llm.json`, `costs/stt.json`, `costs/tts.json`, and `costs/sms.json`. A second job opens a PR on the branch `costs/weekly-refresh` and requests a review from the owner.
+- The `refresh` job has a read-only token. The agent gets no shell except `pnpm costs:validate` and `pnpm costs:featured`, because it reads untrusted web pages.
+- The job stops at a $30 budget and a 3-hour timeout. Rows finished before a stop still go into the PR, and the PR lists the providers it did not reach.
+- A person reviews and merges the PR. The agent never sets `featured`; it lists candidates.
+- The PR comes from `GITHUB_TOKEN`, so `costs-validate.yml` does not run on it. The `refresh` job runs the same checks before it opens the PR.
+
+Setup: add the repo secret `ANTHROPIC_API_KEY`. Use a dedicated key with a low monthly spend limit. Without the secret, the job fails at its first step.
+
+To run the pass by hand instead, follow the procedure below.
+
 ## Pre-flight
 
 Before you start, confirm these items:

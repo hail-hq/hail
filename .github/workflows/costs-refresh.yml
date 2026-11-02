@@ -1,0 +1,148 @@
+name: costs-refresh
+
+# Weekly refresh of the model and SMS price rows, per
+# docs/operations/refresh-costs.md. Claude Code reads vendor pricing pages,
+# edits costs/*.json, and a second job opens a PR for a person to review.
+#
+# Required repo secret:
+#   ANTHROPIC_API_KEY   a dedicated key with a low monthly spend limit
+#
+# Security notes:
+#   - The agent reads untrusted web pages, so it is the only step that sees
+#     the key, it runs with a read-only token, and it has no credentials in
+#     the checkout. It has no shell beyond the two fixed commands below.
+#   - Only the refresh job's diff of the four data files leaves the job. The
+#     job that can write to the repo never runs the agent.
+#   - The budget and the timeout cap the cost of one run.
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC, before the number sync and stale check
+  workflow_dispatch: {}
+
+concurrency:
+  group: costs-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Check the secret is set
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set (Settings → Secrets → Actions)"
+            exit 1
+          fi
+      - name: Run the refresh
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh.md > /tmp/prompt.md
+          # A budget stop exits non-zero. Keep the finished rows: the checks
+          # below decide whether they are good enough for a PR.
+          claude --bare -p "$(cat /tmp/prompt.md)" \
+            --model claude-sonnet-5-5 \
+            --max-budget-usd 30 \
+            --permission-mode dontAsk \
+            --permission-prompts none \
+            --allowedTools 'Read,Grep,Glob,Edit,WebFetch,WebSearch,Bash(pnpm costs:validate),Bash(pnpm costs:featured)' \
+            --disallowedTools 'Read(//proc/**)' \
+            --output-format json > /tmp/claude.json || echo "::warning::Claude Code exited non-zero"
+      - name: Format the data files
+        run: pnpm exec prettier --write costs/llm.json costs/stt.json costs/tts.json costs/sms.json
+      - name: Validate
+        run: |
+          pnpm costs:validate
+          pnpm costs:featured
+          node --test scripts/costs/*.test.mjs
+          for f in costs/llm.json costs/stt.json costs/tts.json; do
+            dupes=$(jq -c '[.models[] | .aliases // [] | .[]] | group_by(.) | map(select(length > 1) | .[0])' "$f")
+            unresolved=$(jq -c '(.models | map(.model_id)) as $ids | [.models[] | select(.replaced_by_model_id != null) | select((.replaced_by_model_id as $r | $ids | index($r)) == null) | .model_id]' "$f")
+            if [ "$dupes" != "[]" ] || [ "$unresolved" != "[]" ]; then
+              echo "::error file=$f::aliases: $dupes ; replaced_by: $unresolved"
+              exit 1
+            fi
+          done
+          pnpm site:build
+      - name: Export the diff
+        id: diff
+        run: |
+          mkdir -p /tmp/out
+          git diff -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json > /tmp/out/refresh.patch
+          {
+            jq -r '.result // "The run gave no summary."' /tmp/claude.json
+            echo
+            echo "---"
+            echo
+            jq -r '"Run status: \(.subtype // "unknown"). Estimated cost: $\(.total_cost_usd // 0)."' /tmp/claude.json
+            echo
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > /tmp/out/summary.md
+          cat /tmp/out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -s /tmp/out/refresh.patch ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.diff.outputs.changed == 'true'
+        with:
+          name: costs-refresh
+          path: /tmp/out/
+          retention-days: 7
+
+  open-pr:
+    needs: refresh
+    if: needs.refresh.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: costs-refresh
+          path: /tmp/out
+      - name: Apply the diff
+        id: apply
+        run: |
+          git apply /tmp/out/refresh.patch
+          echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: costs/weekly-refresh
+          base: main
+          add-paths: |
+            costs/llm.json
+            costs/stt.json
+            costs/tts.json
+            costs/sms.json
+          title: "feat(costs): weekly refresh ${{ steps.apply.outputs.today }}"
+          commit-message: "feat(costs): weekly refresh ${{ steps.apply.outputs.today }}"
+          body-path: /tmp/out/summary.md
+          labels: costs-refresh
+          # The review request is what sends the email: GitHub does not
+          # notify anyone about a bot's new pull request on its own.
+          reviewers: r13i
