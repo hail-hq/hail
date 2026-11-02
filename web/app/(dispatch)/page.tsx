@@ -179,7 +179,7 @@ export default function CostsPage() {
               <div className="v">{numbers.length}</div>
               <div className="n">
                 {priceRange(
-                  numbers.filter(onSale).map((r) => r.usd_per_month),
+                  numbers.filter(onSale).map((r) => r.total_usd_per_month),
                   2,
                   2,
                   "mo",
