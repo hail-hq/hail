@@ -35,7 +35,7 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 210
     outputs:
       ready: ${{ steps.export.outputs.ready }}
       branch: ${{ steps.export.outputs.branch }}
@@ -83,8 +83,16 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          { cat .github/prompts/costs-refresh-repair.md; tail -n 80 /tmp/check.log; } > /tmp/repair.md
-          scripts/costs/run-refresh-agent.sh /tmp/repair.md 3 15 /tmp/repair.json || true
+          # A failure with no data edits is not the agent's to fix.
+          if git diff --quiet -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json; then
+            echo "::warning::Validation failed, but the agent changed no data files."
+            exit 0
+          fi
+          {
+            sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh-repair.md
+            tail -n 120 /tmp/check.log
+          } > /tmp/repair.md
+          scripts/costs/run-refresh-agent.sh /tmp/repair.md 3 15 /tmp/repair.json || echo "::warning::The repair pass exited non-zero."
       - name: Validate the repair
         id: second_check
         if: steps.first_check.outcome == 'failure'
@@ -102,7 +110,7 @@ jobs:
           git diff -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json > /tmp/out/refresh.patch
           field() {
             local value
-            value=$(jq -r "$1" /tmp/claude.json 2>/dev/null || true)
+            value=$(jq -r "$1" "${3:-/tmp/claude.json}" 2>/dev/null || true)
             echo "${value:-$2}"
           }
           is_error=$(field '.is_error // false' true)
@@ -115,17 +123,24 @@ jobs:
               echo "**The agent did not finish** (exit ${AGENT_EXIT:-none}). The report can be missing, and some providers were not checked."
               echo
             fi
-            if [ "$FIRST_CHECK" != "success" ]; then
-              echo "**A repair pass ran**, because the first validation failed. Its edits are in the diff."
+            if [ -e /tmp/repair.json ]; then
+              echo "**A repair pass ran**, because the first validation failed. Its edits are in the diff, and its notes are at the end of the report."
               echo
             fi
             echo "Rows with a new check date: $(grep -c '^+ *\"last_verified\"' /tmp/out/refresh.patch)."
-            echo "Estimated cost: \$$(field '.total_cost_usd // 0' 0), not counting a repair pass. Validation passed: ${valid}."
+            echo "Estimated cost: \$$(field '.total_cost_usd // 0' 0) for the refresh, \$$(field '.total_cost_usd // 0' 0 /tmp/repair.json) for the repair. Validation passed: ${valid}."
             echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
             # The fence keeps mentions, links, and closing keywords inert.
             echo '~~~~~~~~ text'
-            field '.result // "The run gave no report."' "The run gave no report." | sed -E 's/~{8,}/~~~/g'
+            {
+              field '.result // "The run gave no report."' "The run gave no report."
+              if [ -e /tmp/repair.json ]; then
+                echo
+                echo "Repair pass:"
+                field '.result // "The repair gave no report."' "The repair gave no report." /tmp/repair.json
+              fi
+            } | sed -E 's/~{8,}/~~~/g'
             echo '~~~~~~~~'
           } > /tmp/out/summary.md
           cat /tmp/out/summary.md >> "$GITHUB_STEP_SUMMARY"

@@ -76,8 +76,6 @@
       "WebFetch(domain:*.vonage.com)",
       "WebFetch(domain:x.ai)",
       "WebFetch(domain:*.x.ai)",
-      "WebFetch(domain:huggingface.co)",
-      "WebFetch(domain:github.com)",
       "WebFetch(domain:deepmind.google)",
       "WebFetch(domain:*.deepmind.google)",
       "WebFetch(domain:fireworks.ai)",
