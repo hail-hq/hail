@@ -83,11 +83,20 @@ jobs:
                 });
               }
             } else {
-              await github.rest.issues.create({
+              const { data: issue } = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 title,
                 body,
                 labels: ['costs-stale'],
               });
+              const ended = promoLines(report);
+              if (ended.length > 0) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: ['@r13i promotion ended:', '', ...ended].join('\n'),
+                });
+              }
             }
