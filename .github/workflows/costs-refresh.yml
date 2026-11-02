@@ -90,7 +90,7 @@ jobs:
           fi
           {
             sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh-repair.md
-            tail -n 120 /tmp/check.log
+            tail -n 200 /tmp/check.log
           } > /tmp/repair.md
           scripts/costs/run-refresh-agent.sh /tmp/repair.md 3 15 /tmp/repair.json || echo "::warning::The repair pass exited non-zero."
       - name: Validate the repair

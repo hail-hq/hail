@@ -24,6 +24,11 @@ for f in costs/llm.json costs/stt.json costs/tts.json; do
     failed=1
   fi
 done
-run pnpm site:build
+# The build output is long, so show it only on failure. The repair pass reads
+# the end of this log.
+if ! pnpm site:build > /tmp/site-build.log 2>&1; then
+  tail -n 30 /tmp/site-build.log
+  failed=1
+fi
 
 exit "$failed"
