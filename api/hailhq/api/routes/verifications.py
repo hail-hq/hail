@@ -575,17 +575,19 @@ async def _plugin_call(
 ) -> AsyncIterator[None]:
     """Around each plug-in call whose writes into ``row.provider_refs`` (in
     place) outlive it: check, submit, status, and the discard of a refused
-    draft or of a superadmin reject that fails. After it: stamp a filed campaign, and mark the refs changed when they
-    did, so the caller's next commit saves them (JSONB does not track
-    in-place changes). When the call raises partway, only the ids it added
-    are kept (``_added_only``; one it filed may be billed). The caller
-    commits; on a cancel (a restart) nothing does, and they are lost.
+    draft or a superadmin reject. After it: stamp a filed campaign, and
+    mark the refs changed when they did, so the caller's next commit saves
+    them (JSONB does not track in-place changes). When the call raises
+    partway, only the ids it added are kept (``_added_only``; one it filed
+    may be billed). The caller commits. A cancel (a restart) commits
+    nothing, so the refs are left as they are (a plug-in thread may still
+    be writing them).
     A customer cancel and the create rollback are not wrapped: the refs are
     wiped or rolled back right after."""
     before = copy.deepcopy(row.provider_refs)
     try:
         yield
-    except BaseException:
+    except Exception:
         kept = _added_only(before, row.provider_refs)
         row.provider_refs.clear()
         row.provider_refs.update(kept)
@@ -2065,7 +2067,6 @@ async def admin_reject(
 ) -> AdminVerification:
     row = await _admin_row(db, verification_id)
     provider = registry(row.provider, row.purpose)
-    before = _billing_view(row)
     state, changed_at = row.state, row.updated_at
     # Rating commits, which ends the row lock: lock it again, and leave a
     # row that changed meanwhile (the background pass submitted it, say).
@@ -2077,12 +2078,16 @@ async def admin_reject(
             detail="this verification changed meanwhile; reload and try again",
         )
     if provider is not None:
+        before = _billing_view(row)
         try:
             async with _plugin_call(row, provider):
                 await provider.discard(row.provider_refs)
         except Exception as exc:
             # The row keeps its state and its refs; reject again later.
+            # Touched, so the background pass waits before it retries a
+            # submit the admin meant to stop.
             logger.exception("verification discard failed for %s", row.id)
+            row.updated_at = datetime.now(timezone.utc)
             await _commit_and_notify(db, row, before)
             raise _carrier_unavailable() from exc
     row.state, row.rejection_reason = "rejected", body.reason
