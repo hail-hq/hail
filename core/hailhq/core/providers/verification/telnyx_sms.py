@@ -888,7 +888,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if exc.response.status_code == 409:  # already linked
                 return
             logger.warning("10DLC attach failed: status=%s", exc.response.status_code)
-            raise VerificationProviderError("Telnyx request failed") from exc
+            raise VerificationProviderError(
+                f"status {exc.response.status_code}: {_error_log(exc.response)}"
+            ) from exc
         except (httpx.HTTPError, KeyError) as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 
