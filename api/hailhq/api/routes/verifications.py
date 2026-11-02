@@ -439,8 +439,7 @@ async def _fetch_status(
     if provider is None:
         return None
     try:
-        async with _plugin_call(row, provider):
-            return await provider.status(row.provider_refs)
+        return await provider.status(row.provider_refs)
     except Exception:
         logger.warning("verification status poll failed", exc_info=True)
         return None
@@ -551,31 +550,30 @@ def _stamp_campaign_filed(provider: object, refs: dict) -> None:
         refs["campaign_filed_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _keep_refs(row: CarrierVerification, provider: object) -> None:
-    """Stamp a filed campaign and mark the refs changed, so the next commit
-    saves them (JSONB does not track in-place changes)."""
-    _stamp_campaign_filed(provider, row.provider_refs)
-    flag_modified(row, "provider_refs")
-
-
 @asynccontextmanager
 async def _plugin_call(
     row: CarrierVerification, provider: object
 ) -> AsyncIterator[None]:
-    """Around every plug-in call that may write into ``row.provider_refs``
-    in place (check, submit, status, discard). After it: stamp a filed
-    campaign, and mark the refs changed when they did, so the caller's next
-    commit saves them. When the call raises partway, only the ids it added
+    """Around each plug-in call whose writes into ``row.provider_refs`` (in
+    place) outlive it: check, submit, and the discard of a refused draft.
+    After it: stamp a filed campaign, and mark the refs changed when they
+    did, so the caller's next commit saves them (JSONB does not track
+    in-place changes). When the call raises partway, only the ids it added
     are kept (one it filed may be billed); keys it removed or changed go
-    back to what they were. The caller commits."""
+    back to what they were. The caller commits. Status polls keep their
+    own rule (``_poll_and_apply``); a cancel or reject wipes the refs."""
     before = copy.deepcopy(row.provider_refs)
     try:
         yield
-    except Exception:
+    except BaseException:
         row.provider_refs.update(before)
         raise
     finally:
-        _stamp_campaign_filed(provider, row.provider_refs)
+        try:
+            _stamp_campaign_filed(provider, row.provider_refs)
+        except Exception:
+            # Plug-in code: never turn a call that worked into a failure.
+            logger.exception("campaign stamp failed for %s", row.id)
         if row.provider_refs != before:
             flag_modified(row, "provider_refs")
 
@@ -608,21 +606,24 @@ def _notify_if_changed(row: CarrierVerification, before: BillingView | None) -> 
 
 async def _rate_before_wipe(
     db: AsyncSession, row: CarrierVerification, provider: object
-) -> None:
+) -> bool:
     """Before ``provider_refs`` is emptied: the rater charges the carrier
     review by the campaign id in the refs, so let it read them first. A
     campaign's ping when it was filed can be lost; once the id is gone,
     neither a ping nor the rater's sweep can charge it. Awaited, not
     fire-and-forget, so the rater reads before the wipe is committed.
 
-    Commits first. Never call it while holding the organization's lock
-    (``org_lock``): the rater takes the same lock."""
+    Commits first (True when it did), which ends any row lock. Never call
+    it while holding the organization's lock (``org_lock``): the rater
+    takes the same lock."""
     if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
-        return
+        return False
     # Saved with the stamp, so the rater reads a campaign filed just now.
-    _keep_refs(row, provider)
+    _stamp_campaign_filed(provider, row.provider_refs)
+    flag_modified(row, "provider_refs")
     await db.commit()
     await rate_sms_registration(str(row.id))
+    return True
 
 
 async def _audit_carrier_rejection(
@@ -2042,10 +2043,10 @@ async def admin_reject(
     row = await _admin_row(db, verification_id)
     provider = registry(row.provider, row.purpose)
     state, changed_at = row.state, row.updated_at
-    await _rate_before_wipe(db, row, provider)
     # Rating commits, which ends the row lock: lock it again, and leave a
     # row that changed meanwhile (the background pass submitted it, say).
-    if not await _relock(db, row, state, changed_at):
+    rated = await _rate_before_wipe(db, row, provider)
+    if rated and not await _relock(db, row, state, changed_at):
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,

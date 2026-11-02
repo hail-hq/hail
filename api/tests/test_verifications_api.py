@@ -4184,6 +4184,38 @@ async def test_a_superadmin_reject_leaves_a_row_that_changed_while_it_was_rated(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_a_stamp_error_after_a_submit_does_not_undo_it(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    """The submit went through: a plug-in error while stamping the refs
+    after it must not put the row back to be submitted again."""
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+
+    armed: list[bool] = []
+    submit, campaign_filed = sms_carrier.submit, sms_carrier.campaign_filed
+
+    async def submit_then_arm(refs):
+        await submit(refs)
+        armed.append(True)
+
+    def broken_once(refs):
+        if armed:
+            armed.clear()
+            raise KeyError("odd refs")
+        return campaign_filed(refs)
+
+    monkeypatch.setattr(sms_carrier, "submit", submit_then_arm)
+    monkeypatch.setattr(sms_carrier, "campaign_filed", broken_once)
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitted"
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
     client, org_and_key, sms_carrier, async_session, pinged, rated
 ) -> None:
