@@ -47,11 +47,10 @@ The report excludes message bodies, prompts, transcripts, phone numbers, and sec
 ## Configuration and activation
 
 Production deployment and activation need the owner's explicit instruction.
-The service profile is off by default. Without an API key, the worker sends nothing.
+The worker runs in every stack. Without an API key, it idles and sends nothing.
 
 Configure these values in the VM's existing secret file during an approved activation:
 
-- `COMPOSE_PROFILES=activity-digest` includes the service in normal deployment.
 - `HAIL_ACTIVITY_DIGEST_API_KEY` supplies a dedicated sending-workspace key.
 - `HAIL_ACTIVITY_DIGEST_TO` supplies the approved internal recipient.
 - `DATABASE_URL` supplies the existing platform database connection.
@@ -62,7 +61,6 @@ The key needs `GET /whoami` and `POST /emails` access.
 The API picks the workspace's sender, so the workspace must have no more than one verified sender. Several senders return a 422, which closes the date. Email credits must be available.
 It uses the shared `EmailCreate` model, including `message_type="informational"` and `recipient_consent=true`.
 
-Keep the profile in the VM's secret file after activation.
 Later deployments pull, recreate, and check the worker against the API image SHA.
 There is no separate image or GitHub cron to maintain.
 
@@ -134,5 +132,4 @@ The full read took under 2 seconds on 2 million local rows per table. If a real 
 ## Stop
 
 During an approved stop, clear `HAIL_ACTIVITY_DIGEST_API_KEY` and recreate or stop the service.
-Remove `activity-digest` from `COMPOSE_PROFILES` to keep it out of future deployments.
 Stopping the worker does not retract an email already accepted by Hail.

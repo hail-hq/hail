@@ -33,10 +33,9 @@ services:
       interval: 5s
       retries: 10
 
-  # Internal operations only. Opt in with COMPOSE_PROFILES=activity-digest.
+  # Internal operations only. It idles until HAIL_ACTIVITY_DIGEST_API_KEY is set.
   # Build from the API source. No website request or GitHub cron runs it.
   activity-digest:
-    profiles: [activity-digest]
     build:
       context: .
       dockerfile: api/Dockerfile

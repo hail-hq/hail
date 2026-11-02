@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def compose(tmp_path, profile, *args, overlay):
+def compose(tmp_path, *args, overlay):
     # Older Compose versions still check service env_file paths with
     # --no-env-resolution. Keep those paths inside the isolated fixture.
     env_file = tmp_path / ".env"
@@ -33,7 +33,7 @@ def compose(tmp_path, profile, *args, overlay):
             "--no-env-resolution",
             *args,
         ],
-        env={"PATH": os.environ["PATH"], "COMPOSE_PROFILES": profile},
+        env={"PATH": os.environ["PATH"]},
         check=True,
         capture_output=True,
         text=True,
@@ -44,30 +44,20 @@ def compose(tmp_path, profile, *args, overlay):
 @pytest.mark.parametrize(
     "overlay", [None, "docker-compose.local.yml", "docker-compose.prod.yml"]
 )
-def test_default_deployment_does_not_start_the_optional_worker(tmp_path, overlay):
-    assert (
-        "activity-digest"
-        not in compose(tmp_path, "", "--services", overlay=overlay).splitlines()
-    )
-    assert (
-        "activity-digest"
-        in compose(
-            tmp_path, "activity-digest", "--services", overlay=overlay
-        ).splitlines()
-    )
+def test_every_stack_runs_the_worker(tmp_path, overlay):
+    services = compose(tmp_path, "--services", overlay=overlay).splitlines()
+    assert "activity-digest" in services
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Docker Compose is required")
 @pytest.mark.parametrize(
     "overlay", [None, "docker-compose.local.yml", "docker-compose.prod.yml"]
 )
-def test_enabled_worker_reuses_api_image_without_ports_or_provider_credentials(
+def test_worker_reuses_api_image_without_ports_or_provider_credentials(
     tmp_path,
     overlay,
 ):
-    config = json.loads(
-        compose(tmp_path, "activity-digest", "--format", "json", overlay=overlay)
-    )
+    config = json.loads(compose(tmp_path, "--format", "json", overlay=overlay))
     worker = config["services"]["activity-digest"]
     if overlay == "docker-compose.prod.yml":
         assert worker["image"] == config["services"]["api"]["image"]
