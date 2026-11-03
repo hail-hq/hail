@@ -695,6 +695,7 @@ def merge(
         "available",
         "receive_only",
         "by_request",
+        "requirements",
     )
     seen = set()
     numbers = []
@@ -706,12 +707,19 @@ def merge(
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
         if prev and prev.get("verification_method") == "manual-confirmed":
-            diff = [f"{k}={n.get(k)}" for k in watched if prev.get(k) != n.get(k)]
+            diff = [
+                f"{k}={n.get(k)}"
+                for k in watched
+                if k != "requirements" and prev.get(k) != n.get(k)
+            ]
             if diff:
                 report["kept"].append(
                     f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
                 )
-            numbers.append(prev)
+            # Only the requirements block is refreshed: it is not a price or a
+            # capability a person confirmed by hand. A failed fetch already
+            # left the last good block in ``n``.
+            numbers.append({**prev, "requirements": n.get("requirements")})
             continue
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if prev is None:
@@ -872,15 +880,39 @@ def fetch_requirements(provider: str, country_code: str, number_type: str) -> di
     kind of buyer, whether it may buy and which paper categories it needs.
     A kind the carrier refuses gives ``{"accepted": False, "items": []}``.
     DIDWW lists one requirement per DID group; the items are their union."""
-    from hailhq.core.providers.verification import UnsupportedSubjectType
     from hailhq.core.requirement_categories import classify
 
     plugin = _verification_provider(provider)
     rules = None
     if provider == "telnyx":
         # The raw rules tell an address in the number's area from one in
-        # the country; `requirements` alone does not.
+        # the country; `requirements` alone does not. Fetched once: the
+        # plug-in reuses them for each subject instead of asking again.
         rules = _run(plugin._rules(country_code, number_type))
+
+        async def _cached_rules(_cc: str, _nt: str) -> list[dict]:
+            return rules  # type: ignore[return-value]
+
+        plugin._rules = _cached_rules
+    try:
+        return _requirements_block(
+            plugin, provider, country_code, number_type, rules, classify
+        )
+    finally:
+        if provider == "telnyx":
+            del plugin._rules
+
+
+def _requirements_block(
+    plugin: Any,
+    provider: str,
+    country_code: str,
+    number_type: str,
+    rules: list[dict] | None,
+    classify: Any,
+) -> dict:
+    from hailhq.core.providers.verification import UnsupportedSubjectType
+
     block: dict[str, dict] = {}
     for subject in SUBJECTS:
         try:

@@ -954,3 +954,68 @@ def test_schema_accepts_requirements():
     bad = {**base, "numbers": [{**row, "requirements": {"person": {"accepted": True}}}]}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad, schema)
+
+
+def test_telnyx_rules_fetched_once_per_row(monkeypatch):
+    class Telnyx:
+        def __init__(self):
+            self.rule_calls = 0
+
+        async def _rules(self, cc, nt):
+            self.rule_calls += 1
+            return [{"id": "x", "field_type": "address", "name": "Local address"}]
+
+        async def requirements(self, cc, nt, subject):
+            await self._rules(cc, nt)
+            return _req(subject, address=True)
+
+    fake = Telnyx()
+    _use(monkeypatch, fake)
+    block = sync.fetch_requirements("telnyx", "DE", "local")
+    assert block["business"]["items"] == ["address_in_country"]
+    assert fake.rule_calls == 1
+    # The plug-in is left as it was.
+    assert "_rules" not in vars(fake)
+
+
+def _manual_prev(**extra):
+    return {
+        "country_code": "DE",
+        "number_type": "local",
+        "usd_per_month": "9.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "dial_code": "49",
+        "verification_method": "manual-confirmed",
+        "verified_by": "me",
+        "last_verified": "2026-01-01",
+        "last_changed_at": "2026-01-01",
+        **extra,
+    }
+
+
+def test_manual_confirmed_row_takes_fresh_requirements():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    new = {"person": {"accepted": True, "items": ["birth_date"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "usd_per_month": "5.00", "requirements": new}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    (out,) = numbers
+    assert out["requirements"] == new
+    assert out["usd_per_month"] == "9.00" and out["verified_by"] == "me"
+    assert not any("requirements" in line for line in report["kept"])
+
+
+def test_requirements_change_is_reported_and_bumps_last_changed():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    new = {"person": {"accepted": True, "items": ["birth_date"]}}
+    prev = {
+        **_manual_prev(requirements=old),
+        "verification_method": "carrier-sync",
+    }
+    fetched = {**prev, "requirements": new}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert numbers[0]["last_changed_at"] == "2026-11-03"
+    assert any("requirements" in line for line in report["changed"])
