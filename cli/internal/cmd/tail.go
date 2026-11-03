@@ -135,6 +135,17 @@ var amdSentences = map[string]string{
 	"uncertain":           "unclear who answered, treating as human",
 }
 
+// handoverAMDSentences maps the handover check's verdict
+// (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to [amd]
+// lines. Only voicemail and an unavailable mailbox give the caller back.
+var handoverAMDSentences = map[string]string{
+	"human":               "handover: a person answered",
+	"machine-ivr":         "handover: a phone menu answered, kept connected",
+	"machine-vm":          "handover: voicemail answered, caller taken back",
+	"machine-unavailable": "handover: mailbox unavailable, caller taken back",
+	"uncertain":           "handover: unclear who answered, kept connected",
+}
+
 // perCallPalette is the small set of stable colors assigned to short call
 // ids in org-wide tail mode. Hashed lookup lives in shortIDColor.
 var perCallPalette = []string{
@@ -578,6 +589,16 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 			return "[amd]", category
 		}
 		return "[amd]", payloadJSON(ev.Payload)
+	case "handover_amd_result":
+		// Never the payload: it holds the contact's greeting transcript.
+		category, _ := ev.Payload["category"].(string)
+		if sentence, ok := handoverAMDSentences[category]; ok {
+			return "[amd]", sentence
+		}
+		if category != "" {
+			return "[amd]", "handover: " + category
+		}
+		return "[amd]", "handover: no verdict, kept connected"
 	case "person_detected":
 		// Written by the voicebot when a person comes on the line after a
 		// machine answered (post-IVR handoff).
@@ -687,7 +708,7 @@ func colorFor(kind string) string {
 		return colorCyan
 	case "user_turn":
 		return colorYellow
-	case "state_change", "amd_result", "person_detected", "voice_metrics":
+	case "state_change", "amd_result", "handover_amd_result", "person_detected", "voice_metrics":
 		return colorDim
 	case "error":
 		return colorRed

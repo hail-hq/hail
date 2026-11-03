@@ -641,6 +641,40 @@ func TestTail_MachineTranscriptsRelabeled(t *testing.T) {
 // TestTail_HumanPickupFlushesAsHuman: transcripts buffered during AMD
 // flush as [human] when the verdict is human, preserving order before the
 // verdict line.
+// TestTail_HandoverVerdictSentence: a handover_amd_result row renders as a
+// short [amd] sentence, never the payload JSON with the transcript.
+func TestTail_HandoverVerdictSentence(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111112", callA, "handover_amd_result",
+					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "greeting_check"}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222222", callA, "handover_amd_result",
+					map[string]interface{}{"category": nil, "transcript": nil, "reason": "detection_failed"}, tFuture.Add(time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "[amd]") || !strings.Contains(stdout, "handover: voicemail answered, caller taken back") {
+		t.Errorf("missing handover verdict sentence:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "handover: no verdict, kept connected") {
+		t.Errorf("missing no-verdict sentence:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "leave a message") || strings.Contains(stdout, "transcript") {
+		t.Errorf("handover_amd_result should not print the payload:\n%s", stdout)
+	}
+}
+
 func TestTail_HumanPickupFlushesAsHuman(t *testing.T) {
 	tFuture := time.Now().Add(time.Hour)
 	srv := newSequenceServer(t, []sequenceResponse{

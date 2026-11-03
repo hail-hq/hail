@@ -7,12 +7,13 @@ is said) and answers two questions:
 * Does anyone speak? Some mailboxes answer and stay silent, which would
   leave the caller on a dead line. No speech in time: the caller is taken
   back.
-* Is it a machine? Voicemail, a full or missing mailbox, a phone menu or
-  call screening. From the first speech, the line's audio so far is
-  transcribed once and classified with the outbound AMD prompt, at each
-  pause and every few seconds of speech, until a clear verdict. A machine
-  verdict takes the caller back. Anything else (a person, unsure, an error,
-  no transcriber) keeps the two people connected, as before this check.
+* Is it a mailbox? From the first speech, the line's audio so far is
+  transcribed once and classified with the outbound AMD prompt, up to
+  ``MAX_CHECKS`` times, a few seconds apart. Voicemail or a full or unset
+  mailbox (outbound AMD's hang-up verdicts) takes the caller back.
+  Anything else (a person, a phone menu, unsure, an error, no transcriber)
+  keeps the two people connected, as before this check: a switchboard
+  menu stays connected so the caller can press keys.
 
 LiveKit's ``AMD`` cannot run here: it reads the session's audio input,
 which is linked to the caller, not to the contact's second SIP leg
@@ -33,7 +34,7 @@ from typing import Any
 from hailhq.core.config import settings
 from hailhq.voicebot.amd import (
     GREETING_CLASSIFICATION_PROMPT,
-    _close_all,
+    MACHINE_HANGUP_CATEGORIES,
     build_classifier,
     recheck_stt,
 )
@@ -49,22 +50,18 @@ from livekit.agents.voice.amd import AMDCategory
 
 logger = logging.getLogger("hailhq.voicebot")
 
-# Verdicts that mean no person took the call. ``uncertain`` is absent: when
-# in doubt, connect.
-MACHINE_CATEGORIES: frozenset[AMDCategory] = frozenset(
-    {
-        AMDCategory.MACHINE_VM,
-        AMDCategory.MACHINE_UNAVAILABLE,
-        AMDCategory.MACHINE_IVR,
-    }
-)
-# Verdicts that end the check.
-FINAL_CATEGORIES: frozenset[AMDCategory] = MACHINE_CATEGORIES | {AMDCategory.HUMAN}
-
-# The next check runs at the next pause, or after this long without one.
-# A recorded greeting often runs on without a pause; its cues ("you've
-# reached", "leave a message") come within its first seconds.
+# Each check sends all the audio so far, so their number is capped. Three
+# checks about 2 to 3 seconds apart cover the first 7 to 9 seconds of a
+# greeting, inside the bridge's 10-second settle window. A recorded
+# greeting gives its cues ("you've reached", "leave a message") early.
+MAX_CHECKS = 3
+# Least time from the first speech, or from the previous check's start, to
+# the next check. A person's verdict never ends the checks (a greeting can
+# open like a person, "Hi, this is Sam"), so there is no rush to check a
+# short hello.
 CHECK_EVERY_SECONDS = 2.0
+# After that, wait this long for a pause, so a check rarely cuts a word.
+PAUSE_WAIT_SECONDS = 1.0
 # Audio kept from before the first speech: VAD reports speech a little
 # after it starts, and the greeting's first words must not be cut.
 PREROLL_SECONDS = 1.0
@@ -77,6 +74,10 @@ PARTIAL_NOTE = (
     "mid-greeting. Postponing is not available: answer uncertain when more "
     "words could still show a recording.\n"
 )
+# Deepgram models that also take a finished recording, with language
+# detection. The same family check as ``amd.build_amd_models``; others,
+# such as streaming-only ones, get Hail's configured model instead.
+ONE_SHOT_MODEL_PREFIX = "nova-3"
 
 # Transcribe the line's audio, then classify it: (transcript, category).
 GreetingCheck = Callable[[rtc.AudioFrame], Awaitable[tuple[str, AMDCategory | None]]]
@@ -106,16 +107,19 @@ def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
 
     Hail's Deepgram only when the org has no STT of its own, as in the
     outbound recheck (``amd.build_amd_models``). An org on Deepgram uses its
-    own key and model. An org on another provider skips the check: its
-    audio never goes to a provider it did not pick. Language detection is
-    on: the greeting can be in any language, and Deepgram's default is
-    English.
+    own key, and its model when that model takes a recording
+    (``ONE_SHOT_MODEL_PREFIX``). An org on another provider skips the
+    check: its audio never goes to a provider it did not pick. Language
+    detection is on: the greeting can be in any language, and Deepgram's
+    default is English.
     """
     org_stt = org_cfgs.get("stt")
     if org_stt is None:
         model, api_key = settings.deepgram_model, settings.deepgram_api_key
     elif org_stt.provider == "deepgram":
-        model = org_stt.params.get("model") or settings.deepgram_model
+        model = org_stt.params.get("model") or ""
+        if not model.startswith(ONE_SHOT_MODEL_PREFIX):
+            model = settings.deepgram_model
         # Hail's key only when the org allows fallback to Hail.
         api_key = org_stt.api_key or (
             settings.deepgram_api_key if org_stt.fallback_enabled else ""
@@ -133,7 +137,8 @@ def build_greeting_check(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     llm_override: bool = False,
 ) -> tuple[GreetingCheck | None, list]:
-    """The check for :class:`ContactLine` and the clients to close after it.
+    """The check for :class:`ContactLine` and the clients to close at the
+    end of the call (``amd._close_all``). Built once per call.
 
     None (no check, the line connects as before) when there is no
     transcriber or no classifier, or when building one fails.
@@ -170,12 +175,13 @@ def build_greeting_check(
 
 class ContactLine:
     """One read of the contact's leg for the whole check: VAD for speech,
-    and the audio kept in memory for the machine check. Nothing is saved.
+    and the audio kept in memory for the mailbox check. Nothing is saved.
 
     :meth:`speaks` waits for the first speech. From then, when a ``check``
-    is given, the line's audio so far is checked at each pause (VAD end of
-    speech) and every ``CHECK_EVERY_SECONDS``, until a person or a machine
-    verdict, an error, or :meth:`aclose`. :meth:`machine` waits for that.
+    is given, the line's audio so far is checked up to ``MAX_CHECKS``
+    times, until a mailbox verdict, an error, or :meth:`aclose`.
+    :meth:`machine` waits for that. The check's clients belong to the
+    caller (one set per call).
     """
 
     def __init__(
@@ -185,19 +191,18 @@ class ContactLine:
         vad: VAD,
         *,
         check: GreetingCheck | None = None,
-        owned: list | None = None,
     ) -> None:
         self._room = room
         self._identity = identity
         self._vad = vad
         self._check = check
-        self._owned = owned or []
         self._limit = int(MAX_AUDIO_SECONDS * SAMPLE_RATE) * 2
         self._preroll = int(PREROLL_SECONDS * SAMPLE_RATE) * 2
         self._pcm = bytearray()
         self._spoke = asyncio.Event()
         self._ended = asyncio.Event()
         self._pause = asyncio.Event()
+        self._failed = False
         self._read: asyncio.Task | None = None
         self._checking: asyncio.Task | None = None
         self._spoke_at: float | None = None
@@ -207,8 +212,9 @@ class ContactLine:
         self._delay: float | None = None
 
     async def speaks(self, seconds: float) -> bool:
-        """True when the contact starts speaking within ``seconds`` from now.
-        False when they stay silent, publish no audio, or leave."""
+        """True when the contact starts speaking within ``seconds`` from now,
+        or when the line's audio could not be read (connect, as before this
+        check). False when they stay silent, publish no audio, or leave."""
         if self._read is None:
             self._read = asyncio.create_task(self._listen(), name="handover_line")
         spoke = asyncio.ensure_future(self._spoke.wait())
@@ -221,16 +227,16 @@ class ContactLine:
             spoke.cancel()
             ended.cancel()
             await asyncio.gather(spoke, ended, return_exceptions=True)
-        return self._spoke.is_set()
+        return self._spoke.is_set() or self._failed
 
     async def machine(self) -> bool:
-        """True when the check said a machine answered. False when it said a
-        person, failed, did not run, or stopped without a verdict. Never
-        raises."""
+        """True when the check said voicemail or an unavailable mailbox.
+        False when it said anything else, failed, did not run, or stopped
+        without that verdict. Never raises."""
         if self._checking is None:
             return False
         await asyncio.gather(self._checking, return_exceptions=True)
-        return self._category in MACHINE_CATEGORIES
+        return self._category in MACHINE_HANGUP_CATEGORIES
 
     def verdict(self) -> dict[str, Any] | None:
         """The ``handover_amd_result`` call event payload, shaped like
@@ -249,8 +255,6 @@ class ContactLine:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        owned, self._owned = self._owned, []
-        await _close_all(owned)
         self._pcm.clear()
 
     async def _listen(self) -> None:
@@ -278,6 +282,8 @@ class ContactLine:
                 elif event.type == VADEventType.END_OF_SPEECH:
                     self._pause.set()
         except Exception:
+            # Fail open: a read or VAD error is not a silent line.
+            self._failed = True
             logger.warning("handover line audio unavailable", exc_info=True)
         finally:
             # The contact's audio ended (they left) or the read failed.
@@ -313,17 +319,20 @@ class ContactLine:
     async def _check_greeting(self) -> None:
         assert self._check is not None and self._spoke_at is not None
         checked = 0
-        while True:
-            try:
-                await asyncio.wait_for(self._pause.wait(), CHECK_EVERY_SECONDS)
-            except TimeoutError:
-                pass
-            self._pause.clear()
+        last = self._spoke_at
+        for _ in range(MAX_CHECKS):
+            await asyncio.sleep(max(0.0, last + CHECK_EVERY_SECONDS - time.monotonic()))
+            if not self._ended.is_set():
+                self._pause.clear()
+                try:
+                    await asyncio.wait_for(self._pause.wait(), PAUSE_WAIT_SECONDS)
+                except TimeoutError:
+                    pass
             if len(self._pcm) == checked:
-                if self._ended.is_set():
-                    return
-                continue
+                # No new audio: the line ended or the audio cap is full.
+                return
             checked = len(self._pcm)
+            last = time.monotonic()
             audio = rtc.AudioFrame(
                 data=bytes(self._pcm),
                 sample_rate=SAMPLE_RATE,
@@ -340,7 +349,7 @@ class ContactLine:
             if transcript:
                 self._transcript = transcript
             self._category = category
-            if category in FINAL_CATEGORIES:
+            if category in MACHINE_HANGUP_CATEGORIES:
                 self._reason = "greeting_check"
                 self._delay = time.monotonic() - self._spoke_at
                 return
@@ -348,7 +357,7 @@ class ContactLine:
 
 __all__ = [
     "CHECK_EVERY_SECONDS",
-    "MACHINE_CATEGORIES",
+    "MAX_CHECKS",
     "ContactLine",
     "build_greeting_check",
 ]

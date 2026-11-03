@@ -82,6 +82,7 @@ from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
     AMDModels,
+    _close_all,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
@@ -590,10 +591,11 @@ def make_agent_bridge(
     within ``HANDOVER_SILENCE_SECONDS`` (a mailbox that answers in
     silence), the leg is removed, the agent is unmuted and the outcome is
     ``no_answer``. After speech, the line's machine check runs during the
-    settle window: a voicemail, mailbox, phone menu or call screening
-    verdict also removes the leg with ``no_answer``, so the agent offers to
-    take a message. A person, an unsure verdict or a failed check connects,
-    as before the check. Only after the settle window does the handover
+    settle window: a voicemail or unavailable mailbox verdict (outbound
+    AMD's hang-up verdicts) also removes the leg with ``no_answer``, so the
+    agent offers to take a message. A person, a phone menu (the caller can
+    press keys), an unsure verdict or a failed check connects, as before
+    the check. Only after the settle window does the handover
     count as answered. The verdict is written as a ``handover_amd_result``
     call event in the background.
 
@@ -751,9 +753,9 @@ def make_agent_bridge(
                 _unmute()
                 return _gone("no_answer")
             if machine:
-                # Voicemail, a mailbox, a phone menu or call screening: the
-                # same as no answer. The agent offers to take a message.
-                logger.info("call_id=%s handover answered by a machine", call_id)
+                # Voicemail or an unavailable mailbox: the same as no
+                # answer. The agent offers to take a message.
+                logger.info("call_id=%s handover answered by a mailbox", call_id)
                 bridge_state["connected"] = False
                 return await _give_back("no_answer")
             # Settled: a person. The soft cap no longer waits on the check.
@@ -801,7 +803,7 @@ def make_agent_bridge(
 
         async def _settle(line: ContactLine | None) -> bool:
             """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves or
-            the machine check says a machine. True on a machine verdict.
+            the check says voicemail or an unavailable mailbox (True).
             A person's verdict does not end the wait: the settle window,
             and so the answered time, stays as before the check."""
             left = asyncio.Event()
@@ -938,19 +940,43 @@ def _contact_line(
     ctx: JobContext,
     session: AgentSession,
     identity: str,
+    checks: dict[str, Any],
     *,
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     llm_override: bool = False,
 ) -> ContactLine | None:
-    """The bridge's line check: silence, then machine. None (connect at
+    """The bridge's line check: silence, then mailbox. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
-    the silence check runs."""
+    the silence check runs. The check's clients are built on the first
+    pickup, reused by later dials on this call, and kept in ``checks``
+    (``"check"``, ``"owned"``) for :func:`close_greeting_check` at job end."""
     if session.vad is None:
         return None
-    check, owned = build_greeting_check(
-        session, org_cfgs=org_cfgs, llm_override=llm_override
-    )
-    return ContactLine(ctx.room, identity, session.vad, check=check, owned=owned)
+    if "check" not in checks:
+        checks["check"], checks["owned"] = build_greeting_check(
+            session, org_cfgs=org_cfgs, llm_override=llm_override
+        )
+    return ContactLine(ctx.room, identity, session.vad, check=checks["check"])
+
+
+async def close_greeting_check(checks: dict[str, Any]) -> None:
+    """Close the handover check's clients at job end."""
+    owned, checks["owned"] = checks.get("owned", []), []
+    await _close_all(owned)
+
+
+async def finish_verdict_writes(bridge_state: dict[str, Any], call_id: UUID) -> None:
+    """At job shutdown, give the handover verdict rows a few seconds to land,
+    then cancel them."""
+    tasks = set(bridge_state.get("event_tasks", ()))
+    if not tasks:
+        return
+    _, pending = await asyncio.wait(tasks, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+    if pending:
+        logger.warning("call_id=%s handover verdict write cancelled", call_id)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def _prompt_agent(
@@ -2410,6 +2436,9 @@ async def _run_call(
     # Human handover: identity of the contact's leg while one is dialed or
     # connected, and whether it answered. Written by the bridge handle.
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
+    # The handover mailbox check's clients, built on the first pickup and
+    # closed at job end (see _contact_line).
+    greeting_check: dict[str, Any] = {}
 
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
@@ -2603,6 +2632,7 @@ async def _run_call(
                 ctx,
                 session,
                 identity,
+                greeting_check,
                 org_cfgs=org_cfgs,
                 llm_override=llm_cfg is not None,
             ),
@@ -2774,16 +2804,14 @@ async def _run_call(
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
             await finish_answer_post(bridge_state, call_id)
-            # The handover machine check's verdict row.
-            if bridge_state.get("event_tasks"):
-                await asyncio.gather(
-                    *list(bridge_state["event_tasks"]), return_exceptions=True
-                )
             # The background handover dial, result and notice posts use
             # agent_api: give them a moment before it closes.
             await transfer_call.finish_pending(
                 call_id, ANSWER_POST_SHUTDOWN_WAIT_SECONDS
             )
+            # After the dial tasks: a bridge writes its verdict row as it ends.
+            await finish_verdict_writes(bridge_state, call_id)
+            await close_greeting_check(greeting_check)
             for task in list(bridge_state.get("late_leg_tasks", ())):
                 task.cancel()
             if text_watch_task is not None and not text_watch_task.done():

@@ -80,11 +80,11 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - A plain forward: when the phone picks up, the two people are connected
   and the agent stops listening and speaking. It says nothing to the
   contact. The agent listens to the contact's line for 10 seconds after
-  its first sound. If a machine answers (voicemail, a full or unset
-  mailbox, a phone menu or call screening), the agent hangs up that line,
-  comes back and offers to take a message. The caller can hear the first
-  seconds of the greeting before that. If the check is unsure or fails,
-  the two people stay connected. If nobody on the contact's side makes a
+  its first sound. If voicemail or a full or unset mailbox answers, the
+  agent hangs up that line, comes back and offers to take a message. The
+  caller can hear the first seconds of the greeting before that. A phone
+  menu stays connected, so the caller can press keys. If the check is
+  unsure or fails, the two people stay connected. If nobody on the contact's side makes a
   sound for 15 seconds (some mailboxes answer in silence), or the line
   hangs up within 10 seconds of its first sound (a carrier message), the
   agent also hangs up that line and comes back. The verdict is a
@@ -99,7 +99,7 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
   contact's side has spoken and stayed on the line for 10 seconds, and
-  the check did not find a machine.
+  the check did not find voicemail or a mailbox.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call

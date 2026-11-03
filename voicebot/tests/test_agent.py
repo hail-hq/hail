@@ -15,6 +15,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -2410,6 +2411,50 @@ async def test_bridge_silent_line_records_no_verdict(handover_events) -> None:
     )(BridgeRoute("+1", "+1", "ST", None, "Sam"))
     assert out.outcome == "no_answer"
     assert handover_events == [] and not state.get("event_tasks")
+
+
+async def test_shutdown_verdict_writes_are_bounded(monkeypatch) -> None:
+    from hailhq.voicebot import agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "ANSWER_POST_SHUTDOWN_WAIT_SECONDS", 0.05)
+    done = asyncio.create_task(asyncio.sleep(0))
+    stuck = asyncio.create_task(asyncio.sleep(3600))
+    state: dict = {"event_tasks": {done, stuck}}
+    await asyncio.wait_for(agent_mod.finish_verdict_writes(state, CALL_ID), 1)
+    assert done.done() and not done.cancelled() and stuck.cancelled()
+
+
+async def test_greeting_check_is_built_once_per_call(monkeypatch) -> None:
+    """Built on the first pickup, reused by the next dial, closed at job
+    end."""
+    from hailhq.voicebot import agent as agent_mod
+
+    builds: list[int] = []
+    client = SimpleNamespace(aclose=AsyncMock())
+
+    async def check(_audio):
+        return "", None
+
+    def _build(_session, **_kw):
+        builds.append(1)
+        return check, [client]
+
+    monkeypatch.setattr(agent_mod, "build_greeting_check", _build)
+    ctx = FakeJobContext()
+    session = SimpleNamespace(vad=object())
+    checks: dict = {}
+    one = agent_mod._contact_line(ctx, session, "human-1", checks)  # type: ignore[arg-type]
+    two = agent_mod._contact_line(ctx, session, "human-2", checks)  # type: ignore[arg-type]
+    assert one is not None and two is not None and builds == [1]
+    assert one._check is check and two._check is check
+    await agent_mod.close_greeting_check(checks)
+    client.aclose.assert_awaited_once()
+    assert (
+        agent_mod._contact_line(
+            ctx, SimpleNamespace(vad=None), "human-3", {}  # type: ignore[arg-type]
+        )
+        is None
+    )
 
 
 async def test_bridge_silent_leg_that_will_not_drop_ends_the_call() -> None:

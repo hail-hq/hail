@@ -134,6 +134,7 @@ async def test_deadline_includes_waiting_for_the_track(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def _fast_checks(monkeypatch):
     monkeypatch.setattr(handover_watch, "CHECK_EVERY_SECONDS", 0.01)
+    monkeypatch.setattr(handover_watch, "PAUSE_WAIT_SECONDS", 0.01)
 
 
 def _check(*answers):
@@ -150,13 +151,15 @@ def _check(*answers):
     return check, calls
 
 
+_SPEECH = (
+    [VADEventType.START_OF_SPEECH]
+    + [VADEventType.INFERENCE_DONE] * 5
+    + [VADEventType.END_OF_SPEECH]
+)
+
+
 async def _verdict(check, script=None):
-    vad, _ = _vad(
-        script
-        or [VADEventType.START_OF_SPEECH]
-        + [VADEventType.INFERENCE_DONE] * 5
-        + [VADEventType.END_OF_SPEECH]
-    )
+    vad, _ = _vad(script or _SPEECH)
     line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
     try:
         assert await line.speaks(1.0)
@@ -167,14 +170,9 @@ async def _verdict(check, script=None):
 
 
 @pytest.mark.parametrize(
-    "category",
-    [
-        AMDCategory.MACHINE_VM,
-        AMDCategory.MACHINE_UNAVAILABLE,
-        AMDCategory.MACHINE_IVR,
-    ],
+    "category", [AMDCategory.MACHINE_VM, AMDCategory.MACHINE_UNAVAILABLE]
 )
-async def test_machine_verdict(leg, category) -> None:
+async def test_mailbox_verdict(leg, category) -> None:
     check, calls = _check(("You have reached Sam", category))
     machine, verdict = await _verdict(check)
     assert machine is True and len(calls) == 1
@@ -184,23 +182,53 @@ async def test_machine_verdict(leg, category) -> None:
     assert verdict["delay"] >= 0
 
 
-async def test_person_verdict_ends_the_check(leg) -> None:
-    check, calls = _check(("Hello?", AMDCategory.HUMAN))
+@pytest.mark.parametrize(
+    "category",
+    [AMDCategory.HUMAN, AMDCategory.MACHINE_IVR, AMDCategory.UNCERTAIN],
+)
+async def test_person_menu_or_unsure_keeps_checking_then_connects(
+    leg, category
+) -> None:
+    """Only a mailbox verdict acts. A person's verdict is not final (a
+    greeting can open like a person), and a phone menu stays connected so
+    the caller can press keys: the check runs all its tries."""
+    check, calls = _check(("Hello?", category))
     machine, verdict = await _verdict(check)
-    assert machine is False and len(calls) == 1
-    assert verdict["category"] == "human" and verdict["reason"] == "greeting_check"
+    assert machine is False
+    assert len(calls) == handover_watch.MAX_CHECKS
+    assert verdict["category"] == category.value
+    assert verdict["reason"] == "window_ended"
 
 
-async def test_unsure_then_machine_checks_the_longer_greeting(leg) -> None:
-    """An unsure verdict checks again with the audio heard since; the
-    second check gets more audio than the first."""
+async def test_person_then_mailbox_drops(leg) -> None:
+    """'Hi, this is Sam' sounds like a person; the rest of the greeting
+    shows the mailbox. Each check sends the longer greeting."""
     check, calls = _check(
-        ("Hi, this is Sam", AMDCategory.UNCERTAIN),
+        ("Hi, this is Sam", AMDCategory.HUMAN),
         ("Hi, this is Sam, leave a message", AMDCategory.MACHINE_VM),
     )
     machine, verdict = await _verdict(check)
     assert machine is True and len(calls) == 2 and calls[1] > calls[0]
     assert verdict["transcript"] == "Hi, this is Sam, leave a message"
+
+
+async def test_checks_are_capped(leg) -> None:
+    check, calls = _check(("Hi, this is Sam", AMDCategory.UNCERTAIN))
+    machine, _ = await _verdict(check)
+    assert machine is False and len(calls) == handover_watch.MAX_CHECKS
+
+
+async def test_no_new_audio_ends_the_check(monkeypatch, leg) -> None:
+    """The audio cap is full: the check stops instead of waking again."""
+    monkeypatch.setattr(handover_watch, "MAX_AUDIO_SECONDS", 0.05)
+    check, calls = _check(("Hi", AMDCategory.UNCERTAIN))
+
+    async def slow(audio):
+        await asyncio.sleep(0.05)  # the cap fills while it checks
+        return await check(audio)
+
+    machine, _ = await _verdict(slow)
+    assert machine is False and len(calls) == 1
 
 
 async def test_silence_before_speech_is_not_sent(leg) -> None:
@@ -217,17 +245,21 @@ async def test_silence_before_speech_is_not_sent(leg) -> None:
     assert preroll <= calls[0] < preroll + 16000
 
 
-async def test_unsure_until_closed_connects(leg) -> None:
-    check, calls = _check(("Hi, this is Sam", AMDCategory.UNCERTAIN))
-    vad, _ = _vad([VADEventType.START_OF_SPEECH])
+async def test_closed_mid_check_connects(leg) -> None:
+    started = asyncio.Event()
+
+    async def check(_audio):
+        started.set()
+        await asyncio.sleep(3600)
+
+    vad, _ = _vad(list(_SPEECH))
     line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
     assert await line.speaks(1.0)
     machine = asyncio.ensure_future(line.machine())
-    await asyncio.sleep(0.1)
-    assert not machine.done() and len(calls) >= 1
+    await asyncio.wait_for(started.wait(), timeout=1)
     await line.aclose()
     assert await machine is False
-    assert line.verdict()["category"] == "uncertain"
+    assert line.verdict()["category"] is None
     assert line.verdict()["reason"] == "window_ended"
 
 
@@ -259,14 +291,26 @@ async def test_no_verdict_without_speech(leg) -> None:
     await line.aclose()
 
 
-async def test_close_closes_the_check_clients(leg) -> None:
-    owned = [SimpleNamespace(aclose=AsyncMock()), SimpleNamespace(aclose=AsyncMock())]
-    vad, _ = _vad([])
-    line = handover_watch.ContactLine(object(), "human-x", vad, owned=owned)
-    await line.speaks(0.01)
+@pytest.mark.parametrize("where", ["track", "vad"])
+async def test_audio_error_connects(monkeypatch, leg, where) -> None:
+    """A read or VAD error is not a silent line: connect, as before."""
+    if where == "track":
+        monkeypatch.setattr(
+            handover_watch,
+            "wait_for_track_publication",
+            AsyncMock(side_effect=RuntimeError("no track")),
+        )
+        vad = SimpleNamespace(stream=lambda: None)
+    else:
+
+        def _broken():
+            raise RuntimeError("vad down")
+
+        vad = SimpleNamespace(stream=_broken)
+    line = handover_watch.ContactLine(object(), "human-x", vad)
+    assert await asyncio.wait_for(line.speaks(5.0), timeout=1) is True
+    assert line.verdict() is None
     await line.aclose()
-    for client in owned:
-        client.aclose.assert_awaited_once()
 
 
 # --- building the check --------------------------------------------------------
@@ -298,11 +342,27 @@ def deepgram(monkeypatch):
 def test_stt_follows_the_org_choice(deepgram) -> None:
     assert handover_watch._build_stt({}) is not None
     assert handover_watch._build_stt({"stt": _layer("deepgram", api_key="dg-org")})
+    # The org's model when it takes a recording; Hail's model otherwise.
+    org = {"model": "nova-3-medical"}
+    assert handover_watch._build_stt(
+        {"stt": _layer("deepgram", api_key="dg-org", params=org)}
+    )
+    streaming_only = {"model": "flux-general-en"}
+    assert handover_watch._build_stt(
+        {"stt": _layer("deepgram", api_key="dg-org", params=streaming_only)}
+    )
     # Another provider: its audio never goes to a provider it did not pick.
     assert handover_watch._build_stt({"stt": _layer("speechmatics")}) is None
     # Hail's key only when the org allows fallback.
     assert handover_watch._build_stt({"stt": _layer("deepgram")}) is None
-    assert deepgram == [("nova-3", "dg-house"), ("nova-3", "dg-org")]
+    assert handover_watch._build_stt({"stt": _layer("deepgram", fallback_enabled=True)})
+    assert deepgram == [
+        ("nova-3", "dg-house"),
+        ("nova-3", "dg-org"),
+        ("nova-3-medical", "dg-org"),
+        ("nova-3", "dg-org"),
+        ("nova-3", "dg-house"),
+    ]
 
 
 def test_no_deepgram_key_means_no_check(monkeypatch) -> None:

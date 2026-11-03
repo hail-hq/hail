@@ -124,7 +124,7 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 - **`call.transferred`** — the agent handed the live call to a person
   ([Agents](agents.md#hand-over-to-a-person)). Sent once, when someone on
   that person's line has spoken and stayed on for 10 seconds, and it was
-  not a machine (voicemail, a mailbox, a phone menu or call screening). `data` is the call object plus `transfer`:
+  not voicemail or a full or unset mailbox. `data` is the call object plus `transfer`:
   `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
   `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
   team member. Never a phone number.
