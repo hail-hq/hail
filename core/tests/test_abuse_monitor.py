@@ -326,3 +326,63 @@ async def test_email_already_suspended_org_is_not_double_suspended(
     await async_session.commit()
 
     assert await check_and_suspend_email_orgs(async_session) == 0
+
+
+async def test_email_late_events_on_old_mail_do_not_count(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    old = await _seed_emails(async_session, org_id, 10)
+    for email in old:
+        email.sent_at = datetime.now(timezone.utc) - timedelta(days=30)
+    await _seed_emails(async_session, org_id, 20)
+    # Complaints arriving now on mail sent 30 days ago.
+    await _seed_email_events(async_session, old, "complained")
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 0
+
+
+async def test_email_repeated_reports_for_one_recipient_count_once(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+    from hailhq.core.models import EmailEvent
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    emails = await _seed_emails(async_session, org_id, 100)
+    now = datetime.now(timezone.utc)
+    # Five reports for the same recipient: one complaint, 1/100 = 1%.
+    for i in range(5):
+        async_session.add(
+            EmailEvent(
+                email_id=emails[0].id,
+                organization_id=org_id,
+                kind="complained",
+                payload={"recipients": [emails[0].to_addresses[0]]},
+                occurred_at=now - timedelta(minutes=i),
+            )
+        )
+    # A redacted complaint (no recipients) still counts as one.
+    async_session.add(
+        EmailEvent(
+            email_id=emails[1].id,
+            organization_id=org_id,
+            kind="complained",
+            payload={"recipients": []},
+            occurred_at=now,
+        )
+    )
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 1
+    row = await _email_suspension(async_session, org_id)
+    assert "(2/100)" in row.reason

@@ -37,8 +37,9 @@ from hailhq.core.models import (
     Suppression,
     UsageEvent,
 )
-from sqlalchemy import Text, and_, cast, func, literal, or_, select, true
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import Text, and_, case, cast, func, literal, or_, select, true
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -157,15 +158,12 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
 
     # Each distinct address counts once per email, so repeating one address
     # in to/cc/bcc (also as "Name <address>") cannot inflate the denominator
-    # and hide a high rate.
-    no_addresses = cast(literal([], ARRAY(Text)), ARRAY(Text))
+    # and hide a high rate. ``||`` with a NULL cc/bcc array returns the other
+    # side unchanged.
     addr = (
         func.unnest(
-            func.array_cat(
-                func.array_cat(
-                    Email.to_addresses, func.coalesce(Email.cc_addresses, no_addresses)
-                ),
-                func.coalesce(Email.bcc_addresses, no_addresses),
+            Email.to_addresses.op("||")(Email.cc_addresses).op("||")(
+                Email.bcc_addresses
             )
         )
         .table_valued("addr")
@@ -186,11 +184,29 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     )
     send_counts = dict((await db.execute(send_stmt)).all())
 
-    # One SES event can name several recipients. A complaint whose
-    # recipients the mailbox provider redacted still counts as one.
-    event_recipients = func.greatest(
-        func.coalesce(func.jsonb_array_length(EmailEvent.payload["recipients"]), 0),
-        1,
+    # One SES event can name several recipients; each (email, recipient)
+    # counts once per kind, so a repeated feedback report for the same
+    # recipient does not count twice. A complaint whose recipients the
+    # mailbox provider redacted still counts as one (keyed by the event).
+    payload_recipients = EmailEvent.payload["recipients"]
+    event_addr = (
+        func.jsonb_array_elements_text(
+            case(
+                (
+                    func.jsonb_typeof(payload_recipients) == "array",
+                    payload_recipients,
+                ),
+                else_=cast(literal("[]"), JSONB),
+            )
+        )
+        .table_valued("addr")
+        .render_derived(name="event_recipients")
+        .lateral()
+    )
+    event_key = func.concat(
+        EmailEvent.email_id,
+        ":",
+        func.coalesce(_bare_address(event_addr.c.addr), cast(EmailEvent.id, Text)),
     )
     hard_bounce = and_(
         EmailEvent.kind == "bounced",
@@ -203,19 +219,26 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     event_stmt = (
         select(
             EmailEvent.organization_id,
-            func.sum(event_recipients).filter(hard_bounce),
-            func.sum(event_recipients).filter(EmailEvent.kind == "complained"),
+            func.count(func.distinct(event_key)).filter(hard_bounce),
+            func.count(func.distinct(event_key)).filter(
+                EmailEvent.kind == "complained"
+            ),
         )
+        .select_from(EmailEvent)
         .join(Email, Email.id == EmailEvent.email_id)
+        .outerjoin(event_addr, true())
         .where(
             _org_own_send(),
+            # Same emails as the denominator: a late complaint on mail sent
+            # before the window must not count against a smaller recent send.
+            Email.sent_at >= window_start,
             EmailEvent.occurred_at >= window_start,
             or_(hard_bounce, EmailEvent.kind == "complained"),
         )
         .group_by(EmailEvent.organization_id)
     )
     event_counts = {
-        org_id: (bounces or 0, complaints or 0)
+        org_id: (bounces, complaints)
         for org_id, bounces, complaints in (await db.execute(event_stmt)).all()
     }
 
@@ -245,9 +268,18 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             )
         else:
             continue
-        db.add(
-            ChannelSuspension(organization_id=org_id, channel="email", reason=reason)
-        )
+        # Two API replicas can tick at once: the unique (org, channel) key
+        # keeps one row and the other insert does nothing.
+        inserted = (
+            await db.execute(
+                pg_insert(ChannelSuspension)
+                .values(organization_id=org_id, channel="email", reason=reason)
+                .on_conflict_do_nothing()
+                .returning(ChannelSuspension.id)
+            )
+        ).scalar_one_or_none()
+        if inserted is None:
+            continue
         logger.warning("suspending org=%s email channel for abuse: %s", org_id, reason)
         suspended += 1
     await db.flush()
@@ -281,10 +313,13 @@ class AbuseMonitorWorker:
         self._stop.set()
 
     async def tick(self) -> int:
-        async with self._session_factory() as session:
-            count = await check_and_suspend_abusive_orgs(session)
-            count += await check_and_suspend_email_orgs(session)
-            await session.commit()
-            if count:
-                logger.info("abuse monitor suspended %d org(s) this run", count)
-            return count
+        # One session and commit per channel: an email pass error must not
+        # roll back the SMS suspensions from the same tick.
+        count = 0
+        for check in (check_and_suspend_abusive_orgs, check_and_suspend_email_orgs):
+            async with self._session_factory() as session:
+                count += await check(session)
+                await session.commit()
+        if count:
+            logger.info("abuse monitor suspended %d org(s) this run", count)
+        return count
