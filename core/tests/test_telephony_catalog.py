@@ -285,3 +285,10 @@ def test_rows_includes_by_request_excludes_receive_only(tmp_path, monkeypatch):
     got = telephony_catalog.rows("PT", "didww")
     assert sorted(r["number_type"] for r in got) == ["local", "mobile"]
     assert telephony_catalog.rows("XX", "didww") == []
+
+
+def test_effective_capabilities_treats_a_missing_key_as_false():
+    assert telephony_catalog.effective_capabilities({"voice": True}, "twilio") == [
+        "voice"
+    ]
+    assert telephony_catalog.effective_capabilities({}, "twilio") == []

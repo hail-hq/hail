@@ -337,12 +337,3 @@ def test_paperwork_from_block():
         "birth_date",
         "personal_details",
     ]
-
-
-def test_effective_capabilities_treats_a_missing_key_as_false():
-    from hailhq.core import telephony_catalog
-
-    assert telephony_catalog.effective_capabilities({"voice": True}, "twilio") == [
-        "voice"
-    ]
-    assert telephony_catalog.effective_capabilities({}, "twilio") == []

@@ -1103,12 +1103,15 @@ def run_provider(
     summary: list[str],
     shared_dial_codes: dict[str, str] | None = None,
     http_factory: Callable[[requests.Session], Http] = Http,
+    not_synced: list[str] | None = None,
 ) -> bool:
     """``shared_dial_codes`` is one dict for the whole run: DIDWW's country
     list fills it (every country, not only the ones it sells), and the
     carriers after it borrow prefixes for rows no catalog has seen yet."""
     if shared_dial_codes is None:
         shared_dial_codes = {}
+    # A carrier skipped for missing credentials is listed with the failures.
+    skip_notes = not_synced if not_synced is not None else summary
     path = costs_dir / f"{provider}.json"
     existing = load_existing(path)
     dial_codes = {n["country_code"]: n["dial_code"] for n in existing}
@@ -1122,8 +1125,8 @@ def run_provider(
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
-            summary.append(
-                "- twilio: skipped, TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
+            skip_notes.append(
+                "twilio: skipped, TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
             )
             return False
         session.auth = (sid, tok)
@@ -1136,14 +1139,14 @@ def run_provider(
     elif provider == "telnyx":
         key = config.get("TELNYX_API_KEY")
         if not key:
-            summary.append("- telnyx: skipped, TELNYX_API_KEY not set")
+            skip_notes.append("telnyx: skipped, TELNYX_API_KEY not set")
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
-            summary.append("- didww: skipped, DIDWW_API_KEY not set")
+            skip_notes.append("didww: skipped, DIDWW_API_KEY not set")
             return False
         session.headers.update({"Api-Key": key, "Accept": "application/vnd.api+json"})
         rows, skipped, didww_dial_codes = fetch_didww(http_factory(session))
@@ -1195,7 +1198,8 @@ def main(argv: list[str] | None = None) -> int:
         config.update({k: v for k, v in dotenv_values(args.env_file).items() if v})
     config.update({k: v for k, v in os.environ.items() if v})
     today = datetime.now(tz=timezone.utc).date().isoformat()
-    summary: list[str] = [f"# Number catalog sync {today}", ""]
+    header = [f"# Number catalog sync {today}", ""]
+    body: list[str] = []
     providers = PROVIDERS if args.provider == "all" else (args.provider,)
     ran = 0
     shared_dial_codes: dict[str, str] = {}
@@ -1203,7 +1207,13 @@ def main(argv: list[str] | None = None) -> int:
     for provider in providers:
         try:
             ran += run_provider(
-                provider, config, args.costs_dir, today, summary, shared_dial_codes
+                provider,
+                config,
+                args.costs_dir,
+                today,
+                body,
+                shared_dial_codes,
+                not_synced=not_synced,
             )
         except requests.RequestException as exc:
             not_synced.append(
@@ -1217,13 +1227,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"{provider}: failed, verification is not configured "
                 "(check the carrier credentials) (catalog left unchanged)"
             )
-    if not_synced:
-        # At the top, so the reviewer sees it before the carriers that ran.
-        summary[2:2] = [
-            "## Carriers not synced",
-            *(f"- {line}" for line in not_synced),
-            "",
-        ]
+    # Carriers not synced come first, so the reviewer sees them before the rest.
+    top = (
+        ["## Carriers not synced", *(f"- {line}" for line in not_synced), ""]
+        if not_synced
+        else []
+    )
+    summary = header + top + body
     text = _cap_summary("\n".join(summary) + "\n")
     print(text)
     if args.summary_file:

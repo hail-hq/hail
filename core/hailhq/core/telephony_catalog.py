@@ -92,7 +92,7 @@ def capabilities(
         if not caps and not _sms_route_exists(name):
             continue  # an SMS-only number Hail cannot use at this carrier
         # No SMS route also means no MMS.
-        mms = row["mms"] and _sms_route_exists(name)
+        mms = row.get("mms", False) and _sms_route_exists(name)
         return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 

@@ -1308,3 +1308,23 @@ def test_carrier_without_verification_does_not_stop_the_run(tmp_path, monkeypatc
     assert "## Carriers not synced" in text
     assert text.index("## Carriers not synced") < text.index("## didww")
     assert "## telnyx" not in text
+
+
+def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TELNYX_API_KEY", raising=False)
+    summary_file = tmp_path / "summary.md"
+    code = sync.main(
+        [
+            "--provider",
+            "telnyx",
+            "--costs-dir",
+            str(tmp_path),
+            "--summary-file",
+            str(summary_file),
+        ]
+    )
+    text = summary_file.read_text()
+    assert code == 1
+    assert "## Carriers not synced\n- telnyx: skipped, TELNYX_API_KEY not set" in text
