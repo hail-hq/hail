@@ -720,7 +720,25 @@ def make_agent_bridge(
             _unmute()
             return _gone(outcome, stuck=stuck)
 
+        def _call_ending() -> bool:
+            # The caller hung up, or job shutdown began (stop_handover_checks).
+            return bool(
+                bridge_state.get("ending") or bridge_state.get("checks_stopped")
+            )
+
+        def _end_with_call(line: ContactLine | None) -> BridgeOutcome:
+            # The call is ending: shutdown or the caller drops the room and
+            # closes the session. Touch neither; just report the outcome so
+            # transfer_call posts the handover result.
+            if line is not None:
+                line.decide(reason="call_ending")
+            bridge_state["connected"] = False
+            return _gone("no_answer")
+
         async def _after_pickup(line: ContactLine | None) -> BridgeOutcome:
+            if _call_ending():
+                # Picked up after job shutdown began.
+                return _end_with_call(line)
             spoke = True
             if line is not None:
                 try:
@@ -729,6 +747,8 @@ def make_agent_bridge(
                     logger.exception(
                         "call_id=%s handover silence check failed", call_id
                     )
+            if _call_ending():
+                return _end_with_call(line)
             if identity not in ctx.room.remote_participants:
                 # The contact hung up before speaking; the disconnect handler
                 # ignores a leg that never connected.
@@ -750,18 +770,16 @@ def make_agent_bridge(
             bridge_state["connected"] = True
             bridge_state["settling"] = True
             await _settle(line)
+            if _call_ending():
+                if line is not None:
+                    line.stop()
+                return _end_with_call(line)
             # Decide on the line's last finished verdict; no check runs
             # after this, so the recorded row matches what happened.
             machine = False
             if line is not None:
                 line.stop()
                 machine = line.is_mailbox
-            if bridge_state.get("ending"):
-                # The caller hung up meanwhile; the call is ending.
-                if line is not None:
-                    line.decide(reason="call_ending")
-                bridge_state["connected"] = False
-                return _gone("no_answer")
             if identity not in ctx.room.remote_participants:
                 logger.info("call_id=%s handover leg hung up at once", call_id)
                 if line is not None:
@@ -819,9 +837,10 @@ def make_agent_bridge(
                     )
             return BridgeOutcome("answered", None, ring_ms)
 
-        async def _settle(line: ContactLine | None) -> bool:
-            """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves or
-            the check says voicemail or an unavailable mailbox (True).
+        async def _settle(line: ContactLine | None) -> None:
+            """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves, the
+            check says voicemail or an unavailable mailbox, or job shutdown
+            ends the line (``ContactLine.end``).
             A person's verdict does not end the wait: the settle window,
             and so the answered time, stays as before the check. A check
             still running at its end gets up to
@@ -838,7 +857,12 @@ def make_agent_bridge(
             checking = (
                 asyncio.ensure_future(line.machine()) if line is not None else None
             )
-            waits = {leaving} | ({checking} if checking is not None else set())
+            ending = (
+                asyncio.ensure_future(line.wait_call_ending())
+                if line is not None
+                else None
+            )
+            waits = {t for t in (leaving, checking, ending) if t is not None}
             deadline = time.monotonic() + HANDOVER_SETTLE_SECONDS
             grace = False
             try:
@@ -848,7 +872,7 @@ def make_agent_bridge(
                         timeout=max(0.0, deadline - time.monotonic()),
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if leaving in done:
+                    if leaving in done or ending in done:
                         break
                     if checking in done and checking.result():
                         break
@@ -860,23 +884,13 @@ def make_agent_bridge(
                         deadline = time.monotonic() + HANDOVER_CHECK_GRACE_SECONDS
             finally:
                 ctx.room.off("participant_disconnected", _on_leave)
-                for task in (leaving, checking):
-                    if task is not None:
-                        task.cancel()
-                await asyncio.gather(
-                    *(t for t in (leaving, checking) if t is not None),
-                    return_exceptions=True,
-                )
+                tasks = [t for t in (leaving, checking, ending) if t is not None]
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
                 # Last, with no await after it until the caller has decided:
                 # a disconnect seen meanwhile is still left to this handle.
                 bridge_state.pop("settling", None)
-            return (
-                checking is not None
-                and checking.done()
-                and not checking.cancelled()
-                and checking.exception() is None
-                and checking.result()
-            )
 
         if bridge_state.get("cancelled"):
             # The caller asked to stop just as the phone picked up.
@@ -997,11 +1011,17 @@ def _contact_line(
 
 def stop_handover_checks(bridge_state: dict[str, Any]) -> None:
     """At job shutdown, before waiting for the dial tasks: no new check
-    starts, and the running ones stop, so each bridge ends on its own and
-    posts its result. Nothing uses the check's clients after this."""
+    starts, the running ones stop, and each line's silence and settle waits
+    end at once. Each bridge then takes its call-ending path (no unmute, no
+    leg removal), returns an outcome that transfer_call posts, and adds its
+    verdict row, all within the dial wait. Nothing uses the check's clients
+    after this.
+
+    Synchronous, and called right before drop_handover_leg with no await
+    between: the room is deleted while bridge_state still shows the leg."""
     bridge_state["checks_stopped"] = True
     for line in list(bridge_state.get("lines", ())):
-        line.stop("call_ending")
+        line.end()
 
 
 async def finish_handover_checks(
@@ -1015,17 +1035,25 @@ async def finish_handover_checks(
 
 
 async def finish_verdict_writes(bridge_state: dict[str, Any], call_id: UUID) -> None:
-    """At job shutdown, give the handover verdict rows a few seconds to land,
-    then cancel them."""
-    tasks = set(bridge_state.get("event_tasks", ()))
-    if not tasks:
-        return
-    _, pending = await asyncio.wait(tasks, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
-    if pending:
-        logger.warning("call_id=%s handover verdict write cancelled", call_id)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+    """At job shutdown, give the handover verdict rows a few seconds in all
+    to land, then cancel them. A row added meanwhile (a bridge ending late)
+    is waited for too, within the same time."""
+    deadline = time.monotonic() + ANSWER_POST_SHUTDOWN_WAIT_SECONDS
+    seen: set[asyncio.Task] = set()
+    while True:
+        tasks = set(bridge_state.get("event_tasks", ())) - seen
+        if not tasks:
+            return
+        seen |= tasks
+        _, pending = await asyncio.wait(
+            tasks, timeout=max(0.0, deadline - time.monotonic())
+        )
+        if pending:
+            logger.warning("call_id=%s handover verdict write cancelled", call_id)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            return
 
 
 async def _prompt_agent(

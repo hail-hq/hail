@@ -149,13 +149,16 @@ var handoverAMDSentences = map[string]string{
 
 // handoverAMDOutcomes maps a handover_amd_result reason to what the
 // voicebot did. "dropped" (the caller taken back because of the verdict)
-// wins over the reason.
+// wins over the reason. A check's final reason (greeting_check,
+// detection_failed, audio_error) is kept even when the line or the call
+// ended after it, so those lines do not claim the call stayed connected.
 var handoverAMDOutcomes = map[string]string{
+	"greeting_check":        "caller not taken back",
 	"leg_ended":             "line hung up",
 	"call_ending":           "call ending",
 	"timeout":               "check timed out, kept connected",
-	"detection_failed":      "check failed, kept connected",
-	"audio_error":           "audio error, kept connected",
+	"detection_failed":      "check failed",
+	"audio_error":           "audio error",
 	"detection_unavailable": "no check, kept connected",
 }
 

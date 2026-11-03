@@ -701,7 +701,7 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 	for _, want := range []string{
 		"handover: voicemail answered, caller taken back",
 		"handover: unclear who answered, check timed out, kept connected",
-		"handover: no verdict, check failed, kept connected",
+		"handover: no verdict, check failed",
 		"handover: a person answered, kept connected",
 	} {
 		if !strings.Contains(stdout, want) {

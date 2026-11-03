@@ -458,8 +458,9 @@ async def test_decide_records_what_the_bridge_did(leg) -> None:
     line.decide(dropped=True)
     assert line.verdict()["dropped"] is True
     assert line.verdict()["reason"] == "greeting_check"
+    # A final reason stays: the check found the mailbox.
     line.decide(reason="leg_ended")
-    assert line.verdict()["reason"] == "leg_ended"
+    assert line.verdict()["reason"] == "greeting_check"
     assert line.verdict()["dropped"] is False
     await line.aclose()
 
@@ -505,6 +506,7 @@ async def test_a_blip_does_not_use_up_a_check(monkeypatch, leg) -> None:
     """Check 1 waits for FIRST_CHECK_SPEECH_SECONDS of speech; a blip and
     silence never get there."""
     monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 0.2)
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_MIN_SPEECH_SECONDS", 0.1)
     monkeypatch.setattr(handover_watch, "RECHECK_TIMEOUT_SECONDS", 0.1)
     check, calls = _check(("Hi", AMDCategory.HUMAN))
     vad, _ = _vad([VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH])
@@ -514,6 +516,49 @@ async def test_a_blip_does_not_use_up_a_check(monkeypatch, leg) -> None:
     assert await line.speaks(1.0)
     assert await asyncio.wait_for(line.machine(), timeout=2) is False
     assert calls == []
+    await line.aclose()
+
+
+async def test_short_clip_is_checked_at_its_pause(monkeypatch, leg) -> None:
+    """Speech that stops before FIRST_CHECK_SPEECH_SECONDS, but after
+    FIRST_CHECK_MIN_SPEECH_SECONDS (a short "not available" clip), is
+    checked at its pause instead of skipped."""
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 5.0)
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_MIN_SPEECH_SECONDS", 0.05)
+    check, calls = _check(("not available", AMDCategory.MACHINE_UNAVAILABLE))
+    script = [VADEventType.START_OF_SPEECH] + [VADEventType.INFERENCE_DONE] * 80
+    script += [VADEventType.END_OF_SPEECH]
+    machine, _ = await asyncio.wait_for(_verdict(check, script), timeout=1)
+    assert machine is True and len(calls) == 1
+
+
+async def test_end_keeps_a_final_reason(leg) -> None:
+    """Job shutdown after a check finished keeps its reason; before that,
+    the row says call_ending, even with a check in flight."""
+    check, _ = _check(RuntimeError("provider down"))
+    vad, _ = _vad(list(_SPEECH))
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert await line.speaks(1.0)
+    await asyncio.wait_for(line.machine(), timeout=1)
+    line.end()
+    assert line.verdict()["reason"] == "detection_failed"
+    await line.aclose()
+    busy, release = await _line_mid_check()
+    busy.end()
+    await asyncio.wait_for(busy.machine(), timeout=1)
+    assert busy.verdict()["reason"] == "call_ending"
+    release.set()
+    await busy.aclose()
+
+
+async def test_end_ends_speaks_at_once(leg) -> None:
+    vad, _ = _vad([])
+    line = handover_watch.ContactLine(object(), "human-x", vad)
+    waiting = asyncio.ensure_future(line.speaks(30.0))
+    await asyncio.sleep(0.01)
+    line.end()
+    assert await asyncio.wait_for(waiting, timeout=0.5) is False
+    await asyncio.wait_for(line.wait_call_ending(), timeout=0.5)
     await line.aclose()
 
 

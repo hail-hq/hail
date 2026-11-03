@@ -57,9 +57,12 @@ logger = logging.getLogger("hailhq.voicebot")
 
 # Each check sends all the audio so far, so their number is capped.
 MAX_CHECKS = 3
-# Check 1 waits for this much speech (VAD), so a blip or a one-word "Hi"
-# does not use it up.
+# Check 1 runs once there is this much speech (VAD), so a blip or a
+# one-word "Hi" does not use it up...
 FIRST_CHECK_SPEECH_SECONDS = 2.0
+# ...or earlier, at a pause after at least this much speech, so a short
+# clip ("not available") or a short greeting is still checked.
+FIRST_CHECK_MIN_SPEECH_SECONDS = 1.0
 # A later check starts at least this long after the previous one started,
 # and never before it ends.
 CHECK_EVERY_SECONDS = 2.0
@@ -73,10 +76,11 @@ PAUSE_WAIT_SECONDS = 1.0
 # 10 s settle window, and waits up to 3 s more for a check still running
 # (``window_seconds`` is 13 s in all), so a check starts only up to
 # 13 - 5 = 8 s in. A voicemail speaks without long stops: check 1 at about
-# 2 to 3 s (done by about 4 to 5 s), check 2 at about 4.5 to 6 s (done by
-# about 7 to 8 s), check 3 at about 7 to 8 s, if time allows (done by about
-# 10 s). A recorded greeting gives its cue ("you've reached", "leave a
-# message") in its first seconds.
+# 2 to 3 s (at its first pause after 1 s of speech if one comes sooner;
+# done by about 4 to 5 s), check 2 at about 4.5 to 6 s (done by about 7 to
+# 8 s), check 3 at about 7 to 8 s, if time allows (done by about 10 s). A
+# recorded greeting gives its cue ("you've reached", "leave a message") in
+# its first seconds.
 #
 # Audio kept from before the first speech: VAD reports speech a little
 # after it starts, and the greeting's first words must not be cut.
@@ -89,6 +93,11 @@ PARTIAL_NOTE = (
     "\nThis transcript is what the line has said so far. It may stop "
     "mid-greeting. Postponing is not available: answer uncertain when more "
     "words could still show a recording.\n"
+)
+
+# Reasons a later step must not overwrite: a check finished with them.
+FINAL_REASONS: frozenset[str] = frozenset(
+    {"greeting_check", "detection_failed", "audio_error"}
 )
 
 # Transcribe the line's audio, then classify it: (transcript, category).
@@ -199,8 +208,10 @@ class ContactLine:
     times, until a mailbox verdict, an error, the end of ``window_seconds``
     (from the first speech; None: no end), or :meth:`stop`.
     :meth:`machine` waits for that. The bridge records what it did with
-    :meth:`decide`, and :meth:`verdict` is the call event row. The check's
-    clients belong to the caller (one set per call).
+    :meth:`decide`, and :meth:`verdict` is the call event row. Job shutdown
+    calls :meth:`end`, which also ends :meth:`speaks` and
+    :meth:`wait_call_ending` at once. The check's clients belong to the
+    caller (one set per call).
     """
 
     def __init__(
@@ -226,6 +237,10 @@ class ContactLine:
         # Set while the line is silent after speech (VAD end of speech, and
         # no start since).
         self._pause = asyncio.Event()
+        # Set on every VAD start or end of speech, and when the audio ends.
+        self._vad_changed = asyncio.Event()
+        # Set by end(): job shutdown.
+        self._call_ending = asyncio.Event()
         self._failed = False
         self._stopped = False
         self._in_flight = False
@@ -246,17 +261,23 @@ class ContactLine:
         check). False when they stay silent, publish no audio, or leave."""
         if self._read is None:
             self._read = asyncio.create_task(self._listen(), name="handover_line")
-        spoke = asyncio.ensure_future(self._spoke.wait())
-        ended = asyncio.ensure_future(self._ended.wait())
+        waits = [
+            asyncio.ensure_future(event.wait())
+            for event in (self._spoke, self._ended, self._call_ending)
+        ]
         try:
             await asyncio.wait(
-                {spoke, ended}, timeout=seconds, return_when=asyncio.FIRST_COMPLETED
+                waits, timeout=seconds, return_when=asyncio.FIRST_COMPLETED
             )
         finally:
-            spoke.cancel()
-            ended.cancel()
-            await asyncio.gather(spoke, ended, return_exceptions=True)
+            for wait in waits:
+                wait.cancel()
+            await asyncio.gather(*waits, return_exceptions=True)
         return self._spoke.is_set() or self._failed
+
+    async def wait_call_ending(self) -> None:
+        """Returns once :meth:`end` ran (job shutdown)."""
+        await self._call_ending.wait()
 
     async def machine(self) -> bool:
         """True when the check said voicemail or an unavailable mailbox.
@@ -274,23 +295,35 @@ class ContactLine:
         return self._category in MACHINE_HANGUP_CATEGORIES
 
     def stop(self, reason: str | None = None) -> None:
-        """Stop the checks now, and start no new one. ``reason`` replaces
-        the recorded reason (job shutdown: ``call_ending``)."""
+        """Stop the checks now, and start no new one. ``reason`` is recorded
+        unless a check already finished with a final reason. A check
+        cancelled mid-flight records ``timeout`` itself (see
+        :meth:`_check_greeting`) unless a reason is given here."""
         self._stopped = True
         if reason is not None:
-            self._reason = reason
+            self._note(reason)
         if self._checking is not None and not self._checking.done():
-            if self._in_flight and reason is None:
-                self._reason = "timeout"
             self._checking.cancel()
+
+    def end(self) -> None:
+        """Job shutdown: stop the checks, and end :meth:`speaks` and
+        :meth:`wait_call_ending` now. The row says ``call_ending`` unless a
+        check already finished with a final reason."""
+        self._call_ending.set()
+        self.stop("call_ending")
 
     def decide(self, *, dropped: bool = False, reason: str | None = None) -> None:
         """What the bridge did: ``dropped`` when it took the caller back
         because of the verdict; ``reason`` for another end (``leg_ended``,
-        ``call_ending``)."""
+        ``call_ending``), recorded unless a check already finished with a
+        final reason."""
         self.stop()
         self._dropped = dropped
         if reason is not None:
+            self._note(reason)
+
+    def _note(self, reason: str) -> None:
+        if self._reason not in FINAL_REASONS:
             self._reason = reason
 
     def verdict(self) -> dict[str, Any] | None:
@@ -354,6 +387,7 @@ class ContactLine:
             # The contact's audio ended (they left) or the read failed.
             self._ended.set()
             self._pause.set()
+            self._vad_changed.set()
             if feeder is not None:
                 feeder.cancel()
                 await asyncio.gather(feeder, return_exceptions=True)
@@ -374,6 +408,7 @@ class ContactLine:
     def _on_speech(self) -> None:
         # Speaking again: an earlier pause no longer counts.
         self._pause.clear()
+        self._vad_changed.set()
         now = time.monotonic()
         if self._speech_from is None:
             self._speech_from = now
@@ -391,6 +426,7 @@ class ContactLine:
             self._speech_seconds += time.monotonic() - self._speech_from
             self._speech_from = None
         self._pause.set()
+        self._vad_changed.set()
 
     def _speech_so_far(self) -> float:
         open_part = (
@@ -408,16 +444,45 @@ class ContactLine:
             pass
 
     async def _check_greeting(self) -> None:
+        """The check task. It alone owns ``_in_flight`` and the ``timeout``
+        reason: cancelled mid-check (the bridge stopped waiting), the verdict
+        is the last one that finished."""
         try:
             await self._run_checks()
         except asyncio.CancelledError:
-            # Cancelled mid-check (the bridge stopped waiting): the verdict
-            # is the last one that finished.
             if self._in_flight and self._reason == "window_ended":
                 self._reason = "timeout"
             raise
         finally:
             self._in_flight = False
+
+    async def _first_check_ready(self, last_start: float | None) -> None:
+        """Until check 1 may run: ``FIRST_CHECK_SPEECH_SECONDS`` of speech,
+        or a pause after ``FIRST_CHECK_MIN_SPEECH_SECONDS``. Woken by the
+        VAD handlers; returns early when the audio ends or time is up."""
+        while not self._ended.is_set():
+            now = time.monotonic()
+            if last_start is not None and now > last_start:
+                return
+            speech = self._speech_so_far()
+            if speech >= FIRST_CHECK_SPEECH_SECONDS or (
+                speech >= FIRST_CHECK_MIN_SPEECH_SECONDS and self._pause.is_set()
+            ):
+                return
+            # While speaking, wake when the speech reaches the goal.
+            timeout = (
+                FIRST_CHECK_SPEECH_SECONDS - speech
+                if self._speech_from is not None
+                else None
+            )
+            if last_start is not None:
+                left = last_start - now
+                timeout = left if timeout is None else min(timeout, left)
+            self._vad_changed.clear()
+            try:
+                await asyncio.wait_for(self._vad_changed.wait(), timeout)
+            except TimeoutError:
+                pass
 
     async def _run_checks(self) -> None:
         assert self._check is not None and self._spoke_at is not None
@@ -439,11 +504,7 @@ class ContactLine:
         started = self._spoke_at
         for n in range(MAX_CHECKS):
             if n == 0:
-                # Enough speech first, then a pause.
-                while self._speech_so_far() < FIRST_CHECK_SPEECH_SECONDS:
-                    if self._ended.is_set() or _late():
-                        break
-                    await asyncio.sleep(0.05)
+                await self._first_check_ready(last_start)
             else:
                 await asyncio.sleep(
                     max(0.0, started + CHECK_EVERY_SECONDS - time.monotonic())
@@ -463,16 +524,15 @@ class ContactLine:
                 num_channels=1,
                 samples_per_channel=len(self._pcm) // 2,
             )
-            # Left set on cancel: _check_greeting records the timeout.
             self._in_flight = True
             try:
                 transcript, category = await self._check(audio)
             except Exception as exc:
-                self._in_flight = False
                 # Provider error bodies can contain audio or transcripts.
                 logger.warning("handover machine check failed (%s)", type(exc).__name__)
                 self._reason = "detection_failed"
                 return
+            # Not in a finally: a cancel must leave it set for the handler.
             self._in_flight = False
             if transcript:
                 self._transcript = transcript
