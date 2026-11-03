@@ -36,6 +36,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -684,6 +685,7 @@ def merge(
         "added": [],
         "vanished": [],
         "unobserved": [],
+        "requirements_kept": [],
     }
     watched = (
         "usd_per_month",
@@ -721,11 +723,20 @@ def merge(
             # or a row the carrier no longer marks as needing verification)
             # keeps the old one.
             fresh = n.get("requirements")
-            block = fresh if fresh is not None else prev.get("requirements")
+            old_block = prev.get("requirements")
+            block = fresh if fresh is not None else old_block
+            if fresh is None and old_block is not None:
+                # A failed fetch already copied the old block into ``n``, so
+                # None means the carrier no longer lists verification.
+                report["requirements_kept"].append(
+                    f"{key}: carrier no longer lists verification; "
+                    "hand-verified block kept"
+                )
             kept = {**prev, "requirements": block}
-            if prev.get("requirements") != block:
+            if old_block != block:
                 report["changed"].append(
-                    f"{key}: requirements {prev.get('requirements')} -> {block}"
+                    f"{key} (hand-verified row, only requirements refreshed): "
+                    f"{_block_summary(old_block)} -> {_block_summary(block)}"
                 )
                 kept["last_changed_at"] = today
             numbers.append(kept)
@@ -895,9 +906,9 @@ def fetch_requirements(provider: str, country_code: str, number_type: str) -> di
     rules = None
     if provider == "telnyx":
         # The raw rules tell an address in the number's area from one in
-        # the country; `requirements` alone does not. Fetched once: the
-        # plug-in reuses them for each subject instead of asking again.
-        rules = _run(plugin._rules(country_code, number_type))
+        # the country; `requirements` alone does not. The plug-in keeps them
+        # briefly, so the calls below do not ask again.
+        rules = _run(plugin.rules(country_code, number_type))
     return _requirements_block(
         plugin, provider, country_code, number_type, rules, classify
     )
@@ -928,14 +939,6 @@ def _requirements_block(
                         f"DIDWW lists no requirement group for {country_code} "
                         f"{number_type}"
                     )
-            elif rules is not None:
-                found = [
-                    _run(
-                        plugin.requirements(
-                            country_code, number_type, subject, rules=rules
-                        )
-                    )
-                ]
             else:
                 found = [_run(plugin.requirements(country_code, number_type, subject))]
         except UnsupportedSubjectType:
@@ -946,6 +949,29 @@ def _requirements_block(
             "items": _union([classify(r, provider, rules=rules) for r in found]),
         }
     return block
+
+
+def _error_detail(exc: Exception) -> str:
+    """One safe line of an error for the public PR body: first line only,
+    spaces collapsed, URL query strings dropped, at most 160 characters."""
+    lines = str(exc).strip().splitlines()
+    first = re.sub(r"\s+", " ", lines[0] if lines else "")
+    first = re.sub(r"(https?://[^\s?#]+)[?#]\S*", r"\1", first)
+    return first[:160]
+
+
+def _block_summary(block: dict | None) -> str:
+    if not block:
+        return "none"
+    parts = []
+    for subject in SUBJECTS:
+        side = block.get(subject) or {}
+        if not side.get("accepted"):
+            parts.append(f"{subject} not allowed")
+            continue
+        keys = [i if isinstance(i, str) else "other" for i in side.get("items", [])]
+        parts.append(f"{subject} {','.join(keys) or 'no papers'}")
+    return "; ".join(parts)
 
 
 def attach_requirements(
@@ -974,9 +1000,9 @@ def attach_requirements(
         except Exception as exc:  # one bad row must not stop the run
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
-            detail = str(exc)[:200]
             report.append(
-                f"{key}: requirements failed ({exc.__class__.__name__}: {detail}), {kept}"
+                f"{key}: requirements failed ({exc.__class__.__name__}: "
+                f"{_error_detail(exc)}), {kept}"
             )
 
 
@@ -1054,6 +1080,7 @@ def run_provider(
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
     )
+    requirement_errors.extend(report["requirements_kept"])
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
     for label, key in (

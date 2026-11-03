@@ -925,10 +925,10 @@ def test_didww_union_of_groups(monkeypatch):
 
 def test_telnyx_passes_raw_rules_to_classify(monkeypatch):
     class Telnyx:
-        async def _rules(self, cc, nt):
+        async def rules(self, cc, nt):
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject, *, rules=None):
+        async def requirements(self, cc, nt, subject):
             return _req(subject, address=True)
 
     _use(monkeypatch, Telnyx())
@@ -961,13 +961,11 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
         def __init__(self):
             self.rule_calls = 0
 
-        async def _rules(self, cc, nt):
+        async def rules(self, cc, nt):
             self.rule_calls += 1
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject, *, rules=None):
-            if rules is None:
-                rules = await self._rules(cc, nt)
+        async def requirements(self, cc, nt, subject):
             return _req(subject, address=True)
 
     fake = Telnyx()
@@ -975,8 +973,6 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
     block = sync.fetch_requirements("telnyx", "DE", "local")
     assert block["business"]["items"] == ["address_in_country"]
     assert fake.rule_calls == 1
-    # The shared plug-in is not patched.
-    assert "_rules" not in vars(fake)
 
 
 def _manual_prev(**extra):
@@ -1061,4 +1057,53 @@ def test_requirements_error_report_includes_message(monkeypatch):
     report: list[str] = []
     sync.attach_requirements("twilio", [_row_needing()], [], report)
     assert "RuntimeError: carrier said no" in report[0]
-    assert len(report[0]) < 330
+    assert "x" * 160 not in report[0] and "x" * 50 in report[0]
+    assert report[0].count("x") == 160 - len("carrier said no ")
+
+
+def test_requirements_error_report_is_one_safe_line(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError(
+                "GET https://api.example.com/v2/x?api_key=SECRET&b=1  failed\n"
+                "Traceback: more detail"
+            )
+
+    _use(monkeypatch, Boom())
+    report: list[str] = []
+    sync.attach_requirements("twilio", [_row_needing()], [], report)
+    assert "https://api.example.com/v2/x failed" in report[0]
+    assert "SECRET" not in report[0] and "Traceback" not in report[0]
+    assert "\n" not in report[0]
+
+
+def test_manual_row_without_new_block_is_reported_not_refreshed():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "verification_required": False, "requirements": None}
+    _, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert report["requirements_kept"] == [
+        "DE:local: carrier no longer lists verification; hand-verified block kept"
+    ]
+
+
+def test_manual_row_requirements_change_line_is_short():
+    old = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": ["company_name"]},
+    }
+    new = {
+        "person": {"accepted": False, "items": []},
+        "business": {"accepted": True, "items": ["company_name", {"other": "Odd"}]},
+    }
+    prev = _manual_prev(requirements=old)
+    _, report = sync.merge(
+        [prev], [{**prev, "requirements": new}], "2026-11-03", "u", "bot"
+    )
+    assert report["changed"] == [
+        (
+            "DE:local (hand-verified row, only requirements refreshed): "
+            "person id_document; business company_name -> "
+            "person not allowed; business company_name,other"
+        )
+    ]
