@@ -948,10 +948,10 @@ def _for_subject(
         if offer.subject_types and subject not in offer.subject_types:
             continue
         needs = bool(offer.subject_types)
-        items, known, accepted = offer_paperwork(
+        found_papers = offer_paperwork(
             offer.country_code, offer.number_type, offer.provider, subject, needs
         )
-        if not accepted:
+        if not found_papers.accepted:
             continue
         usable = _usable_verifications(
             offer,
@@ -960,16 +960,16 @@ def _for_subject(
             ),
         )
         status, _ = option_status(needs, offer.by_request, subject, usable)
-        papers[id(offer)] = items
+        papers[id(offer)] = found_papers.items
         if status == "ready":
             ready.add(id(offer))
         key = option_key(
             status,
             "by_request" if offer.by_request else "buy",
-            len(items),
+            len(found_papers.items),
             offer.monthly_cents,
             offer.setup_cents,
-            known,
+            found_papers.known,
         )
         ranked.append((key, offer))
     # A stable sort keeps the live order for offers that tie.

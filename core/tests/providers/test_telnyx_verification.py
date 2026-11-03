@@ -828,11 +828,19 @@ def test_module_imports_in_a_fresh_interpreter(module) -> None:
     assert done.returncode == 0, done.stderr
 
 
-async def test_requirements_uses_given_rules_without_a_request() -> None:
+async def test_rules_are_cached_across_requirements_calls() -> None:
     fake = Telnyx(rules_answer("mobile"))
     p = provider(fake)
-    rules = await p._rules("SE", "mobile")
-    before = len(fake.calls)
-    req = await p.requirements("SE", "mobile", "person", rules=rules)
-    assert len(fake.calls) == before
-    assert req.required is True
+    rules = await p.rules("SE", "mobile")
+    await p.requirements("SE", "mobile", "person")
+    await p.requirements("SE", "mobile", "business")
+    assert await p.rules("SE", "mobile") is rules
+    assert len(fake.calls) == 1
+
+
+async def test_rules_outage_is_a_provider_error() -> None:
+    def down(request):
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(VerificationProviderError):
+        await provider(Telnyx(down)).rules("SE", "mobile")

@@ -320,7 +320,19 @@ def test_subject_accepted_follows_catalog_block():
 
 def test_offer_paperwork_returns_accepted_flag(catalog):
     catalog(twilio=[row(**need(person={"accepted": False, "items": []}))])
-    _, known, accepted = mod.offer_paperwork("CH", "local", "twilio", "person", True)
-    assert known is True and accepted is False
-    _, _, accepted = mod.offer_paperwork("CH", "local", "twilio", "business", True)
-    assert accepted is True
+    p = mod.offer_paperwork("CH", "local", "twilio", "person", True)
+    assert p.known is True and p.accepted is False
+    assert mod.offer_paperwork("CH", "local", "twilio", "business", True).accepted
+    none = mod.offer_paperwork("CH", "local", "twilio", "person", False)
+    assert (none.items, none.known, none.accepted) == ([], True, True)
+
+
+def test_paperwork_from_block():
+    assert mod.paperwork_from_block(None, "person", True) == ([], False, True)
+    got = mod.paperwork_from_block({"person": CH_PERSON}, "person", True)
+    assert got.known and got.accepted
+    assert [i.key for i in got.items] == [
+        "id_document",
+        "birth_date",
+        "personal_details",
+    ]

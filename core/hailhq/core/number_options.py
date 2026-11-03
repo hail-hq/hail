@@ -7,7 +7,7 @@ call. ``option_key`` is the one ranking order; ``/quotes`` reuses it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from hailhq.core import requirement_categories, telephony_catalog
 from hailhq.core.carrier_offer import (
@@ -23,10 +23,12 @@ from hailhq.core.number_offers import PROVIDERS
 from hailhq.core.providers.verification import get_verification_provider
 
 __all__ = [
+    "SubjectPapers",
     "number_options",
     "offer_paperwork",
     "option_key",
     "option_status",
+    "paperwork_from_block",
     "subject_accepted",
 ]
 
@@ -85,20 +87,40 @@ def subject_accepted(block: dict | None, subject: str) -> bool:
     return bool((block.get(subject) or {}).get("accepted", False))
 
 
-def offer_paperwork(
-    country_code: str, number_type: str, provider: str, subject: str, needs: bool
-) -> tuple[list[PaperworkItem], bool, bool]:
-    """The papers one subject must give for one carrier row, whether the
-    catalog lists them, and whether the catalog accepts that subject. No
-    verification needed: no papers, list known, accepted."""
+class SubjectPapers(NamedTuple):
+    """What one catalog row asks of one subject."""
+
+    items: list[PaperworkItem]
+    known: bool  # the catalog lists the papers
+    accepted: bool  # the catalog accepts this subject
+
+
+def paperwork_from_block(
+    block: dict | None, subject: str, needs: bool
+) -> SubjectPapers:
+    """No verification needed: no papers, list known, accepted. Needed but no
+    block: unknown list, accepted."""
     if not needs:
-        return [], True, True
-    block = telephony_catalog.requirements(country_code, number_type, provider)
+        return SubjectPapers([], True, True)
     if block is None:
-        return [], False, True
+        return SubjectPapers([], False, True)
     side = block.get(subject) or {}
     items = requirement_categories.paperwork(side.get("items", []))
-    return [PaperworkItem(**p) for p in items], True, subject_accepted(block, subject)
+    return SubjectPapers(
+        [PaperworkItem(**p) for p in items], True, subject_accepted(block, subject)
+    )
+
+
+def offer_paperwork(
+    country_code: str, number_type: str, provider: str, subject: str, needs: bool
+) -> SubjectPapers:
+    """The papers one subject must give for one carrier row."""
+    block = (
+        telephony_catalog.requirements(country_code, number_type, provider)
+        if needs
+        else None
+    )
+    return paperwork_from_block(block, subject, needs)
 
 
 def option_status(
@@ -157,13 +179,9 @@ def _candidates(
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])
             for subject in SUBJECTS:
-                if needs and block is not None:
-                    side = block.get(subject) or {}
-                    if not subject_accepted(block, subject):
-                        continue
-                    papers = requirement_categories.paperwork(side.get("items", []))
-                else:
-                    papers = []
+                papers = paperwork_from_block(block, subject, needs)
+                if not papers.accepted:
+                    continue
                 status, v = option_status(needs, by_request, subject, found)
                 option = SubjectOption(
                     allowed=True,
@@ -171,8 +189,8 @@ def _candidates(
                     monthly_cents=monthly,
                     setup_cents=setup,
                     capabilities=caps,
-                    paperwork=[PaperworkItem(**p) for p in papers],
-                    paperwork_known=not (needs and block is None),
+                    paperwork=papers.items,
+                    paperwork_known=papers.known,
                     status=status,
                     verification=(
                         OptionVerification(
