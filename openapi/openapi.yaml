@@ -8365,6 +8365,16 @@ components:
           format: uuid
           title: Id
           description: Hail verification id.
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description:
+            Who that verification is for. A by-request option can be ready
+            through the other subject's verification, so this can differ from the
+            subject of the option.
         subject_name:
           anyOf:
             - type: string
@@ -8378,6 +8388,7 @@ components:
       type: object
       required:
         - id
+        - subject_type
         - state
       title: OptionVerification
     PaperworkItem:

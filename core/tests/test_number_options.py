@@ -190,6 +190,7 @@ def test_in_review_status(catalog):
     r = number_options("CH", {("twilio", "CH", "local"): [v]})
     b = one(r, subject="business")
     assert b.status == "in_review" and b.verification.subject_name == "Acme AG"
+    assert b.verification.subject_type == "business"
     assert one(r).status == "needs_check" and one(r).verification is None
 
 

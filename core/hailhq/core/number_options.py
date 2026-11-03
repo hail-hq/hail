@@ -197,7 +197,10 @@ def _candidates(
                     status=status,
                     verification=(
                         OptionVerification(
-                            id=v.id, subject_name=v.subject_name, state=v.state
+                            id=v.id,
+                            subject_type=v.subject_type,
+                            subject_name=v.subject_name,
+                            state=v.state,
                         )
                         if v
                         else None

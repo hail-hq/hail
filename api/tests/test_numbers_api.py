@@ -847,6 +847,7 @@ async def test_number_options_lists_types_without_carrier_names(
     ]
     assert t["for"]["business"]["status"] == "ready"
     assert t["for"]["business"]["verification"]["subject_name"] == "Acme AG"
+    assert t["for"]["business"]["verification"]["subject_type"] == "business"
     assert not re.search("twilio|telnyx|didww", resp.text, re.IGNORECASE)
 
 
