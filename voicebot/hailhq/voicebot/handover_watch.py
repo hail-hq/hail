@@ -35,10 +35,16 @@ from hailhq.core.config import settings
 from hailhq.voicebot.amd import (
     GREETING_CLASSIFICATION_PROMPT,
     MACHINE_HANGUP_CATEGORIES,
+    AMDModels,
     build_classifier,
+    recheck_model,
     recheck_stt,
 )
-from hailhq.voicebot.pickup import SAMPLE_RATE, transcribe_and_classify
+from hailhq.voicebot.pickup import (
+    RECHECK_TIMEOUT_SECONDS,
+    SAMPLE_RATE,
+    transcribe_and_classify,
+)
 from hailhq.voicebot.pipeline import ResolvedLayer
 from livekit import rtc
 from livekit.agents.llm import LLM
@@ -50,23 +56,30 @@ from livekit.agents.voice.amd import AMDCategory
 
 logger = logging.getLogger("hailhq.voicebot")
 
-# Each check sends all the audio so far, so their number is capped. Three
-# checks about 2 to 3 seconds apart cover the first 7 to 9 seconds of a
-# greeting, inside the bridge's 10-second settle window. A recorded
-# greeting gives its cues ("you've reached", "leave a message") early.
+# Each check sends all the audio so far, so their number is capped.
 MAX_CHECKS = 3
-# Least time from the first speech, or from the previous check's start, to
-# the next check. A person's verdict never ends the checks (a greeting can
-# open like a person, "Hi, this is Sam"), so there is no rush to check a
-# short hello.
+# The first check runs at the first pause after speech, or this long after
+# the first speech without one. A later check starts at least this long
+# after the previous one started, and never before it ends.
+#
+# Timing, from the first speech: one check (one-shot transcription plus one
+# classifier call) takes about 1.5 to 2.5 s, capped at
+# ``RECHECK_TIMEOUT_SECONDS`` (5 s). The bridge decides at the end of its
+# 10 s settle window, and waits up to 3 s more for a check still running
+# (``window_seconds`` is 13 s in all). So a check starts only up to 13 - 5 =
+# 8 s in, and always ends in time. Typical voicemail: check 1 at about 2 s
+# (done by about 4 s), check 2 at about 4 to 5 s (done by about 7 s), check
+# 3 at about 7 to 8 s (done by about 10 s). A recorded greeting gives its
+# cue ("you've reached", "leave a message") in its first seconds.
 CHECK_EVERY_SECONDS = 2.0
-# After that, wait this long for a pause, so a check rarely cuts a word.
+# For a later check, wait this long for a pause, so a check rarely cuts a
+# word.
 PAUSE_WAIT_SECONDS = 1.0
 # Audio kept from before the first speech: VAD reports speech a little
 # after it starts, and the greeting's first words must not be cut.
 PREROLL_SECONDS = 1.0
 # The line's audio kept for the check, from the preroll on. Longer than the
-# settle window the check runs in.
+# window the checks run in.
 MAX_AUDIO_SECONDS = 15.0
 # The shared prompt is written for a live greeting with a postpone tool.
 PARTIAL_NOTE = (
@@ -74,10 +87,6 @@ PARTIAL_NOTE = (
     "mid-greeting. Postponing is not available: answer uncertain when more "
     "words could still show a recording.\n"
 )
-# Deepgram models that also take a finished recording, with language
-# detection. The same family check as ``amd.build_amd_models``; others,
-# such as streaming-only ones, get Hail's configured model instead.
-ONE_SHOT_MODEL_PREFIX = "nova-3"
 
 # Transcribe the line's audio, then classify it: (transcript, category).
 GreetingCheck = Callable[[rtc.AudioFrame], Awaitable[tuple[str, AMDCategory | None]]]
@@ -105,61 +114,65 @@ async def _contact_audio(room: rtc.Room, identity: str) -> rtc.AudioStream | Non
 def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
     """A one-shot transcriber that follows the org's STT choice.
 
-    Hail's Deepgram only when the org has no STT of its own, as in the
-    outbound recheck (``amd.build_amd_models``). An org on Deepgram uses its
-    own key, and its model when that model takes a recording
-    (``ONE_SHOT_MODEL_PREFIX``). An org on another provider skips the
-    check: its audio never goes to a provider it did not pick. Language
-    detection is on: the greeting can be in any language, and Deepgram's
-    default is English.
+    Always Hail's one-shot model (``amd.recheck_model``): an org's own
+    Deepgram model may be streaming-only. The key is Hail's when the org has
+    no STT of its own, as in the outbound recheck, and the org's own when it
+    is on Deepgram. An org on another provider skips the check: its audio
+    never goes to a provider it did not pick. Language detection is on: the
+    greeting can be in any language, and Deepgram's default is English.
     """
     org_stt = org_cfgs.get("stt")
     if org_stt is None:
-        model, api_key = settings.deepgram_model, settings.deepgram_api_key
+        api_key = settings.deepgram_api_key
     elif org_stt.provider == "deepgram":
-        model = org_stt.params.get("model") or ""
-        if not model.startswith(ONE_SHOT_MODEL_PREFIX):
-            model = settings.deepgram_model
         # Hail's key only when the org allows fallback to Hail.
         api_key = org_stt.api_key or (
             settings.deepgram_api_key if org_stt.fallback_enabled else ""
         )
     else:
         return None
+    model = recheck_model()
     if not (model and api_key):
         return None
     return recheck_stt(model, api_key)
 
 
-def build_greeting_check(
+def build_check_models(
     session: AgentSession,
     *,
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     llm_override: bool = False,
-) -> tuple[GreetingCheck | None, list]:
-    """The check for :class:`ContactLine` and the clients to close at the
-    end of the call (``amd._close_all``). Built once per call.
-
-    None (no check, the line connects as before) when there is no
-    transcriber or no classifier, or when building one fails.
-    """
-    owned: list = []
+) -> AMDModels:
+    """The handover check's clients, built once per call; close them with
+    ``AMDModels.aclose`` at job end. ``recheck_stt`` is the transcriber and
+    ``llm`` the classifier; either is None when unavailable, and then
+    :func:`greeting_check` gives no check (the line connects as before)."""
+    models = AMDModels(llm=None, stt=None)
     try:
         stt = _build_stt(org_cfgs or {})
         if stt is None:
             logger.warning("handover machine check has no transcriber; skipping")
-            return None, owned
-        owned.append(stt)
-        llm, classifiers = build_classifier(
+            return models
+        models.recheck_stt = stt
+        models.owned.append(stt)
+        llm, models.classifiers = build_classifier(
             session, org_cfgs=org_cfgs, llm_override=llm_override
         )
-        owned.extend(classifiers)
         if not isinstance(llm, LLM):
             logger.warning("handover machine check has no classifier; skipping")
-            return None, owned
+            return models
+        models.llm = llm
     except Exception:
         logger.exception("handover machine check setup failed; skipping")
-        return None, owned
+    return models
+
+
+def greeting_check(models: AMDModels) -> GreetingCheck | None:
+    """The check for :class:`ContactLine`, or None without a transcriber or
+    a classifier."""
+    stt, llm = models.recheck_stt, models.llm
+    if stt is None or not isinstance(llm, LLM):
+        return None
 
     async def check(audio: rtc.AudioFrame) -> tuple[str, AMDCategory | None]:
         return await transcribe_and_classify(
@@ -170,7 +183,7 @@ def build_greeting_check(
             note=PARTIAL_NOTE,
         )
 
-    return check, owned
+    return check
 
 
 class ContactLine:
@@ -179,7 +192,8 @@ class ContactLine:
 
     :meth:`speaks` waits for the first speech. From then, when a ``check``
     is given, the line's audio so far is checked up to ``MAX_CHECKS``
-    times, until a mailbox verdict, an error, or :meth:`aclose`.
+    times, until a mailbox verdict, an error, the end of ``window_seconds``
+    (from the first speech; None: no end), or :meth:`freeze`.
     :meth:`machine` waits for that. The check's clients belong to the
     caller (one set per call).
     """
@@ -191,11 +205,13 @@ class ContactLine:
         vad: VAD,
         *,
         check: GreetingCheck | None = None,
+        window_seconds: float | None = None,
     ) -> None:
         self._room = room
         self._identity = identity
         self._vad = vad
         self._check = check
+        self._window = window_seconds
         self._limit = int(MAX_AUDIO_SECONDS * SAMPLE_RATE) * 2
         self._preroll = int(PREROLL_SECONDS * SAMPLE_RATE) * 2
         self._pcm = bytearray()
@@ -203,6 +219,7 @@ class ContactLine:
         self._ended = asyncio.Event()
         self._pause = asyncio.Event()
         self._failed = False
+        self._frozen: dict[str, Any] | None = None
         self._read: asyncio.Task | None = None
         self._checking: asyncio.Task | None = None
         self._spoke_at: float | None = None
@@ -238,9 +255,29 @@ class ContactLine:
         await asyncio.gather(self._checking, return_exceptions=True)
         return self._category in MACHINE_HANGUP_CATEGORIES
 
+    def freeze(self) -> dict[str, Any] | None:
+        """Stop the checks and return the verdict the bridge acts on.
+
+        A check that finishes later is ignored, so the recorded row matches
+        what the bridge did. The bridge sets ``dropped`` on the returned
+        payload when it took the caller back because of it. None when the
+        contact never spoke.
+        """
+        if self._frozen is None:
+            self._frozen = self._payload() or {}
+            if self._checking is not None:
+                self._checking.cancel()
+        return self._frozen or None
+
     def verdict(self) -> dict[str, Any] | None:
         """The ``handover_amd_result`` call event payload, shaped like
-        ``amd_result``. None when the contact never spoke."""
+        ``amd_result`` plus ``dropped``. The frozen one once
+        :meth:`freeze` ran. None when the contact never spoke."""
+        if self._frozen is not None:
+            return self._frozen or None
+        return self._payload()
+
+    def _payload(self) -> dict[str, Any] | None:
         if self._spoke_at is None:
             return None
         return {
@@ -248,6 +285,7 @@ class ContactLine:
             "transcript": self._transcript[:500] or None,
             "reason": self._reason if self._check else "detection_unavailable",
             "delay": round(self._delay, 3) if self._delay is not None else None,
+            "dropped": False,
         }
 
     async def aclose(self) -> None:
@@ -272,6 +310,10 @@ class ContactLine:
                     async for event in stream:
                         self._keep(event.frame)
                         vad_stream.push_frame(event.frame)
+                except Exception:
+                    # Fail open: a read error is not a silent line.
+                    self._failed = True
+                    logger.warning("handover line audio read failed", exc_info=True)
                 finally:
                     vad_stream.end_input()
 
@@ -282,7 +324,7 @@ class ContactLine:
                 elif event.type == VADEventType.END_OF_SPEECH:
                     self._pause.set()
         except Exception:
-            # Fail open: a read or VAD error is not a silent line.
+            # Fail open: a track or VAD error is not a silent line.
             self._failed = True
             logger.warning("handover line audio unavailable", exc_info=True)
         finally:
@@ -311,28 +353,54 @@ class ContactLine:
             return
         self._spoke_at = time.monotonic()
         self._spoke.set()
+        # A pause before the speech is not the greeting's pause.
+        self._pause.clear()
         if self._check is not None:
             self._checking = asyncio.create_task(
                 self._check_greeting(), name="handover_machine_check"
             )
 
+    async def _wait_pause(self, seconds: float) -> None:
+        """Up to ``seconds`` for a pause; one that already came counts."""
+        if seconds <= 0 or self._ended.is_set():
+            return
+        try:
+            await asyncio.wait_for(self._pause.wait(), seconds)
+        except TimeoutError:
+            pass
+
     async def _check_greeting(self) -> None:
         assert self._check is not None and self._spoke_at is not None
+        last_start = (
+            self._spoke_at + self._window - RECHECK_TIMEOUT_SECONDS
+            if self._window is not None
+            else None
+        )
         checked = 0
-        last = self._spoke_at
-        for _ in range(MAX_CHECKS):
-            await asyncio.sleep(max(0.0, last + CHECK_EVERY_SECONDS - time.monotonic()))
-            if not self._ended.is_set():
-                self._pause.clear()
-                try:
-                    await asyncio.wait_for(self._pause.wait(), PAUSE_WAIT_SECONDS)
-                except TimeoutError:
-                    pass
+        started = self._spoke_at
+        for n in range(MAX_CHECKS):
+            if n == 0:
+                # The first pause after speech, or CHECK_EVERY_SECONDS.
+                await self._wait_pause(CHECK_EVERY_SECONDS)
+            else:
+                await asyncio.sleep(
+                    max(0.0, started + CHECK_EVERY_SECONDS - time.monotonic())
+                )
+                await self._wait_pause(
+                    PAUSE_WAIT_SECONDS
+                    if last_start is None
+                    else min(PAUSE_WAIT_SECONDS, last_start - time.monotonic())
+                )
+            if last_start is not None and time.monotonic() > last_start:
+                # It could not finish before the bridge decides.
+                return
             if len(self._pcm) == checked:
                 # No new audio: the line ended or the audio cap is full.
                 return
             checked = len(self._pcm)
-            last = time.monotonic()
+            started = time.monotonic()
+            # A pause from here on counts for the next check.
+            self._pause.clear()
             audio = rtc.AudioFrame(
                 data=bytes(self._pcm),
                 sample_rate=SAMPLE_RATE,
@@ -346,6 +414,8 @@ class ContactLine:
                 logger.warning("handover machine check failed (%s)", type(exc).__name__)
                 self._reason = "detection_failed"
                 return
+            if self._frozen is not None:
+                return  # too late: the bridge already decided
             if transcript:
                 self._transcript = transcript
             self._category = category
@@ -359,5 +429,6 @@ __all__ = [
     "CHECK_EVERY_SECONDS",
     "MAX_CHECKS",
     "ContactLine",
-    "build_greeting_check",
+    "build_check_models",
+    "greeting_check",
 ]

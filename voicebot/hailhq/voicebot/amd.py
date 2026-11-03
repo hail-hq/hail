@@ -248,6 +248,15 @@ def build_classifier(
     return ClassifierFailover(*classifiers), classifiers
 
 
+def recheck_model() -> str:
+    """The Deepgram model for a one-shot greeting transcription: Hail's
+    ``DEEPGRAM_MODEL``. Shared by the outbound recheck and the handover
+    check (``handover_watch``), so both send the model Hail has verified
+    for one-shot requests with language detection. An org's own Deepgram
+    model may be streaming-only, so it is never used here."""
+    return settings.deepgram_model
+
+
 def recheck_stt(model: str, api_key: str) -> STT:
     """One-shot Deepgram for a finished greeting. Deepgram detects the
     language only in one-shot requests, and its default is English.
@@ -288,14 +297,14 @@ def build_amd_models(
                 **({"vad": session.vad} if session.vad is not None else {}),
             )
             models.owned.append(models.stt)
-            if settings.deepgram_api_key and settings.deepgram_model:
+            if settings.deepgram_api_key and recheck_model():
                 # The live model cannot take a finished recording. Recheck
                 # the whole greeting only when the live result is inconclusive.
                 # Deepgram detects the language only in one-shot requests.
                 # https://developers.deepgram.com/docs/language-detection
                 try:
                     models.recheck_stt = recheck_stt(
-                        settings.deepgram_model, settings.deepgram_api_key
+                        recheck_model(), settings.deepgram_api_key
                     )
                     models.owned.append(models.recheck_stt)
                 except Exception:
@@ -547,6 +556,7 @@ __all__ = [
     "amd_end_reason",
     "build_classifier",
     "ivr_navigation_instructions",
+    "recheck_model",
     "recheck_stt",
     "run_amd",
 ]

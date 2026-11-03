@@ -278,6 +278,7 @@ async def test_no_check_connects(leg) -> None:
         "transcript": None,
         "reason": "detection_unavailable",
         "delay": None,
+        "dropped": False,
     }
 
 
@@ -313,6 +314,106 @@ async def test_audio_error_connects(monkeypatch, leg, where) -> None:
     await line.aclose()
 
 
+class _BrokenStream(_AudioStream):
+    """An audio stream whose iterator fails after a few frames."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent = 0
+
+    async def __anext__(self):
+        self.sent += 1
+        if self.sent > 3:
+            raise RuntimeError("stream broke")
+        return await super().__anext__()
+
+
+@pytest.mark.parametrize("where", ["iterator", "push_frame"])
+async def test_feed_error_connects(monkeypatch, where) -> None:
+    """An error inside the frame feed is logged and connects, as before."""
+    audio = _BrokenStream() if where == "iterator" else _AudioStream()
+    monkeypatch.setattr(
+        handover_watch,
+        "wait_for_track_publication",
+        AsyncMock(return_value=SimpleNamespace(track=object())),
+    )
+    monkeypatch.setattr(handover_watch.rtc.AudioStream, "from_track", lambda **_: audio)
+    vad, stream = _vad([])
+    if where == "push_frame":
+
+        def _push(_frame):
+            raise RuntimeError("vad down")
+
+        stream.push_frame = _push
+    line = handover_watch.ContactLine(object(), "human-x", vad)
+    assert await asyncio.wait_for(line.speaks(5.0), timeout=1) is True
+    await line.aclose()
+
+
+async def test_first_check_runs_at_the_first_pause(monkeypatch, leg) -> None:
+    """A short hello is checked at its pause, not after CHECK_EVERY_SECONDS."""
+    monkeypatch.setattr(handover_watch, "CHECK_EVERY_SECONDS", 5.0)
+    check, calls = _check(("You have reached Sam", AMDCategory.MACHINE_VM))
+    machine, _ = await asyncio.wait_for(_verdict(check), timeout=1)
+    assert machine is True and len(calls) == 1
+
+
+async def test_pause_during_the_gap_counts(monkeypatch, leg) -> None:
+    """A pause that comes while the next check waits out its gap is kept:
+    the check runs when the gap ends, not after PAUSE_WAIT_SECONDS more."""
+    monkeypatch.setattr(handover_watch, "CHECK_EVERY_SECONDS", 0.2)
+    monkeypatch.setattr(handover_watch, "PAUSE_WAIT_SECONDS", 5.0)
+    check, calls = _check(
+        ("Hi, this is Sam", AMDCategory.UNCERTAIN),
+        ("Hi, this is Sam, leave a message", AMDCategory.MACHINE_VM),
+    )
+    # One pause at the hello, one more during the gap, then none.
+    script = [VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH]
+    script += [VADEventType.INFERENCE_DONE] * 20 + [VADEventType.END_OF_SPEECH]
+    machine, _ = await asyncio.wait_for(_verdict(check, script), timeout=2)
+    assert machine is True and len(calls) == 2
+
+
+async def test_no_check_starts_that_cannot_finish_in_the_window(
+    monkeypatch, leg
+) -> None:
+    """A check starts only while it can still end before the bridge decides
+    (window minus RECHECK_TIMEOUT_SECONDS)."""
+    monkeypatch.setattr(handover_watch, "RECHECK_TIMEOUT_SECONDS", 0.2)
+    check, calls = _check(("Hi", AMDCategory.UNCERTAIN))
+    vad, _ = _vad(list(_SPEECH))
+    line = handover_watch.ContactLine(
+        object(), "human-x", vad, check=check, window_seconds=0.2
+    )
+    assert await line.speaks(1.0)
+    assert await asyncio.wait_for(line.machine(), timeout=1) is False
+    assert calls == []
+    await line.aclose()
+
+
+async def test_check_after_freeze_is_ignored(leg) -> None:
+    """The bridge decided: a check that ends later does not change the
+    recorded verdict."""
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def check(_audio):
+        started.set()
+        await release.wait()
+        return "leave a message", AMDCategory.MACHINE_VM
+
+    vad, _ = _vad(list(_SPEECH))
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert await line.speaks(1.0)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    frozen = line.freeze()
+    assert frozen["category"] is None and frozen["dropped"] is False
+    release.set()
+    assert await line.machine() is False
+    assert line.verdict() is frozen and frozen["category"] is None
+    await line.aclose()
+
+
 # --- building the check --------------------------------------------------------
 
 
@@ -342,15 +443,11 @@ def deepgram(monkeypatch):
 def test_stt_follows_the_org_choice(deepgram) -> None:
     assert handover_watch._build_stt({}) is not None
     assert handover_watch._build_stt({"stt": _layer("deepgram", api_key="dg-org")})
-    # The org's model when it takes a recording; Hail's model otherwise.
-    org = {"model": "nova-3-medical"}
-    assert handover_watch._build_stt(
-        {"stt": _layer("deepgram", api_key="dg-org", params=org)}
-    )
-    streaming_only = {"model": "flux-general-en"}
-    assert handover_watch._build_stt(
-        {"stt": _layer("deepgram", api_key="dg-org", params=streaming_only)}
-    )
+    # Always Hail's one-shot model: an org model may be streaming-only.
+    for model in ("nova-3-medical", "flux-general-en"):
+        assert handover_watch._build_stt(
+            {"stt": _layer("deepgram", api_key="dg-org", params={"model": model})}
+        )
     # Another provider: its audio never goes to a provider it did not pick.
     assert handover_watch._build_stt({"stt": _layer("speechmatics")}) is None
     # Hail's key only when the org allows fallback.
@@ -359,7 +456,7 @@ def test_stt_follows_the_org_choice(deepgram) -> None:
     assert deepgram == [
         ("nova-3", "dg-house"),
         ("nova-3", "dg-org"),
-        ("nova-3-medical", "dg-org"),
+        ("nova-3", "dg-org"),
         ("nova-3", "dg-org"),
         ("nova-3", "dg-house"),
     ]
@@ -367,21 +464,27 @@ def test_stt_follows_the_org_choice(deepgram) -> None:
 
 def test_no_deepgram_key_means_no_check(monkeypatch) -> None:
     monkeypatch.setattr(handover_watch.settings, "deepgram_api_key", "")
-    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
-    assert check is None and owned == []
+    models = handover_watch.build_check_models(SimpleNamespace(llm=None))
+    assert handover_watch.greeting_check(models) is None and models.owned == []
 
 
-def test_no_classifier_means_no_check(monkeypatch, deepgram) -> None:
+async def test_no_classifier_means_no_check(monkeypatch, deepgram) -> None:
     monkeypatch.setattr(handover_watch, "build_classifier", lambda *a, **k: (None, []))
-    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
-    assert check is None and len(owned) == 1  # the transcriber, to close
+    models = handover_watch.build_check_models(SimpleNamespace(llm=None))
+    assert handover_watch.greeting_check(models) is None
+    assert len(models.owned) == 1  # the transcriber, to close
+    await models.aclose()
+    models.recheck_stt.aclose.assert_awaited_once()
 
 
 async def test_check_uses_the_amd_prompt_for_a_partial_greeting(
     monkeypatch, deepgram
 ) -> None:
     llm = FakeLLM()
-    monkeypatch.setattr(handover_watch, "build_classifier", lambda *a, **k: (llm, []))
+    backup = SimpleNamespace(aclose=AsyncMock())
+    monkeypatch.setattr(
+        handover_watch, "build_classifier", lambda *a, **k: (llm, [backup])
+    )
     seen: dict = {}
 
     async def _tc(audio, *, stt, llm, prompt, note):
@@ -389,9 +492,12 @@ async def test_check_uses_the_amd_prompt_for_a_partial_greeting(
         return "Leave a message", AMDCategory.MACHINE_VM
 
     monkeypatch.setattr(handover_watch, "transcribe_and_classify", _tc)
-    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
+    models = handover_watch.build_check_models(SimpleNamespace(llm=None))
+    check = handover_watch.greeting_check(models)
     assert check is not None
     assert await check(_frame()) == ("Leave a message", AMDCategory.MACHINE_VM)
-    assert seen["llm"] is llm and seen["stt"] is owned[0]
+    assert seen["llm"] is llm and seen["stt"] is models.recheck_stt
     assert seen["prompt"] == handover_watch.GREETING_CLASSIFICATION_PROMPT
     assert seen["note"] == handover_watch.PARTIAL_NOTE
+    await models.aclose()
+    backup.aclose.assert_awaited_once()

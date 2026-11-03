@@ -82,18 +82,20 @@ from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
     AMDModels,
-    _close_all,
     amd_end_reason,
     build_amd_models,
     ivr_navigation_instructions,
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
-from hailhq.voicebot.handover_watch import ContactLine, build_greeting_check
+from hailhq.voicebot.handover_watch import (
+    ContactLine,
+    build_check_models,
+    greeting_check,
+)
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
-    ResolvedLayer,
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
@@ -473,6 +475,9 @@ HANDOVER_SETTLE_SECONDS = 10.0
 # the agent takes the caller back. A person speaks well within it (the
 # slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
 HANDOVER_SILENCE_SECONDS = 15.0
+# How long the bridge waits, past the settle window, for a mailbox check
+# still running. A person is already talking with the caller meanwhile.
+HANDOVER_CHECK_GRACE_SECONDS = 3.0
 # The call event with the handover machine check's verdict. Not
 # ``amd_result``: readers take that row as the verdict on the call's own
 # pickup (``hail tail`` labels the speech after a machine verdict
@@ -743,6 +748,9 @@ def make_agent_bridge(
             bridge_state["connected"] = True
             bridge_state["settling"] = True
             machine = await _settle(line)
+            # The verdict this handle acts on: a check that ends later is
+            # ignored, so the recorded row matches what happened.
+            verdict = line.freeze() if line is not None else None
             if bridge_state.get("ending"):
                 # The caller hung up meanwhile; the call is ending.
                 bridge_state["connected"] = False
@@ -756,8 +764,14 @@ def make_agent_bridge(
                 # Voicemail or an unavailable mailbox: the same as no
                 # answer. The agent offers to take a message.
                 logger.info("call_id=%s handover answered by a mailbox", call_id)
+                if verdict is not None:
+                    verdict["dropped"] = True
                 bridge_state["connected"] = False
                 return await _give_back("no_answer")
+            if verdict is not None and verdict["category"] in MACHINE_HANGUP_CATEGORIES:
+                # The check said voicemail just as the wait ended, unseen:
+                # connected anyway, and the row says so.
+                verdict["reason"] = "late"
             # Settled: a person. The soft cap no longer waits on the check.
             bridge_state.pop("picked_up", None)
             logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
@@ -805,7 +819,9 @@ def make_agent_bridge(
             """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves or
             the check says voicemail or an unavailable mailbox (True).
             A person's verdict does not end the wait: the settle window,
-            and so the answered time, stays as before the check."""
+            and so the answered time, stays as before the check. A check
+            still running at its end gets up to
+            HANDOVER_CHECK_GRACE_SECONDS more."""
             left = asyncio.Event()
 
             def _on_leave(participant: rtc.RemoteParticipant) -> None:
@@ -819,6 +835,7 @@ def make_agent_bridge(
             )
             waits = {leaving} | ({checking} if checking is not None else set())
             deadline = time.monotonic() + HANDOVER_SETTLE_SECONDS
+            grace = False
             try:
                 while identity in ctx.room.remote_participants:
                     done, waits = await asyncio.wait(
@@ -826,10 +843,16 @@ def make_agent_bridge(
                         timeout=max(0.0, deadline - time.monotonic()),
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if not done or leaving in done:
+                    if leaving in done:
                         break
                     if checking in done and checking.result():
                         break
+                    if not done:
+                        if grace or checking not in waits:
+                            break
+                        # A check still runs: give it a little longer.
+                        grace = True
+                        deadline = time.monotonic() + HANDOVER_CHECK_GRACE_SECONDS
             finally:
                 ctx.room.off("participant_disconnected", _on_leave)
                 for task in (leaving, checking):
@@ -860,6 +883,11 @@ def make_agent_bridge(
                 line = listen(identity)
             except Exception:
                 logger.exception("call_id=%s handover line check unavailable", call_id)
+        # Job shutdown stops a bridge still on this step before it closes
+        # the check's clients (finish_handover_checks).
+        me = asyncio.current_task()
+        bridges = bridge_state.setdefault("bridges", set())
+        bridges.add(me)
         try:
             return await _after_pickup(line)
         finally:
@@ -869,6 +897,7 @@ def make_agent_bridge(
                     await line.aclose()
                 except Exception:
                     logger.exception("call_id=%s handover line close failed", call_id)
+            bridges.discard(me)
 
     return _bridge
 
@@ -940,29 +969,37 @@ def _contact_line(
     ctx: JobContext,
     session: AgentSession,
     identity: str,
-    checks: dict[str, Any],
-    *,
-    org_cfgs: dict[str, ResolvedLayer] | None = None,
-    llm_override: bool = False,
+    models: Callable[[], AMDModels],
 ) -> ContactLine | None:
     """The bridge's line check: silence, then mailbox. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
-    the silence check runs. The check's clients are built on the first
-    pickup, reused by later dials on this call, and kept in ``checks``
-    (``"check"``, ``"owned"``) for :func:`close_greeting_check` at job end."""
+    the silence check runs. ``models`` returns the call's check clients,
+    built on the first pickup and reused by later dials."""
     if session.vad is None:
         return None
-    if "check" not in checks:
-        checks["check"], checks["owned"] = build_greeting_check(
-            session, org_cfgs=org_cfgs, llm_override=llm_override
-        )
-    return ContactLine(ctx.room, identity, session.vad, check=checks["check"])
+    return ContactLine(
+        ctx.room,
+        identity,
+        session.vad,
+        check=greeting_check(models()),
+        window_seconds=HANDOVER_SETTLE_SECONDS + HANDOVER_CHECK_GRACE_SECONDS,
+    )
 
 
-async def close_greeting_check(checks: dict[str, Any]) -> None:
-    """Close the handover check's clients at job end."""
-    owned, checks["owned"] = checks.get("owned", []), []
-    await _close_all(owned)
+async def finish_handover_checks(
+    bridge_state: dict[str, Any], call_id: UUID, models: AMDModels | None
+) -> None:
+    """At job shutdown: stop bridges still checking a contact's line (their
+    rows are added as they end), give the verdict rows a few seconds, then
+    close the check's clients, which no check uses any more."""
+    running = {t for t in bridge_state.get("bridges", ()) if not t.done()}
+    for task in running:
+        task.cancel()
+    if running:
+        await asyncio.wait(running, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+    await finish_verdict_writes(bridge_state, call_id)
+    if models is not None:
+        await models.aclose()
 
 
 async def finish_verdict_writes(bridge_state: dict[str, Any], call_id: UUID) -> None:
@@ -2436,9 +2473,9 @@ async def _run_call(
     # Human handover: identity of the contact's leg while one is dialed or
     # connected, and whether it answered. Written by the bridge handle.
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
-    # The handover mailbox check's clients, built on the first pickup and
-    # closed at job end (see _contact_line).
-    greeting_check: dict[str, Any] = {}
+    # The handover check's clients: built on the first pickup, reused by
+    # later dials, closed at job end (finish_handover_checks).
+    handover_models: AMDModels | None = None
 
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
@@ -2605,6 +2642,14 @@ async def _run_call(
         captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
         # Status stays None → on_call_end falls back to "completed".
 
+    def _handover_models() -> AMDModels:
+        nonlocal handover_models
+        if handover_models is None:
+            handover_models = build_check_models(
+                session, org_cfgs=org_cfgs, llm_override=llm_cfg is not None
+            )
+        return handover_models
+
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
     # Whether the other party talked over the goodbye, for end_call.
     speech = SpeechTracker()
@@ -2629,12 +2674,7 @@ async def _run_call(
             on_cap_fired=_on_soft_cap_fired,
             language=language,
             listen=lambda identity: _contact_line(
-                ctx,
-                session,
-                identity,
-                greeting_check,
-                org_cfgs=org_cfgs,
-                llm_override=llm_cfg is not None,
+                ctx, session, identity, _handover_models
             ),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
@@ -2810,8 +2850,7 @@ async def _run_call(
                 call_id, ANSWER_POST_SHUTDOWN_WAIT_SECONDS
             )
             # After the dial tasks: a bridge writes its verdict row as it ends.
-            await finish_verdict_writes(bridge_state, call_id)
-            await close_greeting_check(greeting_check)
+            await finish_handover_checks(bridge_state, call_id, handover_models)
             for task in list(bridge_state.get("late_leg_tasks", ())):
                 task.cancel()
             if text_watch_task is not None and not text_watch_task.done():

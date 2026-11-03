@@ -137,13 +137,38 @@ var amdSentences = map[string]string{
 
 // handoverAMDSentences maps the handover check's verdict
 // (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to [amd]
-// lines. Only voicemail and an unavailable mailbox give the caller back.
+// lines. What the bridge did comes from the row's "dropped" and "reason",
+// see handoverAMDLine.
 var handoverAMDSentences = map[string]string{
-	"human":               "handover: a person answered",
-	"machine-ivr":         "handover: a phone menu answered, kept connected",
-	"machine-vm":          "handover: voicemail answered, caller taken back",
-	"machine-unavailable": "handover: mailbox unavailable, caller taken back",
-	"uncertain":           "handover: unclear who answered, kept connected",
+	"human":               "a person answered",
+	"machine-ivr":         "a phone menu answered",
+	"machine-vm":          "voicemail answered",
+	"machine-unavailable": "mailbox unavailable",
+	"uncertain":           "unclear who answered",
+}
+
+// handoverAMDLine renders a handover_amd_result row. Never the payload: it
+// holds the contact's greeting transcript. "dropped" is true only when the
+// voicebot took the caller back because of this verdict; reason "late"
+// marks a verdict that came after the voicebot had already connected.
+func handoverAMDLine(payload map[string]interface{}) string {
+	category, _ := payload["category"].(string)
+	reason, _ := payload["reason"].(string)
+	dropped, _ := payload["dropped"].(bool)
+	sentence, ok := handoverAMDSentences[category]
+	if !ok {
+		sentence = category
+		if sentence == "" {
+			sentence = "no verdict"
+		}
+	}
+	switch {
+	case dropped:
+		sentence += ", caller taken back"
+	case reason == "late":
+		sentence += " too late, kept connected"
+	}
+	return "handover: " + sentence
 }
 
 // perCallPalette is the small set of stable colors assigned to short call
@@ -590,15 +615,7 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 		}
 		return "[amd]", payloadJSON(ev.Payload)
 	case "handover_amd_result":
-		// Never the payload: it holds the contact's greeting transcript.
-		category, _ := ev.Payload["category"].(string)
-		if sentence, ok := handoverAMDSentences[category]; ok {
-			return "[amd]", sentence
-		}
-		if category != "" {
-			return "[amd]", "handover: " + category
-		}
-		return "[amd]", "handover: no verdict, kept connected"
+		return "[amd]", handoverAMDLine(ev.Payload)
 	case "person_detected":
 		// Written by the voicebot when a person comes on the line after a
 		// machine answered (post-IVR handoff).

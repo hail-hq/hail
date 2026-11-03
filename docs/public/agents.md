@@ -80,7 +80,7 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - A plain forward: when the phone picks up, the two people are connected
   and the agent stops listening and speaking. It says nothing to the
   contact. The agent listens to the contact's line for 10 seconds after
-  its first sound. If voicemail or a full or unset mailbox answers, the
+  its first sound, and up to 3 seconds more while a check finishes. If voicemail or a full or unset mailbox answers, the
   agent hangs up that line, comes back and offers to take a message. The
   caller can hear the first seconds of the greeting before that. A phone
   menu stays connected, so the caller can press keys. If the check is
@@ -98,7 +98,8 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
-  contact's side has spoken and stayed on the line for 10 seconds, and
+  contact's side has spoken and stayed on the line for 10 seconds (up to
+  13 while a check finishes), and
   the check did not find voicemail or a mailbox.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 

@@ -123,7 +123,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 - **`call.no_answer`** — the callee did not answer.
 - **`call.transferred`** — the agent handed the live call to a person
   ([Agents](agents.md#hand-over-to-a-person)). Sent once, when someone on
-  that person's line has spoken and stayed on for 10 seconds, and it was
+  that person's line has spoken and stayed on for 10 seconds (up to 13
+  while a check finishes), and it was
   not voicemail or a full or unset mailbox. `data` is the call object plus `transfer`:
   `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
   `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
