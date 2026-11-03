@@ -25,7 +25,6 @@ from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.directory import is_verified_member
 from hailhq.core.email_mime import ParsedMime
-from hailhq.core.email_sender import from_address_for
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.models import Agent, Email, EmailDomain, Sms
 from hailhq.core.prompts import (
@@ -72,10 +71,10 @@ __all__ = [
     "proves_sender",
     "queue_decision",
     "replies_in_thread",
-    "reply_from_address",
     "reply_references",
     "reply_subject",
     "retry_reply",
+    "routed_agent",
     "run_refusal",
     "sender_refusal",
     "sender_trust",
@@ -140,6 +139,23 @@ def answers_emails(agent: Agent | None) -> bool:
     """True for a live agent with ``email_enabled``: the one test for queueing,
     claiming, and sending an email reply."""
     return agent is not None and agent.status == "live" and agent.email_enabled
+
+
+async def routed_agent(
+    db: AsyncSession, email: Email
+) -> tuple[EmailDomain, Agent] | None:
+    """The address of this inbound row and the agent that answers it now, or
+    None when either is gone or the agent stopped answering email."""
+    if email.email_domain_id is None:
+        return None
+    domain = await db.get(EmailDomain, email.email_domain_id)
+    if domain is None or domain.email_agent_id is None:
+        return None
+    agent = await db.get(Agent, domain.email_agent_id)
+    if not answers_emails(agent):
+        return None
+    assert agent is not None
+    return domain, agent
 
 
 def proves_sender(parsed: ParsedMime, dmarc_verdict: str | None) -> bool:
@@ -440,17 +456,11 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedEmailReply | None:
         if email is None:
             await db.commit()  # keep the expiry updates
             return None
-        domain = (
-            await db.get(EmailDomain, email.email_domain_id)
-            if email.email_domain_id
-            else None
-        )
-        agent = (
-            await db.get(Agent, domain.email_agent_id)
-            if domain is not None and domain.email_agent_id
-            else None
-        )
-        if domain is not None and agent is not None and answers_emails(agent):
+        routed = await routed_agent(db, email)
+        if routed is not None:
+            domain, agent = routed
+            # The route may have moved to another agent since ingest.
+            email.agent_id = agent.id
             email.agent_reply_state = "processing"
             email.agent_reply_attempts += 1
             email.agent_reply_available_at = now + CLAIM_LEASE
@@ -760,12 +770,6 @@ def reply_subject(subject: str | None) -> str:
     if clean.lower().startswith("re:"):
         return clean[:MAX_SUBJECT_CHARS]
     return f"Re: {clean}"[:MAX_SUBJECT_CHARS] if clean else "Re: your email"
-
-
-def reply_from_address(domain: EmailDomain) -> str:
-    """The hail-mail address, or ``noreply@`` on a custom domain. To and Cc
-    are sender-written headers: they must not choose the ``From``."""
-    return from_address_for(domain)
 
 
 def _usable_id(value: str) -> bool:

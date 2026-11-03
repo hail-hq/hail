@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from hailhq.core.models import Contact, OrganizationMember, User
 from sqlalchemy import func, select
@@ -104,15 +105,7 @@ async def resolve_member_emails(
     Returns every match — the caller owns the 0-match and >1-match
     policies (the internal route refuses ambiguous sends).
     """
-    stmt = (
-        select(User.email)
-        .join(OrganizationMember, OrganizationMember.user_id == User.id)
-        .where(
-            OrganizationMember.organization_id == organization_id,
-            func.lower(User.name) == name.strip().lower(),
-        )
-    )
-    return list((await session.execute(stmt)).scalars().all())
+    return await _members_named(session, organization_id, name, User.email)
 
 
 async def resolve_member_phones(
@@ -121,8 +114,15 @@ async def resolve_member_phones(
     """Phone numbers of members matching ``name``, for agent sends. Same
     policy as :func:`resolve_member_emails`. A member with no phone stays in
     the list as None, so a shared name stays ambiguous."""
+    return await _members_named(session, organization_id, name, User.phone_number)
+
+
+async def _members_named(
+    session: AsyncSession, organization_id: uuid.UUID, name: str, column: Any
+) -> list[Any]:
+    """``column`` of every member named ``name``, case-insensitively."""
     stmt = (
-        select(User.phone_number)
+        select(column)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
         .where(
             OrganizationMember.organization_id == organization_id,

@@ -1035,6 +1035,20 @@ async def test_tools_run_only_during_a_claim(
     email_mock.send_email.assert_not_awaited()
 
 
+@pytest.mark.parametrize("state", ["pending", "done", "skipped", "failed", None])
+async def test_a_new_reply_needs_a_claim(
+    client, async_session, email_mock, state
+) -> None:
+    """A worker that lost its claim cannot write a reply the row never gets."""
+    _org, _agent, _domain, inbound = await _seed(async_session, state=state)
+    data = await _reply(client, inbound.id)
+    assert data["state"] == "skipped"
+    assert data["reason"] == "not_claimed"
+    email_mock.send_email.assert_not_awaited()
+    await async_session.refresh(inbound)
+    assert inbound.agent_reply_state == state
+
+
 @pytest.mark.parametrize("verdict", ["GRAY", "PROCESSING_FAILED", None])
 async def test_the_server_refuses_tools_for_an_unproven_sender(
     client, async_session, email_mock, sms_mock, add_phone_number, verdict
