@@ -200,7 +200,7 @@ class NumberQuotesResponse(BaseModel):
 
 class OptionVerification(BaseModel):
     id: UUID = Field(description="Hail verification id.")
-    subject_type: Literal["person", "business"] = Field(
+    subject_type: SubjectType = Field(
         description="Who that verification is for. A by-request option can be ready through the other subject's verification, so this can differ from the subject of the option."
     )
     subject_name: str | None = Field(

@@ -19,7 +19,7 @@ from hailhq.core.carrier_offer import (
     TypeOptions,
     cents,
 )
-from hailhq.core.number_offers import PROVIDERS
+from hailhq.core.number_offers import PROVIDERS, by_request_quotable
 from hailhq.core.providers.verification import get_verification_provider
 
 __all__ = [
@@ -167,8 +167,10 @@ def _candidates(
             caps = telephony_catalog.effective_capabilities(row, provider)
             if not caps or (sms_only and "sms" not in caps):
                 continue
-            # Same as /quotes: support orders only numbers that take calls.
-            if by_request and "voice" not in caps:
+            # Same as /quotes: one rule for what a by-request row can be quoted for.
+            if by_request and not by_request_quotable(
+                row, provider, ["voice", "sms"] if sms_only else ["voice"]
+            ):
                 continue
             nt = row["number_type"]
             block = (

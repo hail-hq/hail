@@ -854,7 +854,8 @@ _LOOP: asyncio.AbstractEventLoop | None = None
 
 class VerificationUnavailable(RuntimeError):
     """A carrier has rows that need verification but no verification plug-in
-    is configured. The run fails: empty blocks must never be written."""
+    is configured. The run skips that carrier and leaves its catalog file
+    unchanged: empty blocks must never be written."""
 
 
 def _run(coro: Any) -> Any:
@@ -1043,7 +1044,9 @@ def attach_requirements(
     ``report``. Any other row gets None."""
     needing = [r for r in rows if r["verification_required"]]
     if needing:
-        _verification_provider(provider)  # fail loudly before any row is written
+        _verification_provider(
+            provider
+        )  # raises VerificationUnavailable before any row is written; main() skips the carrier
     previous = {
         f"{n['country_code']}:{n['number_type']}": n.get("requirements")
         for n in existing
@@ -1209,10 +1212,9 @@ def main(argv: list[str] | None = None) -> int:
             summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
         except VerificationUnavailable:
             # Raised before any write: the provider's file stays as it was.
-            summary.append(f"## {provider}")
             summary.append(
-                f"{provider}: requirements not refreshed: verification is not "
-                "configured (check the carrier credentials). Catalog left unchanged."
+                f"- {provider}: failed, verification is not configured "
+                "(check the carrier credentials) (catalog left unchanged)"
             )
     text = _cap_summary("\n".join(summary) + "\n")
     print(text)

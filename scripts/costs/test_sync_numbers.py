@@ -1300,7 +1300,9 @@ def test_carrier_without_verification_does_not_stop_the_run(tmp_path, monkeypatc
     assert (tmp_path / "telnyx.json").read_text() == "old"
     assert (tmp_path / "didww.json").read_text() == "new"
     assert (tmp_path / "twilio.json").read_text() == "new"
+    text = summary_file.read_text()
     assert (
-        "telnyx: requirements not refreshed: verification is not configured "
-        "(check the carrier credentials). Catalog left unchanged."
-    ) in summary_file.read_text()
+        "- telnyx: failed, verification is not configured "
+        "(check the carrier credentials) (catalog left unchanged)"
+    ) in text
+    assert "## telnyx" not in text
