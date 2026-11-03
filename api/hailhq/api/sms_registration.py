@@ -269,12 +269,12 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
     provider = registry(number.provider, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
         return
+    # registered_numbers re-reads every listed number under the org lock,
+    # this one included: the background pass may have changed it while this
+    # request waited for the lock.
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
         # A person's registration holds one number: this one is not next.
         return
-    # Read under the org lock: the background pass may have changed these
-    # while this request waited for it.
-    await db.refresh(number, ["provisioning_metadata", "sms_registration_id"])
     await _attach(row, provider, number)
 
 
