@@ -1,4 +1,5 @@
-"""The handover silence check: did anyone on the contact's side speak?"""
+"""The handover line check: did anyone on the contact's side speak, and
+was it a machine?"""
 
 import asyncio
 from types import SimpleNamespace
@@ -8,6 +9,9 @@ import pytest
 from hailhq.voicebot import handover_watch
 from livekit import rtc
 from livekit.agents.vad import VADEventType
+from livekit.agents.voice.amd import AMDCategory
+
+from ._fakes import FakeLLM
 
 
 def _frame(samples=320):
@@ -81,17 +85,25 @@ def _vad(script):
     return SimpleNamespace(stream=lambda: stream), stream
 
 
+async def _speaks(vad, seconds, **kwargs) -> bool:
+    line = handover_watch.ContactLine(object(), "human-x", vad, **kwargs)
+    try:
+        return await line.speaks(seconds)
+    finally:
+        await line.aclose()
+
+
 async def test_speech_counts(leg) -> None:
     vad, stream = _vad(
         [VADEventType.INFERENCE_DONE] * 3 + [VADEventType.START_OF_SPEECH]
     )
-    assert await handover_watch.contact_speaks(object(), "human-x", vad, 2.0)
+    assert await _speaks(vad, 2.0)
     assert leg.closed and stream.closed
 
 
 async def test_silence_until_the_deadline(leg) -> None:
     vad, stream = _vad([])
-    assert not await handover_watch.contact_speaks(object(), "human-x", vad, 0.05)
+    assert not await _speaks(vad, 0.05)
     assert leg.closed and stream.closed
 
 
@@ -102,7 +114,7 @@ async def test_no_audio_track_is_silent(monkeypatch) -> None:
         AsyncMock(return_value=SimpleNamespace(track=None)),
     )
     vad, _ = _vad([VADEventType.START_OF_SPEECH])
-    assert not await handover_watch.contact_speaks(object(), "human-x", vad, 1.0)
+    assert not await asyncio.wait_for(_speaks(vad, 1.0), timeout=0.5)
 
 
 async def test_deadline_includes_waiting_for_the_track(monkeypatch) -> None:
@@ -113,6 +125,213 @@ async def test_deadline_includes_waiting_for_the_track(monkeypatch) -> None:
 
     monkeypatch.setattr(handover_watch, "wait_for_track_publication", never)
     vad, _ = _vad([])
-    assert not await asyncio.wait_for(
-        handover_watch.contact_speaks(object(), "human-x", vad, 0.05), timeout=1
+    assert not await asyncio.wait_for(_speaks(vad, 0.05), timeout=1)
+
+
+# --- machine check -----------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _fast_checks(monkeypatch):
+    monkeypatch.setattr(handover_watch, "CHECK_EVERY_SECONDS", 0.01)
+
+
+def _check(*answers):
+    """A greeting check that returns ``answers`` in order, then the last."""
+    calls: list[int] = []
+
+    async def check(audio):
+        calls.append(audio.samples_per_channel)
+        answer = answers[min(len(calls), len(answers)) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return check, calls
+
+
+async def _verdict(check, script=None):
+    vad, _ = _vad(
+        script
+        or [VADEventType.START_OF_SPEECH]
+        + [VADEventType.INFERENCE_DONE] * 5
+        + [VADEventType.END_OF_SPEECH]
     )
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    try:
+        assert await line.speaks(1.0)
+        machine = await asyncio.wait_for(line.machine(), timeout=2)
+        return machine, line.verdict()
+    finally:
+        await line.aclose()
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        AMDCategory.MACHINE_VM,
+        AMDCategory.MACHINE_UNAVAILABLE,
+        AMDCategory.MACHINE_IVR,
+    ],
+)
+async def test_machine_verdict(leg, category) -> None:
+    check, calls = _check(("You have reached Sam", category))
+    machine, verdict = await _verdict(check)
+    assert machine is True and len(calls) == 1
+    assert verdict["category"] == category.value
+    assert verdict["transcript"] == "You have reached Sam"
+    assert verdict["reason"] == "greeting_check"
+    assert verdict["delay"] >= 0
+
+
+async def test_person_verdict_ends_the_check(leg) -> None:
+    check, calls = _check(("Hello?", AMDCategory.HUMAN))
+    machine, verdict = await _verdict(check)
+    assert machine is False and len(calls) == 1
+    assert verdict["category"] == "human" and verdict["reason"] == "greeting_check"
+
+
+async def test_unsure_then_machine_checks_the_longer_greeting(leg) -> None:
+    """An unsure verdict checks again with the audio heard since; the
+    second check gets more audio than the first."""
+    check, calls = _check(
+        ("Hi, this is Sam", AMDCategory.UNCERTAIN),
+        ("Hi, this is Sam, leave a message", AMDCategory.MACHINE_VM),
+    )
+    machine, verdict = await _verdict(check)
+    assert machine is True and len(calls) == 2 and calls[1] > calls[0]
+    assert verdict["transcript"] == "Hi, this is Sam, leave a message"
+
+
+async def test_silence_before_speech_is_not_sent(leg) -> None:
+    """Two seconds of silence, then speech: the check gets about one second
+    of audio from before the speech (the preroll), not the whole wait."""
+    check, calls = _check(("Leave a message", AMDCategory.MACHINE_VM))
+    machine, _ = await _verdict(
+        check,
+        [VADEventType.INFERENCE_DONE] * 100
+        + [VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH],
+    )
+    assert machine is True
+    preroll = int(handover_watch.PREROLL_SECONDS * 16000)
+    assert preroll <= calls[0] < preroll + 16000
+
+
+async def test_unsure_until_closed_connects(leg) -> None:
+    check, calls = _check(("Hi, this is Sam", AMDCategory.UNCERTAIN))
+    vad, _ = _vad([VADEventType.START_OF_SPEECH])
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert await line.speaks(1.0)
+    machine = asyncio.ensure_future(line.machine())
+    await asyncio.sleep(0.1)
+    assert not machine.done() and len(calls) >= 1
+    await line.aclose()
+    assert await machine is False
+    assert line.verdict()["category"] == "uncertain"
+    assert line.verdict()["reason"] == "window_ended"
+
+
+async def test_failed_check_connects(leg) -> None:
+    check, calls = _check(RuntimeError("provider down"))
+    machine, verdict = await _verdict(check)
+    assert machine is False and len(calls) == 1
+    assert verdict["category"] is None and verdict["reason"] == "detection_failed"
+
+
+async def test_no_check_connects(leg) -> None:
+    machine, verdict = await _verdict(None)
+    assert machine is False
+    assert verdict == {
+        "category": None,
+        "transcript": None,
+        "reason": "detection_unavailable",
+        "delay": None,
+    }
+
+
+async def test_no_verdict_without_speech(leg) -> None:
+    check, calls = _check(("x", AMDCategory.MACHINE_VM))
+    vad, _ = _vad([])
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert not await line.speaks(0.05)
+    assert await line.machine() is False
+    assert line.verdict() is None and calls == []
+    await line.aclose()
+
+
+async def test_close_closes_the_check_clients(leg) -> None:
+    owned = [SimpleNamespace(aclose=AsyncMock()), SimpleNamespace(aclose=AsyncMock())]
+    vad, _ = _vad([])
+    line = handover_watch.ContactLine(object(), "human-x", vad, owned=owned)
+    await line.speaks(0.01)
+    await line.aclose()
+    for client in owned:
+        client.aclose.assert_awaited_once()
+
+
+# --- building the check --------------------------------------------------------
+
+
+def _layer(provider, **kw):
+    return handover_watch.ResolvedLayer(
+        provider=provider,
+        api_key=kw.get("api_key"),
+        params=kw.get("params", {}),
+        fallback_enabled=kw.get("fallback_enabled", False),
+    )
+
+
+@pytest.fixture
+def deepgram(monkeypatch):
+    monkeypatch.setattr(handover_watch.settings, "deepgram_api_key", "dg-house")
+    monkeypatch.setattr(handover_watch.settings, "deepgram_model", "nova-3")
+    built: list[tuple] = []
+
+    def _stt(model, api_key):
+        built.append((model, api_key))
+        return SimpleNamespace(model=model, aclose=AsyncMock())
+
+    monkeypatch.setattr(handover_watch, "recheck_stt", _stt)
+    return built
+
+
+def test_stt_follows_the_org_choice(deepgram) -> None:
+    assert handover_watch._build_stt({}) is not None
+    assert handover_watch._build_stt({"stt": _layer("deepgram", api_key="dg-org")})
+    # Another provider: its audio never goes to a provider it did not pick.
+    assert handover_watch._build_stt({"stt": _layer("speechmatics")}) is None
+    # Hail's key only when the org allows fallback.
+    assert handover_watch._build_stt({"stt": _layer("deepgram")}) is None
+    assert deepgram == [("nova-3", "dg-house"), ("nova-3", "dg-org")]
+
+
+def test_no_deepgram_key_means_no_check(monkeypatch) -> None:
+    monkeypatch.setattr(handover_watch.settings, "deepgram_api_key", "")
+    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
+    assert check is None and owned == []
+
+
+def test_no_classifier_means_no_check(monkeypatch, deepgram) -> None:
+    monkeypatch.setattr(handover_watch, "build_classifier", lambda *a, **k: (None, []))
+    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
+    assert check is None and len(owned) == 1  # the transcriber, to close
+
+
+async def test_check_uses_the_amd_prompt_for_a_partial_greeting(
+    monkeypatch, deepgram
+) -> None:
+    llm = FakeLLM()
+    monkeypatch.setattr(handover_watch, "build_classifier", lambda *a, **k: (llm, []))
+    seen: dict = {}
+
+    async def _tc(audio, *, stt, llm, prompt, note):
+        seen.update(stt=stt, llm=llm, prompt=prompt, note=note)
+        return "Leave a message", AMDCategory.MACHINE_VM
+
+    monkeypatch.setattr(handover_watch, "transcribe_and_classify", _tc)
+    check, owned = handover_watch.build_greeting_check(SimpleNamespace(llm=None))
+    assert check is not None
+    assert await check(_frame()) == ("Leave a message", AMDCategory.MACHINE_VM)
+    assert seen["llm"] is llm and seen["stt"] is owned[0]
+    assert seen["prompt"] == handover_watch.GREETING_CLASSIFICATION_PROMPT
+    assert seen["note"] == handover_watch.PARTIAL_NOTE

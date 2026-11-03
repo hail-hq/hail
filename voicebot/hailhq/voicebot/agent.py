@@ -88,10 +88,11 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
-from hailhq.voicebot.handover_watch import contact_speaks
+from hailhq.voicebot.handover_watch import ContactLine, build_greeting_check
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
+    ResolvedLayer,
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
@@ -471,6 +472,11 @@ HANDOVER_SETTLE_SECONDS = 10.0
 # the agent takes the caller back. A person speaks well within it (the
 # slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
 HANDOVER_SILENCE_SECONDS = 15.0
+# The call event with the handover machine check's verdict. Not
+# ``amd_result``: readers take that row as the verdict on the call's own
+# pickup (``hail tail`` labels the speech after a machine verdict
+# [machine]).
+HANDOVER_AMD_EVENT_KIND = "handover_amd_result"
 
 # SIP final responses that mean the person is there but declined / busy, and
 # the ones that mean nobody picked up. Anything else is a failed dial.
@@ -565,7 +571,7 @@ def make_agent_bridge(
     bridge_state: dict[str, Any],
     handover_seconds: int = 0,
     on_cap_fired: Callable[[], None] | None = None,
-    watch: Callable[[str], Awaitable[bool]] | None = None,
+    listen: Callable[[str], ContactLine | None] | None = None,
     language: str | None = None,
 ) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]:
     """Build the bridge handle wired into the ``transfer_call`` agent tool.
@@ -579,11 +585,17 @@ def make_agent_bridge(
     got a text and an email with the caller's number and reason while it
     rang).
 
-    ``watch`` listens to the contact's leg after pickup and reports whether
-    anyone there spoke within ``HANDOVER_SILENCE_SECONDS``. When nobody did
-    (a mailbox that answers in silence), the leg is removed, the agent is
-    unmuted and the outcome is ``no_answer``. Only after speech does the
-    handover count as answered.
+    ``listen`` opens a :class:`ContactLine` on the contact's leg after
+    pickup (None: no check, the line connects). When nobody there speaks
+    within ``HANDOVER_SILENCE_SECONDS`` (a mailbox that answers in
+    silence), the leg is removed, the agent is unmuted and the outcome is
+    ``no_answer``. After speech, the line's machine check runs during the
+    settle window: a voicemail, mailbox, phone menu or call screening
+    verdict also removes the leg with ``no_answer``, so the agent offers to
+    take a message. A person, an unsure verdict or a failed check connects,
+    as before the check. Only after the settle window does the handover
+    count as answered. The verdict is written as a ``handover_amd_result``
+    call event in the background.
 
     ``bridge_state["human"]`` is set before dialing so
     :func:`handle_sip_disconnect` can tell the contact's leg from the
@@ -600,6 +612,21 @@ def make_agent_bridge(
     contact's SIP participant joins the room when the trunk accepts the
     INVITE, so it can be removed while it rings.
     """
+
+    def _record_verdict(line: ContactLine) -> None:
+        """Write the machine check's verdict without blocking the call."""
+        try:
+            payload = line.verdict()
+            if payload is None:
+                return
+            task = asyncio.create_task(
+                write_call_event(call_id, HANDOVER_AMD_EVENT_KIND, payload)
+            )
+            tasks = bridge_state.setdefault("event_tasks", set())
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+        except Exception:
+            logger.exception("call_id=%s handover verdict not recorded", call_id)
 
     async def _bridge(route: BridgeRoute) -> BridgeOutcome:
         if bridge_state.get("human") or bridge_state.get("connected"):
@@ -686,93 +713,160 @@ def make_agent_bridge(
             _unmute()
             return _gone(outcome, stuck=stuck)
 
+        async def _after_pickup(line: ContactLine | None) -> BridgeOutcome:
+            spoke = True
+            if line is not None:
+                try:
+                    spoke = await line.speaks(HANDOVER_SILENCE_SECONDS)
+                except Exception:
+                    logger.exception(
+                        "call_id=%s handover silence check failed", call_id
+                    )
+            if identity not in ctx.room.remote_participants:
+                # The contact hung up before speaking; the disconnect handler
+                # ignores a leg that never connected.
+                logger.info(
+                    "call_id=%s handover contact left before connecting", call_id
+                )
+                _unmute()
+                return _gone("no_answer")
+            if not spoke:
+                logger.info(
+                    "call_id=%s handover contact line silent, dropping", call_id
+                )
+                return await _give_back("no_answer")
+            # Connected, but a leg that hangs up within HANDOVER_SETTLE_SECONDS
+            # was a recording, and a machine verdict in that window drops it:
+            # the disconnect handler leaves both to this handle.
+            bridge_state["connected"] = True
+            bridge_state["settling"] = True
+            machine = await _settle(line)
+            if bridge_state.get("ending"):
+                # The caller hung up meanwhile; the call is ending.
+                bridge_state["connected"] = False
+                return _gone("no_answer")
+            if identity not in ctx.room.remote_participants:
+                logger.info("call_id=%s handover leg hung up at once", call_id)
+                bridge_state["connected"] = False
+                _unmute()
+                return _gone("no_answer")
+            if machine:
+                # Voicemail, a mailbox, a phone menu or call screening: the
+                # same as no answer. The agent offers to take a message.
+                logger.info("call_id=%s handover answered by a machine", call_id)
+                bridge_state["connected"] = False
+                return await _give_back("no_answer")
+            # Settled: a person. The soft cap no longer waits on the check.
+            bridge_state.pop("picked_up", None)
+            logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
+            # The contact answered: max_duration_seconds no longer applies. The
+            # handover limit counts from now. A cap that already fired
+            # (announcing now) is left to finish.
+            soft_cap = bridge_state.pop("soft_cap_task", None)
+            if (
+                soft_cap is not None
+                and not soft_cap.done()
+                and not bridge_state.get("soft_cap_fired")
+            ):
+                soft_cap.cancel()
+                await asyncio.gather(soft_cap, return_exceptions=True)
+                if handover_seconds > 0:
+                    bridge_state["soft_cap_task"] = asyncio.create_task(
+                        soft_cap_announce_and_hangup(
+                            ctx,
+                            session,
+                            call_id,
+                            handover_seconds,
+                            on_fire=on_cap_fired,
+                            bridge_state=bridge_state,
+                            language=language,
+                        )
+                    )
+            if route.on_answered is not None:
+                # The sweepers lift the time limit only once the "answered"
+                # event exists. Runs in the background (the post retries for
+                # about a minute, see transfer_call._post_answered); the task
+                # is held in bridge_state and awaited briefly at job shutdown.
+                try:
+                    post = route.on_answered(ring_ms)
+                except Exception:
+                    logger.exception(
+                        "call_id=%s handover answered hook failed", call_id
+                    )
+                else:
+                    bridge_state["answer_task"] = asyncio.create_task(
+                        _report_answer(post, call_id)
+                    )
+            return BridgeOutcome("answered", None, ring_ms)
+
+        async def _settle(line: ContactLine | None) -> bool:
+            """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves or
+            the machine check says a machine. True on a machine verdict.
+            A person's verdict does not end the wait: the settle window,
+            and so the answered time, stays as before the check."""
+            left = asyncio.Event()
+
+            def _on_leave(participant: rtc.RemoteParticipant) -> None:
+                if participant.identity == identity:
+                    left.set()
+
+            ctx.room.on("participant_disconnected", _on_leave)
+            leaving = asyncio.ensure_future(left.wait())
+            checking = (
+                asyncio.ensure_future(line.machine()) if line is not None else None
+            )
+            waits = {leaving} | ({checking} if checking is not None else set())
+            deadline = time.monotonic() + HANDOVER_SETTLE_SECONDS
+            try:
+                while identity in ctx.room.remote_participants:
+                    done, waits = await asyncio.wait(
+                        waits,
+                        timeout=max(0.0, deadline - time.monotonic()),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if not done or leaving in done:
+                        break
+                    if checking in done and checking.result():
+                        break
+            finally:
+                ctx.room.off("participant_disconnected", _on_leave)
+                for task in (leaving, checking):
+                    if task is not None:
+                        task.cancel()
+                await asyncio.gather(
+                    *(t for t in (leaving, checking) if t is not None),
+                    return_exceptions=True,
+                )
+                # Last, with no await after it until the caller has decided:
+                # a disconnect seen meanwhile is still left to this handle.
+                bridge_state.pop("settling", None)
+            return (
+                checking is not None
+                and checking.done()
+                and not checking.cancelled()
+                and checking.exception() is None
+                and checking.result()
+            )
+
         if bridge_state.get("cancelled"):
             # The caller asked to stop just as the phone picked up.
             logger.info("call_id=%s handover cancelled at pickup", call_id)
             return await _give_back("cancelled")
-        spoke = True
-        if watch is not None:
+        line: ContactLine | None = None
+        if listen is not None:
             try:
-                spoke = await watch(identity)
+                line = listen(identity)
             except Exception:
-                logger.exception("call_id=%s handover silence check failed", call_id)
-        if identity not in ctx.room.remote_participants:
-            # The contact hung up before speaking; the disconnect handler
-            # ignores a leg that never connected.
-            logger.info("call_id=%s handover contact left before connecting", call_id)
-            _unmute()
-            return _gone("no_answer")
-        if not spoke:
-            logger.info("call_id=%s handover contact line silent, dropping", call_id)
-            return await _give_back("no_answer")
-        # Connected, but a leg that hangs up within HANDOVER_SETTLE_SECONDS
-        # was a recording: the disconnect handler leaves it to this handle.
-        bridge_state["connected"] = True
-        bridge_state["settling"] = True
-        left = asyncio.Event()
-
-        def _on_leave(participant: rtc.RemoteParticipant) -> None:
-            if participant.identity == identity:
-                left.set()
-
-        ctx.room.on("participant_disconnected", _on_leave)
+                logger.exception("call_id=%s handover line check unavailable", call_id)
         try:
-            if identity in ctx.room.remote_participants:
-                await asyncio.wait_for(left.wait(), HANDOVER_SETTLE_SECONDS)
-        except TimeoutError:
-            pass
+            return await _after_pickup(line)
         finally:
-            ctx.room.off("participant_disconnected", _on_leave)
-            bridge_state.pop("settling", None)
-        if bridge_state.get("ending"):
-            # The caller hung up meanwhile; the call is ending.
-            bridge_state["connected"] = False
-            return _gone("no_answer")
-        if identity not in ctx.room.remote_participants:
-            logger.info("call_id=%s handover leg hung up at once", call_id)
-            bridge_state["connected"] = False
-            _unmute()
-            return _gone("no_answer")
-        # Settled: a person. The soft cap no longer waits on the check.
-        bridge_state.pop("picked_up", None)
-        logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
-        # The contact answered: max_duration_seconds no longer applies. The
-        # handover limit counts from now. A cap that already fired
-        # (announcing now) is left to finish.
-        soft_cap = bridge_state.pop("soft_cap_task", None)
-        if (
-            soft_cap is not None
-            and not soft_cap.done()
-            and not bridge_state.get("soft_cap_fired")
-        ):
-            soft_cap.cancel()
-            await asyncio.gather(soft_cap, return_exceptions=True)
-            if handover_seconds > 0:
-                bridge_state["soft_cap_task"] = asyncio.create_task(
-                    soft_cap_announce_and_hangup(
-                        ctx,
-                        session,
-                        call_id,
-                        handover_seconds,
-                        on_fire=on_cap_fired,
-                        bridge_state=bridge_state,
-                        language=language,
-                    )
-                )
-        if route.on_answered is not None:
-            # The sweepers lift the time limit only once the "answered" event
-            # exists. Runs in the background (the post retries for about a
-            # minute, see transfer_call._post_answered); the task is held in
-            # bridge_state and awaited briefly at job shutdown.
-            try:
-                post = route.on_answered(ring_ms)
-            except Exception:
-                logger.exception("call_id=%s handover answered hook failed", call_id)
-            else:
-                bridge_state["answer_task"] = asyncio.create_task(
-                    _report_answer(post, call_id)
-                )
-        return BridgeOutcome("answered", None, ring_ms)
+            if line is not None:
+                _record_verdict(line)
+                try:
+                    await line.aclose()
+                except Exception:
+                    logger.exception("call_id=%s handover line close failed", call_id)
 
     return _bridge
 
@@ -840,13 +934,23 @@ def make_bridge_cancel(
     return _cancel
 
 
-async def _contact_spoke(ctx: JobContext, session: AgentSession, identity: str) -> bool:
-    """The bridge's silence check; True (connect) without a VAD."""
+def _contact_line(
+    ctx: JobContext,
+    session: AgentSession,
+    identity: str,
+    *,
+    org_cfgs: dict[str, ResolvedLayer] | None = None,
+    llm_override: bool = False,
+) -> ContactLine | None:
+    """The bridge's line check: silence, then machine. None (connect at
+    once, no check) without a VAD. Without a transcriber or classifier only
+    the silence check runs."""
     if session.vad is None:
-        return True
-    return await contact_speaks(
-        ctx.room, identity, session.vad, HANDOVER_SILENCE_SECONDS
+        return None
+    check, owned = build_greeting_check(
+        session, org_cfgs=org_cfgs, llm_override=llm_override
     )
+    return ContactLine(ctx.room, identity, session.vad, check=check, owned=owned)
 
 
 async def _prompt_agent(
@@ -2495,7 +2599,13 @@ async def _run_call(
             or HANDOVER_DEFAULT_MAX_SECONDS,
             on_cap_fired=_on_soft_cap_fired,
             language=language,
-            watch=lambda identity: _contact_spoke(ctx, session, identity),
+            listen=lambda identity: _contact_line(
+                ctx,
+                session,
+                identity,
+                org_cfgs=org_cfgs,
+                llm_override=llm_cfg is not None,
+            ),
         ),
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
@@ -2664,6 +2774,11 @@ async def _run_call(
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
             await finish_answer_post(bridge_state, call_id)
+            # The handover machine check's verdict row.
+            if bridge_state.get("event_tasks"):
+                await asyncio.gather(
+                    *list(bridge_state["event_tasks"]), return_exceptions=True
+                )
             # The background handover dial, result and notice posts use
             # agent_api: give them a moment before it closes.
             await transfer_call.finish_pending(

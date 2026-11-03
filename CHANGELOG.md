@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Handover: when voicemail, a mailbox, a phone menu or call screening answers the person's phone, the agent comes back and offers to take a message.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
 
 ## [0.32.0] (2026-10-30)

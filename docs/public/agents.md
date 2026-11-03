@@ -79,11 +79,16 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact (a team member's login email); without one, no email.
 - A plain forward: when the phone picks up, the two people are connected
   and the agent stops listening and speaking. It says nothing to the
-  contact. If voicemail answers, the caller hears it and can leave a
-  message. If nobody on the contact's side makes a sound for 15 seconds
-  (some mailboxes answer in silence), or the line hangs up within 10
-  seconds of its first sound (a carrier message), the agent hangs up that
-  line and comes back to the caller. Code: [`handover_watch.py`](../../voicebot/hailhq/voicebot/handover_watch.py).
+  contact. The agent listens to the contact's line for 10 seconds after
+  its first sound. If a machine answers (voicemail, a full or unset
+  mailbox, a phone menu or call screening), the agent hangs up that line,
+  comes back and offers to take a message. The caller can hear the first
+  seconds of the greeting before that. If the check is unsure or fails,
+  the two people stay connected. If nobody on the contact's side makes a
+  sound for 15 seconds (some mailboxes answer in silence), or the line
+  hangs up within 10 seconds of its first sound (a carrier message), the
+  agent also hangs up that line and comes back. The verdict is a
+  `handover_amd_result` call event. Code: [`handover_watch.py`](../../voicebot/hailhq/voicebot/handover_watch.py).
   Once connected, if either side hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
@@ -93,7 +98,8 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
-  contact's side has spoken and stayed on the line for 10 seconds.
+  contact's side has spoken and stayed on the line for 10 seconds, and
+  the check did not find a machine.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call
