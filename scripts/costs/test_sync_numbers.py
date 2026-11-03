@@ -1122,7 +1122,67 @@ def test_manual_row_requirements_change_line_is_short():
     assert report["changed"] == [
         (
             "DE:local (hand-verified row, only requirements refreshed): "
-            "person id_document; business company_name -> "
-            "person not allowed; business company_name,other: Odd paper"
+            "person id_document | business company_name -> "
+            "person not allowed | business company_name; other: Odd paper"
         )
     ]
+
+
+def test_error_detail_finds_status_in_context_and_survives_cycles():
+    class Http(Exception):
+        status = 502
+
+    inner = Http("x")
+    try:
+        try:
+            raise inner
+        except Http:
+            raise RuntimeError("wrapped") from None
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError (HTTP 502)"
+    a, b = RuntimeError("a"), RuntimeError("b")
+    a.__cause__, b.__cause__ = b, a
+    assert sync._error_detail(a) == "RuntimeError"
+
+
+def test_block_summary_odd_items_and_extra_keys():
+    block = {
+        "person": {"accepted": True, "items": ["id_document", 7, {"other": "A, b"}]},
+        "business": {"accepted": False, "items": []},
+        "secret": "do not print",
+    }
+    out = sync._block_summary(block)
+    assert "person id_document; other; other: A, b" in out
+    assert "business not allowed" in out
+    assert "also keys secret" in out and "do not print" not in out
+
+
+def test_dropped_suffix_only_when_verification_flag_changed():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old, usd_per_month="9.00")
+    same = {**prev, "usd_per_month": "5.00", "requirements": None}
+    _, report = sync.merge([prev], [same], "2026-11-03", "u", "bot")
+    assert (
+        report["kept"]
+        and "hand-verified requirements block kept" not in report["kept"][0]
+    )
+
+
+def test_failure_is_logged_in_full_to_stderr(monkeypatch, capsys):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("secret detail")
+
+    _use(monkeypatch, Boom())
+    report: list[str] = []
+    sync.attach_requirements("twilio", [_row_needing()], [], report)
+    assert "secret detail" in capsys.readouterr().err
+    assert "secret detail" not in report[0]
+
+
+def test_section_caps_lines():
+    out: list[str] = []
+    sync._section(out, "X", [str(i) for i in range(62)])
+    assert out[0] == "### X (62)" and out[-1] == "- … 2 more" and len(out) == 62
+    sync._section(out, "Y", [])
+    assert len(out) == 62

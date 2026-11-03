@@ -718,13 +718,14 @@ def merge(
             # attach_requirements, so None here means the carrier lists no
             # verification for this row. The hand-verified block stays.
             block = fresh if fresh is not None else old_block
-            dropped = fresh is None and old_block is not None
-            if diff or dropped:
-                line = f"{key}: " + (
-                    f"carrier says {', '.join(diff)}; "
-                    if diff
-                    else "carrier no longer lists verification; "
-                )
+            dropped = (
+                fresh is None
+                and old_block is not None
+                and bool(prev.get("verification_required"))
+                and not n.get("verification_required")
+            )
+            if diff:
+                line = f"{key}: carrier says {', '.join(diff)}; "
                 line += f"kept {prev['verified_by']} {prev['last_verified']}"
                 if dropped:
                     line += " (hand-verified requirements block kept)"
@@ -967,14 +968,19 @@ def _error_detail(exc: Exception) -> str:
     status when the error carries one."""
     if isinstance(exc, RequirementsUnavailable):
         return str(exc)[:160]
-    seen: Exception | None = exc
-    while seen is not None:
+    todo: list[BaseException] = [exc]
+    visited: set[int] = set()
+    while todo:
+        seen = todo.pop(0)
+        if id(seen) in visited:
+            continue
+        visited.add(id(seen))
         status = getattr(getattr(seen, "response", None), "status_code", None)
         if status is None:
             status = getattr(seen, "status", None)
         if isinstance(status, int):
             return f"{exc.__class__.__name__} (HTTP {status})"
-        seen = seen.__cause__ if isinstance(seen.__cause__, Exception) else None
+        todo += [e for e in (seen.__cause__, seen.__context__) if e is not None]
     return exc.__class__.__name__
 
 
@@ -987,13 +993,19 @@ def _block_summary(block: dict | None) -> str:
         if not side.get("accepted"):
             parts.append(f"{subject} not allowed")
             continue
-        keys = [
-            i if isinstance(i, str) else f"other: {str(i.get('other', ''))[:40]}"
-            for i in side.get("items", [])
-        ]
-        parts.append(f"{subject} {','.join(keys) or 'no papers'}")
-    parts += [f"{k} {block[k]}" for k in block if k not in SUBJECTS]
-    return "; ".join(parts)
+        keys = []
+        for i in side.get("items", []):
+            if isinstance(i, str):
+                keys.append(i)
+            elif isinstance(i, dict):
+                keys.append(f"other: {str(i.get('other', ''))[:40]}")
+            else:
+                keys.append("other")
+        parts.append(f"{subject} {'; '.join(keys) or 'no papers'}")
+    extra = [str(k) for k in block if k not in SUBJECTS]
+    if extra:
+        parts.append(f"also keys {', '.join(extra)}")
+    return " | ".join(parts)
 
 
 def attach_requirements(
@@ -1020,9 +1032,20 @@ def attach_requirements(
                 provider, row["country_code"], row["number_type"]
             )
         except Exception as exc:  # one bad row must not stop the run
+            print(f"requirements failed for {provider} {key}: {exc!r}", file=sys.stderr)
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
             report.append(f"{key}: requirements failed ({_error_detail(exc)}), {kept}")
+
+
+def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:
+    """A PR-summary section: the first ``cap`` lines, then "… N more"."""
+    if not lines:
+        return
+    summary.append(f"### {label} ({len(lines)})")
+    summary.extend(f"- {line}" for line in lines[:cap])
+    if len(lines) > cap:
+        summary.append(f"- … {len(lines) - cap} more")
 
 
 def run_provider(
@@ -1108,19 +1131,9 @@ def run_provider(
         ("No longer offered (kept, noted)", "vanished"),
         ("Not observed this run (kept as is)", "unobserved"),
     ):
-        if report[key]:
-            summary.append(f"### {label} ({len(report[key])})")
-            summary.extend(f"- {line}" for line in report[key])
-    if requirement_errors:
-        summary.append(f"### Requirements not refreshed ({len(requirement_errors)})")
-        summary.extend(f"- {line}" for line in requirement_errors[:60])
-        if len(requirement_errors) > 60:
-            summary.append(f"- … {len(requirement_errors) - 60} more")
-    if skipped:
-        summary.append(f"### Skipped by the sync ({len(skipped)})")
-        summary.extend(f"- {line}" for line in skipped[:60])
-        if len(skipped) > 60:
-            summary.append(f"- … {len(skipped) - 60} more")
+        _section(summary, label, report[key])
+    _section(summary, "Requirements not refreshed", requirement_errors)
+    _section(summary, "Skipped by the sync", skipped)
     return True
 
 

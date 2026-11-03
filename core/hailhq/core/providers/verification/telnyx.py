@@ -203,7 +203,7 @@ class TelnyxVerificationProvider(VerificationProvider):
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> set[str]:
         """Ids of the text rules Telnyx tags for the other kind of end user."""
-        rules = await self._rules(country_code, number_type)
+        rules = await self.rules(country_code, number_type)
         return {
             r["id"]
             for r in rules

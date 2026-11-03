@@ -845,3 +845,11 @@ async def test_rules_outage_is_a_provider_error() -> None:
 
     with pytest.raises(VerificationProviderError):
         await provider(Telnyx(down)).rules("SE", "mobile")
+
+
+async def test_not_for_outage_is_a_provider_error() -> None:
+    def down(request):
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(VerificationProviderError):
+        await provider(Telnyx(down))._not_for("SE", "mobile", "person")
