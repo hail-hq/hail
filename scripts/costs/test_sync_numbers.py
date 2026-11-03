@@ -1328,3 +1328,4 @@ def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
     text = summary_file.read_text()
     assert code == 1
     assert "## Carriers not synced\n- telnyx: skipped, TELNYX_API_KEY not set" in text
+    assert text.count("telnyx: skipped, TELNYX_API_KEY not set") == 1

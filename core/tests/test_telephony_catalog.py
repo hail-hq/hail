@@ -292,3 +292,26 @@ def test_effective_capabilities_treats_a_missing_key_as_false():
         "voice"
     ]
     assert telephony_catalog.effective_capabilities({}, "twilio") == []
+
+
+def test_capabilities_are_booleans_for_null_flags(tmp_path, monkeypatch):
+    row = {
+        "country_code": "SE",
+        "number_type": "mobile",
+        "usd_per_month": "3.00",
+        "voice": None,
+        "sms": True,
+        "mms": None,
+    }
+    empty = {"numbers": [], "a2p_10dlc": []}
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": [row]}))
+    (tmp_path / "telnyx.json").write_text(json.dumps(empty))
+    (tmp_path / "didww.json").write_text(json.dumps(empty))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    assert telephony_catalog.effective_capabilities(row, "twilio") == ["sms"]
+    assert telephony_catalog.capabilities("SE", "mobile", "twilio") == {
+        "voice": False,
+        "sms": True,
+        "mms": False,
+    }

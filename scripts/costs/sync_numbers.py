@@ -1101,17 +1101,17 @@ def run_provider(
     costs_dir: Path,
     today: str,
     summary: list[str],
+    not_synced: list[str],
     shared_dial_codes: dict[str, str] | None = None,
     http_factory: Callable[[requests.Session], Http] = Http,
-    not_synced: list[str] | None = None,
 ) -> bool:
     """``shared_dial_codes`` is one dict for the whole run: DIDWW's country
     list fills it (every country, not only the ones it sells), and the
     carriers after it borrow prefixes for rows no catalog has seen yet."""
     if shared_dial_codes is None:
         shared_dial_codes = {}
-    # A carrier skipped for missing credentials is listed with the failures.
-    skip_notes = not_synced if not_synced is not None else summary
+    # A carrier skipped for missing credentials goes to ``not_synced`` with
+    # the failures. main() prints each entry as a bullet.
     path = costs_dir / f"{provider}.json"
     existing = load_existing(path)
     dial_codes = {n["country_code"]: n["dial_code"] for n in existing}
@@ -1125,7 +1125,7 @@ def run_provider(
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
-            skip_notes.append(
+            not_synced.append(
                 "twilio: skipped, TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
             )
             return False
@@ -1139,14 +1139,14 @@ def run_provider(
     elif provider == "telnyx":
         key = config.get("TELNYX_API_KEY")
         if not key:
-            skip_notes.append("telnyx: skipped, TELNYX_API_KEY not set")
+            not_synced.append("telnyx: skipped, TELNYX_API_KEY not set")
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
-            skip_notes.append("didww: skipped, DIDWW_API_KEY not set")
+            not_synced.append("didww: skipped, DIDWW_API_KEY not set")
             return False
         session.headers.update({"Api-Key": key, "Accept": "application/vnd.api+json"})
         rows, skipped, didww_dial_codes = fetch_didww(http_factory(session))
@@ -1212,8 +1212,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.costs_dir,
                 today,
                 body,
+                not_synced,
                 shared_dial_codes,
-                not_synced=not_synced,
             )
         except requests.RequestException as exc:
             not_synced.append(

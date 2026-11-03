@@ -60,9 +60,9 @@ def effective_capabilities(row: dict, provider: str) -> list[str]:
     deliver it, so it is never promised. An SMS-only row at such a carrier
     gives an empty list."""
     caps = []
-    if row.get("voice", False):
+    if row.get("voice"):
         caps.append("voice")
-    if row.get("sms", False) and _sms_route_exists(provider):
+    if row.get("sms") and _sms_route_exists(provider):
         caps.append("sms")
     return caps
 
@@ -92,7 +92,7 @@ def capabilities(
         if not caps and not _sms_route_exists(name):
             continue  # an SMS-only number Hail cannot use at this carrier
         # No SMS route also means no MMS.
-        mms = row.get("mms", False) and _sms_route_exists(name)
+        mms = bool(row.get("mms")) and _sms_route_exists(name)
         return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 
