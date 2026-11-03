@@ -306,6 +306,8 @@ async def test_business_only_file_means_only_a_business_can_buy() -> None:
         ({"name": "Legal Rep Address (Legal Entity Only)"}, ("business",)),
         # A business can give its representative's ID.
         ({"name": "ID/Passport Copy (Personal Use Only)"}, ("person", "business")),
+        # An untagged company certificate is still company only.
+        ({"name": "Business Registration Certificate"}, ("business",)),
         (
             {"name": "VAT (For Legal Entities and Sole Proprietorships Only)"},
             ("person", "business"),
@@ -319,6 +321,45 @@ def test_subject_types_for_file_rules(rule, allowed) -> None:
         "person",
         "business",
     )
+
+
+def _live(name: str) -> list[dict]:
+    data = json.loads((FIXTURES / f"telnyx-regulatory-{name}.json").read_text())
+    return data["data"][0]["regulatory_requirements"]
+
+
+@pytest.mark.parametrize(
+    ("cc", "expected"),
+    [
+        ("CH", ("business",)),
+        ("PT", ("business",)),
+        ("ES", ("business", "person")),
+    ],
+)
+def test_subject_types_live_fixtures(cc, expected) -> None:
+    got = subject_types_for(_live(f"{cc}-local"))
+    assert tuple(sorted(got)) == tuple(sorted(expected))
+
+
+def test_se_local_company_only() -> None:
+    assert subject_types_for(_live("SE-local")) == ("business",)
+
+
+def test_se_mobile_unchanged() -> None:
+    got = subject_types_for(_live("SE-mobile"))
+    assert sorted(got) == ["business", "person"]
+
+
+def test_gb_mobile_unchanged() -> None:
+    got = subject_types_for(_live("GB-mobile"))
+    assert sorted(got) == ["business", "person"]
+
+
+async def test_person_form_for_company_only_raises() -> None:
+    payload = json.loads((FIXTURES / "telnyx-regulatory-CH-local.json").read_text())
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    with pytest.raises(UnsupportedSubjectType):
+        await provider(fake).requirements("CH", "local", "person")
 
 
 async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
