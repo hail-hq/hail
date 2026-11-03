@@ -4697,6 +4697,9 @@ async def test_background_repairs_existing_territory_campaign_links(
         client, key, async_session, sms_carrier, subject_type=subject_type
     )
     if not keep_primary:
+        # As release_org_number does: off the registration, then released.
+        # A released number still on it would keep the person's registration.
+        us_number.sms_registration_id = None
         us_number.provisioning_state = "released"
     territory = await _us_number(
         async_session, org_id, "+13405550101", resource="PN-existing-territory"
@@ -5323,6 +5326,33 @@ async def test_a_re_attach_does_not_add_the_number_the_carrier_holds(
     await async_session.refresh(other)
     assert other.sms_registration_id is None
     assert await _audits(async_session, "verification.sms_attached") == []
+
+
+async def test_a_released_number_still_on_a_persons_registration_keeps_it(
+    client, org_and_key, async_session, sms_mock, monkeypatch
+) -> None:
+    # A release raced the approval: the released number still carries the
+    # registration. It counts as the person's number, so no second joins.
+    org_id, _, key = org_and_key
+    released = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    row, tried = await _person_twilio_row(
+        async_session, org_id, monkeypatch, refused=set()
+    )
+    released.sms_registration_id = row.id
+    released.provisioning_state = "released"
+    await async_session.commit()
+
+    resp = await client.post(f"/numbers/{second.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert tried == []
+    assert await _numbers_on(async_session, str(row.id)) == ["PNA"]
+    await async_session.refresh(second)
+    assert second.sms_registration_id is None
 
 
 async def test_recording_the_held_number_clears_the_tried_numbers_wait(

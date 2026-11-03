@@ -49,7 +49,8 @@ async def registered_numbers(
 ) -> list[PhoneNumber]:
     """The org's active US long codes on the row's carrier that belong on the
     registration, oldest first. A person's registration takes one number:
-    the one already on it. Else the free numbers (on no registration) up to
+    the one already on it (see ``_has_number``), and none when that number
+    is no longer eligible. Else the free numbers (on no registration) up to
     and including the oldest one the carrier has not refused for this
     registration, so a refused number does not block the next one. Callers
     stop at the first number that attaches."""
@@ -81,9 +82,9 @@ async def registered_numbers(
         .all()
     )
     if row.subject_type == "person":
-        on = [n for n in numbers if n.sms_registration_id == row.id]
-        if on:
-            return on[:1]
+        if await _has_number(db, row):
+            # Only a still-eligible number on it is tried again (a re-attach).
+            return [n for n in numbers if n.sms_registration_id == row.id][:1]
         free = [n for n in numbers if n.sms_registration_id is None]
         for i, number in enumerate(free):
             if _refusal(row, number) is None:
@@ -204,7 +205,12 @@ async def _refused(
 
 
 async def _has_number(db: AsyncSession, row: CarrierVerification) -> bool:
-    """True when a number is on the registration (read fresh)."""
+    """True when any number is on the registration (read fresh), eligible
+    or not: a released number still recorded on it counts. The one rule for
+    "a person's registration has its number" (``registered_numbers`` and the
+    held-number check in ``_attach``), so Hail never records a second one.
+    Such a registration takes no other number until support clears that
+    number's ``sms_registration_id``."""
     return (
         await db.execute(
             select(PhoneNumber.id)

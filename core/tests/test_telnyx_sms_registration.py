@@ -437,6 +437,10 @@ def _link(number: str, status: str = "ASSIGNED", campaign: str = "C1") -> dict:
     }
 
 
+def _unlisted(record: dict) -> dict:
+    return {k: v for k, v in record.items() if k != "assignmentStatus"}
+
+
 async def test_a_persons_campaign_with_another_number_is_refused() -> None:
     calls = []
     p = _provider(_linked_handler(calls, [_link("+15125550199")]))
@@ -457,13 +461,63 @@ async def test_a_persons_campaign_with_another_number_is_refused() -> None:
 
 async def test_a_persons_number_already_on_the_campaign_is_a_success() -> None:
     calls = []
-    # A link that timed out went through: Telnyx has it, still pending.
-    p = _provider(_linked_handler(calls, [_link("+15125550100", "PENDING_ASSIGNMENT")]))
+    # A link that timed out went through: Telnyx has it linked.
+    p = _provider(_linked_handler(calls, [_link("+15125550100", "ASSIGNED")]))
     await p.attach_number(
         _person_refs(campaign_id="C1"),
         provider_resource_id="PN1",
         e164="+15125550100",
     )
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize("link_status", [200, 409])
+@pytest.mark.parametrize(
+    "record",
+    [
+        _link("+15125550100", "PENDING_ASSIGNMENT"),
+        _link("+15125550100", "FAILED_UNASSIGNMENT"),
+        _link("+15125550100", None),
+        _unlisted(_link("+15125550100")),
+        _link("+15125550100", "SOMETHING_NEW"),
+    ],
+    ids=["pending", "failed_unlink", "null", "missing", "unknown"],
+)
+async def test_a_persons_number_not_yet_linked_is_linked_again(
+    record, link_status
+) -> None:
+    # Only ASSIGNED is a done link. Any other status of the number tried
+    # sends the link, so Hail never records a link Telnyx may not finish; a
+    # 409 on it is a success.
+    calls = []
+    handler = _linked_handler(calls, [record])
+
+    def answer(req):
+        response = handler(req)
+        return response if req.method == "GET" else httpx.Response(link_status)
+
+    await _provider(answer).attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET", "POST"]
+
+
+async def test_a_persons_pending_number_still_meets_another_linked_one() -> None:
+    # The number tried is pending and another number is linked: the
+    # other-number rule applies, naming only the other number.
+    calls = []
+    records = [_link("+15125550100", "PENDING_ASSIGNMENT"), _link("+15125550199")]
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert "+15125550100" not in str(caught.value)
     assert [c[0] for c in calls] == ["GET"]
 
 
@@ -504,10 +558,6 @@ async def test_a_linked_number_on_the_campaign_can_be_recorded() -> None:
     assert caught.value.e164 == "+15125550199"
     assert "+15125550199 (ASSIGNED)" in str(caught.value)
     assert [c[0] for c in calls] == ["GET"]
-
-
-def _unlisted(record: dict) -> dict:
-    return {k: v for k, v in record.items() if k != "assignmentStatus"}
 
 
 @pytest.mark.parametrize(

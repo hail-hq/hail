@@ -47,8 +47,9 @@ logger = logging.getLogger(__name__)
 # other value holds it, a missing or unknown one too, so a second number is
 # never linked on a status Hail does not know.
 _RELEASES_CAMPAIGN = frozenset({"FAILED_ASSIGNMENT", "PENDING_UNASSIGNMENT"})
-# The only status for which the caller may record the held number as the
-# registration's own: the link is done.
+# The link is done: the only status in which the number tried counts as
+# already linked, and in which the caller may record another held number as
+# the registration's own.
 _LINKED = "ASSIGNED"
 # GET /10dlc/phone_number_campaigns: 20 is the documented default and no
 # maximum is documented, so every page is read.
@@ -895,12 +896,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
         """Link the number to the campaign. A person's campaign holds one
         number: another number already on it is refused, and the same
-        number already on it is a success (a link that timed out may have
-        gone through)."""
+        number already linked (``ASSIGNED``) is a success (a link that timed
+        out may have gone through). The same number in any other holding
+        status (pending, a failed unlink, missing, unknown) is linked again,
+        as if it were not listed; a 409 on that link is a success."""
         # No campaign id: the link below raises.
         if refs.get("subject_type") == "person" and refs.get("campaign_id"):
             held = await self._campaign_numbers(refs["campaign_id"])
-            if _digits(e164) in held:
+            own = held.pop(_digits(e164), None)
+            if own is not None and own[1] == _LINKED:
                 return
             if held:
                 logger.warning(
