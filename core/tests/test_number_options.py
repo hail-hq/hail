@@ -280,3 +280,39 @@ def test_needs_paperwork_follows_verification_required(catalog):
     empty = {"accepted": True, "items": []}
     catalog(twilio=[row(**need(person=empty, business=empty))])
     assert number_options("CH", {}).needs_paperwork is True
+
+
+@pytest.mark.parametrize("state", ["draft", "awaiting_review", "rejected", "cancelled"])
+def test_not_sent_or_over_verification_is_not_in_review(catalog, state):
+    catalog(twilio=[row(**need())])
+    v = ov(state, name="Acme AG", subject="business")
+    r = number_options("CH", {("twilio", "CH", "local"): [v]})
+    b = one(r, subject="business")
+    assert b.status == "needs_check" and b.verification is None
+
+
+def test_submitting_counts_as_in_review(catalog):
+    catalog(twilio=[row(**need())])
+    v = ov("submitting", name="Acme AG", subject="business")
+    r = number_options("CH", {("twilio", "CH", "local"): [v]})
+    assert one(r, subject="business").status == "in_review"
+
+
+def test_disallowed_copy_status_is_needs_check(catalog):
+    catalog(twilio=[row(**need(person={"accepted": False, "items": []}))])
+    v = ov("approved", subject="business", name="Acme")
+    r = number_options("CH", {("twilio", "CH", "local"): [v]})
+    assert one(r, subject="business").status == "ready"
+    p = one(r)
+    assert p.allowed is False
+    assert p.status == "needs_check" and p.verification is None
+    assert p.more_options == 0
+
+
+def test_subject_accepted_follows_catalog_block(catalog):
+    catalog(twilio=[row(**need(person={"accepted": False, "items": []}))])
+    assert mod.subject_accepted("CH", "local", "twilio", "person") is False
+    assert mod.subject_accepted("CH", "local", "twilio", "business") is True
+    # No block: unknown, kept.
+    catalog(twilio=[row(verification_required=True)])
+    assert mod.subject_accepted("CH", "local", "twilio", "person") is True

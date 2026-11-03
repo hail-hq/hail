@@ -1058,3 +1058,34 @@ async def test_quotes_recommend_only_offers_ready_for_the_subject(
     assert person["recommended_quote_id"] is None
     business = (await _quotes(client, key, subject_type="business")).json()
     assert business["recommended_quote_id"] is not None
+
+
+async def test_quotes_subject_drops_offer_the_catalog_does_not_accept(
+    client, org_and_key, ch_two_carriers, monkeypatch
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.carrier_offer import CarrierOffer
+
+    # Telnyx lists business as not accepted, but the live offer carries both
+    # subjects (as a by-request offer does).
+    offers = [
+        CarrierOffer(
+            provider="telnyx",
+            e164="+41215550002",
+            country_code="CH",
+            number_type="local",
+            capabilities=["voice"],
+            monthly_cents=300,
+            setup_cents=0,
+            readiness="verification_required",
+            subject_types=["person", "business"],
+        )
+    ]
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=(offers, [])),
+    )
+    resp = await _quotes(client, org_and_key[2], subject_type="business")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["offers"] == []

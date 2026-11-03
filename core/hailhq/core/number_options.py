@@ -22,10 +22,19 @@ from hailhq.core.carrier_offer import (
 from hailhq.core.number_offers import PROVIDERS
 from hailhq.core.providers.verification import get_verification_provider
 
-__all__ = ["number_options", "offer_paperwork", "option_key", "option_status"]
+__all__ = [
+    "number_options",
+    "offer_paperwork",
+    "option_key",
+    "option_status",
+    "subject_accepted",
+]
 
 SUBJECTS = ("person", "business")
 _STATUS_RANK = {"ready": 0, "in_review": 1, "needs_check": 2}
+# States that mean the carrier has it: sent, or being sent. A draft or an
+# awaiting_review row was never sent; rejected and cancelled are over.
+_IN_REVIEW_STATES = ("submitting", "submitted")
 _TYPE_ORDER = ("local", "mobile", "national", "toll_free")
 
 
@@ -82,6 +91,17 @@ def offer_paperwork(
     return [PaperworkItem(**p) for p in items], True
 
 
+def subject_accepted(
+    country_code: str, number_type: str, provider: str, subject: str
+) -> bool:
+    """False when the catalog block for this row says ``subject`` is not
+    accepted. No block: unknown, so True."""
+    block = telephony_catalog.requirements(country_code, number_type, provider)
+    if block is None:
+        return True
+    return bool((block.get(subject) or {}).get("accepted", False))
+
+
 def option_status(
     needs: bool,
     by_request: bool,
@@ -100,7 +120,9 @@ def option_status(
         mine = [v for v in approved if v.subject_type == subject]
         if mine:
             return "ready", mine[0]
-    pending = [v for v in found if v.state != "approved" and v.subject_type == subject]
+    pending = [
+        v for v in found if v.state in _IN_REVIEW_STATES and v.subject_type == subject
+    ]
     if pending:
         return "in_review", pending[0]
     return "needs_check", None
@@ -206,6 +228,7 @@ def number_options(
                 row[s] = best[other[s]].option.model_copy(
                     update={
                         "allowed": False,
+                        "status": "needs_check",
                         "reason": reasons[s],
                         "more_options": 0,
                         "verification": None,
