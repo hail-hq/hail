@@ -1642,6 +1642,11 @@ class Email(Base):
             "requested_at",
             postgresql_where=text("agent_id IS NOT NULL"),
         ),
+        Index(
+            "emails_agent_idx",
+            "agent_id",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"
             "'complained','received')",

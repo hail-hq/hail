@@ -122,9 +122,18 @@ def upgrade() -> None:
         ["organization_id", "requested_at"],
         postgresql_where=sa.text("agent_id IS NOT NULL"),
     )
+    # Deleting an agent clears emails.agent_id (ON DELETE SET NULL); without
+    # this the delete reads every email. Partial, so mail with no agent skips it.
+    op.create_index(
+        "emails_agent_idx",
+        "emails",
+        ["agent_id"],
+        postgresql_where=sa.text("agent_id IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("emails_agent_idx", table_name="emails")
     op.drop_index("emails_agent_thread_idx", table_name="emails")
     op.drop_index("emails_agent_reply_queued_idx", table_name="emails")
     op.drop_index("emails_agent_reply_pending_idx", table_name="emails")
