@@ -57,7 +57,7 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 
 [`scripts/costs/sync_numbers.py`](../../scripts/costs/sync_numbers.py), function `merge()`, applies these in order:
 
-1. A row a person verified by hand (`verification_method: "manual-confirmed"`) is never overwritten and never marked unavailable. Differences, and a carrier that no longer lists it, are reported under **kept** in the summary for a person to decide.
+1. A row a person verified by hand (`verification_method: "manual-confirmed"`) keeps every field except `requirements`, and is never marked unavailable. Its `requirements` block is refreshed from the carrier when the fetch succeeds and returns a block; otherwise the old block stays. A block change is listed under **changed**. Other differences, and a carrier that no longer lists it, are reported under **kept** in the summary for a person to decide.
 2. A row the carrier no longer lists is kept with `available: false` and a dated note (`not offered by the carrier as of YYYY-MM-DD; kept so held numbers stay billable`). A hand-written `notes` value is kept in front of that note. Listed under **vanished**.
 3. A row the carrier lists again gets `available: true` and the dated note removed. Hand-written notes stay.
 4. A row is marked gone only when the carrier's list covered that country and number type and the row was missing from it. In every other case the row is left exactly as it was and listed under **unobserved**: no numbers in stock, no price, no dial code, or a country the sync account cannot see. Not seeing stock is not the same as the carrier dropping the type.
@@ -85,7 +85,7 @@ Each row has an optional `requirements` block: who may buy the number and which 
 - On a carrier error the row keeps the block from the last sync (or `null` if it never had one). The error is listed under "Requirements not refreshed" in the PR summary.
 - DIDWW lists one requirement per DID group. The block is the union of the items of all groups of that country and type.
 - If a carrier has rows that need verification but no verification plug-in starts (credentials missing), the run fails. It never writes empty blocks.
-- Hand-verified rows (`manual-confirmed`) keep their block as they are.
+- Hand-verified rows (`manual-confirmed`) keep every other field. Their block is refreshed when the fetch succeeds and returns a block; otherwise the old block stays.
 
 ## Reviewing the sync PR
 

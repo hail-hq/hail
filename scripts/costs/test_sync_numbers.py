@@ -928,7 +928,7 @@ def test_telnyx_passes_raw_rules_to_classify(monkeypatch):
         async def _rules(self, cc, nt):
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject):
+        async def requirements(self, cc, nt, subject, *, rules=None):
             return _req(subject, address=True)
 
     _use(monkeypatch, Telnyx())
@@ -965,8 +965,9 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
             self.rule_calls += 1
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject):
-            await self._rules(cc, nt)
+        async def requirements(self, cc, nt, subject, *, rules=None):
+            if rules is None:
+                rules = await self._rules(cc, nt)
             return _req(subject, address=True)
 
     fake = Telnyx()
@@ -974,7 +975,7 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
     block = sync.fetch_requirements("telnyx", "DE", "local")
     assert block["business"]["items"] == ["address_in_country"]
     assert fake.rule_calls == 1
-    # The plug-in is left as it was.
+    # The shared plug-in is not patched.
     assert "_rules" not in vars(fake)
 
 
@@ -1006,6 +1007,8 @@ def test_manual_confirmed_row_takes_fresh_requirements():
     assert out["requirements"] == new
     assert out["usd_per_month"] == "9.00" and out["verified_by"] == "me"
     assert not any("requirements" in line for line in report["kept"])
+    assert any("requirements" in line for line in report["changed"])
+    assert out["last_changed_at"] == "2026-11-03"
 
 
 def test_requirements_change_is_reported_and_bumps_last_changed():
@@ -1037,3 +1040,25 @@ def test_didww_no_groups_keeps_last_good_block(monkeypatch):
     sync.attach_requirements("didww", [row], existing, report)
     assert row["requirements"] == good
     assert len(report) == 1 and "DE:local" in report[0]
+
+
+def test_manual_confirmed_row_keeps_block_when_new_block_is_none():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "verification_required": False, "requirements": None}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert numbers[0]["requirements"] == old
+    assert numbers[0]["last_changed_at"] == "2026-01-01"
+    assert not any("requirements" in line for line in report["changed"])
+
+
+def test_requirements_error_report_includes_message(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("carrier said no " + "x" * 400)
+
+    _use(monkeypatch, Boom())
+    report: list[str] = []
+    sync.attach_requirements("twilio", [_row_needing()], [], report)
+    assert "RuntimeError: carrier said no" in report[0]
+    assert len(report[0]) < 330

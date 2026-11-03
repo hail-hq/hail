@@ -717,9 +717,18 @@ def merge(
                     f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
                 )
             # Only the requirements block is refreshed: it is not a price or a
-            # capability a person confirmed by hand. A failed fetch already
-            # left the last good block in ``n``.
-            numbers.append({**prev, "requirements": n.get("requirements")})
+            # capability a person confirmed by hand. No block (a failed fetch,
+            # or a row the carrier no longer marks as needing verification)
+            # keeps the old one.
+            fresh = n.get("requirements")
+            block = fresh if fresh is not None else prev.get("requirements")
+            kept = {**prev, "requirements": block}
+            if prev.get("requirements") != block:
+                report["changed"].append(
+                    f"{key}: requirements {prev.get('requirements')} -> {block}"
+                )
+                kept["last_changed_at"] = today
+            numbers.append(kept)
             continue
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if prev is None:
@@ -889,18 +898,9 @@ def fetch_requirements(provider: str, country_code: str, number_type: str) -> di
         # the country; `requirements` alone does not. Fetched once: the
         # plug-in reuses them for each subject instead of asking again.
         rules = _run(plugin._rules(country_code, number_type))
-
-        async def _cached_rules(_cc: str, _nt: str) -> list[dict]:
-            return rules  # type: ignore[return-value]
-
-        plugin._rules = _cached_rules
-    try:
-        return _requirements_block(
-            plugin, provider, country_code, number_type, rules, classify
-        )
-    finally:
-        if provider == "telnyx":
-            del plugin._rules
+    return _requirements_block(
+        plugin, provider, country_code, number_type, rules, classify
+    )
 
 
 def _requirements_block(
@@ -928,6 +928,14 @@ def _requirements_block(
                         f"DIDWW lists no requirement group for {country_code} "
                         f"{number_type}"
                     )
+            elif rules is not None:
+                found = [
+                    _run(
+                        plugin.requirements(
+                            country_code, number_type, subject, rules=rules
+                        )
+                    )
+                ]
             else:
                 found = [_run(plugin.requirements(country_code, number_type, subject))]
         except UnsupportedSubjectType:
@@ -966,8 +974,9 @@ def attach_requirements(
         except Exception as exc:  # noqa: BLE001 - one bad row must not stop the run
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
+            detail = str(exc)[:200]
             report.append(
-                f"{key}: requirements failed ({exc.__class__.__name__}), {kept}"
+                f"{key}: requirements failed ({exc.__class__.__name__}: {detail}), {kept}"
             )
 
 
