@@ -42,7 +42,7 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The PR comes from `GITHUB_TOKEN`, so `costs-validate.yml` does not run on it. The `refresh` job runs the schema, reference, featured, script test, and site build checks first.
 - `sms-registration.json` and `recording.json` are not covered. Refresh those by hand.
 
-Setup, once:
+Setup, once. Set `AWS_PROFILE` to a profile that can manage IAM in the account. The account must already have GitHub's OIDC provider (`token.actions.githubusercontent.com`); the stack reads it and does not create it.
 
 ```bash
 cd infra/costs-refresh
@@ -50,7 +50,7 @@ terragrunt apply
 terragrunt output -raw role_arn | gh secret set AWS_ROLE_TO_ASSUME --repo hail-hq/hail
 ```
 
-The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/costs-refresh` limits the role to that model, for runs on `main` of this repo. It is a separate stack, so self-hosters never apply it. The credentials reach only the agent steps. Without the secret, the job fails before the agent starts.
+The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/costs-refresh` limits the role to Bedrock models, for runs on `main` of this repo. It is a separate stack, so self-hosters never apply it. The credentials reach only the agent steps. Without the secret, the job fails before the agent starts.
 
 Bedrock has no WebSearch, so the agent starts from the catalog URLs and each row's `source_url`.
 
