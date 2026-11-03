@@ -35,7 +35,6 @@ from hailhq.core.prompts import (
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.text_agent import (
     CHAT_LIMIT,
-    CLAIM_LEASE,
     MAX_ATTEMPTS,
     MAX_REPLIES_PER_THREAD,
     REPLY_CAP_WINDOW,
@@ -85,6 +84,10 @@ __all__ = [
 ]
 
 MAX_REPLY_CHARS = 5000  # same cap as the send_email tool
+# A worker that has not finished within this long is presumed dead. Longer than
+# the text lease: one email run is a 90-second model call plus tool sends and
+# the reply post, so a slow run must not be claimed again and paid twice.
+EMAIL_CLAIM_LEASE = timedelta(minutes=5)
 # Characters of one email in the chat. Quoted history makes bodies long.
 MAX_EMAIL_CHARS = 6000
 # HTML read per email, cut before parsing so a huge body costs a bounded time.
@@ -463,7 +466,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedEmailReply | None:
             email.agent_id = agent.id
             email.agent_reply_state = "processing"
             email.agent_reply_attempts += 1
-            email.agent_reply_available_at = now + CLAIM_LEASE
+            email.agent_reply_available_at = now + EMAIL_CLAIM_LEASE
             attempt = email.agent_reply_attempts
             await db.commit()
             return ClaimedEmailReply(

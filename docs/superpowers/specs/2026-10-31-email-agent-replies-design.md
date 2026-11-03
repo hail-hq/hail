@@ -59,7 +59,8 @@ writes.
 ## Replies
 
 Tasks beside the voicebot's text worker claim email rows, so a slow email cannot
-delay a text. They use the same lease, attempts, and backoff. The chat is the agent's instructions plus the thread: rows
+delay a text. They use the same attempts and backoff, and a 5-minute lease (texts
+use 2), so a slow email run is not claimed twice. The chat is the agent's instructions plus the thread: rows
 linked by `In-Reply-To` and `References`, and only rows with this same sender, so
 a forged `References` header cannot read another thread. Inbound rows join the
 chat only with `emails.from_verified`, and not when they were spam, a virus, or
