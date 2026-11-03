@@ -52,6 +52,13 @@ _HELP = "HELP,INFO"
 _OPT_OUT_MESSAGE = (
     "You are unsubscribed and will get no more messages from this number."
 )
+# The opt-in confirmation declared in the campaign filing. Carriers reject a
+# campaign whose opt-in text lacks the message frequency and the rates notice
+# (TCR error 611).
+_OPT_IN_MESSAGE = (
+    "You are opted in. Msg frequency varies. Msg & data rates may apply. "
+    "Reply HELP for help, STOP to opt out."
+)
 # Help contact for campaigns whose snapshot has no contact email (filed
 # before it was kept) or one too long for the HELP reply.
 _HELP_CONTACT = "hi@hail.so"
@@ -159,9 +166,7 @@ def _campaign_replies(brand: dict, refs: dict) -> dict:
         help_text = f"Reply STOP to opt out. For help contact {_HELP_CONTACT}."
     return {
         "helpMessage": _named(name, help_text),
-        "optinMessage": _named(
-            name, "You are opted in. Reply STOP to opt out, HELP for help."
-        ),
+        "optinMessage": _named(name, _OPT_IN_MESSAGE),
         # Required when subscriberOptout is true (Telnyx 10015).
         "optoutMessage": _named(name, _OPT_OUT_MESSAGE),
     }
