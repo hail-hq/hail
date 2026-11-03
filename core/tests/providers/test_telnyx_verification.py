@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -805,3 +807,19 @@ async def test_create_draft_refuses_a_value_over_the_carrier_limit() -> None:
         (email.name, "Use at most 150 characters.")
     ]
     assert len(fake.calls) == 1  # only the requirements lookup
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "hailhq.core.providers.telnyx",
+        "hailhq.core.requirement_categories",
+        "hailhq.core.providers.sms.telnyx",
+        "hailhq.api.routes.sms_webhooks.telnyx",
+    ],
+)
+def test_module_imports_in_a_fresh_interpreter(module) -> None:
+    done = subprocess.run(
+        [sys.executable, "-c", f"import {module}"], capture_output=True, text=True
+    )
+    assert done.returncode == 0, done.stderr

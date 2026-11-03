@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from hailhq.core.providers.verification.base import VerificationRequirements
+if TYPE_CHECKING:
+    from hailhq.core.providers.verification.base import VerificationRequirements
 
 __all__ = [
     "LABELS",
