@@ -310,3 +310,34 @@ def test_paperwork_labels():
         {"key": "other", "label": "Blood type"},
     ]
     assert LABELS["company_registration"] == "Company register extract or certificate"
+
+
+def test_every_known_didww_field_maps_to_a_category_or_nothing():
+    from hailhq.core.providers.verification import VerificationRequirements
+    from hailhq.core.providers.verification.didww import _LABELS, _field
+    from hailhq.core.requirement_categories import classify
+
+    # Names DIDWW sends in {personal,business}_mandatory_fields (read from its
+    # API) plus every name the plug-in labels.
+    names = set(_LABELS) | {
+        "birth_country",
+        "birth_date",
+        "company_reg_number",
+        "contact_email",
+        "country",
+        "id_number",
+        "personal_tax_id",
+        "vat_id",
+        "description",
+    }
+    for name in sorted(names):
+        for subject in ("person", "business"):
+            req = VerificationRequirements(
+                country_code="DE",
+                number_type="local",
+                subject_type=subject,
+                required=True,
+                fields=(_field(name),),
+            )
+            items = classify(req, "didww")
+            assert not any(isinstance(i, dict) for i in items), (name, items)

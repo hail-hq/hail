@@ -125,6 +125,11 @@ _DIDWW_FIELDS: dict[str, tuple[str, ...]] = {
     "company_reg_number": ("company_id",),
     "vat_id": ("company_id",),
     "service_description": _NONE,
+    # The country is chosen with the number, not paperwork.
+    "country": _NONE,
+    "description": _NONE,
+    "birth_country": ("personal_details",),
+    "contact_email": ("contact_details",),
 }
 _DIDWW_SLOTS = {
     "identity_proof": (("id_document",), ("company_registration",)),
