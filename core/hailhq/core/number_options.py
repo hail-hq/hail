@@ -32,9 +32,10 @@ __all__ = [
 
 SUBJECTS = ("person", "business")
 _STATUS_RANK = {"ready": 0, "in_review": 1, "needs_check": 2}
-# States that mean the carrier has it: sent, or being sent. A draft or an
-# awaiting_review row was never sent; rejected and cancelled are over.
-_IN_REVIEW_STATES = ("submitting", "submitted")
+# States that mean the customer submitted it and it is under review (Hail's
+# own check, being sent, or at the carrier). A draft was never submitted;
+# rejected and cancelled are over.
+_IN_REVIEW_STATES = ("awaiting_review", "submitting", "submitted")
 _TYPE_ORDER = ("local", "mobile", "national", "toll_free")
 
 

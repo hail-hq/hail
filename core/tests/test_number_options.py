@@ -282,7 +282,7 @@ def test_needs_paperwork_follows_verification_required(catalog):
     assert number_options("CH", {}).needs_paperwork is True
 
 
-@pytest.mark.parametrize("state", ["draft", "awaiting_review", "rejected", "cancelled"])
+@pytest.mark.parametrize("state", ["draft", "rejected", "cancelled"])
 def test_not_sent_or_over_verification_is_not_in_review(catalog, state):
     catalog(twilio=[row(**need())])
     v = ov(state, name="Acme AG", subject="business")
@@ -291,9 +291,10 @@ def test_not_sent_or_over_verification_is_not_in_review(catalog, state):
     assert b.status == "needs_check" and b.verification is None
 
 
-def test_submitting_counts_as_in_review(catalog):
+@pytest.mark.parametrize("state", ["awaiting_review", "submitting", "submitted"])
+def test_submitted_states_count_as_in_review(catalog, state):
     catalog(twilio=[row(**need())])
-    v = ov("submitting", name="Acme AG", subject="business")
+    v = ov(state, name="Acme AG", subject="business")
     r = number_options("CH", {("twilio", "CH", "local"): [v]})
     assert one(r, subject="business").status == "in_review"
 
