@@ -1207,6 +1207,13 @@ def main(argv: list[str] | None = None) -> int:
             )
         except CatalogShrunk as exc:
             summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
+        except VerificationUnavailable:
+            # Raised before any write: the provider's file stays as it was.
+            summary.append(f"## {provider}")
+            summary.append(
+                f"{provider}: requirements not refreshed: verification is not "
+                "configured (check the carrier credentials). Catalog left unchanged."
+            )
     text = _cap_summary("\n".join(summary) + "\n")
     print(text)
     if args.summary_file:

@@ -1278,3 +1278,29 @@ def test_summary_is_cut_under_the_pr_body_limit():
     body = cut[: -len(sync.SUMMARY_CUT)].rstrip("\n")
     assert body.splitlines()[-1].endswith("x" * 200)  # last line is whole
     assert sync._cap_summary("short\n") == "short\n"
+
+
+def test_carrier_without_verification_does_not_stop_the_run(tmp_path, monkeypatch):
+    for p in sync.PROVIDERS:
+        (tmp_path / f"{p}.json").write_text("old")
+    summary_file = tmp_path / "summary.md"
+
+    def fake_run(provider, config, costs_dir, today, summary, *args, **kwargs):
+        if provider == "telnyx":
+            raise sync.VerificationUnavailable("no plug-in")
+        (costs_dir / f"{provider}.json").write_text("new")
+        summary.append(f"## {provider}: 1 rows, 1 countries")
+        return True
+
+    monkeypatch.setattr(sync, "run_provider", fake_run)
+    code = sync.main(
+        ["--costs-dir", str(tmp_path), "--summary-file", str(summary_file)]
+    )
+    assert code == 0
+    assert (tmp_path / "telnyx.json").read_text() == "old"
+    assert (tmp_path / "didww.json").read_text() == "new"
+    assert (tmp_path / "twilio.json").read_text() == "new"
+    assert (
+        "telnyx: requirements not refreshed: verification is not configured "
+        "(check the carrier credentials). Catalog left unchanged."
+    ) in summary_file.read_text()
