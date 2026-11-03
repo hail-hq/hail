@@ -16,7 +16,7 @@ name: costs-refresh
 #     shell, and file tools only inside the repo. It can edit only the four
 #     data files, and WebFetch reaches only the sites listed in
 #     .github/prompts/costs-refresh-settings.json. Bedrock has no WebSearch.
-#   - The AWS role can only call one model on Bedrock and read inference
+#   - The AWS role can only call Bedrock models and read inference
 #     profiles, and only the agent steps get its credentials. The job has a
 #     read-only GitHub token, and the checkout keeps no credentials.
 #   - Only the diff of the four data files and the report leave the job. The
