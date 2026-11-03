@@ -243,6 +243,13 @@ class OfferVerification(BaseModel):
     subject_name: str | None = None
 
 
+class PaperworkItem(BaseModel):
+    """One paper a subject must give for an offer."""
+
+    key: str
+    label: str
+
+
 class NumberOffer(BaseModel):
     """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml.
     ``by_request`` offers have no ``e164`` and cannot be bought: ask support."""
@@ -272,6 +279,9 @@ class NumberOffer(BaseModel):
     # verification_id would use.
     verification: OfferVerification | None = None
     by_request: bool = False
+    # Papers the request's ``subject_type`` must give. None when the request
+    # had no ``subject_type``.
+    paperwork: list[PaperworkItem] | None = None
 
 
 class NumberRegion(BaseModel):
