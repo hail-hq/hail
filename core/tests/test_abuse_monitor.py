@@ -278,7 +278,7 @@ async def test_email_repeated_address_counts_once(async_session, monkeypatch) ->
         address = email.to_addresses[0]
         email.to_addresses = [address] * 50
         email.cc_addresses = [address.upper()]
-        email.bcc_addresses = [f" {address} "]
+        email.bcc_addresses = [f" {address} ", f"Bob <{address}>", f"B <{address}> "]
     await _seed_email_events(async_session, emails[:2], "bounced", hard=True)  # 10%
     await async_session.commit()
 

@@ -130,6 +130,12 @@ async def _suspended_orgs(db: AsyncSession, channel: str) -> set:
     )
 
 
+def _bare_address(column):
+    """SQL: the address inside "Name <address>" if present, trimmed and
+    lowercased."""
+    return func.lower(func.trim(func.regexp_replace(column, r"^.*<([^>]*)>.*$", r"\1")))
+
+
 def _org_own_send():
     """Filter for the org's own outbound sends: not a forward, not system
     mail."""
@@ -150,7 +156,8 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     )
 
     # Each distinct address counts once per email, so repeating one address
-    # in to/cc/bcc cannot inflate the denominator and hide a high rate.
+    # in to/cc/bcc (also as "Name <address>") cannot inflate the denominator
+    # and hide a high rate.
     no_addresses = cast(literal([], ARRAY(Text)), ARRAY(Text))
     addr = (
         func.unnest(
@@ -169,9 +176,7 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         select(
             Email.organization_id,
             func.count(
-                func.distinct(
-                    func.concat(Email.id, ":", func.lower(func.trim(addr.c.addr)))
-                )
+                func.distinct(func.concat(Email.id, ":", _bare_address(addr.c.addr)))
             ),
         )
         .select_from(Email)
