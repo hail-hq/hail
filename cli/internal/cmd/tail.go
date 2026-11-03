@@ -136,9 +136,8 @@ var amdSentences = map[string]string{
 }
 
 // handoverAMDSentences maps the handover check's verdict
-// (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to [amd]
-// lines. What the voicebot did comes from the row's "dropped" and "reason",
-// see handoverAMDLine.
+// (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to the
+// first half of an [amd] line.
 var handoverAMDSentences = map[string]string{
 	"human":               "a person answered",
 	"machine-ivr":         "a phone menu answered",
@@ -147,28 +146,21 @@ var handoverAMDSentences = map[string]string{
 	"uncertain":           "unclear who answered",
 }
 
-// handoverAMDOutcomes maps a handover_amd_result reason to what the
-// voicebot did. "dropped" (the caller taken back because of the verdict)
-// wins over the reason. A check's final reason (greeting_check,
-// detection_failed, audio_error) is kept even when the line or the call
-// ended after it, so those lines do not claim the call stayed connected.
-var handoverAMDOutcomes = map[string]string{
-	"greeting_check":        "caller not taken back",
-	"leg_ended":             "line hung up",
-	"call_ending":           "call ending",
-	"timeout":               "check timed out, kept connected",
-	"detection_failed":      "check failed",
-	"audio_error":           "audio error",
-	"detection_unavailable": "no check, kept connected",
+// handoverAMDActions maps the row's "action" (what the voicebot did) to the
+// second half.
+var handoverAMDActions = map[string]string{
+	"dropped":     "caller taken back",
+	"kept":        "kept connected",
+	"leg_ended":   "line hung up",
+	"call_ending": "call ending",
 }
 
-// handoverAMDLine renders a handover_amd_result row as what answered and
-// what the voicebot did. Never the payload: it holds the contact's greeting
+// handoverAMDLine renders a handover_amd_result row as "handover:
+// <category>, <action>". Never the payload: it holds the contact's greeting
 // transcript.
 func handoverAMDLine(payload map[string]interface{}) string {
 	category, _ := payload["category"].(string)
-	reason, _ := payload["reason"].(string)
-	dropped, _ := payload["dropped"].(bool)
+	action, _ := payload["action"].(string)
 	sentence, ok := handoverAMDSentences[category]
 	if !ok {
 		sentence = category
@@ -176,14 +168,14 @@ func handoverAMDLine(payload map[string]interface{}) string {
 			sentence = "no verdict"
 		}
 	}
-	outcome, ok := handoverAMDOutcomes[reason]
-	switch {
-	case dropped:
-		outcome = "caller taken back"
-	case !ok:
-		outcome = "kept connected"
+	did, ok := handoverAMDActions[action]
+	if !ok {
+		did = action
+		if did == "" {
+			did = "no action recorded"
+		}
 	}
-	return "handover: " + sentence + ", " + outcome
+	return "handover: " + sentence + ", " + did
 }
 
 // perCallPalette is the small set of stable colors assigned to short call

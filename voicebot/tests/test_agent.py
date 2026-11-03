@@ -2207,10 +2207,9 @@ class _FakeLine:
         self._run: asyncio.Future | None = None
         self.category = category  # the last finished verdict
         self.reason = "window_ended"
-        self.dropped = False
+        self.action = None
         self.stopped = False
         self.closed = False
-        self._ending = asyncio.Event()
 
     async def speaks(self, seconds: float) -> bool:
         if isinstance(self._spoke, Exception):
@@ -2225,10 +2224,10 @@ class _FakeLine:
         try:
             await asyncio.gather(self._run, return_exceptions=True)
         except asyncio.CancelledError:
-            if self.reason == "window_ended":
-                self.reason = "timeout"
+            self.reason = "timeout"
             raise
         if self._run.cancelled():
+            self.reason = "timeout"
             return False
         if self._machine:
             self.category, self.reason = "machine-vm", "greeting_check"
@@ -2238,37 +2237,23 @@ class _FakeLine:
     def is_mailbox(self) -> bool:
         return self.category in ("machine-vm", "machine-unavailable")
 
-    def _note(self, reason) -> None:
-        if self.reason not in ("greeting_check", "detection_failed", "audio_error"):
-            self.reason = reason
-
-    def stop(self, reason=None) -> None:
+    def stop(self) -> None:
         self.stopped = True
-        if reason is not None:
-            self._note(reason)
         if self._run is not None and not self._run.done():
-            if reason is None and self.reason == "window_ended":
-                self.reason = "timeout"  # the real check task's own handler
             self._run.cancel()
 
     def end(self) -> None:
-        self._ending.set()
-        self.stop("call_ending")
-
-    async def wait_call_ending(self) -> None:
-        await self._ending.wait()
-
-    def decide(self, *, dropped=False, reason=None) -> None:
         self.stop()
-        self.dropped = dropped
-        if reason is not None:
-            self._note(reason)
+
+    def decide(self, action) -> None:
+        self.stop()
+        self.action = action
 
     def verdict(self):
         return {
             "category": self.category,
             "reason": self.reason,
-            "dropped": self.dropped,
+            "action": self.action,
         }
 
     async def aclose(self) -> None:
@@ -2407,7 +2392,7 @@ async def test_bridge_machine_answer_gives_the_caller_back(
         (
             CALL_ID,
             "handover_amd_result",
-            {"category": "machine-vm", "reason": "greeting_check", "dropped": True},
+            {"category": "machine-vm", "reason": "greeting_check", "action": "dropped"},
         )
     ]
     soft_cap.cancel()
@@ -2462,7 +2447,7 @@ async def test_bridge_person_or_unsure_check_connects(
         (
             CALL_ID,
             "handover_amd_result",
-            {"category": category, "reason": reason, "dropped": False},
+            {"category": category, "reason": reason, "action": "kept"},
         )
     ]
     state["soft_cap_task"].cancel()
@@ -2518,10 +2503,10 @@ async def test_bridge_waits_briefly_for_a_check_still_running(
         assert row == {
             "category": "machine-vm",
             "reason": "greeting_check",
-            "dropped": True,
+            "action": "dropped",
         }
     else:
-        assert row == {"category": None, "reason": "timeout", "dropped": False}
+        assert row == {"category": None, "reason": "timeout", "action": "kept"}
         await asyncio.sleep(0.4)  # the cancelled check never lands
         assert row["category"] is None
 
@@ -2550,8 +2535,8 @@ async def test_bridge_records_a_leg_that_hangs_up(handover_events) -> None:
     await asyncio.gather(*state["event_tasks"])
     assert handover_events[0][2] == {
         "category": "uncertain",
-        "reason": "leg_ended",
-        "dropped": False,
+        "reason": "timeout",
+        "action": "leg_ended",
     }
 
 
@@ -2637,9 +2622,9 @@ async def test_shutdown_ends_the_bridge_at_once(
                 {
                     "category": None,
                     "transcript": None,
-                    "reason": "call_ending",
+                    "reason": "timeout",
                     "delay": None,
-                    "dropped": False,
+                    "action": "call_ending",
                 },
             )
         ]
@@ -2648,42 +2633,30 @@ async def test_shutdown_ends_the_bridge_at_once(
     assert closed == ["models"]
 
 
-async def test_stop_keeps_a_final_reason(handover_events) -> None:
-    """A check that already found a mailbox keeps greeting_check when the
-    call ends; a dropped row never says call_ending."""
+async def test_shutdown_wakes_a_settle_without_a_line(
+    monkeypatch, handover_events
+) -> None:
+    """No VAD, so no line: job shutdown still ends the settle wait at once
+    (the wakeup is on bridge_state), and the bridge takes its call-ending
+    path."""
+    from hailhq.voicebot import agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "HANDOVER_SETTLE_SECONDS", 30.0)
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
-    listen, _ = _watch(True, True)
-    out = await make_agent_bridge(
-        ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
-    )(BridgeRoute("+1", "+1", "ST", None, "Sam"))
-    assert out.outcome == "no_answer"
-    (line,) = listen.lines  # type: ignore[attr-defined]
-    line.end()
-    assert line.verdict() == {
-        "category": "machine-vm",
-        "reason": "greeting_check",
-        "dropped": True,
-    }
-
-
-async def test_verdict_writes_include_rows_added_while_waiting(monkeypatch) -> None:
-    from hailhq.voicebot import agent as agent_mod
-
-    order: list[str] = []
-    state: dict = {"event_tasks": set()}
-
-    async def write(name: str, then=None) -> None:
+    task = asyncio.create_task(
+        make_agent_bridge(
+            ctx, session, CALL_ID, state, listen=lambda _i: None  # type: ignore[arg-type]
+        )(BridgeRoute("+1", "+1", "ST", None, "Sam"))
+    )
+    while not state.get("settling"):
         await asyncio.sleep(0.01)
-        order.append(name)
-        if then is not None:
-            late = asyncio.create_task(write(then))
-            state["event_tasks"].add(late)
-
-    state["event_tasks"].add(asyncio.create_task(write("first", then="late")))
-    await asyncio.wait_for(agent_mod.finish_verdict_writes(state, CALL_ID), 2)
-    assert order == ["first", "late"]
+    agent_mod.stop_handover_checks(state)
+    out = await asyncio.wait_for(task, timeout=1)
+    assert out.outcome == "no_answer" and state["connected"] is False
+    ctx.api.room.remove_participant.assert_not_awaited()
+    assert session.input.enabled == [False] and handover_events == []
 
 
 async def test_shutdown_verdict_writes_are_bounded(monkeypatch) -> None:
@@ -2720,7 +2693,7 @@ async def test_contact_line_uses_the_call_check(monkeypatch) -> None:
         ctx, session, "human-2", lambda: None  # type: ignore[arg-type]
     )
     assert late is not None and late._check is None
-    assert late._reason == "call_ending"
+    assert late._reason == "no_check"
     assert (
         agent_mod._contact_line(
             ctx, SimpleNamespace(vad=None), "human-3", lambda: models  # type: ignore[arg-type]

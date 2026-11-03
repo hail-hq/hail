@@ -679,13 +679,13 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 		{http.StatusOK, client.EventStreamResponse{
 			Items: []client.EventResponse{
 				sampleEventInCall("11111111-1111-1111-1111-111111111112", callA, "handover_amd_result",
-					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "greeting_check", "dropped": true}, tFuture),
+					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "greeting_check", "action": "dropped"}, tFuture),
 				sampleEventInCall("22222222-2222-2222-2222-222222222222", callA, "handover_amd_result",
-					map[string]interface{}{"category": "uncertain", "transcript": "hi this is sam", "reason": "timeout", "dropped": false}, tFuture.Add(time.Second)),
+					map[string]interface{}{"category": "uncertain", "transcript": "hi this is sam", "reason": "timeout", "action": "kept"}, tFuture.Add(time.Second)),
 				sampleEventInCall("33333333-3333-3333-3333-333333333332", callA, "handover_amd_result",
-					map[string]interface{}{"category": nil, "transcript": nil, "reason": "detection_failed", "dropped": false}, tFuture.Add(2*time.Second)),
+					map[string]interface{}{"category": nil, "transcript": nil, "reason": "detection_failed", "action": "leg_ended"}, tFuture.Add(2*time.Second)),
 				sampleEventInCall("44444444-4444-4444-4444-444444444442", callA, "handover_amd_result",
-					map[string]interface{}{"category": "human", "transcript": "hello", "reason": "window_ended", "dropped": false}, tFuture.Add(3*time.Second)),
+					map[string]interface{}{"category": "machine-vm", "transcript": "hello", "reason": "greeting_check", "action": "call_ending"}, tFuture.Add(3*time.Second)),
 			},
 			CallStatus: completedStatus(),
 		}},
@@ -700,16 +700,13 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 	}
 	for _, want := range []string{
 		"handover: voicemail answered, caller taken back",
-		"handover: unclear who answered, check timed out, kept connected",
-		"handover: no verdict, check failed",
-		"handover: a person answered, kept connected",
+		"handover: unclear who answered, kept connected",
+		"handover: no verdict, line hung up",
+		"handover: voicemail answered, call ending",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("missing %q:\n%s", want, stdout)
 		}
-	}
-	if strings.Count(stdout, "caller taken back") != 1 {
-		t.Errorf("only the dropped row may say the caller was taken back:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "leave a message") || strings.Contains(stdout, "hi this is sam") ||
 		strings.Contains(stdout, "transcript") {
