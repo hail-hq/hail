@@ -735,6 +735,8 @@ def make_agent_bridge(
                 logger.info(
                     "call_id=%s handover contact left before connecting", call_id
                 )
+                if line is not None:
+                    line.decide(reason="leg_ended")
                 _unmute()
                 return _gone("no_answer")
             if not spoke:
@@ -747,16 +749,23 @@ def make_agent_bridge(
             # the disconnect handler leaves both to this handle.
             bridge_state["connected"] = True
             bridge_state["settling"] = True
-            machine = await _settle(line)
-            # The verdict this handle acts on: a check that ends later is
-            # ignored, so the recorded row matches what happened.
-            verdict = line.freeze() if line is not None else None
+            await _settle(line)
+            # Decide on the line's last finished verdict; no check runs
+            # after this, so the recorded row matches what happened.
+            machine = False
+            if line is not None:
+                line.stop()
+                machine = line.is_mailbox
             if bridge_state.get("ending"):
                 # The caller hung up meanwhile; the call is ending.
+                if line is not None:
+                    line.decide(reason="call_ending")
                 bridge_state["connected"] = False
                 return _gone("no_answer")
             if identity not in ctx.room.remote_participants:
                 logger.info("call_id=%s handover leg hung up at once", call_id)
+                if line is not None:
+                    line.decide(reason="leg_ended")
                 bridge_state["connected"] = False
                 _unmute()
                 return _gone("no_answer")
@@ -764,14 +773,9 @@ def make_agent_bridge(
                 # Voicemail or an unavailable mailbox: the same as no
                 # answer. The agent offers to take a message.
                 logger.info("call_id=%s handover answered by a mailbox", call_id)
-                if verdict is not None:
-                    verdict["dropped"] = True
+                line.decide(dropped=True)  # type: ignore[union-attr]
                 bridge_state["connected"] = False
                 return await _give_back("no_answer")
-            if verdict is not None and verdict["category"] in MACHINE_HANGUP_CATEGORIES:
-                # The check said voicemail just as the wait ended, unseen:
-                # connected anyway, and the row says so.
-                verdict["reason"] = "late"
             # Settled: a person. The soft cap no longer waits on the check.
             bridge_state.pop("picked_up", None)
             logger.info("call_id=%s handover answered after %d ms", call_id, ring_ms)
@@ -821,7 +825,8 @@ def make_agent_bridge(
             A person's verdict does not end the wait: the settle window,
             and so the answered time, stays as before the check. A check
             still running at its end gets up to
-            HANDOVER_CHECK_GRACE_SECONDS more."""
+            HANDOVER_CHECK_GRACE_SECONDS more; then it is cancelled
+            (recorded as ``timeout``)."""
             left = asyncio.Event()
 
             def _on_leave(participant: rtc.RemoteParticipant) -> None:
@@ -883,11 +888,10 @@ def make_agent_bridge(
                 line = listen(identity)
             except Exception:
                 logger.exception("call_id=%s handover line check unavailable", call_id)
-        # Job shutdown stops a bridge still on this step before it closes
-        # the check's clients (finish_handover_checks).
-        me = asyncio.current_task()
-        bridges = bridge_state.setdefault("bridges", set())
-        bridges.add(me)
+        # Job shutdown stops these lines' checks (stop_handover_checks).
+        lines = bridge_state.setdefault("lines", set())
+        if line is not None:
+            lines.add(line)
         try:
             return await _after_pickup(line)
         finally:
@@ -897,7 +901,7 @@ def make_agent_bridge(
                     await line.aclose()
                 except Exception:
                     logger.exception("call_id=%s handover line close failed", call_id)
-            bridges.discard(me)
+            lines.discard(line)
 
     return _bridge
 
@@ -969,34 +973,42 @@ def _contact_line(
     ctx: JobContext,
     session: AgentSession,
     identity: str,
-    models: Callable[[], AMDModels],
+    models: Callable[[], AMDModels | None],
 ) -> ContactLine | None:
     """The bridge's line check: silence, then mailbox. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
     the silence check runs. ``models`` returns the call's check clients,
-    built on the first pickup and reused by later dials."""
+    built on the first pickup and reused by later dials, or None once job
+    shutdown began: then only the silence check runs."""
     if session.vad is None:
         return None
+    current = models()
     return ContactLine(
         ctx.room,
         identity,
         session.vad,
-        check=greeting_check(models()),
+        check=greeting_check(current) if current is not None else None,
         window_seconds=HANDOVER_SETTLE_SECONDS + HANDOVER_CHECK_GRACE_SECONDS,
+        no_check_reason=(
+            "detection_unavailable" if current is not None else "call_ending"
+        ),
     )
+
+
+def stop_handover_checks(bridge_state: dict[str, Any]) -> None:
+    """At job shutdown, before waiting for the dial tasks: no new check
+    starts, and the running ones stop, so each bridge ends on its own and
+    posts its result. Nothing uses the check's clients after this."""
+    bridge_state["checks_stopped"] = True
+    for line in list(bridge_state.get("lines", ())):
+        line.stop("call_ending")
 
 
 async def finish_handover_checks(
     bridge_state: dict[str, Any], call_id: UUID, models: AMDModels | None
 ) -> None:
-    """At job shutdown: stop bridges still checking a contact's line (their
-    rows are added as they end), give the verdict rows a few seconds, then
-    close the check's clients, which no check uses any more."""
-    running = {t for t in bridge_state.get("bridges", ()) if not t.done()}
-    for task in running:
-        task.cancel()
-    if running:
-        await asyncio.wait(running, timeout=ANSWER_POST_SHUTDOWN_WAIT_SECONDS)
+    """At job shutdown, after the dial tasks: give the verdict rows a few
+    seconds, then close the check's clients."""
     await finish_verdict_writes(bridge_state, call_id)
     if models is not None:
         await models.aclose()
@@ -2642,8 +2654,11 @@ async def _run_call(
         captured["end_reason"] = CallEndReason.SOFT_CAP_REACHED.value
         # Status stays None → on_call_end falls back to "completed".
 
-    def _handover_models() -> AMDModels:
+    def _handover_models() -> AMDModels | None:
         nonlocal handover_models
+        if bridge_state.get("checks_stopped"):
+            # Job shutdown began: no new clients, none that may be closed.
+            return None
         if handover_models is None:
             handover_models = build_check_models(
                 session, org_cfgs=org_cfgs, llm_override=llm_cfg is not None
@@ -2840,6 +2855,9 @@ async def _run_call(
             if cap_task is not None and not cap_task.done():
                 cap_task.cancel()
                 await asyncio.gather(cap_task, return_exceptions=True)
+            # No handover check runs from here, so each bridge ends on its
+            # own within the dial wait below.
+            stop_handover_checks(bridge_state)
             # Worker shutdown, BYO-LLM give-up or any other end while a
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
@@ -2849,7 +2867,8 @@ async def _run_call(
             await transfer_call.finish_pending(
                 call_id, ANSWER_POST_SHUTDOWN_WAIT_SECONDS
             )
-            # After the dial tasks: a bridge writes its verdict row as it ends.
+            # After the dial tasks: a bridge writes its verdict row as it
+            # ends. Then the check's clients close: no check can use them.
             await finish_handover_checks(bridge_state, call_id, handover_models)
             for task in list(bridge_state.get("late_leg_tasks", ())):
                 task.cancel()

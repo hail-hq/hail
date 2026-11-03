@@ -135,6 +135,7 @@ async def test_deadline_includes_waiting_for_the_track(monkeypatch) -> None:
 def _fast_checks(monkeypatch):
     monkeypatch.setattr(handover_watch, "CHECK_EVERY_SECONDS", 0.01)
     monkeypatch.setattr(handover_watch, "PAUSE_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 0.0)
 
 
 def _check(*answers):
@@ -245,7 +246,7 @@ async def test_silence_before_speech_is_not_sent(leg) -> None:
     assert preroll <= calls[0] < preroll + 16000
 
 
-async def test_closed_mid_check_connects(leg) -> None:
+async def test_closed_mid_check_is_a_timeout(leg) -> None:
     started = asyncio.Event()
 
     async def check(_audio):
@@ -260,7 +261,7 @@ async def test_closed_mid_check_connects(leg) -> None:
     await line.aclose()
     assert await machine is False
     assert line.verdict()["category"] is None
-    assert line.verdict()["reason"] == "window_ended"
+    assert line.verdict()["reason"] == "timeout"
 
 
 async def test_failed_check_connects(leg) -> None:
@@ -391,27 +392,137 @@ async def test_no_check_starts_that_cannot_finish_in_the_window(
     await line.aclose()
 
 
-async def test_check_after_freeze_is_ignored(leg) -> None:
-    """The bridge decided: a check that ends later does not change the
-    recorded verdict."""
+async def _line_mid_check(check_result=None):
+    """A line whose first check is running (blocked)."""
     release = asyncio.Event()
     started = asyncio.Event()
 
     async def check(_audio):
         started.set()
         await release.wait()
-        return "leave a message", AMDCategory.MACHINE_VM
+        return check_result or ("leave a message", AMDCategory.MACHINE_VM)
 
     vad, _ = _vad(list(_SPEECH))
     line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
     assert await line.speaks(1.0)
     await asyncio.wait_for(started.wait(), timeout=1)
-    frozen = line.freeze()
-    assert frozen["category"] is None and frozen["dropped"] is False
+    return line, release
+
+
+async def test_cancelled_machine_wait_is_a_timeout(leg) -> None:
+    """The bridge stops waiting (grace over): the running check is
+    cancelled, never lands, and the row says timeout with the last finished
+    verdict."""
+    line, release = await _line_mid_check()
+    waiting = asyncio.ensure_future(line.machine())
+    await asyncio.sleep(0.01)
+    waiting.cancel()
+    await asyncio.gather(waiting, return_exceptions=True)
     release.set()
-    assert await line.machine() is False
-    assert line.verdict() is frozen and frozen["category"] is None
+    await asyncio.sleep(0.01)
+    assert not line.is_mailbox
+    assert line.verdict()["reason"] == "timeout"
+    assert line.verdict()["category"] is None
     await line.aclose()
+
+
+@pytest.mark.parametrize("reason,expected", [(None, "timeout"), ("call_ending",) * 2])
+async def test_stop_ends_the_check_now(leg, reason, expected) -> None:
+    line, release = await _line_mid_check()
+    line.stop(reason)
+    assert await asyncio.wait_for(line.machine(), timeout=1) is False
+    release.set()
+    assert line.verdict()["reason"] == expected and not line.is_mailbox
+    await line.aclose()
+
+
+async def test_stopped_line_starts_no_check(leg) -> None:
+    """Job shutdown stopped the line before its first speech: speech then
+    starts no check, and the row says why."""
+    check, calls = _check(("leave a message", AMDCategory.MACHINE_VM))
+    vad, _ = _vad([VADEventType.INFERENCE_DONE] * 20 + list(_SPEECH))
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    line.stop("call_ending")
+    assert await line.speaks(1.0)
+    assert await line.machine() is False and calls == []
+    assert line.verdict()["reason"] == "call_ending"
+    await line.aclose()
+
+
+async def test_decide_records_what_the_bridge_did(leg) -> None:
+    check, _ = _check(("leave a message", AMDCategory.MACHINE_VM))
+    vad, _ = _vad(list(_SPEECH))
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert await line.speaks(1.0)
+    assert await asyncio.wait_for(line.machine(), timeout=1) is True
+    line.decide(dropped=True)
+    assert line.verdict()["dropped"] is True
+    assert line.verdict()["reason"] == "greeting_check"
+    line.decide(reason="leg_ended")
+    assert line.verdict()["reason"] == "leg_ended"
+    assert line.verdict()["dropped"] is False
+    await line.aclose()
+
+
+async def test_feed_error_after_speech_is_recorded(monkeypatch) -> None:
+    """The stream breaks after the first speech: connect, and the row says
+    audio_error, not window_ended."""
+    audio = _BrokenStream()
+    monkeypatch.setattr(
+        handover_watch,
+        "wait_for_track_publication",
+        AsyncMock(return_value=SimpleNamespace(track=object())),
+    )
+    monkeypatch.setattr(handover_watch.rtc.AudioStream, "from_track", lambda **_: audio)
+    vad, _ = _vad([VADEventType.START_OF_SPEECH])
+    check, _ = _check(("Hi", AMDCategory.UNCERTAIN))
+    line = handover_watch.ContactLine(object(), "human-x", vad, check=check)
+    assert await line.speaks(1.0)
+    await asyncio.wait_for(line.machine(), timeout=1)
+    assert line.verdict()["reason"] == "audio_error"
+    await line.aclose()
+
+
+async def test_pause_before_new_speech_does_not_count(monkeypatch, leg) -> None:
+    """A pause, then speech again: the check waits for the next pause
+    instead of cutting the new words."""
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 0.05)
+    monkeypatch.setattr(handover_watch, "PAUSE_WAIT_SECONDS", 5.0)
+    check, calls = _check(("leave a message", AMDCategory.MACHINE_VM))
+    script = [
+        VADEventType.START_OF_SPEECH,
+        VADEventType.END_OF_SPEECH,
+        VADEventType.START_OF_SPEECH,
+    ]
+    script += [VADEventType.INFERENCE_DONE] * 100 + [VADEventType.END_OF_SPEECH]
+    machine, _ = await asyncio.wait_for(_verdict(check, script), timeout=3)
+    assert machine is True
+    # Checked at the second pause (frame ~103), not at 0.05 s of speech.
+    assert calls[0] >= 100 * 320
+
+
+async def test_a_blip_does_not_use_up_a_check(monkeypatch, leg) -> None:
+    """Check 1 waits for FIRST_CHECK_SPEECH_SECONDS of speech; a blip and
+    silence never get there."""
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 0.2)
+    monkeypatch.setattr(handover_watch, "RECHECK_TIMEOUT_SECONDS", 0.1)
+    check, calls = _check(("Hi", AMDCategory.HUMAN))
+    vad, _ = _vad([VADEventType.START_OF_SPEECH, VADEventType.END_OF_SPEECH])
+    line = handover_watch.ContactLine(
+        object(), "human-x", vad, check=check, window_seconds=0.4
+    )
+    assert await line.speaks(1.0)
+    assert await asyncio.wait_for(line.machine(), timeout=2) is False
+    assert calls == []
+    await line.aclose()
+
+
+async def test_enough_speech_gets_checked(monkeypatch, leg) -> None:
+    monkeypatch.setattr(handover_watch, "FIRST_CHECK_SPEECH_SECONDS", 0.05)
+    check, calls = _check(("leave a message", AMDCategory.MACHINE_VM))
+    script = [VADEventType.START_OF_SPEECH] + [VADEventType.INFERENCE_DONE] * 200
+    machine, _ = await asyncio.wait_for(_verdict(check, script), timeout=2)
+    assert machine is True and len(calls) == 1
 
 
 # --- building the check --------------------------------------------------------

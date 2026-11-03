@@ -681,7 +681,7 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 				sampleEventInCall("11111111-1111-1111-1111-111111111112", callA, "handover_amd_result",
 					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "greeting_check", "dropped": true}, tFuture),
 				sampleEventInCall("22222222-2222-2222-2222-222222222222", callA, "handover_amd_result",
-					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "late", "dropped": false}, tFuture.Add(time.Second)),
+					map[string]interface{}{"category": "uncertain", "transcript": "hi this is sam", "reason": "timeout", "dropped": false}, tFuture.Add(time.Second)),
 				sampleEventInCall("33333333-3333-3333-3333-333333333332", callA, "handover_amd_result",
 					map[string]interface{}{"category": nil, "transcript": nil, "reason": "detection_failed", "dropped": false}, tFuture.Add(2*time.Second)),
 				sampleEventInCall("44444444-4444-4444-4444-444444444442", callA, "handover_amd_result",
@@ -700,9 +700,9 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 	}
 	for _, want := range []string{
 		"handover: voicemail answered, caller taken back",
-		"handover: voicemail answered too late, kept connected",
-		"handover: no verdict",
-		"handover: a person answered",
+		"handover: unclear who answered, check timed out, kept connected",
+		"handover: no verdict, check failed, kept connected",
+		"handover: a person answered, kept connected",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("missing %q:\n%s", want, stdout)
@@ -711,7 +711,8 @@ func TestTail_HandoverVerdictSentence(t *testing.T) {
 	if strings.Count(stdout, "caller taken back") != 1 {
 		t.Errorf("only the dropped row may say the caller was taken back:\n%s", stdout)
 	}
-	if strings.Contains(stdout, "leave a message") || strings.Contains(stdout, "transcript") {
+	if strings.Contains(stdout, "leave a message") || strings.Contains(stdout, "hi this is sam") ||
+		strings.Contains(stdout, "transcript") {
 		t.Errorf("handover_amd_result should not print the payload:\n%s", stdout)
 	}
 }

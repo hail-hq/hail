@@ -137,7 +137,7 @@ var amdSentences = map[string]string{
 
 // handoverAMDSentences maps the handover check's verdict
 // (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to [amd]
-// lines. What the bridge did comes from the row's "dropped" and "reason",
+// lines. What the voicebot did comes from the row's "dropped" and "reason",
 // see handoverAMDLine.
 var handoverAMDSentences = map[string]string{
 	"human":               "a person answered",
@@ -147,10 +147,21 @@ var handoverAMDSentences = map[string]string{
 	"uncertain":           "unclear who answered",
 }
 
-// handoverAMDLine renders a handover_amd_result row. Never the payload: it
-// holds the contact's greeting transcript. "dropped" is true only when the
-// voicebot took the caller back because of this verdict; reason "late"
-// marks a verdict that came after the voicebot had already connected.
+// handoverAMDOutcomes maps a handover_amd_result reason to what the
+// voicebot did. "dropped" (the caller taken back because of the verdict)
+// wins over the reason.
+var handoverAMDOutcomes = map[string]string{
+	"leg_ended":             "line hung up",
+	"call_ending":           "call ending",
+	"timeout":               "check timed out, kept connected",
+	"detection_failed":      "check failed, kept connected",
+	"audio_error":           "audio error, kept connected",
+	"detection_unavailable": "no check, kept connected",
+}
+
+// handoverAMDLine renders a handover_amd_result row as what answered and
+// what the voicebot did. Never the payload: it holds the contact's greeting
+// transcript.
 func handoverAMDLine(payload map[string]interface{}) string {
 	category, _ := payload["category"].(string)
 	reason, _ := payload["reason"].(string)
@@ -162,13 +173,14 @@ func handoverAMDLine(payload map[string]interface{}) string {
 			sentence = "no verdict"
 		}
 	}
+	outcome, ok := handoverAMDOutcomes[reason]
 	switch {
 	case dropped:
-		sentence += ", caller taken back"
-	case reason == "late":
-		sentence += " too late, kept connected"
+		outcome = "caller taken back"
+	case !ok:
+		outcome = "kept connected"
 	}
-	return "handover: " + sentence
+	return "handover: " + sentence + ", " + outcome
 }
 
 // perCallPalette is the small set of stable colors assigned to short call

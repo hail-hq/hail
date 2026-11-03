@@ -37,7 +37,6 @@ from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     AMDModels,
     build_classifier,
-    recheck_model,
     recheck_stt,
 )
 from hailhq.voicebot.pickup import (
@@ -58,23 +57,27 @@ logger = logging.getLogger("hailhq.voicebot")
 
 # Each check sends all the audio so far, so their number is capped.
 MAX_CHECKS = 3
-# The first check runs at the first pause after speech, or this long after
-# the first speech without one. A later check starts at least this long
-# after the previous one started, and never before it ends.
+# Check 1 waits for this much speech (VAD), so a blip or a one-word "Hi"
+# does not use it up.
+FIRST_CHECK_SPEECH_SECONDS = 2.0
+# A later check starts at least this long after the previous one started,
+# and never before it ends.
+CHECK_EVERY_SECONDS = 2.0
+# Then it waits this long for a pause, so a check rarely cuts a word. A
+# pause counts only while the line is still silent.
+PAUSE_WAIT_SECONDS = 1.0
 #
-# Timing, from the first speech: one check (one-shot transcription plus one
+# Timing, from the first speech. One check (one-shot transcription plus one
 # classifier call) takes about 1.5 to 2.5 s, capped at
 # ``RECHECK_TIMEOUT_SECONDS`` (5 s). The bridge decides at the end of its
 # 10 s settle window, and waits up to 3 s more for a check still running
-# (``window_seconds`` is 13 s in all). So a check starts only up to 13 - 5 =
-# 8 s in, and always ends in time. Typical voicemail: check 1 at about 2 s
-# (done by about 4 s), check 2 at about 4 to 5 s (done by about 7 s), check
-# 3 at about 7 to 8 s (done by about 10 s). A recorded greeting gives its
-# cue ("you've reached", "leave a message") in its first seconds.
-CHECK_EVERY_SECONDS = 2.0
-# For a later check, wait this long for a pause, so a check rarely cuts a
-# word.
-PAUSE_WAIT_SECONDS = 1.0
+# (``window_seconds`` is 13 s in all), so a check starts only up to
+# 13 - 5 = 8 s in. A voicemail speaks without long stops: check 1 at about
+# 2 to 3 s (done by about 4 to 5 s), check 2 at about 4.5 to 6 s (done by
+# about 7 to 8 s), check 3 at about 7 to 8 s, if time allows (done by about
+# 10 s). A recorded greeting gives its cue ("you've reached", "leave a
+# message") in its first seconds.
+#
 # Audio kept from before the first speech: VAD reports speech a little
 # after it starts, and the greeting's first words must not be cut.
 PREROLL_SECONDS = 1.0
@@ -114,8 +117,8 @@ async def _contact_audio(room: rtc.Room, identity: str) -> rtc.AudioStream | Non
 def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
     """A one-shot transcriber that follows the org's STT choice.
 
-    Always Hail's one-shot model (``amd.recheck_model``): an org's own
-    Deepgram model may be streaming-only. The key is Hail's when the org has
+    Always Hail's one-shot model, ``DEEPGRAM_MODEL``, as in the outbound
+    recheck: an org's own Deepgram model may be streaming-only. The key is Hail's when the org has
     no STT of its own, as in the outbound recheck, and the org's own when it
     is on Deepgram. An org on another provider skips the check: its audio
     never goes to a provider it did not pick. Language detection is on: the
@@ -131,7 +134,8 @@ def _build_stt(org_cfgs: dict[str, ResolvedLayer]) -> STT | None:
         )
     else:
         return None
-    model = recheck_model()
+    # The model the outbound recheck uses (amd.build_amd_models).
+    model = settings.deepgram_model
     if not (model and api_key):
         return None
     return recheck_stt(model, api_key)
@@ -193,9 +197,10 @@ class ContactLine:
     :meth:`speaks` waits for the first speech. From then, when a ``check``
     is given, the line's audio so far is checked up to ``MAX_CHECKS``
     times, until a mailbox verdict, an error, the end of ``window_seconds``
-    (from the first speech; None: no end), or :meth:`freeze`.
-    :meth:`machine` waits for that. The check's clients belong to the
-    caller (one set per call).
+    (from the first speech; None: no end), or :meth:`stop`.
+    :meth:`machine` waits for that. The bridge records what it did with
+    :meth:`decide`, and :meth:`verdict` is the call event row. The check's
+    clients belong to the caller (one set per call).
     """
 
     def __init__(
@@ -206,6 +211,7 @@ class ContactLine:
         *,
         check: GreetingCheck | None = None,
         window_seconds: float | None = None,
+        no_check_reason: str = "detection_unavailable",
     ) -> None:
         self._room = room
         self._identity = identity
@@ -217,16 +223,22 @@ class ContactLine:
         self._pcm = bytearray()
         self._spoke = asyncio.Event()
         self._ended = asyncio.Event()
+        # Set while the line is silent after speech (VAD end of speech, and
+        # no start since).
         self._pause = asyncio.Event()
         self._failed = False
-        self._frozen: dict[str, Any] | None = None
+        self._stopped = False
+        self._in_flight = False
         self._read: asyncio.Task | None = None
         self._checking: asyncio.Task | None = None
         self._spoke_at: float | None = None
+        self._speech_seconds = 0.0
+        self._speech_from: float | None = None
         self._category: AMDCategory | None = None
         self._transcript = ""
-        self._reason = "window_ended"
+        self._reason = "window_ended" if check is not None else no_check_reason
         self._delay: float | None = None
+        self._dropped = False
 
     async def speaks(self, seconds: float) -> bool:
         """True when the contact starts speaking within ``seconds`` from now,
@@ -249,51 +261,64 @@ class ContactLine:
     async def machine(self) -> bool:
         """True when the check said voicemail or an unavailable mailbox.
         False when it said anything else, failed, did not run, or stopped
-        without that verdict. Never raises."""
+        without that verdict. Never raises. Cancelling it cancels the check
+        (a check still running then is recorded as ``timeout``)."""
         if self._checking is None:
             return False
         await asyncio.gather(self._checking, return_exceptions=True)
         return self._category in MACHINE_HANGUP_CATEGORIES
 
-    def freeze(self) -> dict[str, Any] | None:
-        """Stop the checks and return the verdict the bridge acts on.
+    @property
+    def is_mailbox(self) -> bool:
+        """The last finished check said voicemail or an unavailable mailbox."""
+        return self._category in MACHINE_HANGUP_CATEGORIES
 
-        A check that finishes later is ignored, so the recorded row matches
-        what the bridge did. The bridge sets ``dropped`` on the returned
-        payload when it took the caller back because of it. None when the
-        contact never spoke.
-        """
-        if self._frozen is None:
-            self._frozen = self._payload() or {}
-            if self._checking is not None:
-                self._checking.cancel()
-        return self._frozen or None
+    def stop(self, reason: str | None = None) -> None:
+        """Stop the checks now, and start no new one. ``reason`` replaces
+        the recorded reason (job shutdown: ``call_ending``)."""
+        self._stopped = True
+        if reason is not None:
+            self._reason = reason
+        if self._checking is not None and not self._checking.done():
+            if self._in_flight and reason is None:
+                self._reason = "timeout"
+            self._checking.cancel()
+
+    def decide(self, *, dropped: bool = False, reason: str | None = None) -> None:
+        """What the bridge did: ``dropped`` when it took the caller back
+        because of the verdict; ``reason`` for another end (``leg_ended``,
+        ``call_ending``)."""
+        self.stop()
+        self._dropped = dropped
+        if reason is not None:
+            self._reason = reason
 
     def verdict(self) -> dict[str, Any] | None:
         """The ``handover_amd_result`` call event payload, shaped like
-        ``amd_result`` plus ``dropped``. The frozen one once
-        :meth:`freeze` ran. None when the contact never spoke."""
-        if self._frozen is not None:
-            return self._frozen or None
-        return self._payload()
-
-    def _payload(self) -> dict[str, Any] | None:
+        ``amd_result`` plus ``dropped``. None when the contact never spoke."""
         if self._spoke_at is None:
             return None
         return {
             "category": self._category.value if self._category else None,
             "transcript": self._transcript[:500] or None,
-            "reason": self._reason if self._check else "detection_unavailable",
+            "reason": self._reason,
             "delay": round(self._delay, 3) if self._delay is not None else None,
-            "dropped": False,
+            "dropped": self._dropped,
         }
 
     async def aclose(self) -> None:
+        self.stop()
         tasks = [t for t in (self._checking, self._read) if t is not None]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._pcm.clear()
+
+    def _audio_failed(self) -> None:
+        # Fail open: a read or VAD error is not a silent line.
+        self._failed = True
+        if self._spoke_at is not None and self._reason == "window_ended":
+            self._reason = "audio_error"
 
     async def _listen(self) -> None:
         stream: rtc.AudioStream | None = None
@@ -311,8 +336,7 @@ class ContactLine:
                         self._keep(event.frame)
                         vad_stream.push_frame(event.frame)
                 except Exception:
-                    # Fail open: a read error is not a silent line.
-                    self._failed = True
+                    self._audio_failed()
                     logger.warning("handover line audio read failed", exc_info=True)
                 finally:
                     vad_stream.end_input()
@@ -322,10 +346,9 @@ class ContactLine:
                 if event.type == VADEventType.START_OF_SPEECH:
                     self._on_speech()
                 elif event.type == VADEventType.END_OF_SPEECH:
-                    self._pause.set()
+                    self._on_silence()
         except Exception:
-            # Fail open: a track or VAD error is not a silent line.
-            self._failed = True
+            self._audio_failed()
             logger.warning("handover line audio unavailable", exc_info=True)
         finally:
             # The contact's audio ended (they left) or the read failed.
@@ -349,19 +372,34 @@ class ContactLine:
             del self._pcm[: len(self._pcm) - self._preroll]
 
     def _on_speech(self) -> None:
+        # Speaking again: an earlier pause no longer counts.
+        self._pause.clear()
+        now = time.monotonic()
+        if self._speech_from is None:
+            self._speech_from = now
         if self._spoke.is_set():
             return
-        self._spoke_at = time.monotonic()
+        self._spoke_at = now
         self._spoke.set()
-        # A pause before the speech is not the greeting's pause.
-        self._pause.clear()
-        if self._check is not None:
+        if self._check is not None and not self._stopped:
             self._checking = asyncio.create_task(
                 self._check_greeting(), name="handover_machine_check"
             )
 
+    def _on_silence(self) -> None:
+        if self._speech_from is not None:
+            self._speech_seconds += time.monotonic() - self._speech_from
+            self._speech_from = None
+        self._pause.set()
+
+    def _speech_so_far(self) -> float:
+        open_part = (
+            time.monotonic() - self._speech_from if self._speech_from is not None else 0
+        )
+        return self._speech_seconds + open_part
+
     async def _wait_pause(self, seconds: float) -> None:
-        """Up to ``seconds`` for a pause; one that already came counts."""
+        """Up to ``seconds`` for the line to be silent; it may already be."""
         if seconds <= 0 or self._ended.is_set():
             return
         try:
@@ -370,28 +408,48 @@ class ContactLine:
             pass
 
     async def _check_greeting(self) -> None:
+        try:
+            await self._run_checks()
+        except asyncio.CancelledError:
+            # Cancelled mid-check (the bridge stopped waiting): the verdict
+            # is the last one that finished.
+            if self._in_flight and self._reason == "window_ended":
+                self._reason = "timeout"
+            raise
+        finally:
+            self._in_flight = False
+
+    async def _run_checks(self) -> None:
         assert self._check is not None and self._spoke_at is not None
         last_start = (
             self._spoke_at + self._window - RECHECK_TIMEOUT_SECONDS
             if self._window is not None
             else None
         )
+
+        def _late() -> bool:
+            return last_start is not None and time.monotonic() > last_start
+
+        def _left() -> float:
+            if last_start is None:
+                return PAUSE_WAIT_SECONDS
+            return min(PAUSE_WAIT_SECONDS, last_start - time.monotonic())
+
         checked = 0
         started = self._spoke_at
         for n in range(MAX_CHECKS):
             if n == 0:
-                # The first pause after speech, or CHECK_EVERY_SECONDS.
-                await self._wait_pause(CHECK_EVERY_SECONDS)
+                # Enough speech first, then a pause.
+                while self._speech_so_far() < FIRST_CHECK_SPEECH_SECONDS:
+                    if self._ended.is_set() or _late():
+                        break
+                    await asyncio.sleep(0.05)
             else:
                 await asyncio.sleep(
                     max(0.0, started + CHECK_EVERY_SECONDS - time.monotonic())
                 )
-                await self._wait_pause(
-                    PAUSE_WAIT_SECONDS
-                    if last_start is None
-                    else min(PAUSE_WAIT_SECONDS, last_start - time.monotonic())
-                )
-            if last_start is not None and time.monotonic() > last_start:
+            await self._wait_pause(_left())
+            if _late():
                 # It could not finish before the bridge decides.
                 return
             if len(self._pcm) == checked:
@@ -399,23 +457,23 @@ class ContactLine:
                 return
             checked = len(self._pcm)
             started = time.monotonic()
-            # A pause from here on counts for the next check.
-            self._pause.clear()
             audio = rtc.AudioFrame(
                 data=bytes(self._pcm),
                 sample_rate=SAMPLE_RATE,
                 num_channels=1,
                 samples_per_channel=len(self._pcm) // 2,
             )
+            # Left set on cancel: _check_greeting records the timeout.
+            self._in_flight = True
             try:
                 transcript, category = await self._check(audio)
             except Exception as exc:
+                self._in_flight = False
                 # Provider error bodies can contain audio or transcripts.
                 logger.warning("handover machine check failed (%s)", type(exc).__name__)
                 self._reason = "detection_failed"
                 return
-            if self._frozen is not None:
-                return  # too late: the bridge already decided
+            self._in_flight = False
             if transcript:
                 self._transcript = transcript
             self._category = category
