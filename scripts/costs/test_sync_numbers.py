@@ -1052,15 +1052,22 @@ def test_manual_confirmed_row_keeps_block_when_new_block_is_none():
 
 
 def test_error_detail_hides_carrier_text():
-    class TwilioLike(Exception):
+    class TwilioRestException(Exception):
         status = 401
 
-    exc = TwilioLike(
+    exc = TwilioRestException(
         "HTTP 401 https://api.twilio.com/2010-04-01/Accounts/ACabc123/x.json?t=1"
     )
     detail = sync._error_detail(exc)
-    assert detail == "TwilioLike (HTTP 401)"
+    assert detail == "TwilioRestException (HTTP 401)"
     assert "ACabc123" not in detail
+
+
+def test_error_detail_ignores_status_on_other_classes():
+    class Other(Exception):
+        status = 401
+
+    assert sync._error_detail(Other("x")) == "Other"
 
 
 def test_error_detail_httpx_status():
@@ -1128,18 +1135,40 @@ def test_manual_row_requirements_change_line_is_short():
     ]
 
 
-def test_error_detail_finds_status_in_context_and_survives_cycles():
-    class Http(Exception):
-        status = 502
+def _http_503():
+    import httpx
 
-    inner = Http("x")
+    req = httpx.Request("GET", "https://x.example/a?k=SECRET")
+    return httpx.HTTPStatusError(
+        "m", request=req, response=httpx.Response(503, request=req)
+    )
+
+
+def test_error_detail_follows_cause_and_implicit_context():
     try:
         try:
-            raise inner
-        except Http:
+            raise _http_503()
+        except Exception as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError (HTTP 503)"
+    try:
+        try:
+            raise _http_503()
+        except Exception:
+            raise RuntimeError("wrapped")
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError (HTTP 503)"
+
+
+def test_error_detail_skips_suppressed_context_and_survives_cycles():
+    try:
+        try:
+            raise _http_503()
+        except Exception:
             raise RuntimeError("wrapped") from None
     except RuntimeError as outer:
-        assert sync._error_detail(outer) == "RuntimeError (HTTP 502)"
+        assert sync._error_detail(outer) == "RuntimeError"
     a, b = RuntimeError("a"), RuntimeError("b")
     a.__cause__, b.__cause__ = b, a
     assert sync._error_detail(a) == "RuntimeError"
@@ -1176,8 +1205,9 @@ def test_failure_is_logged_in_full_to_stderr(monkeypatch, capsys):
     _use(monkeypatch, Boom())
     report: list[str] = []
     sync.attach_requirements("twilio", [_row_needing()], [], report)
-    assert "secret detail" in capsys.readouterr().err
-    assert "secret detail" not in report[0]
+    err = capsys.readouterr().err
+    assert "twilio DE:local" in err and "RuntimeError" in err
+    assert "secret detail" not in err and "secret detail" not in report[0]
 
 
 def test_section_caps_lines():
@@ -1186,3 +1216,18 @@ def test_section_caps_lines():
     assert out[0] == "### X (62)" and out[-1] == "- … 2 more" and len(out) == 62
     sync._section(out, "Y", [])
     assert len(out) == 62
+
+
+def test_row_sections_are_not_capped():
+    lines = [f"CC{i}:local: changed" for i in range(70)]
+    report = {
+        "kept": [],
+        "changed": lines,
+        "added": [],
+        "vanished": [],
+        "unobserved": [],
+    }
+    out: list[str] = []
+    sync._row_sections(out, report)
+    assert out[0] == "### Changed (70)" and len(out) == 71
+    assert not any("more" in line for line in out)

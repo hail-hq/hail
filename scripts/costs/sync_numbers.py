@@ -968,19 +968,25 @@ def _error_detail(exc: Exception) -> str:
     status when the error carries one."""
     if isinstance(exc, RequirementsUnavailable):
         return str(exc)[:160]
-    todo: list[BaseException] = [exc]
-    visited: set[int] = set()
-    while todo:
-        seen = todo.pop(0)
-        if id(seen) in visited:
-            continue
-        visited.add(id(seen))
-        status = getattr(getattr(seen, "response", None), "status_code", None)
-        if status is None:
-            status = getattr(seen, "status", None)
+    import httpx  # the verification plug-ins need it; the rest of this file does not
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        status = None
+        if isinstance(cur, httpx.HTTPStatusError):
+            status = cur.response.status_code
+        elif cur.__class__.__name__ == "TwilioRestException":
+            status = getattr(cur, "status", None)
         if isinstance(status, int):
             return f"{exc.__class__.__name__} (HTTP {status})"
-        todo += [e for e in (seen.__cause__, seen.__context__) if e is not None]
+        if cur.__cause__ is not None:
+            cur = cur.__cause__
+        elif not cur.__suppress_context__:
+            cur = cur.__context__
+        else:
+            cur = None
     return exc.__class__.__name__
 
 
@@ -1032,7 +1038,11 @@ def attach_requirements(
                 provider, row["country_code"], row["number_type"]
             )
         except Exception as exc:  # one bad row must not stop the run
-            print(f"requirements failed for {provider} {key}: {exc!r}", file=sys.stderr)
+            # The logs are public: only what the PR summary shows.
+            print(
+                f"requirements failed for {provider} {key}: {_error_detail(exc)}",
+                file=sys.stderr,
+            )
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
             report.append(f"{key}: requirements failed ({_error_detail(exc)}), {kept}")
@@ -1046,6 +1056,20 @@ def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) ->
     summary.extend(f"- {line}" for line in lines[:cap])
     if len(lines) > cap:
         summary.append(f"- … {len(lines) - cap} more")
+
+
+def _row_sections(summary: list[str], report: dict[str, list[str]]) -> None:
+    """Every row change, uncapped: the reviewer must see them all."""
+    for label, key in (
+        ("Kept hand-verified rows", "kept"),
+        ("Changed", "changed"),
+        ("Added", "added"),
+        ("No longer offered (kept, noted)", "vanished"),
+        ("Not observed this run (kept as is)", "unobserved"),
+    ):
+        if report[key]:
+            summary.append(f"### {label} ({len(report[key])})")
+            summary.extend(f"- {line}" for line in report[key])
 
 
 def run_provider(
@@ -1124,14 +1148,7 @@ def run_provider(
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
-    for label, key in (
-        ("Kept hand-verified rows", "kept"),
-        ("Changed", "changed"),
-        ("Added", "added"),
-        ("No longer offered (kept, noted)", "vanished"),
-        ("Not observed this run (kept as is)", "unobserved"),
-    ):
-        _section(summary, label, report[key])
+    _row_sections(summary, report)
     _section(summary, "Requirements not refreshed", requirement_errors)
     _section(summary, "Skipped by the sync", skipped)
     return True
