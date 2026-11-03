@@ -22,7 +22,7 @@ from hailhq.core.carrier_offer import (
 from hailhq.core.number_offers import PROVIDERS
 from hailhq.core.providers.verification import get_verification_provider
 
-__all__ = ["number_options", "option_key"]
+__all__ = ["number_options", "offer_paperwork", "option_key", "option_status"]
 
 SUBJECTS = ("person", "business")
 _STATUS_RANK = {"ready": 0, "in_review": 1, "needs_check": 2}
@@ -35,12 +35,15 @@ def option_key(
     paperwork_count: int,
     monthly_cents: int,
     setup_cents: int,
-) -> tuple[int, int, int, int]:
-    """Sort key, best first: status, then buy before by request, then fewer
-    papers, then lower monthly plus setup."""
+    paperwork_known: bool = True,
+) -> tuple[int, int, int, int, int]:
+    """Sort key, best first: status, then buy before by request, then a known
+    paper list before an unknown one, then fewer papers, then lower monthly
+    plus setup."""
     return (
         _STATUS_RANK[status],
         0 if how == "buy" else 1,
+        0 if paperwork_known else 1,
         paperwork_count,
         monthly_cents + setup_cents,
     )
@@ -49,16 +52,37 @@ def option_key(
 @dataclass
 class _Candidate:
     option: SubjectOption
+    needs: bool
 
     @property
-    def key(self) -> tuple[int, int, int, int]:
+    def key(self) -> tuple[int, int, int, int, int]:
         o = self.option
         return option_key(
-            o.status, o.how, len(o.paperwork), o.monthly_cents, o.setup_cents
+            o.status,
+            o.how,
+            len(o.paperwork),
+            o.monthly_cents,
+            o.setup_cents,
+            o.paperwork_known,
         )
 
 
-def _status(
+def offer_paperwork(
+    country_code: str, number_type: str, provider: str, subject: str, needs: bool
+) -> tuple[list[PaperworkItem], bool]:
+    """The papers one subject must give for one carrier row, and whether the
+    catalog lists them. No verification needed: no papers, list known."""
+    if not needs:
+        return [], True
+    block = telephony_catalog.requirements(country_code, number_type, provider)
+    if block is None:
+        return [], False
+    side = block.get(subject) or {}
+    items = requirement_categories.paperwork(side.get("items", []))
+    return [PaperworkItem(**p) for p in items], True
+
+
+def option_status(
     needs: bool,
     by_request: bool,
     subject: str,
@@ -93,13 +117,14 @@ def _candidates(
             if row.get("available") is False:
                 continue
             needs = bool(row.get("verification_required"))
-            if needs and get_verification_provider(provider) is None:
+            by_request = bool(row.get("by_request"))
+            # Same as /quotes: no verification provider, no by-request row.
+            if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
             caps = telephony_catalog.effective_capabilities(row, provider)
             if not caps or (sms_only and "sms" not in caps):
                 continue
             nt = row["number_type"]
-            by_request = bool(row.get("by_request"))
             block = (
                 telephony_catalog.requirements(country_code, nt, provider)
                 if needs
@@ -118,7 +143,7 @@ def _candidates(
                     papers = requirement_categories.paperwork(side.get("items", []))
                 else:
                     papers = []
-                status, v = _status(needs, by_request, subject, found)
+                status, v = option_status(needs, by_request, subject, found)
                 option = SubjectOption(
                     allowed=True,
                     how="by_request" if by_request else "buy",
@@ -138,14 +163,15 @@ def _candidates(
                     more_options=0,
                 )
                 out.setdefault(nt, {}).setdefault(subject, []).append(
-                    _Candidate(option)
+                    _Candidate(option, needs)
                 )
     return out
 
 
-def _best(cands: list[_Candidate]) -> SubjectOption:
+def _best(cands: list[_Candidate]) -> _Candidate:
     best = min(cands, key=lambda c: c.key)
-    return best.option.model_copy(update={"more_options": len(cands) - 1})
+    option = best.option.model_copy(update={"more_options": len(cands) - 1})
+    return _Candidate(option, best.needs)
 
 
 def number_options(
@@ -173,12 +199,17 @@ def number_options(
         row: dict[str, SubjectOption] = {}
         for s in SUBJECTS:
             if s in best:
-                row[s] = best[s]
-                if best[s].paperwork or not best[s].paperwork_known:
+                row[s] = best[s].option
+                if best[s].needs:
                     needs_paperwork = True
             else:
-                row[s] = best[other[s]].model_copy(
-                    update={"allowed": False, "reason": reasons[s]}
+                row[s] = best[other[s]].option.model_copy(
+                    update={
+                        "allowed": False,
+                        "reason": reasons[s],
+                        "more_options": 0,
+                        "verification": None,
+                    }
                 )
         types.append(TypeOptions(number_type=nt, for_=row))
     return NumberOptionsResponse(

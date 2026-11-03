@@ -233,3 +233,50 @@ def test_no_carrier_name_in_json(catalog):
     catalog(twilio=[row(**need())])
     text = number_options("CH", {}).model_dump_json(by_alias=True)
     assert '"for"' in text and "twilio" not in text.lower()
+
+
+def test_by_request_row_without_verification_provider_skipped(catalog, monkeypatch):
+    catalog(
+        didww=[row("US", by_request=True)],
+        twilio=[row("US", usd="5.00")],
+    )
+    monkeypatch.setattr(
+        mod,
+        "get_verification_provider",
+        lambda name: None if name == "didww" else object(),
+    )
+    o = one(number_options("US", {}))
+    assert o.how == "buy" and o.more_options == 0
+
+
+def test_disallowed_copy_has_no_more_options_or_verification(catalog):
+    catalog(
+        twilio=[
+            row(**need(person={"accepted": False, "items": []})),
+        ],
+        telnyx=[row(usd="2.00", **need(person={"accepted": False, "items": []}))],
+    )
+    v = ov("approved", subject="business", name="Acme")
+    r = number_options("CH", {("twilio", "CH", "local"): [v]})
+    b, p = one(r, subject="business"), one(r)
+    assert b.more_options == 1 and b.verification is not None
+    assert p.allowed is False
+    assert p.more_options == 0 and p.verification is None
+
+
+def test_unknown_paperwork_ranks_after_known(catalog):
+    catalog(
+        twilio=[row(usd="1.00", verification_required=True)],
+        telnyx=[row(usd="9.00", **need())],
+    )
+    o = one(number_options("CH", {}))
+    assert o.paperwork_known is True and o.monthly_cents == 900
+    assert option_key("needs_check", "buy", 0, 1, 0, False) > option_key(
+        "needs_check", "buy", 5, 1, 0
+    )
+
+
+def test_needs_paperwork_follows_verification_required(catalog):
+    empty = {"accepted": True, "items": []}
+    catalog(twilio=[row(**need(person=empty, business=empty))])
+    assert number_options("CH", {}).needs_paperwork is True
