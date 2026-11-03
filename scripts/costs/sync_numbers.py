@@ -747,7 +747,7 @@ def merge(
         elif changed:
             report["changed"].append(
                 f"{key}: "
-                + ", ".join(f"{k} {prev.get(k)} -> {n.get(k)}" for k in changed)
+                + ", ".join(_change(k, prev.get(k), n.get(k)) for k in changed)
             )
         numbers.append(
             {
@@ -990,6 +990,26 @@ def _error_detail(exc: Exception) -> str:
     return exc.__class__.__name__
 
 
+def _change(key: str, old: Any, new: Any) -> str:
+    """One changed field of a carrier row, for the "Changed" section. A
+    requirements block is summarized, not printed whole."""
+    if key == "requirements":
+        return f"requirements {_block_summary(old)} -> {_block_summary(new)}"
+    return f"{key} {old} -> {new}"
+
+
+SUMMARY_LIMIT = 60_000  # GitHub allows 65,536 characters in a PR body
+SUMMARY_CUT = "… summary cut at 60,000 characters. See the file diff for every row.\n"
+
+
+def _cap_summary(text: str) -> str:
+    """Cut at the last full line under the limit, with a note."""
+    if len(text) <= SUMMARY_LIMIT:
+        return text
+    cut = text[:SUMMARY_LIMIT].rsplit("\n", 1)[0]
+    return cut + "\n" + SUMMARY_CUT
+
+
 def _block_summary(block: dict | None) -> str:
     if not block:
         return "none"
@@ -1038,14 +1058,14 @@ def attach_requirements(
                 provider, row["country_code"], row["number_type"]
             )
         except Exception as exc:  # one bad row must not stop the run
+            detail = _error_detail(exc)
             # The logs are public: only what the PR summary shows.
             print(
-                f"requirements failed for {provider} {key}: {_error_detail(exc)}",
-                file=sys.stderr,
+                f"requirements failed for {provider} {key}: {detail}", file=sys.stderr
             )
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
-            report.append(f"{key}: requirements failed ({_error_detail(exc)}), {kept}")
+            report.append(f"{key}: requirements failed ({detail}), {kept}")
 
 
 def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:
@@ -1187,7 +1207,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except CatalogShrunk as exc:
             summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
-    text = "\n".join(summary) + "\n"
+    text = _cap_summary("\n".join(summary) + "\n")
     print(text)
     if args.summary_file:
         args.summary_file.write_text(text)

@@ -1231,3 +1231,50 @@ def test_row_sections_are_not_capped():
     sync._row_sections(out, report)
     assert out[0] == "### Changed (70)" and len(out) == 71
     assert not any("more" in line for line in out)
+
+
+def test_carrier_row_requirements_change_is_short():
+    new = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": False, "items": []},
+    }
+    prev = {
+        **_manual_prev(),
+        "verification_method": "carrier-sync",
+        "available": True,
+    }
+    _, report = sync.merge(
+        [prev], [{**prev, "requirements": new}], "2026-11-03", "u", "bot"
+    )
+    assert report["changed"] == [
+        "DE:local: requirements none -> person id_document | business not allowed"
+    ]
+
+
+def test_summary_is_cut_under_the_pr_body_limit():
+    block = {
+        "person": {"accepted": True, "items": ["id_document", "birth_date"]},
+        "business": {"accepted": True, "items": ["company_name"]},
+    }
+    prevs = [
+        {
+            **_manual_prev(),
+            "country_code": f"{a}{b}",
+            "verification_method": "carrier-sync",
+        }
+        for a in "ABCDEFGHIJ"
+        for b in "ABCDEFGHIJ"
+    ][:100]
+    fetched = [{**p, "requirements": block, "usd_per_month": "1.00"} for p in prevs]
+    _, report = sync.merge(prevs, fetched, "2026-11-03", "u", "bot")
+    out: list[str] = []
+    sync._row_sections(out, report)
+    full = "\n".join(out) + "\n"
+    assert len(full) < sync.SUMMARY_LIMIT  # 100 short lines fit
+    big = "\n".join(f"- line {i} " + "x" * 200 for i in range(500)) + "\n"
+    cut = sync._cap_summary(big)
+    assert len(cut) <= sync.SUMMARY_LIMIT + len(sync.SUMMARY_CUT) + 1
+    assert cut.endswith(sync.SUMMARY_CUT)
+    body = cut[: -len(sync.SUMMARY_CUT)].rstrip("\n")
+    assert body.splitlines()[-1].endswith("x" * 200)  # last line is whole
+    assert sync._cap_summary("short\n") == "short\n"
