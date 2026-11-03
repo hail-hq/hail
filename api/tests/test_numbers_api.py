@@ -1011,3 +1011,50 @@ async def test_quotes_paperwork_from_catalog(
 async def test_quotes_unknown_subject_is_422(client, org_and_key) -> None:
     resp = await _quotes(client, org_and_key[2], subject_type="robot")
     assert resp.status_code == 422
+
+
+async def test_quotes_recommend_only_offers_ready_for_the_subject(
+    client, org_and_key, async_session, ch_two_carriers, monkeypatch
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.carrier_offer import Approval, CarrierOffer
+    from hailhq.core.models import CarrierVerification
+
+    org_id, _, key = org_and_key
+    ver = CarrierVerification(
+        organization_id=org_id,
+        provider="twilio",
+        country_code="CH",
+        number_type="local",
+        subject_type="business",
+        subject_name="Acme AG",
+        purpose="number",
+        state="approved",
+        provider_refs={},
+        requirements_version="x",
+    )
+    async_session.add(ver)
+    await async_session.commit()
+    offer = CarrierOffer(
+        provider="twilio",
+        e164="+41215550001",
+        country_code="CH",
+        number_type="local",
+        capabilities=["voice"],
+        monthly_cents=100,
+        setup_cents=0,
+        readiness="ready",
+        subject_types=["person", "business"],
+        approvals=[Approval(row_id=ver.id, subject_type="business")],
+    )
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    plain = (await _quotes(client, key)).json()
+    assert plain["recommended_quote_id"] is not None
+    person = (await _quotes(client, key, subject_type="person")).json()
+    assert person["recommended_quote_id"] is None
+    business = (await _quotes(client, key, subject_type="business")).json()
+    assert business["recommended_quote_id"] is not None

@@ -871,8 +871,11 @@ async def quote_numbers(
             ", ".join(unavailable),
         )
     paperwork: dict[int, list[PaperworkItem]] = {}
+    ready_for_subject: set[int] = set()
     if body.subject_type:
-        offers, paperwork = _for_subject(offers, body.subject_type, verifications)
+        offers, paperwork, ready_for_subject = _for_subject(
+            offers, body.subject_type, verifications
+        )
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -903,8 +906,17 @@ async def quote_numbers(
             offer.requirements = []
     await db.commit()
     # Never a by-request offer: it cannot be bought here.
+    # With a subject, only an offer ready for that subject: an approval of the
+    # other subject would make the purchase use the wrong verification.
     recommended = next(
-        (o for o in offers if o.readiness == "ready" and not o.by_request), None
+        (
+            o
+            for o in offers
+            if o.readiness == "ready"
+            and not o.by_request
+            and (not body.subject_type or id(o) in ready_for_subject)
+        ),
+        None,
     )
     # The public offer drops the carrier and its ids; the stored quote above
     # keeps them for the purchase.
@@ -925,12 +937,13 @@ def _for_subject(
     offers: list[CarrierOffer],
     subject: str,
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
-) -> tuple[list[CarrierOffer], dict[int, list[PaperworkItem]]]:
+) -> tuple[list[CarrierOffer], dict[int, list[PaperworkItem]], set[int]]:
     """Keep the offers that accept ``subject``, best first by the same order
     as GET /numbers/options, and the papers each one needs from that subject
-    (keyed by ``id(offer)``)."""
+    (keyed by ``id(offer)``), and the ids of offers ready for ``subject``."""
     ranked: list[tuple[tuple[int, ...], CarrierOffer]] = []
     papers: dict[int, list[PaperworkItem]] = {}
+    ready: set[int] = set()
     for offer in offers:
         if offer.subject_types and subject not in offer.subject_types:
             continue
@@ -946,6 +959,8 @@ def _for_subject(
         )
         status, _ = option_status(needs, offer.by_request, subject, usable)
         papers[id(offer)] = items
+        if status == "ready":
+            ready.add(id(offer))
         key = option_key(
             status,
             "by_request" if offer.by_request else "buy",
@@ -957,7 +972,7 @@ def _for_subject(
         ranked.append((key, offer))
     # A stable sort keeps the live order for offers that tie.
     ranked.sort(key=lambda pair: pair[0])
-    return [offer for _, offer in ranked], papers
+    return [offer for _, offer in ranked], papers, ready
 
 
 def _usable_verifications(
