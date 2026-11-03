@@ -920,6 +920,14 @@ def _requirements_block(
                 found = _run(
                     plugin.requirements_per_group(country_code, number_type, subject)
                 )
+                if not found:
+                    # The caller only asks for rows marked verification_required.
+                    # No group at all contradicts that: an error, so the sync
+                    # keeps the last good block.
+                    raise RuntimeError(
+                        f"DIDWW lists no requirement group for {country_code} "
+                        f"{number_type}"
+                    )
             else:
                 found = [_run(plugin.requirements(country_code, number_type, subject))]
         except UnsupportedSubjectType:

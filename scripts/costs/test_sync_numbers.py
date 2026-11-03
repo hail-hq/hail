@@ -912,7 +912,7 @@ def test_didww_union_of_groups(monkeypatch):
                         fields=("birth_date",),
                     ),
                 ]
-            return []
+            return [_req("business")]
 
     _use(monkeypatch, Didww())
     block = sync.fetch_requirements("didww", "DE", "local")
@@ -1019,3 +1019,21 @@ def test_requirements_change_is_reported_and_bumps_last_changed():
     numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
     assert numbers[0]["last_changed_at"] == "2026-11-03"
     assert any("requirements" in line for line in report["changed"])
+
+
+def test_didww_no_groups_keeps_last_good_block(monkeypatch):
+    class Didww:
+        async def requirements_per_group(self, cc, nt, subject):
+            return []
+
+    _use(monkeypatch, Didww())
+    good = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": []},
+    }
+    existing = [{**_row_needing(), "requirements": good}]
+    row = _row_needing()
+    report: list[str] = []
+    sync.attach_requirements("didww", [row], existing, report)
+    assert row["requirements"] == good
+    assert len(report) == 1 and "DE:local" in report[0]
