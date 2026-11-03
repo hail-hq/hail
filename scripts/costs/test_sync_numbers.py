@@ -1305,4 +1305,6 @@ def test_carrier_without_verification_does_not_stop_the_run(tmp_path, monkeypatc
         "- telnyx: failed, verification is not configured "
         "(check the carrier credentials) (catalog left unchanged)"
     ) in text
+    assert "## Carriers not synced" in text
+    assert text.index("## Carriers not synced") < text.index("## didww")
     assert "## telnyx" not in text

@@ -1199,23 +1199,31 @@ def main(argv: list[str] | None = None) -> int:
     providers = PROVIDERS if args.provider == "all" else (args.provider,)
     ran = 0
     shared_dial_codes: dict[str, str] = {}
+    not_synced: list[str] = []
     for provider in providers:
         try:
             ran += run_provider(
                 provider, config, args.costs_dir, today, summary, shared_dial_codes
             )
         except requests.RequestException as exc:
-            summary.append(
-                f"- {provider}: failed, {exc.__class__.__name__} {getattr(exc.response, 'status_code', '')} (catalog left unchanged)"
+            not_synced.append(
+                f"{provider}: failed, {exc.__class__.__name__} {getattr(exc.response, 'status_code', '')} (catalog left unchanged)"
             )
         except CatalogShrunk as exc:
-            summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
+            not_synced.append(f"{provider}: failed, {exc} (catalog left unchanged)")
         except VerificationUnavailable:
             # Raised before any write: the provider's file stays as it was.
-            summary.append(
-                f"- {provider}: failed, verification is not configured "
+            not_synced.append(
+                f"{provider}: failed, verification is not configured "
                 "(check the carrier credentials) (catalog left unchanged)"
             )
+    if not_synced:
+        # At the top, so the reviewer sees it before the carriers that ran.
+        summary[2:2] = [
+            "## Carriers not synced",
+            *(f"- {line}" for line in not_synced),
+            "",
+        ]
     text = _cap_summary("\n".join(summary) + "\n")
     print(text)
     if args.summary_file:

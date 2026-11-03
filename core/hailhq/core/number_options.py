@@ -169,7 +169,7 @@ def _candidates(
                 continue
             # Same as /quotes: one rule for what a by-request row can be quoted for.
             if by_request and not by_request_quotable(
-                row, provider, ["voice", "sms"] if sms_only else ["voice"]
+                caps, ["voice", "sms"] if sms_only else ["voice"]
             ):
                 continue
             nt = row["number_type"]

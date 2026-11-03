@@ -60,9 +60,9 @@ def effective_capabilities(row: dict, provider: str) -> list[str]:
     deliver it, so it is never promised. An SMS-only row at such a carrier
     gives an empty list."""
     caps = []
-    if row["voice"]:
+    if row.get("voice", False):
         caps.append("voice")
-    if row["sms"] and _sms_route_exists(provider):
+    if row.get("sms", False) and _sms_route_exists(provider):
         caps.append("sms")
     return caps
 
