@@ -1141,15 +1141,6 @@ async def test_a_huge_references_header_cannot_break_the_thread_lookup(async_ses
     assert next(r.body_text for r in thread) == "Before"
 
 
-def test_reply_from_address_ignores_sender_written_headers():
-    assert (
-        email_agent.reply_from_address(EmailDomain(kind="hail_mail", domain=ADDRESS))
-        == ADDRESS
-    )
-    custom = EmailDomain(kind="custom", domain="acme.com")
-    assert email_agent.reply_from_address(custom) == "noreply@acme.com"
-
-
 @pytest.mark.asyncio
 async def test_claim_lease_retry_and_failure(async_session):
     await _seed(async_session)

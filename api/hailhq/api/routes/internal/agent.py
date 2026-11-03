@@ -60,18 +60,17 @@ from hailhq.core.compliance_gate import (
     normalize_recipient,
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
-from hailhq.core.db import get_session, org_lock
+from hailhq.core.db import get_session, key_lock, org_lock
 from hailhq.core.directory import resolve_member_emails, resolve_member_phones
 from hailhq.core.email_agent import (
     MAX_REPLY_CHARS as EMAIL_MAX_REPLY_CHARS,
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
-    answers_emails,
     prior_reply,
-    reply_from_address,
     reply_references,
     reply_subject,
+    routed_agent,
     run_refusal,
     stamp_skip,
     tool_sends_for_reply,
@@ -117,7 +116,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -584,10 +583,7 @@ async def agent_reply_sms(
     # per-thread reply cap below is exact. A lock on the inbound row (FOR
     # UPDATE) would deadlock with the worker's claim, hence an advisory lock
     # keyed by thread.
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": thread_lock_key(inbound)},
-    )
+    await key_lock(db, thread_lock_key(inbound))
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
     # The oldest row wins, a belt for rows written before the lock existed.
     prior = await prior_reply(db, inbound)
@@ -710,35 +706,22 @@ def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
 
 
 async def _routed_email(
-    db: AsyncSession, email_id: UUID
-) -> tuple[Email, EmailDomain, Agent] | None:
-    """The inbound row, its address, and the agent that answers it now. None
-    when any of them is gone or the agent stopped answering email. Routing can
-    change while the model writes."""
-    inbound = await db.get(Email, email_id)
-    if inbound is None or inbound.direction != "inbound":
-        return None
-    domain = (
-        await db.get(EmailDomain, inbound.email_domain_id)
-        if inbound.email_domain_id
-        else None
-    )
-    agent = (
-        await db.get(Agent, domain.email_agent_id)
-        if domain is not None and domain.email_agent_id
-        else None
-    )
-    if domain is None or agent is None or not answers_emails(agent):
+    db: AsyncSession, inbound: Email
+) -> tuple[EmailDomain, Agent] | None:
+    """The inbound row's address and the agent that answers it now, or None.
+    Routing can change while the model writes."""
+    routed = await routed_agent(db, inbound)
+    if routed is None:
         return None
     await bind_organization(db, inbound.organization_id)
     tag_context(
         channel="email",
         direction="inbound",
-        agent_id=agent.id,
+        agent_id=routed[1].id,
         email_id=inbound.id,
         from_=inbound.from_address,
     )
-    return inbound, domain, agent
+    return routed
 
 
 @router.post("/reply-email", response_model=AgentReplyEmailResponse)
@@ -765,10 +748,7 @@ async def agent_reply_email(
 
     # One request per thread at a time: a retry that races the original sees
     # the reply below, and the thread cap is exact.
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": email_thread_lock_key(inbound)},
-    )
+    await key_lock(db, email_thread_lock_key(inbound))
     await db.refresh(inbound)
     # Idempotent per inbound row: the worker retries with the same email_id.
     prior = await prior_reply(db, inbound)
@@ -783,10 +763,14 @@ async def agent_reply_email(
 
     # After the checks above: the route can go while the first send is running,
     # and that send must not be reported as skipped.
-    routed = await _routed_email(db, body.email_id)
+    routed = await _routed_email(db, inbound)
     if routed is None:
         return await skip("no_agent")
-    inbound, domain, agent = routed
+    domain, agent = routed
+    if prior is None and inbound.agent_reply_state != "processing":
+        # The worker lost its claim: the row expired, failed, or was settled.
+        # Its final state stands, so nothing is stamped.
+        return AgentReplyEmailResponse(ok=False, state="skipped", reason="not_claimed")
     org = inbound.organization_id
     recipient = normalize_address(inbound.from_address)
 
@@ -842,7 +826,8 @@ async def agent_reply_email(
         organization_id=org,
         email_domain_id=domain.id,
         agent_id=agent.id,
-        from_address=reply_from_address(domain),
+        # Never To or Cc: the sender writes those headers.
+        from_address=from_address_for(domain),
         from_name=agent.name,
         to_addresses=[recipient],
         subject=reply_subject(inbound.subject),
@@ -940,20 +925,17 @@ async def _email_run(
     inbound = await db.get(Email, body.inbound_email_id)
     if inbound is None or inbound.direction != "inbound":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": email_thread_lock_key(inbound)},
-    )
+    await key_lock(db, email_thread_lock_key(inbound))
     await db.refresh(inbound)
     prior = await _prior_send(
         db, model, inbound.organization_id, body.tool_invocation_id
     )
     if prior is not None:
         return _replayed_send(prior)
-    routed = await _routed_email(db, body.inbound_email_id)
+    routed = await _routed_email(db, inbound)
     if routed is None or inbound.agent_reply_state != "processing":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
-    inbound, domain, agent = routed
+    domain, agent = routed
     refusal = await run_refusal(db, domain, inbound, count_own_sends=True)
     if refusal == "thread_cap":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
