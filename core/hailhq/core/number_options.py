@@ -167,6 +167,9 @@ def _candidates(
             caps = telephony_catalog.effective_capabilities(row, provider)
             if not caps or (sms_only and "sms" not in caps):
                 continue
+            # Same as /quotes: support orders only numbers that take calls.
+            if by_request and "voice" not in caps:
+                continue
             nt = row["number_type"]
             block = (
                 telephony_catalog.requirements(country_code, nt, provider)
