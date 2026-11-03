@@ -9,7 +9,7 @@ from uuid import UUID
 
 import phonenumbers
 from hailhq.core.schemas import NumberType
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SubjectType = Literal["person", "business"]
 
@@ -187,3 +187,68 @@ class NumberQuotesResponse(BaseModel):
     expires_at: datetime = Field(
         description="UTC expiry of these persisted quotes; request fresh offers afterward."
     )
+
+
+class PaperworkItem(BaseModel):
+    key: str = Field(description="Fixed paper category key, such as id_document.")
+    label: str = Field(description="Short text to show for that category.")
+
+
+class OptionVerification(BaseModel):
+    id: UUID = Field(description="Hail verification id.")
+    subject_name: str | None = Field(
+        default=None, description="Name of the person or company, when known."
+    )
+    state: str = Field(description="State of that verification.")
+
+
+class SubjectOption(BaseModel):
+    """The best way for one subject (person or business) to get one type."""
+
+    allowed: bool = Field(
+        description="False when no option lets this subject have this number type. The other fields then describe the other subject's best option."
+    )
+    reason: Literal["company_only", "person_only"] | None = Field(
+        default=None, description="Why allowed is false, else null."
+    )
+    how: Literal["buy", "by_request"] = Field(
+        description="'buy' in the console, or 'by_request' (support orders it)."
+    )
+    monthly_cents: int = Field(description="Catalog monthly price in USD cents.")
+    setup_cents: int = Field(description="Catalog one-time setup price in USD cents.")
+    capabilities: list[Literal["voice", "sms"]] = Field(
+        description="What this option can do."
+    )
+    paperwork: list[PaperworkItem] = Field(
+        description="Paper categories this subject needs. Empty when none, or when unknown."
+    )
+    paperwork_known: bool = Field(
+        description="False when the list is not known yet. The list is then empty."
+    )
+    status: Literal["ready", "in_review", "needs_check"] = Field(
+        description="ready: no papers needed, or a verification covers it. in_review: a verification is under review. needs_check: papers are needed."
+    )
+    verification: OptionVerification | None = Field(
+        default=None,
+        description="The verification behind ready or in_review, else null.",
+    )
+    more_options: int = Field(
+        description="How many other options this subject has for this type."
+    )
+
+
+class TypeOptions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    number_type: str = Field(description="local, mobile, national or toll_free.")
+    for_: dict[Literal["person", "business"], SubjectOption] = Field(
+        alias="for", description="The best option for each subject."
+    )
+
+
+class NumberOptionsResponse(BaseModel):
+    country_code: str = Field(description="ISO alpha-2 country code.")
+    needs_paperwork: bool = Field(
+        description="False when no type needs papers for anyone."
+    )
+    types: list[TypeOptions] = Field(description="One row per number type.")

@@ -45,6 +45,7 @@ from hailhq.api.routes.verifications import (
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
 from hailhq.core.carrier_offer import (
     CarrierOffer,
+    NumberOptionsResponse,
     NumberQuotesResponse,
     OfferVerification,
     QuoteOffer,
@@ -52,6 +53,7 @@ from hailhq.core.carrier_offer import (
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
+from hailhq.core.number_options import number_options
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
@@ -550,6 +552,38 @@ async def list_number_regions(
     ``POST /numbers/quotes``. In the US and Canada a city search needs one:
     city names repeat across states."""
     return REGIONS_RESPONSE
+
+
+# Declared before "/{number_id}": that route would read "options" as an id.
+@router.get(
+    "/options",
+    response_model=NumberOptionsResponse,
+    response_model_by_alias=True,
+)
+async def get_number_options(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    country_code: Annotated[
+        str,
+        Query(
+            min_length=2,
+            max_length=2,
+            pattern="^[A-Za-z]{2}$",
+            description="ISO alpha-2 country code, such as CH.",
+        ),
+    ],
+    sms_only: Annotated[
+        bool,
+        Query(description="True: only count options that can send and receive SMS."),
+    ] = False,
+) -> NumberOptionsResponse:
+    """The number types sold in a country, one row each. For a person and for
+    a business it gives the best option: price, capabilities, the papers
+    needed, and whether this organization already has them verified. Reads
+    the bundled catalog and your verifications. It calls no carrier, so
+    prices are catalog prices and the live quote may differ slightly."""
+    verifications = await _offer_verifications(db, principal.organization_id)
+    return number_options(country_code.upper(), verifications, sms_only)
 
 
 @router.get(

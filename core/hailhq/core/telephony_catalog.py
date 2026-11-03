@@ -17,6 +17,7 @@ from pathlib import Path
 __all__ = [
     "by_request_row",
     "capabilities",
+    "effective_capabilities",
     "monthly_price",
     "requirements",
     "rows",
@@ -46,15 +47,34 @@ def _capability_fees(path: Path) -> tuple[dict, ...]:
     return tuple(json.loads(path.read_text()).get("capability_monthly_fees", []))
 
 
+def _sms_route_exists(provider: str) -> bool:
+    from hailhq.core.carrier_routing import CARRIERS
+
+    return provider not in CARRIERS or CARRIERS[provider].sms_route is not None
+
+
+def effective_capabilities(row: dict, provider: str) -> list[str]:
+    """What Hail can deliver on this catalog row: ``voice`` and/or ``sms``.
+    Hail routes no SMS through a carrier whose ``sms_route`` is None. Its
+    catalog row may list SMS, because the carrier sells it; Hail cannot
+    deliver it, so it is never promised. An SMS-only row at such a carrier
+    gives an empty list."""
+    caps = []
+    if row["voice"]:
+        caps.append("voice")
+    if row["sms"] and _sms_route_exists(provider):
+        caps.append("sms")
+    return caps
+
+
 def capabilities(
     country_code: str, number_type: str, provider: str = "auto"
 ) -> dict | None:
     """What a number of this kind can do at ``provider``, or None when that
     carrier does not sell it. 'auto' answers from the first carrier the API
     can buy from that lists it."""
-    # Imported here: carrier_routing imports the carrier adapters, and
-    # number_offers imports carrier_routing.
-    from hailhq.core.carrier_routing import CARRIERS
+    # Imported here: number_offers imports carrier_routing, which imports
+    # the carrier adapters.
     from hailhq.core.number_offers import PROVIDERS
 
     # Only carriers the API can buy from.
@@ -68,14 +88,12 @@ def capabilities(
         # orders a by_request number by hand.
         if row.get("receive_only") or row.get("by_request"):
             continue
-        # Hail routes no SMS through this carrier. Its catalog row may list
-        # SMS, because the carrier sells it; Hail cannot deliver it, so it
-        # is never promised.
-        if name in CARRIERS and CARRIERS[name].sms_route is None:
-            if not row["voice"]:
-                continue  # an SMS-only number Hail cannot use at this carrier
-            return {"voice": True, "sms": False, "mms": False}
-        return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
+        caps = effective_capabilities(row, name)
+        if not caps and not _sms_route_exists(name):
+            continue  # an SMS-only number Hail cannot use at this carrier
+        # No SMS route also means no MMS.
+        mms = row["mms"] and _sms_route_exists(name)
+        return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 
 

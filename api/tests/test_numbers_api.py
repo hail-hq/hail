@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 import pytest
@@ -782,3 +783,90 @@ async def test_same_key_replay_after_mismatch_returns_cached_409(buy_number):
     assert first.status_code == second.status_code == 409
     assert first.json() == second.json()
     buy_number.purchase.assert_not_awaited()
+
+
+@pytest.fixture
+def ch_catalog(pinned_catalog, tmp_path, monkeypatch):
+    from hailhq.core import number_options as number_options_mod
+
+    row = {
+        "country_code": "CH",
+        "number_type": "local",
+        "usd_per_month": "1.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "requirements": {
+            "person": {"accepted": True, "items": ["id_document"]},
+            "business": {"accepted": True, "items": ["company_name"]},
+        },
+    }
+    (tmp_path / "twilio.json").write_text(json.dumps({"version": 3, "numbers": [row]}))
+    (tmp_path / "didww.json").write_text(json.dumps({"version": 3, "numbers": []}))
+    telephony_catalog._load.cache_clear()
+    monkeypatch.setattr(
+        number_options_mod, "get_verification_provider", lambda name: object()
+    )
+
+
+async def test_number_options_lists_types_without_carrier_names(
+    client, org_and_key, async_session, ch_catalog
+) -> None:
+    from hailhq.core.models import CarrierVerification
+
+    org_id, _, plaintext = org_and_key
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="twilio",
+            country_code="CH",
+            number_type="local",
+            subject_type="business",
+            subject_name="Acme AG",
+            purpose="number",
+            state="approved",
+            provider_refs={},
+            requirements_version="x",
+        )
+    )
+    await async_session.commit()
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "ch"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["country_code"] == "CH" and body["needs_paperwork"] is True
+    (t,) = body["types"]
+    assert t["number_type"] == "local"
+    assert t["for"]["person"]["status"] == "needs_check"
+    assert t["for"]["person"]["paperwork"] == [
+        {"key": "id_document", "label": "ID card or passport"}
+    ]
+    assert t["for"]["business"]["status"] == "ready"
+    assert t["for"]["business"]["verification"]["subject_name"] == "Acme AG"
+    assert not re.search("twilio|telnyx|didww", resp.text, re.I)
+
+
+async def test_number_options_bad_country_is_422(client, org_and_key) -> None:
+    _, _, plaintext = org_and_key
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "C"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_number_options_requires_auth(client) -> None:
+    resp = await client.get("/numbers/options", params={"country_code": "CH"})
+    assert resp.status_code == 401
+
+
+def test_number_options_openapi_uses_for_key() -> None:
+    from hailhq.api.main import app
+
+    schemas = app.openapi()["components"]["schemas"]
+    assert "for" in schemas["TypeOptions"]["properties"]
