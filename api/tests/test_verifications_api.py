@@ -7,6 +7,7 @@ A fake carrier stands in for Twilio so nothing here depends on it.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -3111,6 +3112,7 @@ async def test_attach_reads_the_retry_state_under_the_lock(
         "registration_id": str(row.id),
         "wait_hours": 1,
         "retry_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "reason_hash": _reason_hash("carrier refused"),
     }
     async with session_scope() as other:
         await other.execute(
@@ -4728,6 +4730,10 @@ async def _end_the_wait(async_session, number: PhoneNumber) -> None:
     await async_session.commit()
 
 
+def _reason_hash(reason: str) -> str:
+    return hashlib.sha256(reason.encode()).hexdigest()[:16]
+
+
 async def _audits(async_session, action: str) -> list[AuditLog]:
     result = await async_session.execute(
         select(AuditLog).where(AuditLog.action == action).order_by(AuditLog.occurred_at)
@@ -4934,6 +4940,333 @@ async def test_a_refused_attach_at_approval_is_audited_once(
     )
     assert number.provisioning_metadata["sms_attach_refused"]["wait_hours"] == 2
     assert len(await _audits(async_session, "verification.sms_attach_refused")) == 1
+
+
+async def _person_twilio_row(async_session, org_id, monkeypatch, refused: set[str]):
+    """An approved person registration on Twilio, with enable-sms wired to
+    the fake carrier. The carrier refuses the resource ids in ``refused``;
+    returns the resource ids it accepted."""
+    from hailhq.api.routes import numbers as numbers_routes
+
+    row = CarrierVerification(
+        organization_id=org_id,
+        provider="twilio",
+        purpose="sms",
+        country_code="US",
+        number_type="local",
+        subject_type="person",
+        state="approved",
+        provider_refs={"campaign_sid": "QE1", "messaging_service_sid": "MG1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    carrier = FakeSmsCarrier()
+    monkeypatch.setattr(
+        numbers_routes,
+        "get_verification_provider",
+        lambda name, purpose="number": carrier if purpose == "sms" else None,
+    )
+    tried: list[str] = []
+
+    async def attach(refs, *, provider_resource_id, e164):
+        tried.append(provider_resource_id)
+        if provider_resource_id in refused:
+            raise RuntimeError("carrier refused")
+
+    monkeypatch.setattr(carrier, "attach_number", attach)
+    return row, tried
+
+
+async def test_enable_sms_tries_a_persons_next_number_while_the_oldest_is_refused(
+    client, org_and_key, async_session, sms_mock, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    oldest = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    third = await _us_number(
+        async_session, org_id, "+15125550102", provider="twilio", resource="PNC"
+    )
+    row, tried = await _person_twilio_row(
+        async_session, org_id, monkeypatch, refused={"PNA"}
+    )
+
+    resp = await client.post(f"/numbers/{oldest.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(f"/numbers/{second.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert tried == ["PNA", "PNB"]
+    await async_session.refresh(second)
+    assert second.sms_registration_id == row.id
+    assert "sms_attach_refused" not in second.provisioning_metadata
+
+    # The registration now holds its one number: no other number joins it.
+    for number in (oldest, third):
+        resp = await client.post(f"/numbers/{number.id}/enable-sms", headers=_auth(key))
+        assert resp.status_code == 200, resp.text
+    assert tried == ["PNA", "PNB"]
+    on = (
+        await async_session.execute(
+            select(PhoneNumber.provider_resource_id).where(
+                PhoneNumber.sms_registration_id == row.id
+            )
+        )
+    ).scalars()
+    assert list(on) == ["PNB"]
+
+
+async def test_enable_sms_does_not_skip_a_persons_untried_oldest_number(
+    client, org_and_key, async_session, sms_mock, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    _, tried = await _person_twilio_row(
+        async_session, org_id, monkeypatch, refused=set()
+    )
+    resp = await client.post(f"/numbers/{second.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert tried == []
+    await async_session.refresh(second)
+    assert second.sms_registration_id is None
+
+
+async def test_a_persons_next_number_reads_the_others_under_the_lock(
+    org_and_key, async_session, monkeypatch
+) -> None:
+    # This session loaded the refused oldest number; then another request
+    # attached it. The next number must not join as a second one.
+    org_id, _, _ = org_and_key
+    oldest = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    row, _ = await _person_twilio_row(async_session, org_id, monkeypatch, refused=set())
+    oldest.provisioning_metadata = {
+        "sms_attach_refused": {
+            "registration_id": str(row.id),
+            "wait_hours": 1,
+            "retry_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "reason_hash": _reason_hash("carrier refused"),
+        }
+    }
+    await async_session.commit()
+    await async_session.refresh(oldest)
+    assert oldest.sms_registration_id is None
+    async with session_scope() as other:
+        await other.execute(
+            update(PhoneNumber)
+            .where(PhoneNumber.id == oldest.id)
+            .values(sms_registration_id=row.id, provisioning_metadata={})
+        )
+        await other.commit()
+
+    carrier = FakeSmsCarrier()
+    await sms_registration.attach_if_registered(
+        async_session, second, lambda name, purpose="number": carrier
+    )
+    await async_session.commit()
+    assert carrier.attached == []
+    await async_session.refresh(second)
+    assert second.sms_registration_id is None
+
+
+async def _person_refused_at_approval(client, key, org_id, async_session, sms_carrier):
+    """A person registration approved while the carrier refused its oldest
+    number. Returns the registration id and the two numbers."""
+    await _set_balance(async_session, org_id, 10_000)
+    oldest = await _us_number(async_session, org_id, "+15125550100", resource="PNA")
+    second = await _us_number(async_session, org_id, "+15125550101", resource="PNB")
+    real_attach = sms_carrier.attach_number
+    sms_carrier.refused = {"PNA"}
+
+    async def attach(refs, *, provider_resource_id, e164):
+        if provider_resource_id in sms_carrier.refused:
+            raise RuntimeError("carrier refused")
+        await real_attach(refs, provider_resource_id=provider_resource_id, e164=e164)
+
+    sms_carrier.attach_number = attach
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type="person"
+    )
+    return vid, oldest, second
+
+
+async def _numbers_on(async_session, vid) -> list[str]:
+    return list(
+        (
+            await async_session.execute(
+                select(PhoneNumber.provider_resource_id)
+                .where(PhoneNumber.sms_registration_id == uuid.UUID(vid))
+                .order_by(PhoneNumber.provider_resource_id)
+            )
+        ).scalars()
+    )
+
+
+async def test_background_moves_a_persons_registration_to_the_next_number(
+    client, org_and_key, sms_carrier, async_session
+):
+    org_id, _, key = org_and_key
+    vid, oldest, _ = await _person_refused_at_approval(
+        client, key, org_id, async_session, sms_carrier
+    )
+    assert sms_carrier.attached == []
+    attached = await _audits(async_session, "verification.sms_attached")
+    assert attached[-1].payload == {"numbers": 0, "failed": 1}
+
+    registry = _sms_registry(sms_carrier)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert [r for _, r, _ in sms_carrier.attached] == ["PNB"]
+    assert await _numbers_on(async_session, vid) == ["PNB"]
+
+    # The oldest number's wait ends and the carrier takes it now: the
+    # registration still holds one number.
+    sms_carrier.refused = set()
+    await _end_the_wait(async_session, oldest)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert [r for _, r, _ in sms_carrier.attached] == ["PNB"]
+    assert await _numbers_on(async_session, vid) == ["PNB"]
+
+
+async def test_a_persons_registration_takes_one_number_when_the_carrier_accepts_again(
+    client, org_and_key, sms_carrier, async_session
+):
+    # Both numbers are candidates (the oldest was refused, its wait ended):
+    # the pass stops at the first that attaches.
+    org_id, _, key = org_and_key
+    vid, oldest, _ = await _person_refused_at_approval(
+        client, key, org_id, async_session, sms_carrier
+    )
+    sms_carrier.refused = set()
+    await _end_the_wait(async_session, oldest)
+    await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert [r for _, r, _ in sms_carrier.attached] == ["PNA"]
+    assert await _numbers_on(async_session, vid) == ["PNA"]
+
+
+async def test_a_business_registration_still_takes_every_number(
+    client, org_and_key, sms_carrier, async_session
+):
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    oldest = await _us_number(async_session, org_id, "+15125550100", resource="PNA")
+    await _us_number(async_session, org_id, "+15125550101", resource="PNB")
+    real_attach = sms_carrier.attach_number
+    refused = {"PNA"}
+
+    async def attach(refs, *, provider_resource_id, e164):
+        if provider_resource_id in refused:
+            raise RuntimeError("carrier refused")
+        await real_attach(refs, provider_resource_id=provider_resource_id, e164=e164)
+
+    sms_carrier.attach_number = attach
+    vid = await _approved_sms_row(client, key, async_session, sms_carrier)
+    assert await _numbers_on(async_session, vid) == ["PNB"]
+    attached = await _audits(async_session, "verification.sms_attached")
+    assert attached[-1].payload == {"numbers": 1, "failed": 1}
+
+    registry = _sms_registry(sms_carrier)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert [r for _, r, _ in sms_carrier.attached] == ["PNB"]  # PNA waits
+
+    refused.clear()
+    await _end_the_wait(async_session, oldest)
+    await _us_number(async_session, org_id, "+15125550102", resource="PNC")
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert await _numbers_on(async_session, vid) == ["PNA", "PNB", "PNC"]
+    attached = await _audits(async_session, "verification.sms_attached")
+    assert attached[-1].payload == {"numbers": 2, "failed": 0}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_changed_carrier_reason_gets_a_new_audit_row(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    # An outage wrote the first row; the real refusal must not hide behind it.
+    org_id, _, key = org_and_key
+    number, vid, attempts = await _refused_territory_number(
+        client, key, org_id, sms_carrier, async_session, monkeypatch
+    )
+    reasons = iter(["carrier down", "carrier down", "number not eligible"] * 2)
+
+    async def refused(refs, *, provider_resource_id, e164):
+        attempts.append(provider_resource_id)
+        raise RuntimeError(next(reasons))
+
+    monkeypatch.setattr(sms_carrier, "attach_number", refused)
+    registry = _sms_registry(sms_carrier)
+
+    for _ in range(4):
+        await verifications_routes.sweep_verifications(async_session, registry)
+        await _end_the_wait(async_session, number)
+    assert len(attempts) == 4
+
+    rows = await _audits(async_session, "verification.sms_attach_refused")
+    assert [r.payload["carrier_reason"] for r in rows] == [
+        "carrier down",
+        "number not eligible",
+        "carrier down",
+    ]
+    assert all(r.payload["verification_id"] == vid for r in rows)
+    assert number.provisioning_metadata["sms_attach_refused"]["wait_hours"] == 8
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_the_same_carrier_reason_gets_no_new_audit_row(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    org_id, _, key = org_and_key
+    number, _, attempts = await _refused_territory_number(
+        client, key, org_id, sms_carrier, async_session, monkeypatch
+    )
+    registry = _sms_registry(sms_carrier)
+    for _ in range(3):
+        await verifications_routes.sweep_verifications(async_session, registry)
+        await _end_the_wait(async_session, number)
+    assert len(attempts) == 3
+    assert len(await _audits(async_session, "verification.sms_attach_refused")) == 1
+    refusal = number.provisioning_metadata["sms_attach_refused"]
+    assert refusal["reason_hash"] == _reason_hash("carrier refused")
+    assert "carrier refused" not in json.dumps(refusal)
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_retry_state_without_a_reason_hash_audits_once_more(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    # State written before the hash was kept: the row it wrote may hold
+    # another reason, so the next refusal is audited.
+    org_id, _, key = org_and_key
+    number, vid, _ = await _refused_territory_number(
+        client, key, org_id, sms_carrier, async_session, monkeypatch
+    )
+    number.provisioning_metadata = {
+        "sms_attach_refused": {
+            "registration_id": vid,
+            "wait_hours": 1,
+            "retry_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        }
+    }
+    await async_session.commit()
+    registry = _sms_registry(sms_carrier)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await _end_the_wait(async_session, number)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert len(await _audits(async_session, "verification.sms_attach_refused")) == 1
+    assert number.provisioning_metadata["sms_attach_refused"]["wait_hours"] == 4
 
 
 async def test_a_superadmin_reject_whose_discard_fails_answers_502(

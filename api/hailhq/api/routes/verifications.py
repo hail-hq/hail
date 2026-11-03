@@ -38,7 +38,6 @@ from hailhq.api.sms_registration import (
     attach_org_numbers,
     detach_org_numbers,
     reconcile_approved_registrations,
-    registered_numbers,
 )
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import sms_registration_fees, sms_setup
@@ -496,8 +495,7 @@ async def _settle_sms_approval(
     provider = registry(row.provider, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
         return status
-    attached = await attach_org_numbers(db, row, provider)
-    failed = len(await registered_numbers(db, row)) - attached
+    attached, failed = await attach_org_numbers(db, row, provider)
     if attached or failed:
         await write_audit_log(
             row.organization_id,

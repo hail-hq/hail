@@ -4,10 +4,12 @@ numbers are on which registration; the send gate reads it.
 
 A number the carrier refuses keeps its retry state in
 ``provisioning_metadata['sms_attach_refused']``: the registration, the wait,
-and when the background pass may try it again."""
+when the background pass may try it again, and a hash of the carrier's last
+audited reason. A person's registration then moves on to their next number."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -42,7 +44,10 @@ async def registered_numbers(
 ) -> list[PhoneNumber]:
     """The org's active US long codes on the row's carrier that belong on the
     registration, oldest first. A person's registration takes one number:
-    the one already on it, else the oldest number on no registration."""
+    the one already on it. Else the free numbers (on no registration) up to
+    and including the oldest one the carrier has not refused for this
+    registration, so a refused number does not block the next one. Callers
+    stop at the first number that attaches."""
     numbers = (
         (
             await db.execute(
@@ -57,6 +62,9 @@ async def registered_numbers(
                     PhoneNumber.created_at,
                     PhoneNumber.id,
                 )
+                # Callers hold the org lock: read what other sessions
+                # committed, so a person's registration never gets two.
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()
@@ -64,8 +72,13 @@ async def registered_numbers(
     )
     if row.subject_type == "person":
         on = [n for n in numbers if n.sms_registration_id == row.id]
+        if on:
+            return on[:1]
         free = [n for n in numbers if n.sms_registration_id is None]
-        return on[:1] or free[:1]
+        for i, number in enumerate(free):
+            if _refusal(row, number) is None:
+                return free[: i + 1]
+        return free
     return list(numbers)
 
 
@@ -89,12 +102,15 @@ def _waiting(row: CarrierVerification, number: PhoneNumber) -> bool:
 async def _record_refusal(
     row: CarrierVerification, number: PhoneNumber, reason: str
 ) -> None:
-    """Push the number's next background try back. The first refusal also
+    """Push the number's next background try back. The first refusal, and
+    each one whose carrier reason differs from the last audited one, also
     writes the audit row that says why the number's texts fail."""
     refusal = _refusal(row, number)
     hours = _FIRST_WAIT_HOURS
     if refusal:
         hours = min(refusal["wait_hours"] * 2, _MAX_WAIT_HOURS)
+    # A hash, not the text: the audit row already holds the text.
+    reason_hash = hashlib.sha256(reason.encode()).hexdigest()[:16]
     number.provisioning_metadata = {
         **number.provisioning_metadata,
         _REFUSED: {
@@ -103,9 +119,11 @@ async def _record_refusal(
             "retry_at": (
                 datetime.now(timezone.utc) + timedelta(hours=hours)
             ).isoformat(),
+            "reason_hash": reason_hash,
         },
     }
-    if refusal is None:
+    # State written before reason_hash existed has no key: audit once more.
+    if refusal is None or refusal.get("reason_hash") != reason_hash:
         await write_audit_log(
             row.organization_id,
             None,
@@ -153,15 +171,30 @@ async def _attach(
 
 
 async def attach_org_numbers(
-    db: AsyncSession, row: CarrierVerification, provider: SmsRegistrationProvider
-) -> int:
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: SmsRegistrationProvider,
+    *,
+    background: bool = False,
+) -> tuple[int, int]:
     """Attach every number that belongs on the registration, each on its
-    own: one failure does not stop the rest. Returns how many were
-    attached."""
-    attached = 0
+    own: one failure does not stop the rest. A person's registration stops
+    at the first number that attaches. The background pass skips numbers
+    already on the registration and numbers in their wait. Returns how many
+    attached and how many failed."""
+    attached = failed = 0
     for number in await registered_numbers(db, row):
-        attached += await _attach(row, provider, number)
-    return attached
+        if background and (
+            number.sms_registration_id is not None or _waiting(row, number)
+        ):
+            continue
+        if await _attach(row, provider, number):
+            attached += 1
+            if row.subject_type == "person":
+                break
+        else:
+            failed += 1
+    return attached, failed
 
 
 async def detach_org_numbers(
@@ -237,7 +270,8 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
     if not isinstance(provider, SmsRegistrationProvider):
         return
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
-        return  # a person's registration holds one number only
+        # A person's registration holds one number: this one is not next.
+        return
     # Read under the org lock: the background pass may have changed these
     # while this request waited for it.
     await db.refresh(number, ["provisioning_metadata", "sms_registration_id"])
@@ -250,7 +284,8 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
     Only an existing approved campaign is used; this never files a new brand
     or campaign. The org lock serializes repair with cancellation and release.
     A refused number is skipped until its wait ends; ``attach_if_registered``
-    (POST /numbers/{id}/enable-sms) does not wait.
+    (POST /numbers/{id}/enable-sms) does not wait. A person's registration
+    moves on to their next free number while the older ones are refused.
     """
     missing_number = (
         select(PhoneNumber.id)
@@ -289,20 +324,14 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
             provider = registry(row.provider, "sms")
             attached = failed = 0
             if isinstance(provider, SmsRegistrationProvider):
-                for number in await registered_numbers(db, row):
-                    if number.sms_registration_id is not None:
-                        continue
-                    if _waiting(row, number):
-                        continue
-                    if await _attach(row, provider, number):
-                        attached += 1
-                    else:
-                        failed += 1
+                attached, failed = await attach_org_numbers(
+                    db, row, provider, background=True
+                )
             organization_id, verification_id = row.organization_id, row.id
             await db.commit()
             total += attached
-            # _attach audits a refused number once; this row counts the
-            # numbers that moved.
+            # _attach audits a refused number (again when its reason
+            # changes); this row counts the numbers that moved.
             if attached:
                 await write_audit_log(
                     organization_id,
