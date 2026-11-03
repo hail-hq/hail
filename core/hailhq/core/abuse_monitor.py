@@ -37,7 +37,8 @@ from hailhq.core.models import (
     Suppression,
     UsageEvent,
 )
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Text, and_, cast, func, literal, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -148,13 +149,33 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         hours=settings.hail_email_abuse_window_hours
     )
 
-    recipients = (
-        func.cardinality(Email.to_addresses)
-        + func.coalesce(func.cardinality(Email.cc_addresses), 0)
-        + func.coalesce(func.cardinality(Email.bcc_addresses), 0)
+    # Each distinct address counts once per email, so repeating one address
+    # in to/cc/bcc cannot inflate the denominator and hide a high rate.
+    no_addresses = cast(literal([], ARRAY(Text)), ARRAY(Text))
+    addr = (
+        func.unnest(
+            func.array_cat(
+                func.array_cat(
+                    Email.to_addresses, func.coalesce(Email.cc_addresses, no_addresses)
+                ),
+                func.coalesce(Email.bcc_addresses, no_addresses),
+            )
+        )
+        .table_valued("addr")
+        .render_derived(name="recipients")
+        .lateral()
     )
     send_stmt = (
-        select(Email.organization_id, func.sum(recipients))
+        select(
+            Email.organization_id,
+            func.count(
+                func.distinct(
+                    func.concat(Email.id, ":", func.lower(func.trim(addr.c.addr)))
+                )
+            ),
+        )
+        .select_from(Email)
+        .join(addr, true())
         .where(_org_own_send(), Email.sent_at >= window_start)
         .group_by(Email.organization_id)
     )

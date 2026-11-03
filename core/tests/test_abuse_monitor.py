@@ -267,6 +267,24 @@ async def test_email_rate_counts_every_recipient(async_session, monkeypatch) -> 
     assert await check_and_suspend_email_orgs(async_session) == 0
 
 
+async def test_email_repeated_address_counts_once(async_session, monkeypatch) -> None:
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    emails = await _seed_emails(async_session, org_id, 20)
+    for email in emails:
+        # The same address 50 times, in every field: still one recipient.
+        address = email.to_addresses[0]
+        email.to_addresses = [address] * 50
+        email.cc_addresses = [address.upper()]
+        email.bcc_addresses = [f" {address} "]
+    await _seed_email_events(async_session, emails[:2], "bounced", hard=True)  # 10%
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 1
+
+
 async def test_email_forwards_do_not_count(async_session, monkeypatch) -> None:
     from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
 
