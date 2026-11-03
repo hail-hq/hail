@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import logging
 import re
-import time
 
 import httpx
 from hailhq.core.providers.telnyx import (
@@ -168,9 +167,6 @@ def _address_payload(address: Address, subject_type: SubjectType) -> dict:
     return payload
 
 
-_RULES_TTL = 60.0
-
-
 class TelnyxVerificationProvider(VerificationProvider):
     name = "telnyx"
 
@@ -180,7 +176,6 @@ class TelnyxVerificationProvider(VerificationProvider):
         # TelnyxClient raises ValueError without a key, which the registry
         # reads as "not configured".
         self._api = TelnyxClient(api_key, client)
-        self._rules_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
 
     # -- requirements ------------------------------------------------------
 
@@ -198,18 +193,11 @@ class TelnyxVerificationProvider(VerificationProvider):
 
     async def rules(self, country_code: str, number_type: str) -> list[dict]:
         """The raw rules for one country and type. A carrier outage is a
-        ``VerificationProviderError``. Kept for ``_RULES_TTL`` seconds, so the
-        calls one form or one catalog-sync row makes share one request."""
-        key = (country_code, number_type)
-        hit = self._rules_cache.get(key)
-        if hit is not None and time.monotonic() - hit[0] < _RULES_TTL:
-            return hit[1]
+        ``VerificationProviderError``. Not cached."""
         try:
-            found = await self._rules(country_code, number_type)
+            return await self._rules(country_code, number_type)
         except httpx.HTTPError as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
-        self._rules_cache[key] = (time.monotonic(), found)
-        return found
 
     async def _not_for(
         self, country_code: str, number_type: str, subject_type: SubjectType
@@ -229,6 +217,18 @@ class TelnyxVerificationProvider(VerificationProvider):
         subject_type: SubjectType,
     ) -> Requirements:
         rules = await self.rules(country_code, number_type)
+        return self.requirements_from_rules(
+            country_code, number_type, subject_type, rules
+        )
+
+    def requirements_from_rules(
+        self,
+        country_code: str,
+        number_type: str,
+        subject_type: SubjectType,
+        rules: list[dict],
+    ) -> Requirements:
+        """``requirements`` for rules already fetched with :meth:`rules`."""
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
         if subject_type not in allowed:
             raise UnsupportedSubjectType(

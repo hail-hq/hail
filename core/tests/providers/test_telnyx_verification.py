@@ -828,14 +828,15 @@ def test_module_imports_in_a_fresh_interpreter(module) -> None:
     assert done.returncode == 0, done.stderr
 
 
-async def test_rules_are_cached_across_requirements_calls() -> None:
+async def test_requirements_from_rules_makes_no_request() -> None:
     fake = Telnyx(rules_answer("mobile"))
     p = provider(fake)
     rules = await p.rules("SE", "mobile")
-    await p.requirements("SE", "mobile", "person")
-    await p.requirements("SE", "mobile", "business")
-    assert await p.rules("SE", "mobile") is rules
+    person = p.requirements_from_rules("SE", "mobile", "person", rules)
+    business = p.requirements_from_rules("SE", "mobile", "business", rules)
     assert len(fake.calls) == 1
+    assert person == await p.requirements("SE", "mobile", "person")
+    assert business.subject_type == "business"
 
 
 async def test_rules_outage_is_a_provider_error() -> None:
