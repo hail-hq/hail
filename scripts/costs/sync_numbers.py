@@ -36,7 +36,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import sys
 import time
 from collections import defaultdict
@@ -685,7 +684,6 @@ def merge(
         "added": [],
         "vanished": [],
         "unobserved": [],
-        "requirements_kept": [],
     }
     watched = (
         "usd_per_month",
@@ -714,24 +712,23 @@ def merge(
                 for k in watched
                 if k != "requirements" and prev.get(k) != n.get(k)
             ]
-            if diff:
-                report["kept"].append(
-                    f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
-                )
-            # Only the requirements block is refreshed: it is not a price or a
-            # capability a person confirmed by hand. No block (a failed fetch,
-            # or a row the carrier no longer marks as needing verification)
-            # keeps the old one.
             fresh = n.get("requirements")
             old_block = prev.get("requirements")
+            # A failed fetch copied the previous block into ``n`` in
+            # attach_requirements, so None here means the carrier lists no
+            # verification for this row. The hand-verified block stays.
             block = fresh if fresh is not None else old_block
-            if fresh is None and old_block is not None:
-                # A failed fetch already copied the old block into ``n``, so
-                # None means the carrier no longer lists verification.
-                report["requirements_kept"].append(
-                    f"{key}: carrier no longer lists verification; "
-                    "hand-verified block kept"
+            dropped = fresh is None and old_block is not None
+            if diff or dropped:
+                line = f"{key}: " + (
+                    f"carrier says {', '.join(diff)}; "
+                    if diff
+                    else "carrier no longer lists verification; "
                 )
+                line += f"kept {prev['verified_by']} {prev['last_verified']}"
+                if dropped:
+                    line += " (hand-verified requirements block kept)"
+                report["kept"].append(line)
             kept = {**prev, "requirements": block}
             if old_block != block:
                 report["changed"].append(
@@ -906,8 +903,8 @@ def fetch_requirements(provider: str, country_code: str, number_type: str) -> di
     rules = None
     if provider == "telnyx":
         # The raw rules tell an address in the number's area from one in
-        # the country; `requirements` alone does not. The plug-in keeps them
-        # briefly, so the calls below do not ask again.
+        # the country; `requirements` alone does not. Fetched once here and
+        # reused for both kinds of buyer.
         rules = _run(plugin.rules(country_code, number_type))
     return _requirements_block(
         plugin, provider, country_code, number_type, rules, classify
@@ -935,10 +932,17 @@ def _requirements_block(
                     # The caller only asks for rows marked verification_required.
                     # No group at all contradicts that: an error, so the sync
                     # keeps the last good block.
-                    raise RuntimeError(
+                    raise RequirementsUnavailable(
                         f"DIDWW lists no requirement group for {country_code} "
                         f"{number_type}"
                     )
+            elif provider == "telnyx":
+                # Telnyx is the only carrier whose rules are a separate fetch.
+                found = [
+                    plugin.requirements_from_rules(
+                        country_code, number_type, subject, rules
+                    )
+                ]
             else:
                 found = [_run(plugin.requirements(country_code, number_type, subject))]
         except UnsupportedSubjectType:
@@ -951,13 +955,27 @@ def _requirements_block(
     return block
 
 
+class RequirementsUnavailable(Exception):
+    """A requirements fetch that failed for a reason this script states. Its
+    message is written here, so it is safe for the public PR body."""
+
+
 def _error_detail(exc: Exception) -> str:
-    """One safe line of an error for the public PR body: first line only,
-    spaces collapsed, URL query strings dropped, at most 160 characters."""
-    lines = str(exc).strip().splitlines()
-    first = re.sub(r"\s+", " ", lines[0] if lines else "")
-    first = re.sub(r"(https?://[^\s?#]+)[?#]\S*", r"\1", first)
-    return first[:160]
+    """What a failed fetch shows in the public PR body. Never the carrier's
+    text: it can hold URLs, account ids and request bodies. Our own
+    ``RequirementsUnavailable`` message, or the class name plus the HTTP
+    status when the error carries one."""
+    if isinstance(exc, RequirementsUnavailable):
+        return str(exc)[:160]
+    seen: Exception | None = exc
+    while seen is not None:
+        status = getattr(getattr(seen, "response", None), "status_code", None)
+        if status is None:
+            status = getattr(seen, "status", None)
+        if isinstance(status, int):
+            return f"{exc.__class__.__name__} (HTTP {status})"
+        seen = seen.__cause__ if isinstance(seen.__cause__, Exception) else None
+    return exc.__class__.__name__
 
 
 def _block_summary(block: dict | None) -> str:
@@ -969,8 +987,12 @@ def _block_summary(block: dict | None) -> str:
         if not side.get("accepted"):
             parts.append(f"{subject} not allowed")
             continue
-        keys = [i if isinstance(i, str) else "other" for i in side.get("items", [])]
+        keys = [
+            i if isinstance(i, str) else f"other: {str(i.get('other', ''))[:40]}"
+            for i in side.get("items", [])
+        ]
         parts.append(f"{subject} {','.join(keys) or 'no papers'}")
+    parts += [f"{k} {block[k]}" for k in block if k not in SUBJECTS]
     return "; ".join(parts)
 
 
@@ -1000,10 +1022,7 @@ def attach_requirements(
         except Exception as exc:  # one bad row must not stop the run
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
-            report.append(
-                f"{key}: requirements failed ({exc.__class__.__name__}: "
-                f"{_error_detail(exc)}), {kept}"
-            )
+            report.append(f"{key}: requirements failed ({_error_detail(exc)}), {kept}")
 
 
 def run_provider(
@@ -1080,7 +1099,6 @@ def run_provider(
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
     )
-    requirement_errors.extend(report["requirements_kept"])
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
     for label, key in (
@@ -1096,6 +1114,8 @@ def run_provider(
     if requirement_errors:
         summary.append(f"### Requirements not refreshed ({len(requirement_errors)})")
         summary.extend(f"- {line}" for line in requirement_errors[:60])
+        if len(requirement_errors) > 60:
+            summary.append(f"- … {len(requirement_errors) - 60} more")
     if skipped:
         summary.append(f"### Skipped by the sync ({len(skipped)})")
         summary.extend(f"- {line}" for line in skipped[:60])

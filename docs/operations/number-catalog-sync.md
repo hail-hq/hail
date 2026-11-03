@@ -82,10 +82,10 @@ Each row has an optional `requirements` block: who may buy the number and which 
 - `items`: category keys in a fixed order (`hailhq.core.requirement_categories`). A paper no category fits is `{"other": "<carrier label>"}`.
 - `null` when the row needs no verification (`verification_required: false`), or when no block was ever read for it.
 - The sync reads it once per carrier, country and type, for rows with `verification_required: true`. Read: `telephony_catalog.requirements(country, type, carrier)`.
-- On a carrier error the row keeps the block from the last sync (or `null` if it never had one). The error is listed under "Requirements not refreshed" in the PR summary.
+- On a carrier error the row keeps the block from the last sync (or `null` if it never had one). The failure is listed under "Requirements not refreshed" in the PR summary as `ClassName (HTTP n)`, or as our own message for a case the script names (for example DIDWW listing no requirement group). The carrier's own error text is never printed: the PR body is public.
 - DIDWW lists one requirement per DID group. The block is the union of the items of all groups of that country and type.
 - If a carrier has rows that need verification but no verification plug-in starts (credentials missing), the run fails. It never writes empty blocks.
-- Hand-verified rows (`manual-confirmed`) keep every other field. Their block is refreshed when the fetch succeeds and returns a block; otherwise the old block stays.
+- Hand-verified rows (`manual-confirmed`) keep every other field. Their block is refreshed when the fetch succeeds and returns a block; otherwise the old block stays. A block change is listed under **changed** as `CC:type (hand-verified row, only requirements refreshed): person <papers> -> ...; business <papers> -> ...`. If the carrier no longer lists verification for the row, the **kept** line ends with `(hand-verified requirements block kept)`.
 
 ## Reviewing the sync PR
 

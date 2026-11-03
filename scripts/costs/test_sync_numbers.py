@@ -928,7 +928,7 @@ def test_telnyx_passes_raw_rules_to_classify(monkeypatch):
         async def rules(self, cc, nt):
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject):
+        def requirements_from_rules(self, cc, nt, subject, rules):
             return _req(subject, address=True)
 
     _use(monkeypatch, Telnyx())
@@ -960,12 +960,14 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
     class Telnyx:
         def __init__(self):
             self.rule_calls = 0
+            self.from_rules_calls = []
 
         async def rules(self, cc, nt):
             self.rule_calls += 1
             return [{"id": "x", "field_type": "address", "name": "Local address"}]
 
-        async def requirements(self, cc, nt, subject):
+        def requirements_from_rules(self, cc, nt, subject, rules):
+            self.from_rules_calls.append(subject)
             return _req(subject, address=True)
 
     fake = Telnyx()
@@ -973,6 +975,7 @@ def test_telnyx_rules_fetched_once_per_row(monkeypatch):
     block = sync.fetch_requirements("telnyx", "DE", "local")
     assert block["business"]["items"] == ["address_in_country"]
     assert fake.rule_calls == 1
+    assert fake.from_rules_calls == ["person", "business"]
 
 
 def _manual_prev(**extra):
@@ -1048,43 +1051,56 @@ def test_manual_confirmed_row_keeps_block_when_new_block_is_none():
     assert not any("requirements" in line for line in report["changed"])
 
 
-def test_requirements_error_report_includes_message(monkeypatch):
+def test_error_detail_hides_carrier_text():
+    class TwilioLike(Exception):
+        status = 401
+
+    exc = TwilioLike(
+        "HTTP 401 https://api.twilio.com/2010-04-01/Accounts/ACabc123/x.json?t=1"
+    )
+    detail = sync._error_detail(exc)
+    assert detail == "TwilioLike (HTTP 401)"
+    assert "ACabc123" not in detail
+
+
+def test_error_detail_httpx_status():
+    import httpx
+
+    req = httpx.Request("GET", "https://api.example.com/v2/x?key=SECRET")
+    exc = httpx.HTTPStatusError(
+        "boom SECRET", request=req, response=httpx.Response(503, request=req)
+    )
+    assert sync._error_detail(exc) == "HTTPStatusError (HTTP 503)"
+
+
+def test_error_detail_plain_exception_is_class_name_only():
+    assert sync._error_detail(RuntimeError("secret https://x?y=1")) == "RuntimeError"
+
+
+def test_error_detail_own_message_is_shown():
+    exc = sync.RequirementsUnavailable("DIDWW lists no requirement group for DE local")
+    assert sync._error_detail(exc) == "DIDWW lists no requirement group for DE local"
+
+
+def test_error_report_line_has_no_carrier_text(monkeypatch):
     class Boom:
         async def requirements(self, *a):
-            raise RuntimeError("carrier said no " + "x" * 400)
+            raise RuntimeError("secret https://x?y=1")
 
     _use(monkeypatch, Boom())
     report: list[str] = []
     sync.attach_requirements("twilio", [_row_needing()], [], report)
-    assert "RuntimeError: carrier said no" in report[0]
-    assert "x" * 160 not in report[0] and "x" * 50 in report[0]
-    assert report[0].count("x") == 160 - len("carrier said no ")
+    assert report == ["DE:local: requirements failed (RuntimeError), no block stored"]
 
 
-def test_requirements_error_report_is_one_safe_line(monkeypatch):
-    class Boom:
-        async def requirements(self, *a):
-            raise RuntimeError(
-                "GET https://api.example.com/v2/x?api_key=SECRET&b=1  failed\n"
-                "Traceback: more detail"
-            )
-
-    _use(monkeypatch, Boom())
-    report: list[str] = []
-    sync.attach_requirements("twilio", [_row_needing()], [], report)
-    assert "https://api.example.com/v2/x failed" in report[0]
-    assert "SECRET" not in report[0] and "Traceback" not in report[0]
-    assert "\n" not in report[0]
-
-
-def test_manual_row_without_new_block_is_reported_not_refreshed():
+def test_manual_row_without_new_block_is_marked_in_kept_line():
     old = {"person": {"accepted": True, "items": ["id_document"]}}
     prev = _manual_prev(requirements=old)
     fetched = {**prev, "verification_required": False, "requirements": None}
     _, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
-    assert report["requirements_kept"] == [
-        "DE:local: carrier no longer lists verification; hand-verified block kept"
-    ]
+    assert len(report["kept"]) == 1
+    assert report["kept"][0].endswith("(hand-verified requirements block kept)")
+    assert "requirements_kept" not in report
 
 
 def test_manual_row_requirements_change_line_is_short():
@@ -1094,7 +1110,10 @@ def test_manual_row_requirements_change_line_is_short():
     }
     new = {
         "person": {"accepted": False, "items": []},
-        "business": {"accepted": True, "items": ["company_name", {"other": "Odd"}]},
+        "business": {
+            "accepted": True,
+            "items": ["company_name", {"other": "Odd paper"}],
+        },
     }
     prev = _manual_prev(requirements=old)
     _, report = sync.merge(
@@ -1104,6 +1123,6 @@ def test_manual_row_requirements_change_line_is_short():
         (
             "DE:local (hand-verified row, only requirements refreshed): "
             "person id_document; business company_name -> "
-            "person not allowed; business company_name,other"
+            "person not allowed; business company_name,other: Odd paper"
         )
     ]
