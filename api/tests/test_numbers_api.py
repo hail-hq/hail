@@ -870,3 +870,144 @@ def test_number_options_openapi_uses_for_key() -> None:
 
     schemas = app.openapi()["components"]["schemas"]
     assert "for" in schemas["TypeOptions"]["properties"]
+
+
+@pytest.fixture
+def ch_two_carriers(pinned_catalog, tmp_path, monkeypatch):
+    from hailhq.core import number_options as number_options_mod
+
+    def row(usd, person, business):
+        return {
+            "country_code": "CH",
+            "number_type": "local",
+            "usd_per_month": usd,
+            "voice": True,
+            "sms": False,
+            "mms": False,
+            "verification_required": True,
+            "requirements": {"person": person, "business": business},
+        }
+
+    twilio = row(
+        "1.00",
+        {"accepted": True, "items": ["id_document", "birth_date"]},
+        {"accepted": True, "items": ["company_name"]},
+    )
+    telnyx = row(
+        "3.00",
+        {"accepted": True, "items": ["id_document"]},
+        {"accepted": False, "items": []},
+    )
+    (tmp_path / "twilio.json").write_text(
+        json.dumps({"version": 3, "numbers": [twilio]})
+    )
+    (tmp_path / "telnyx.json").write_text(
+        json.dumps({"version": 3, "numbers": [telnyx]})
+    )
+    (tmp_path / "didww.json").write_text(json.dumps({"version": 3, "numbers": []}))
+    telephony_catalog._load.cache_clear()
+    monkeypatch.setattr(
+        number_options_mod, "get_verification_provider", lambda name: object()
+    )
+
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.carrier_offer import CarrierOffer
+
+    def offer(provider, e164, cents, subjects):
+        return CarrierOffer(
+            provider=provider,
+            e164=e164,
+            country_code="CH",
+            number_type="local",
+            capabilities=["voice"],
+            monthly_cents=cents,
+            setup_cents=0,
+            readiness="verification_required",
+            subject_types=subjects,
+        )
+
+    offers = [
+        offer("twilio", "+41215550001", 100, ["person", "business"]),
+        offer("telnyx", "+41215550002", 300, ["person"]),
+    ]
+    monkeypatch.setattr(
+        "hailhq.api.routes.numbers.discover_offers",
+        AsyncMock(return_value=(offers, [])),
+    )
+
+
+async def _quotes(client, key, **extra):
+    return await client.post(
+        "/numbers/quotes",
+        json={
+            "country_code": "CH",
+            "number_type": "local",
+            "capabilities": ["voice"],
+            **extra,
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+
+async def _options(client, key):
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "CH"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    (t,) = resp.json()["types"]
+    return t["for"]
+
+
+async def test_quotes_without_subject_unchanged(
+    client, org_and_key, ch_two_carriers
+) -> None:
+    resp = await _quotes(client, org_and_key[2])
+    assert resp.status_code == 200, resp.text
+    offers = resp.json()["offers"]
+    assert [o["e164"] for o in offers] == ["+41215550001", "+41215550002"]
+    assert all(o["paperwork"] is None for o in offers)
+
+
+async def test_quotes_subject_drops_unaccepted(
+    client, org_and_key, ch_two_carriers
+) -> None:
+    resp = await _quotes(client, org_and_key[2], subject_type="business")
+    assert resp.status_code == 200, resp.text
+    assert [o["e164"] for o in resp.json()["offers"]] == ["+41215550001"]
+
+
+async def test_quotes_subject_ranking_matches_options(
+    client, org_and_key, ch_two_carriers
+) -> None:
+    key = org_and_key[2]
+    for subject in ("person", "business"):
+        best = (await _options(client, key))[subject]
+        resp = await _quotes(client, key, subject_type=subject)
+        first = resp.json()["offers"][0]
+        assert first["monthly_cents"] == best["monthly_cents"]
+        assert first["paperwork"] == best["paperwork"]
+    person = await _quotes(client, key, subject_type="person")
+    # Telnyx lists one paper, Twilio two: fewer papers first.
+    assert [o["e164"] for o in person.json()["offers"]][0] == "+41215550002"
+
+
+async def test_quotes_paperwork_from_catalog(
+    client, org_and_key, ch_two_carriers
+) -> None:
+    resp = await _quotes(client, org_and_key[2], subject_type="person")
+    by_number = {o["e164"]: o["paperwork"] for o in resp.json()["offers"]}
+    assert by_number["+41215550001"] == [
+        {"key": "id_document", "label": "ID card or passport"},
+        {"key": "birth_date", "label": by_number["+41215550001"][1]["label"]},
+    ]
+    assert by_number["+41215550002"] == [
+        {"key": "id_document", "label": "ID card or passport"}
+    ]
+    assert not re.search("twilio|telnyx|didww", resp.text, re.I)
+
+
+async def test_quotes_unknown_subject_is_422(client, org_and_key) -> None:
+    resp = await _quotes(client, org_and_key[2], subject_type="robot")
+    assert resp.status_code == 422

@@ -49,6 +49,11 @@ class Approval(BaseModel):
     )
 
 
+class PaperworkItem(BaseModel):
+    key: str = Field(description="Fixed paper category key, such as id_document.")
+    label: str = Field(description="Short text to show for that category.")
+
+
 class QuoteOffer(BaseModel):
     """One number offer as the public API shows it. It never names the
     carrier or carries a carrier-issued id: Hail picks the carrier."""
@@ -112,6 +117,10 @@ class QuoteOffer(BaseModel):
     by_request: bool = Field(
         default=False,
         description="True when support orders this number by hand: it cannot be bought with POST /numbers. Ask support for it. Its quote_id still works for verification.",
+    )
+    paperwork: list[PaperworkItem] | None = Field(
+        default=None,
+        description="The papers the chosen `subject_type` must give for this offer, from the catalog. Null when the request had no `subject_type`. An empty list means no papers are needed.",
     )
 
 
@@ -187,11 +196,6 @@ class NumberQuotesResponse(BaseModel):
     expires_at: datetime = Field(
         description="UTC expiry of these persisted quotes; request fresh offers afterward."
     )
-
-
-class PaperworkItem(BaseModel):
-    key: str = Field(description="Fixed paper category key, such as id_document.")
-    label: str = Field(description="Short text to show for that category.")
 
 
 class OptionVerification(BaseModel):

@@ -48,12 +48,18 @@ from hailhq.core.carrier_offer import (
     NumberOptionsResponse,
     NumberQuotesResponse,
     OfferVerification,
+    PaperworkItem,
     QuoteOffer,
 )
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.number_options import number_options
+from hailhq.core.number_options import (
+    number_options,
+    offer_paperwork,
+    option_key,
+    option_status,
+)
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
@@ -760,6 +766,11 @@ async def quote_numbers(
     approved ones the carrier still accepts for this offer. Pass an approved
     one's `id` as `verification_id` to POST /numbers. An offer that needs
     verification is `ready` when one of them is approved.
+
+    Send `subject_type` (`person` or `business`) to get offers for that
+    subject only: offers that do not accept it are left out, the rest come
+    best first in the same order as GET /numbers/options, and each lists the
+    `paperwork` that subject must give. Without it, nothing changes.
     """
 
     # Numbers support orders by hand: catalog offers, not live stock, so a
@@ -859,6 +870,9 @@ async def quote_numbers(
             principal.organization_id,
             ", ".join(unavailable),
         )
+    paperwork: dict[int, list[PaperworkItem]] = {}
+    if body.subject_type:
+        offers, paperwork = _for_subject(offers, body.subject_type, verifications)
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -895,11 +909,55 @@ async def quote_numbers(
     # The public offer drops the carrier and its ids; the stored quote above
     # keeps them for the purchase.
     return NumberQuotesResponse(
-        offers=[QuoteOffer.model_validate(o.model_dump()) for o in offers],
+        offers=[
+            QuoteOffer.model_validate(
+                {**o.model_dump(), "paperwork": paperwork.get(id(o))}
+            )
+            for o in offers
+        ],
         recommended_quote_id=recommended.quote_id if recommended else None,
         incomplete=bool(unavailable),
         expires_at=expires,
     )
+
+
+def _for_subject(
+    offers: list[CarrierOffer],
+    subject: str,
+    verifications: dict[tuple[str, str, str], list[OfferVerification]],
+) -> tuple[list[CarrierOffer], dict[int, list[PaperworkItem]]]:
+    """Keep the offers that accept ``subject``, best first by the same order
+    as GET /numbers/options, and the papers each one needs from that subject
+    (keyed by ``id(offer)``)."""
+    ranked: list[tuple[tuple[int, ...], CarrierOffer]] = []
+    papers: dict[int, list[PaperworkItem]] = {}
+    for offer in offers:
+        if offer.subject_types and subject not in offer.subject_types:
+            continue
+        needs = bool(offer.subject_types)
+        items, known = offer_paperwork(
+            offer.country_code, offer.number_type, offer.provider, subject, needs
+        )
+        usable = _usable_verifications(
+            offer,
+            verifications.get(
+                (offer.provider, offer.country_code, offer.number_type), []
+            ),
+        )
+        status, _ = option_status(needs, offer.by_request, subject, usable)
+        papers[id(offer)] = items
+        key = option_key(
+            status,
+            "by_request" if offer.by_request else "buy",
+            len(items),
+            offer.monthly_cents,
+            offer.setup_cents,
+            known,
+        )
+        ranked.append((key, offer))
+    # A stable sort keeps the live order for offers that tie.
+    ranked.sort(key=lambda pair: pair[0])
+    return [offer for _, offer in ranked], papers
 
 
 def _usable_verifications(

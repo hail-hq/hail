@@ -2732,7 +2732,16 @@ paths:
 
         one's `id` as `verification_id` to POST /numbers. An offer that needs
 
-        verification is `ready` when one of them is approved."
+        verification is `ready` when one of them is approved.
+
+
+        Send `subject_type` (`person` or `business`) to get offers for that
+
+        subject only: offers that do not accept it are left out, the rest come
+
+        best first in the same order as GET /numbers/options, and each lists the
+
+        `paperwork` that subject must give. Without it, nothing changes."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -8180,6 +8189,19 @@ components:
           description:
             "Optional, with city: a US state or Canadian province code,
             such as AZ. GET /numbers/regions lists the codes."
+        subject_type:
+          anyOf:
+            - type: string
+              enum:
+                - person
+                - business
+            - type: "null"
+          title: Subject Type
+          description:
+            "Who the number is for: 'person' (you) or 'business' (your
+            company). Offers that do not accept that subject are left out, the rest
+            are ranked for it, and each offer lists its `paperwork`. Omit to get every
+            offer as before."
       additionalProperties: false
       type: object
       required:
@@ -8855,6 +8877,17 @@ components:
             bought with POST /numbers. Ask support for it. Its quote_id still works
             for verification."
           default: false
+        paperwork:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/PaperworkItem"
+              type: array
+            - type: "null"
+          title: Paperwork
+          description:
+            The papers the chosen `subject_type` must give for this offer,
+            from the catalog. Null when the request had no `subject_type`. An empty
+            list means no papers are needed.
       type: object
       required:
         - e164
