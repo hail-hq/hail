@@ -10,9 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.12"
+          enable-cache: false
       # Pinned: ruff 0.17.0 (2026-10-09) adds auto-fix rules that fail the whole
       # tree; bump deliberately with a formatting-only PR.
       - run: uvx ruff==0.16.10 check .
@@ -34,9 +35,10 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.12"
+          enable-cache: false
       - run: uv sync --all-packages --all-extras
       - name: core tests
         working-directory: core
