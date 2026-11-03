@@ -45,8 +45,10 @@ from hailhq.api.routes.verifications import (
 from hailhq.core import inbound_routing, sms_setup, telephony_catalog
 from hailhq.core.carrier_offer import (
     CarrierOffer,
+    NumberOptionsResponse,
     NumberQuotesResponse,
     OfferVerification,
+    PaperworkItem,
     QuoteOffer,
 )
 from hailhq.core.carrier_routing import CARRIERS, carrier
@@ -58,6 +60,12 @@ from hailhq.core.number_offers import (
     by_request_offers,
     discover_offers,
     rank_offers,
+)
+from hailhq.core.number_options import (
+    number_options,
+    offer_paperwork,
+    option_key,
+    option_status,
 )
 from hailhq.core.providers.verification import (
     SmsRegistrationProvider,
@@ -552,6 +560,38 @@ async def list_number_regions(
     return REGIONS_RESPONSE
 
 
+# Declared before "/{number_id}": that route would read "options" as an id.
+@router.get(
+    "/options",
+    response_model=NumberOptionsResponse,
+    response_model_by_alias=True,
+)
+async def get_number_options(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    country_code: Annotated[
+        str,
+        Query(
+            min_length=2,
+            max_length=2,
+            pattern="^[A-Za-z]{2}$",
+            description="ISO alpha-2 country code, such as CH.",
+        ),
+    ],
+    sms_only: Annotated[
+        bool,
+        Query(description="True: only count options that can send and receive SMS."),
+    ] = False,
+) -> NumberOptionsResponse:
+    """The number types sold in a country, one row each. For a person and for
+    a business it gives the best option: price, capabilities, the papers
+    needed, and whether this organization already has them verified. Reads
+    the bundled catalog and your verifications. It calls no carrier, so
+    prices are catalog prices and the live quote may differ slightly."""
+    verifications = await _offer_verifications(db, principal.organization_id)
+    return number_options(country_code.upper(), verifications, sms_only)
+
+
 @router.get(
     "/{number_id}",
     response_model=PhoneNumberResponse,
@@ -726,6 +766,11 @@ async def quote_numbers(
     approved ones the carrier still accepts for this offer. Pass an approved
     one's `id` as `verification_id` to POST /numbers. An offer that needs
     verification is `ready` when one of them is approved.
+
+    Send `subject_type` (`person` or `business`) to get offers for that
+    subject only: offers that do not accept it are left out, the rest come
+    best first in the same order as GET /numbers/options, and each lists the
+    `paperwork` that subject must give. Without it, nothing changes.
     """
 
     # Numbers support orders by hand: catalog offers, not live stock, so a
@@ -825,6 +870,12 @@ async def quote_numbers(
             principal.organization_id,
             ", ".join(unavailable),
         )
+    paperwork: dict[int, list[PaperworkItem]] = {}
+    ready_for_subject: set[int] = set()
+    if body.subject_type:
+        offers, paperwork, ready_for_subject = _for_subject(
+            offers, body.subject_type, verifications
+        )
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     for offer in offers:
         row = NumberOffer(
@@ -855,17 +906,75 @@ async def quote_numbers(
             offer.requirements = []
     await db.commit()
     # Never a by-request offer: it cannot be bought here.
+    # With a subject, only an offer ready for that subject: an approval of the
+    # other subject would make the purchase use the wrong verification.
     recommended = next(
-        (o for o in offers if o.readiness == "ready" and not o.by_request), None
+        (
+            o
+            for o in offers
+            if o.readiness == "ready"
+            and not o.by_request
+            and (not body.subject_type or id(o) in ready_for_subject)
+        ),
+        None,
     )
     # The public offer drops the carrier and its ids; the stored quote above
     # keeps them for the purchase.
     return NumberQuotesResponse(
-        offers=[QuoteOffer.model_validate(o.model_dump()) for o in offers],
+        offers=[
+            QuoteOffer.model_validate(
+                {**o.model_dump(), "paperwork": paperwork.get(id(o))}
+            )
+            for o in offers
+        ],
         recommended_quote_id=recommended.quote_id if recommended else None,
         incomplete=bool(unavailable),
         expires_at=expires,
     )
+
+
+def _for_subject(
+    offers: list[CarrierOffer],
+    subject: str,
+    verifications: dict[tuple[str, str, str], list[OfferVerification]],
+) -> tuple[list[CarrierOffer], dict[int, list[PaperworkItem]], set[int]]:
+    """Keep the offers that accept ``subject``, best first by the same order
+    as GET /numbers/options, and the papers each one needs from that subject
+    (keyed by ``id(offer)``), and the ids of offers ready for ``subject``."""
+    ranked: list[tuple[tuple[int, ...], CarrierOffer]] = []
+    papers: dict[int, list[PaperworkItem]] = {}
+    ready: set[int] = set()
+    for offer in offers:
+        if offer.subject_types and subject not in offer.subject_types:
+            continue
+        needs = bool(offer.subject_types)
+        found_papers = offer_paperwork(
+            offer.country_code, offer.number_type, offer.provider, subject, needs
+        )
+        if not found_papers.accepted:
+            continue
+        usable = _usable_verifications(
+            offer,
+            verifications.get(
+                (offer.provider, offer.country_code, offer.number_type), []
+            ),
+        )
+        status, _ = option_status(needs, offer.by_request, subject, usable)
+        papers[id(offer)] = found_papers.items
+        if status == "ready":
+            ready.add(id(offer))
+        key = option_key(
+            status,
+            "by_request" if offer.by_request else "buy",
+            len(found_papers.items),
+            offer.monthly_cents,
+            offer.setup_cents,
+            found_papers.known,
+        )
+        ranked.append((key, offer))
+    # A stable sort keeps the live order for offers that tie.
+    ranked.sort(key=lambda pair: pair[0])
+    return [offer for _, offer in ranked], papers, ready
 
 
 def _usable_verifications(

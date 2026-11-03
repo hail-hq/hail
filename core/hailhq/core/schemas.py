@@ -697,6 +697,10 @@ class NumberQuoteRequest(BaseModel):
         pattern=r"^[A-Za-z]{2}$",
         description="Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.",
     )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description="Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.",
+    )
 
     @field_validator("country_code")
     @classmethod

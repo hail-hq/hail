@@ -11,6 +11,7 @@ import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from hailhq.core.config import settings
+from hailhq.core.requirement_categories import is_company_document
 from hailhq.core.urls import join_url
 
 TELNYX_API_BASE = "https://api.telnyx.com/v2"
@@ -135,5 +136,9 @@ def subject_types_for(rules: list[dict]) -> tuple[str, ...]:
         r.get("field_type") != "textual" and not rule_applies_to(r, "person")
         for r in rules
     ):
+        return ("business",)
+    # A company registration certificate has no person version, even when the
+    # rule name carries no tag.
+    if any(is_company_document(r) for r in rules):
         return ("business",)
     return ("person", "business")
