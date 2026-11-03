@@ -820,7 +820,10 @@ async def test_create_draft_refuses_a_value_over_the_carrier_limit() -> None:
 )
 def test_module_imports_in_a_fresh_interpreter(module) -> None:
     done = subprocess.run(
-        [sys.executable, "-c", f"import {module}"], capture_output=True, text=True
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert done.returncode == 0, done.stderr
 

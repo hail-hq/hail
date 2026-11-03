@@ -971,7 +971,7 @@ def attach_requirements(
             row["requirements"] = fetch_requirements(
                 provider, row["country_code"], row["number_type"]
             )
-        except Exception as exc:  # noqa: BLE001 - one bad row must not stop the run
+        except Exception as exc:  # one bad row must not stop the run
             row["requirements"] = previous.get(key)
             kept = "kept the last block" if previous.get(key) else "no block stored"
             detail = str(exc)[:200]

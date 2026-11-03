@@ -54,18 +54,18 @@ from hailhq.core.carrier_offer import (
 from hailhq.core.carrier_routing import CARRIERS, carrier
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.number_options import (
-    number_options,
-    offer_paperwork,
-    option_key,
-    option_status,
-)
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
     PROVIDERS,
     by_request_offers,
     discover_offers,
     rank_offers,
+)
+from hailhq.core.number_options import (
+    number_options,
+    offer_paperwork,
+    option_key,
+    option_status,
 )
 from hailhq.core.providers.verification import (
     SmsRegistrationProvider,

@@ -847,7 +847,7 @@ async def test_number_options_lists_types_without_carrier_names(
     ]
     assert t["for"]["business"]["status"] == "ready"
     assert t["for"]["business"]["verification"]["subject_name"] == "Acme AG"
-    assert not re.search("twilio|telnyx|didww", resp.text, re.I)
+    assert not re.search("twilio|telnyx|didww", resp.text, re.IGNORECASE)
 
 
 async def test_number_options_bad_country_is_422(client, org_and_key) -> None:
@@ -990,7 +990,7 @@ async def test_quotes_subject_ranking_matches_options(
         assert first["paperwork"] == best["paperwork"]
     person = await _quotes(client, key, subject_type="person")
     # Telnyx lists one paper, Twilio two: fewer papers first.
-    assert [o["e164"] for o in person.json()["offers"]][0] == "+41215550002"
+    assert next(o["e164"] for o in person.json()["offers"]) == "+41215550002"
 
 
 async def test_quotes_paperwork_from_catalog(
@@ -1005,7 +1005,7 @@ async def test_quotes_paperwork_from_catalog(
     assert by_number["+41215550002"] == [
         {"key": "id_document", "label": "ID card or passport"}
     ]
-    assert not re.search("twilio|telnyx|didww", resp.text, re.I)
+    assert not re.search("twilio|telnyx|didww", resp.text, re.IGNORECASE)
 
 
 async def test_quotes_unknown_subject_is_422(client, org_and_key) -> None:
