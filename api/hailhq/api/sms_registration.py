@@ -62,8 +62,13 @@ async def registered_numbers(
                     PhoneNumber.created_at,
                     PhoneNumber.id,
                 )
-                # Callers hold the org lock: read what other sessions
-                # committed, so a person's registration never gets two.
+                # Read what other sessions committed, so a person's
+                # registration never gets two. The worker and
+                # attach_if_registered's callers hold the org lock. The
+                # approval (_settle_sms_approval) holds only the row lock:
+                # the row turns approved in the same commit as its numbers,
+                # and the other paths act only on approved rows, so none
+                # attaches to it before that commit.
                 .execution_options(populate_existing=True)
             )
         )

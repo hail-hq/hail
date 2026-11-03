@@ -400,6 +400,93 @@ async def test_a_refused_attach_carries_telnyx_reason() -> None:
         )
 
 
+def _linked_handler(calls: list, records: list, list_status: int = 200):
+    """Telnyx with ``records`` on the campaign; a link answers 200."""
+
+    def handler(req):
+        calls.append((req.method, req.url.path, dict(req.url.params)))
+        if req.method == "GET":
+            return httpx.Response(list_status, json={"records": records})
+        return httpx.Response(200, json={})
+
+    return handler
+
+
+def _link(number: str, status: str = "ASSIGNED", campaign: str = "C1") -> dict:
+    return {
+        "phoneNumber": number,
+        "campaignId": campaign,
+        "telnyxCampaignId": campaign,
+        "assignmentStatus": status,
+    }
+
+
+async def test_a_persons_campaign_with_another_number_is_refused() -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, [_link("+15125550199")]))
+    with pytest.raises(VerificationProviderError, match=r"\+15125550199"):
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert calls == [
+        (
+            "GET",
+            "/v2/10dlc/phone_number_campaigns",
+            {"filter[telnyx_campaign_id]": "C1"},
+        )
+    ]
+
+
+async def test_a_persons_number_already_on_the_campaign_is_a_success() -> None:
+    calls = []
+    # A link that timed out went through: Telnyx has it, still pending.
+    p = _provider(_linked_handler(calls, [_link("+15125550100", "PENDING_ASSIGNMENT")]))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [],
+        # A failed link does not hold the campaign.
+        [_link("+15125550199", "FAILED_ASSIGNMENT")],
+        # Another campaign's number, in case Telnyx ignores the filter.
+        [_link("+15125550199", campaign="C2")],
+    ],
+)
+async def test_a_persons_free_campaign_gets_the_number(records) -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, records))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[:2] for c in calls] == [
+        ("GET", "/v2/10dlc/phone_number_campaigns"),
+        ("POST", "/v2/10dlc/phone_number_campaigns"),
+    ]
+
+
+async def test_a_persons_link_is_not_sent_when_telnyx_cannot_be_read() -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, [], list_status=500))
+    with pytest.raises(VerificationProviderError):
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert [c[0] for c in calls] == ["GET"]
+
+
 async def test_detach_deletes_the_number_campaign_link() -> None:
     calls = []
 
