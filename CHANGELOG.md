@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Email: Hail pauses an organization's email when its hard bounce rate or spam complaint rate gets too high, so one sender cannot get email paused for every organization.
+
 ### Fixed
 
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.

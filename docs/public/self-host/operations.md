@@ -718,7 +718,7 @@ describe-active-receipt-rule-set` again.
   not, raise `HAIL_FORWARD_MAX_HOPS`, or blacklist the target:
   clear `forward_to`.
 
-## SMS abuse monitor & channel suspensions
+## Abuse monitor & channel suspensions
 
 All orgs share one Hail-owned A2P 10DLC campaign, so one org's high opt-out
 rate can cause carriers to throttle the whole platform. `AbuseMonitorWorker`
@@ -728,6 +728,16 @@ rolling opt-out rate. Past the threshold
 `channel_suspensions` row. `check_sms_allowed` then blocks that org's
 outbound SMS. The thresholds are unvalidated starting guesses. Expect to
 tune them when real traffic arrives.
+
+Email works the same way. All orgs send from one email provider account,
+and one org's bounces or complaints can get that account paused. The same
+worker computes each org's hard bounce rate and complaint rate per
+recipient over `HAIL_EMAIL_ABUSE_WINDOW_HOURS`. Past
+`HAIL_EMAIL_ABUSE_MAX_BOUNCE_RATE` or `HAIL_EMAIL_ABUSE_MAX_COMPLAINT_RATE`
+(once the org has `HAIL_EMAIL_ABUSE_MIN_SENDS` recipients), it inserts a
+`channel_suspensions` row with `channel = 'email'`. `check_email_allowed`
+then blocks `POST /v1/emails` and agent sends. Forwards and Hail's own
+notices are not counted and are not blocked.
 
 **You must lift a suspension manually for now — there is no CLI/route/expiry.**
 An auto-suspended org stays blocked until an operator runs raw SQL. Inspect
@@ -741,10 +751,15 @@ psql "$DATABASE_URL" -c \
 # Lift one org's SMS suspension (re-enables outbound immediately)
 psql "$DATABASE_URL" -c \
   "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'sms';"
+
+# Lift one org's email suspension
+psql "$DATABASE_URL" -c \
+  "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'email';"
 ```
 
 Before you lift a suspension, confirm that the opt-out spike was benign (a
-burst of legitimate STOPs, not abuse). Otherwise, the next hourly tick
+burst of legitimate STOPs, not abuse), or that the org cleaned the list
+that bounced. Otherwise, the next hourly tick
 suspends the org again. There is no cooldown/backoff yet, so a
 persistently-abusive org trips again on the next run. If you see false
 positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
