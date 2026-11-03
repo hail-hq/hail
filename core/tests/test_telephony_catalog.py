@@ -244,3 +244,44 @@ def test_by_request_offers_come_from_the_catalog_and_rank_last(tmp_path, monkeyp
         assert rank_offers([asked, live]) == [live, asked]
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_requirements_reader(tmp_path, monkeypatch):
+    block = {
+        "person": {"accepted": False, "items": []},
+        "business": {"accepted": True, "items": ["company_registration"]},
+    }
+    data = {
+        "numbers": [
+            {"country_code": "CH", "number_type": "local", "requirements": block},
+            {"country_code": "US", "number_type": "local", "requirements": None},
+            {"country_code": "SE", "number_type": "local"},
+        ]
+    }
+    (tmp_path / "telnyx.json").write_text(json.dumps(data))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    assert telephony_catalog.requirements("CH", "local", "telnyx") == block
+    assert telephony_catalog.requirements("US", "local", "telnyx") is None
+    assert telephony_catalog.requirements("SE", "local", "telnyx") is None
+    assert telephony_catalog.requirements("FR", "local", "telnyx") is None
+
+
+def test_rows_includes_by_request_excludes_receive_only(tmp_path, monkeypatch):
+    def row(cc, nt, **extra):
+        return {"country_code": cc, "number_type": nt, **extra}
+
+    data = {
+        "numbers": [
+            row("PT", "local"),
+            row("PT", "mobile", by_request=True),
+            row("PT", "national", receive_only=True),
+            row("ES", "local"),
+        ]
+    }
+    (tmp_path / "didww.json").write_text(json.dumps(data))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    got = telephony_catalog.rows("PT", "didww")
+    assert sorted(r["number_type"] for r in got) == ["local", "mobile"]
+    assert telephony_catalog.rows("XX", "didww") == []

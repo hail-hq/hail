@@ -5,6 +5,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 spec = importlib.util.spec_from_file_location(
     "sync_numbers", Path(__file__).with_name("sync_numbers.py")
 )
@@ -773,3 +775,182 @@ def test_sync_preserves_capability_fees_as_separate_source(tmp_path):
     ]
     path.write_text(json.dumps({"capability_monthly_fees": fees}))
     assert sync.write_catalog(path, "telnyx", [])["capability_monthly_fees"] == fees
+
+
+# -- requirements block ---------------------------------------------------------
+
+
+def _req(subject, *, docs=(), fields=(), provider_rules=None, address=False):
+    from hailhq.core.providers.verification import (
+        DocumentOption,
+        DocumentSlot,
+        FieldSpec,
+        VerificationRequirements,
+    )
+
+    return VerificationRequirements(
+        country_code="DE",
+        number_type="local",
+        subject_type=subject,
+        required=True,
+        fields=tuple(FieldSpec(name=n, label=n) for n in fields),
+        documents=tuple(
+            DocumentSlot(name=n, label=n, options=(DocumentOption(key="a", label="a"),))
+            for n in docs
+        ),
+        address_required=address,
+    )
+
+
+class _FakeProvider:
+    """Twilio-style plug-in: ``requirements`` per subject."""
+
+    def __init__(self, by_subject, calls=None):
+        self.by_subject = by_subject
+        self.calls = calls if calls is not None else []
+
+    async def requirements(self, cc, nt, subject):
+        from hailhq.core.providers.verification import UnsupportedSubjectType
+
+        self.calls.append((cc, nt, subject))
+        value = self.by_subject[subject]
+        if value is None:
+            raise UnsupportedSubjectType("no", allowed=())
+        return value
+
+
+def _use(monkeypatch, provider):
+    from hailhq.core.providers import verification
+
+    monkeypatch.setattr(
+        verification,
+        "get_verification_provider",
+        lambda name, purpose="number": provider,
+    )
+
+
+def _row_needing(cc="DE", nt="local", verify=True):
+    return {
+        "country_code": cc,
+        "number_type": nt,
+        "usd_per_month": "1.00",
+        "verification_required": verify,
+    }
+
+
+def test_requirements_written_for_verified_rows(monkeypatch):
+    fake = _FakeProvider(
+        {
+            "person": _req("person", docs=("proof_of_identity",)),
+            "business": _req("business", docs=("business_address",)),
+        }
+    )
+    _use(monkeypatch, fake)
+    row = _row_needing()
+    sync.attach_requirements("twilio", [row], [], [])
+    assert row["requirements"] == {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": ["proof_of_address"]},
+    }
+
+
+def test_unsupported_subject_is_not_accepted(monkeypatch):
+    fake = _FakeProvider(
+        {"person": None, "business": _req("business", docs=("business_address",))}
+    )
+    _use(monkeypatch, fake)
+    block = sync.fetch_requirements("twilio", "DE", "local")
+    assert block["person"] == {"accepted": False, "items": []}
+    assert block["business"]["accepted"] is True
+
+
+def test_no_requirements_for_unverified_rows(monkeypatch):
+    fake = _FakeProvider({})
+    _use(monkeypatch, fake)
+    row = _row_needing(verify=False)
+    sync.attach_requirements("twilio", [row], [], [])
+    assert row["requirements"] is None
+    assert fake.calls == []
+
+
+def test_carrier_error_keeps_last_good_block(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("carrier down")
+
+    _use(monkeypatch, Boom())
+    good = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": False, "items": []},
+    }
+    existing = [{**_row_needing(), "requirements": good}]
+    row, row2 = _row_needing(), _row_needing("FR")
+    report: list[str] = []
+    sync.attach_requirements("twilio", [row, row2], existing, report)
+    assert row["requirements"] == good
+    assert row2["requirements"] is None  # nothing stored before
+    assert len(report) == 2 and "DE:local" in report[0]
+
+
+def test_missing_verification_provider_fails_loudly(monkeypatch):
+    _use(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="twilio"):
+        sync.attach_requirements("twilio", [_row_needing()], [], [])
+    # No row needs verification: nothing to fetch, no error.
+    sync.attach_requirements("twilio", [_row_needing(verify=False)], [], [])
+
+
+def test_didww_union_of_groups(monkeypatch):
+    class Didww:
+        async def requirements_per_group(self, cc, nt, subject):
+            if subject == "person":
+                return [
+                    _req("person", docs=("identity_proof_1",)),
+                    _req(
+                        "person",
+                        docs=("identity_proof_1", "address_proof_1"),
+                        fields=("birth_date",),
+                    ),
+                ]
+            return []
+
+    _use(monkeypatch, Didww())
+    block = sync.fetch_requirements("didww", "DE", "local")
+    assert block["person"] == {
+        "accepted": True,
+        "items": ["id_document", "birth_date", "proof_of_address"],
+    }
+    assert block["business"] == {"accepted": True, "items": []}
+
+
+def test_telnyx_passes_raw_rules_to_classify(monkeypatch):
+    class Telnyx:
+        async def _rules(self, cc, nt):
+            return [{"id": "x", "field_type": "address", "name": "Local address"}]
+
+        async def requirements(self, cc, nt, subject):
+            return _req(subject, address=True)
+
+    _use(monkeypatch, Telnyx())
+    block = sync.fetch_requirements("telnyx", "DE", "local")
+    assert block["person"]["items"] == ["address_in_country"]
+
+
+def test_schema_accepts_requirements():
+    import jsonschema
+
+    schema = json.loads(
+        (Path(__file__).parents[2] / "costs/schema/numbers.schema.json").read_text()
+    )
+    base = json.loads((Path(__file__).parents[2] / "costs/telnyx.json").read_text())
+    row = dict(base["numbers"][0])
+    block = {
+        "person": {"accepted": True, "items": ["id_document", {"other": "Odd paper"}]},
+        "business": {"accepted": False, "items": []},
+    }
+    for value in (block, None):
+        doc = {**base, "numbers": [{**row, "requirements": value}]}
+        jsonschema.validate(doc, schema)
+    bad = {**base, "numbers": [{**row, "requirements": {"person": {"accepted": True}}}]}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad, schema)

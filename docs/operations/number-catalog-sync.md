@@ -67,6 +67,26 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 7. DIDWW only: `by_request: true` when every area of the type that can place calls has `available_dids_enabled: false` (DIDWW picks the number at order time). `receive_only: true` when no area of the type can place calls (`voice_out` missing). Both are written only when true, and both are watched fields. The row price comes from the areas Hail can sell. The API and the console never offer a marked row; see [didww.md](../public/self-host/didww.md#numbers-hail-cannot-sell).
 8. `voice`, `sms` and `mms`: a feature one of the sampled numbers has is a yes. For a feature none of them has, the carrier is asked directly: Twilio with a filtered search (`VoiceEnabled` / `SmsEnabled` / `MmsEnabled`), Telnyx through the `features` its `country_coverage` list declares for the number type. A `false` is never read off the sample, which changes from run to run. DIDWW flags come from its number-group attributes.
 
+## Requirements block
+
+Each row has an optional `requirements` block: who may buy the number and which paper categories each kind of buyer needs. The API reads it from the file and makes no carrier call. Schema: `costs/schema/numbers.schema.json`.
+
+```json
+"requirements": {
+  "person":   {"accepted": false, "items": []},
+  "business": {"accepted": true,  "items": ["company_registration", "proof_of_address"]}
+}
+```
+
+- `accepted: false`: this kind of buyer may not buy the number. `items` is empty.
+- `items`: category keys in a fixed order (`hailhq.core.requirement_categories`). A paper no category fits is `{"other": "<carrier label>"}`.
+- `null` when the row needs no verification (`verification_required: false`), or when no block was ever read for it.
+- The sync reads it once per carrier, country and type, for rows with `verification_required: true`. Read: `telephony_catalog.requirements(country, type, carrier)`.
+- On a carrier error the row keeps the block from the last sync (or `null` if it never had one). The error is listed under "Requirements not refreshed" in the PR summary.
+- DIDWW lists one requirement per DID group. The block is the union of the items of all groups of that country and type.
+- If a carrier has rows that need verification but no verification plug-in starts (credentials missing), the run fails. It never writes empty blocks.
+- Hand-verified rows (`manual-confirmed`) keep their block as they are.
+
 ## Reviewing the sync PR
 
 1. Read the summary sections per carrier: **added**, **changed**, **vanished**, **kept**, **unobserved**, **Skipped by the sync**.

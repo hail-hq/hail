@@ -14,7 +14,14 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["by_request_row", "capabilities", "monthly_price", "sells_in"]
+__all__ = [
+    "by_request_row",
+    "capabilities",
+    "monthly_price",
+    "requirements",
+    "rows",
+    "sells_in",
+]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -96,6 +103,24 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
     sells it by request only (support orders it by hand), else None."""
     row = _load(provider).get((country_code, number_type))
     return row if row and row.get("by_request") else None
+
+
+def requirements(country_code: str, number_type: str, provider: str) -> dict | None:
+    """The stored requirements block of ``provider``'s catalog row (who may
+    buy and which paper categories each needs), or None when the row has no
+    block. Read from the catalog only; no carrier call."""
+    row = _load(provider).get((country_code, number_type))
+    return row.get("requirements") if row else None
+
+
+def rows(country_code: str, provider: str) -> list[dict]:
+    """Every catalog row of ``provider`` in this country, by-request rows
+    included, receive-only rows left out."""
+    return [
+        row
+        for (cc, _), row in _load(provider).items()
+        if cc == country_code and not row.get("receive_only")
+    ]
 
 
 def monthly_price(provider: str, base_cents: int, selected: list[str]) -> dict:

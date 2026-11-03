@@ -33,6 +33,7 @@ TELNYX_API_KEY, DIDWW_API_KEY.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -819,6 +820,117 @@ SOURCE_URLS = {
 }
 
 
+# -- Requirements ---------------------------------------------------------------
+
+SUBJECTS = ("person", "business")
+_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+class VerificationUnavailable(RuntimeError):
+    """A carrier has rows that need verification but no verification plug-in
+    is configured. The run fails: empty blocks must never be written."""
+
+
+def _run(coro: Any) -> Any:
+    """Run a plug-in coroutine on one loop for the whole run. The plug-ins
+    keep HTTP clients that a second, new loop would break."""
+    global _LOOP
+    if _LOOP is None or _LOOP.is_closed():
+        _LOOP = asyncio.new_event_loop()
+    return _LOOP.run_until_complete(coro)
+
+
+def _verification_provider(provider: str) -> Any:
+    # Imported here: the rest of this script needs only `requests`.
+    from hailhq.core.providers import verification
+
+    plugin = verification.get_verification_provider(provider)
+    if plugin is None:
+        raise VerificationUnavailable(
+            f"no verification plug-in for {provider}: its credentials are missing "
+            "or the plug-in cannot start"
+        )
+    return plugin
+
+
+def _union(lists: list[list[Any]]) -> list[Any]:
+    """Every item of every list once: known categories in the fixed catalog
+    order, then ``{other}`` items in the order they appear."""
+    from hailhq.core.requirement_categories import LABELS
+
+    keys = {i for items in lists for i in items if isinstance(i, str)}
+    others: list[dict[str, str]] = []
+    for items in lists:
+        for i in items:
+            if isinstance(i, dict) and i not in others:
+                others.append(i)
+    return [k for k in LABELS if k in keys] + others
+
+
+def fetch_requirements(provider: str, country_code: str, number_type: str) -> dict:
+    """The requirements block for one (country, type) at one carrier: for each
+    kind of buyer, whether it may buy and which paper categories it needs.
+    A kind the carrier refuses gives ``{"accepted": False, "items": []}``.
+    DIDWW lists one requirement per DID group; the items are their union."""
+    from hailhq.core.providers.verification import UnsupportedSubjectType
+    from hailhq.core.requirement_categories import classify
+
+    plugin = _verification_provider(provider)
+    rules = None
+    if provider == "telnyx":
+        # The raw rules tell an address in the number's area from one in
+        # the country; `requirements` alone does not.
+        rules = _run(plugin._rules(country_code, number_type))
+    block: dict[str, dict] = {}
+    for subject in SUBJECTS:
+        try:
+            if provider == "didww":
+                found = _run(
+                    plugin.requirements_per_group(country_code, number_type, subject)
+                )
+            else:
+                found = [_run(plugin.requirements(country_code, number_type, subject))]
+        except UnsupportedSubjectType:
+            block[subject] = {"accepted": False, "items": []}
+            continue
+        block[subject] = {
+            "accepted": True,
+            "items": _union([classify(r, provider, rules=rules) for r in found]),
+        }
+    return block
+
+
+def attach_requirements(
+    provider: str, rows: list[dict], existing: list[dict], report: list[str]
+) -> None:
+    """Set ``requirements`` on each fetched row. A row that needs verification
+    gets the carrier's block; on a carrier error it keeps the block of the
+    current catalog (None when there is none) and the error goes to
+    ``report``. Any other row gets None."""
+    needing = [r for r in rows if r["verification_required"]]
+    if needing:
+        _verification_provider(provider)  # fail loudly before any row is written
+    previous = {
+        f"{n['country_code']}:{n['number_type']}": n.get("requirements")
+        for n in existing
+    }
+    for row in rows:
+        row["requirements"] = None
+        if not row["verification_required"]:
+            continue
+        key = f"{row['country_code']}:{row['number_type']}"
+        try:
+            row["requirements"] = fetch_requirements(
+                provider, row["country_code"], row["number_type"]
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad row must not stop the run
+            row["requirements"] = previous.get(key)
+            kept = "kept the last block" if previous.get(key) else "no block stored"
+            report.append(
+                f"{key}: requirements failed ({exc.__class__.__name__}), {kept}"
+            )
+
+
 def run_provider(
     provider: str,
     config: dict[str, str],
@@ -883,6 +995,8 @@ def run_provider(
         raise CatalogShrunk(
             f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
+    requirement_errors: list[str] = []
+    attach_requirements(provider, rows, existing, requirement_errors)
     numbers, report = merge(
         existing,
         rows,
@@ -903,6 +1017,9 @@ def run_provider(
         if report[key]:
             summary.append(f"### {label} ({len(report[key])})")
             summary.extend(f"- {line}" for line in report[key])
+    if requirement_errors:
+        summary.append(f"### Requirements not refreshed ({len(requirement_errors)})")
+        summary.extend(f"- {line}" for line in requirement_errors[:60])
     if skipped:
         summary.append(f"### Skipped by the sync ({len(skipped)})")
         summary.extend(f"- {line}" for line in skipped[:60])
