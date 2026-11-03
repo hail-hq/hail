@@ -26,6 +26,7 @@ from hailhq.core.providers.verification.base import (
     FieldSpec,
     Problem,
     ProviderStatus,
+    RegistrationHoldsAnotherNumber,
     Requirements,
     SmsRegistrationProvider,
     VerificationProviderError,
@@ -40,6 +41,15 @@ from hailhq.core.providers.verification.sms_form import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A number in these states holds a person's campaign (Telnyx's
+# ``assignmentStatus``). An unlink that failed still holds it.
+_HOLDS_CAMPAIGN = frozenset({"ASSIGNED", "PENDING_ASSIGNMENT", "FAILED_UNASSIGNMENT"})
+# GET /10dlc/phone_number_campaigns: 20 is the documented default and no
+# maximum is documented, so every page is read.
+_LIST_PAGE_SIZE = 20
+# A guard against a listing that never ends (1,000 records).
+_MAX_LIST_PAGES = 50
 
 _EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
@@ -891,10 +901,17 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC: campaign %s already holds a number", refs["campaign_id"]
                 )
-                raise VerificationProviderError(
+                message = (
                     "a person's registration holds one number: "
                     f"Telnyx has {', '.join(sorted(held.values()))} on the campaign"
                 )
+                if len(held) == 1:
+                    # The caller records it as the registration's number
+                    # when it is one of the organization's.
+                    raise RegistrationHoldsAnotherNumber(
+                        message, "+" + next(iter(held))
+                    )
+                raise VerificationProviderError(message)
         try:
             await self._api.request(
                 "POST",
@@ -912,35 +929,56 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
 
     async def _campaign_numbers(self, campaign_id: str) -> dict[str, str]:
-        """The numbers Telnyx has on the campaign, keyed by their digits. A
-        failed link (``FAILED_ASSIGNMENT``) does not hold the campaign. One
-        page is enough: a sole proprietor campaign takes one number. Raises
-        when Telnyx cannot be read, so a link is never sent blind."""
-        try:
-            body = await self._api.request(
-                "GET",
-                "/10dlc/phone_number_campaigns",
-                params={"filter[telnyx_campaign_id]": campaign_id},
-            )
-            records = body.get("records") or []
-        except (httpx.HTTPError, ValueError, AttributeError) as exc:
-            raise VerificationProviderError("Telnyx request failed") from exc
+        """The numbers that hold the campaign, keyed by their digits: linked
+        (``ASSIGNED``), being linked (``PENDING_ASSIGNMENT``) or not unlinked
+        (``FAILED_UNASSIGNMENT``). A failed link and a number being unlinked
+        do not hold it. Reads every page. Raises when Telnyx cannot be read,
+        so a link is never sent blind."""
         held: dict[str, str] = {}
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            # Checked here too, in case Telnyx ignores the filter.
-            if campaign_id not in (
-                record.get("campaignId"),
-                record.get("telnyxCampaignId"),
-            ):
-                continue
-            if record.get("assignmentStatus") == "FAILED_ASSIGNMENT":
-                continue
-            number = str(record.get("phoneNumber") or "")
-            if _digits(number):
-                held[_digits(number)] = number
-        return held
+        seen = 0
+        for page in range(1, _MAX_LIST_PAGES + 1):
+            try:
+                body = await self._api.request(
+                    "GET",
+                    "/10dlc/phone_number_campaigns",
+                    params={
+                        "filter[telnyx_campaign_id]": campaign_id,
+                        "recordsPerPage": _LIST_PAGE_SIZE,
+                        "page": page,
+                    },
+                )
+                records = body.get("records") or []
+                total = body.get("totalRecords")
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "10DLC campaign numbers not read: status=%s",
+                    exc.response.status_code,
+                )
+                raise VerificationProviderError(
+                    f"status {exc.response.status_code}: {_error_log(exc.response)}"
+                ) from exc
+            except (httpx.HTTPError, ValueError, AttributeError) as exc:
+                raise VerificationProviderError("Telnyx request failed") from exc
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                # Checked here too, in case Telnyx ignores the filter.
+                if campaign_id not in (
+                    record.get("campaignId"),
+                    record.get("telnyxCampaignId"),
+                ):
+                    continue
+                if record.get("assignmentStatus") not in _HOLDS_CAMPAIGN:
+                    continue
+                number = str(record.get("phoneNumber") or "")
+                if _digits(number):
+                    held[_digits(number)] = number
+            seen += len(records)
+            if not records or not isinstance(total, int) or seen >= total:
+                return held
+        raise VerificationProviderError(
+            f"Telnyx lists more than {_MAX_LIST_PAGES} pages of campaign numbers"
+        )
 
     async def discard(self, refs) -> None:
         steps = (

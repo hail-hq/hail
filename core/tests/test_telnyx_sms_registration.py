@@ -9,6 +9,7 @@ from hailhq.core.providers.verification.base import (
     CAMPAIGN_REJECTED,
     Address,
     Problem,
+    RegistrationHoldsAnotherNumber,
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.telnyx_sms import (
@@ -400,13 +401,28 @@ async def test_a_refused_attach_carries_telnyx_reason() -> None:
         )
 
 
-def _linked_handler(calls: list, records: list, list_status: int = 200):
-    """Telnyx with ``records`` on the campaign; a link answers 200."""
+def _linked_handler(
+    calls: list, records: list, list_status: int = 200, list_errors=None
+):
+    """Telnyx with ``records`` on the campaign, served in pages as the API
+    reference says (``page``, ``recordsPerPage``, ``totalRecords``); a link
+    answers 200."""
 
     def handler(req):
         calls.append((req.method, req.url.path, dict(req.url.params)))
         if req.method == "GET":
-            return httpx.Response(list_status, json={"records": records})
+            if list_status != 200:
+                return httpx.Response(list_status, json={"errors": list_errors or []})
+            page = int(req.url.params.get("page", 1))
+            size = int(req.url.params.get("recordsPerPage", 20))
+            return httpx.Response(
+                200,
+                json={
+                    "records": records[(page - 1) * size : page * size],
+                    "page": page,
+                    "totalRecords": len(records),
+                },
+            )
         return httpx.Response(200, json={})
 
     return handler
@@ -434,7 +450,7 @@ async def test_a_persons_campaign_with_another_number_is_refused() -> None:
         (
             "GET",
             "/v2/10dlc/phone_number_campaigns",
-            {"filter[telnyx_campaign_id]": "C1"},
+            {"filter[telnyx_campaign_id]": "C1", "recordsPerPage": "20", "page": "1"},
         )
     ]
 
@@ -455,8 +471,11 @@ async def test_a_persons_number_already_on_the_campaign_is_a_success() -> None:
     "records",
     [
         [],
-        # A failed link does not hold the campaign.
+        # A failed link and a number being unlinked do not hold the campaign.
         [_link("+15125550199", "FAILED_ASSIGNMENT")],
+        [_link("+15125550199", "PENDING_UNASSIGNMENT")],
+        # Neither does a record with no status Hail knows.
+        [_link("+15125550199", None)],
         # Another campaign's number, in case Telnyx ignores the filter.
         [_link("+15125550199", campaign="C2")],
     ],
@@ -473,6 +492,96 @@ async def test_a_persons_free_campaign_gets_the_number(records) -> None:
         ("GET", "/v2/10dlc/phone_number_campaigns"),
         ("POST", "/v2/10dlc/phone_number_campaigns"),
     ]
+
+
+@pytest.mark.parametrize(
+    "status", ["ASSIGNED", "PENDING_ASSIGNMENT", "FAILED_UNASSIGNMENT"]
+)
+async def test_a_number_that_holds_the_campaign_refuses_another(status) -> None:
+    # An unlink that failed still holds the campaign.
+    calls = []
+    p = _provider(_linked_handler(calls, [_link("+15125550199", status)]))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert [c[0] for c in calls] == ["GET"]
+
+
+async def test_a_persons_number_being_unlinked_is_linked_again() -> None:
+    # Telnyx is about to unlink it: not a success, so the link is sent.
+    calls = []
+    p = _provider(
+        _linked_handler(calls, [_link("+15125550100", "PENDING_UNASSIGNMENT")])
+    )
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET", "POST"]
+
+
+async def test_two_numbers_on_a_persons_campaign_name_no_one_number() -> None:
+    calls = []
+    records = [_link("+15125550198"), _link("+15125550199")]
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(
+        VerificationProviderError, match=r"5550198, \+15125550199"
+    ) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert not isinstance(caught.value, RegistrationHoldsAnotherNumber)
+
+
+async def test_the_campaign_check_reads_every_page() -> None:
+    # Newest first: failed links fill page 1, the number that holds the
+    # campaign is on page 2.
+    calls = []
+    records = [_link(f"+1512555{i:04}", "FAILED_ASSIGNMENT") for i in range(20)]
+    records.append(_link("+15125550199"))
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert [(c[0], c[2].get("page")) for c in calls] == [("GET", "1"), ("GET", "2")]
+
+
+async def test_the_campaign_check_stops_at_the_last_page() -> None:
+    calls = []
+    records = [_link(f"+1512555{i:04}", "FAILED_ASSIGNMENT") for i in range(20)]
+    p = _provider(_linked_handler(calls, records))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [(c[0], c[2].get("page")) for c in calls] == [("GET", "1"), ("POST", None)]
+
+
+async def test_a_failed_campaign_check_keeps_telnyx_reason() -> None:
+    calls = []
+    errors = [{"code": "10015", "title": "Bad Request", "detail": "Invalid filter"}]
+    p = _provider(_linked_handler(calls, [], list_status=400, list_errors=errors))
+    with pytest.raises(VerificationProviderError) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert str(caught.value).startswith("status 400: ")
+    assert "10015" in str(caught.value) and "Invalid filter" in str(caught.value)
+    assert [c[0] for c in calls] == ["GET"]
 
 
 async def test_a_persons_link_is_not_sent_when_telnyx_cannot_be_read() -> None:

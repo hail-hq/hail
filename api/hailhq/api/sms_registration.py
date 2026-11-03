@@ -5,7 +5,9 @@ numbers are on which registration; the send gate reads it.
 A number the carrier refuses keeps its retry state in
 ``provisioning_metadata['sms_attach_refused']``: the registration, the wait,
 when the background pass may try it again, and a hash of the carrier's last
-audited reason. A person's registration then moves on to their next number."""
+audited reason. A person's registration then moves on to their next number.
+When the carrier already holds another of the organization's free numbers
+on a person's registration, Hail records that number as attached instead."""
 
 from __future__ import annotations
 
@@ -17,7 +19,10 @@ from uuid import UUID
 from hailhq.api.audit import write_audit_log
 from hailhq.core.db import org_lock
 from hailhq.core.models import CarrierVerification, PhoneNumber
-from hailhq.core.providers.verification.base import SmsRegistrationProvider
+from hailhq.core.providers.verification.base import (
+    RegistrationHoldsAnotherNumber,
+    SmsRegistrationProvider,
+)
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,25 +150,74 @@ async def _record_refusal(
 
 
 async def _attach(
-    row: CarrierVerification, provider: SmsRegistrationProvider, number: PhoneNumber
-) -> bool:
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: SmsRegistrationProvider,
+    number: PhoneNumber,
+) -> PhoneNumber | None:
     """Attach one number and record it. A failure is logged with the number
-    id and recorded (see ``_record_refusal``). True when the number is now on
-    the registration."""
+    id and recorded (see ``_record_refusal``). Returns the number now on the
+    registration: this one, or the free number of this organization the
+    carrier already holds on a person's registration (an earlier link that
+    timed out may have gone through). None when nothing joined."""
     try:
         await provider.attach_number(
             row.provider_refs,
             provider_resource_id=number.provider_resource_id,
             e164=number.e164,
         )
+    except RegistrationHoldsAnotherNumber as exc:
+        held = await _free_number(db, row, exc.e164)
+        if held is not None:
+            logger.info(
+                "SMS registration %s: the carrier holds number %s, recorded",
+                row.id,
+                held.id,
+            )
+            _record_attached(row, held)
+            return held
+        await _refused(row, number, exc)
+        return None
     except Exception as exc:
-        logger.warning(
-            "SMS registration attach failed for number %s", number.id, exc_info=True
+        await _refused(row, number, exc)
+        return None
+    _record_attached(row, number)
+    return number
+
+
+async def _refused(
+    row: CarrierVerification, number: PhoneNumber, exc: Exception
+) -> None:
+    logger.warning(
+        "SMS registration attach failed for number %s", number.id, exc_info=exc
+    )
+    # A failed re-attach leaves a number on the registration: it still texts.
+    if number.sms_registration_id != row.id:
+        await _record_refusal(row, number, str(exc)[:500] or repr(exc))
+
+
+async def _free_number(
+    db: AsyncSession, row: CarrierVerification, e164: str
+) -> PhoneNumber | None:
+    """The organization's eligible number ``e164`` on the row's carrier, when
+    it is on no registration. Read fresh: callers hold the org lock."""
+    return (
+        await db.execute(
+            select(PhoneNumber)
+            .where(
+                PhoneNumber.organization_id == row.organization_id,
+                PhoneNumber.provider == row.provider,
+                PhoneNumber.e164 == e164,
+                PhoneNumber.sms_registration_id.is_(None),
+                *_ELIGIBLE_NUMBER,
+            )
+            .limit(1)
+            .execution_options(populate_existing=True)
         )
-        # A failed re-attach leaves a number on the registration: it still texts.
-        if number.sms_registration_id != row.id:
-            await _record_refusal(row, number, str(exc)[:500] or repr(exc))
-        return False
+    ).scalar_one_or_none()
+
+
+def _record_attached(row: CarrierVerification, number: PhoneNumber) -> None:
     number.sms_registration_id = row.id
     service = (row.provider_refs or {}).get("messaging_service_sid")
     if service:
@@ -172,7 +226,6 @@ async def _attach(
         number.provisioning_metadata = {
             k: v for k, v in number.provisioning_metadata.items() if k != _REFUSED
         }
-    return True
 
 
 async def attach_org_numbers(
@@ -193,7 +246,7 @@ async def attach_org_numbers(
             number.sms_registration_id is not None or _waiting(row, number)
         ):
             continue
-        if await _attach(row, provider, number):
+        if await _attach(db, row, provider, number) is not None:
             attached += 1
             if row.subject_type == "person":
                 break
@@ -280,7 +333,19 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
         # A person's registration holds one number: this one is not next.
         return
-    await _attach(row, provider, number)
+    joined = await _attach(db, row, provider, number)
+    if joined is not None and joined.id != number.id:
+        # The carrier held another of the org's numbers: the approval and
+        # the worker write this row for theirs.
+        await write_audit_log(
+            row.organization_id,
+            None,
+            "verification.sms_attached",
+            "carrier_verification",
+            row.id,
+            {"numbers": 1, "failed": 0},
+            actor_kind="system",
+        )
 
 
 async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
