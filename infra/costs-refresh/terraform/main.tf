@@ -30,9 +30,10 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
+# The account already has GitHub's OIDC provider, and AWS allows one per URL,
+# so this stack reads it instead of creating it.
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 data "aws_iam_policy_document" "trust" {
@@ -41,7 +42,7 @@ data "aws_iam_policy_document" "trust" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {

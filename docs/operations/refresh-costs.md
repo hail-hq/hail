@@ -42,7 +42,7 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The PR comes from `GITHUB_TOKEN`, so `costs-validate.yml` does not run on it. The `refresh` job runs the schema, reference, featured, script test, and site build checks first.
 - `sms-registration.json` and `recording.json` are not covered. Refresh those by hand.
 
-Setup, once:
+Setup, once. Set `AWS_PROFILE` to a profile that can manage IAM in the account. The account must already have GitHub's OIDC provider (`token.actions.githubusercontent.com`); the stack reads it and does not create it.
 
 ```bash
 cd infra/costs-refresh
