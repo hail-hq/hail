@@ -56,7 +56,7 @@ _OPT_OUT_MESSAGE = (
 # campaign whose opt-in text lacks the message frequency and the rates notice
 # (TCR error 611).
 _OPT_IN_MESSAGE = (
-    "You are opted in. Msg frequency varies. Msg & data rates may apply. "
+    "You are opted in. Msg frequency varies. Msg and data rates may apply. "
     "Reply HELP for help, STOP to opt out."
 )
 # Help contact for campaigns whose snapshot has no contact email (filed
