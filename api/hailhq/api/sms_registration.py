@@ -167,7 +167,11 @@ async def _attach(
             e164=number.e164,
         )
     except RegistrationHoldsAnotherNumber as exc:
-        held = await _free_number(db, row, exc.e164)
+        # A number already on the registration in Hail stays its one number
+        # (a re-attach): the carrier's other number is refused, not added.
+        held = None
+        if not await _has_number(db, row):
+            held = await _free_number(db, row, exc.e164)
         if held is not None:
             logger.info(
                 "SMS registration %s: the carrier holds number %s, recorded",
@@ -175,6 +179,9 @@ async def _attach(
                 held.id,
             )
             _record_attached(row, held)
+            # The number tried is not refused: drop its wait for this row.
+            if _refusal(row, number) is not None:
+                _clear_refusal(number)
             return held
         await _refused(row, number, exc)
         return None
@@ -196,11 +203,29 @@ async def _refused(
         await _record_refusal(row, number, str(exc)[:500] or repr(exc))
 
 
+async def _has_number(db: AsyncSession, row: CarrierVerification) -> bool:
+    """True when a number is on the registration (read fresh)."""
+    return (
+        await db.execute(
+            select(PhoneNumber.id)
+            .where(PhoneNumber.sms_registration_id == row.id)
+            .limit(1)
+        )
+    ).first() is not None
+
+
 async def _free_number(
     db: AsyncSession, row: CarrierVerification, e164: str
 ) -> PhoneNumber | None:
     """The organization's eligible number ``e164`` on the row's carrier, when
-    it is on no registration. Read fresh: callers hold the org lock."""
+    it is on no registration. The row is locked (``FOR UPDATE``) until the
+    caller commits; Postgres checks these conditions again on the newest
+    version of the row once the lock is free, so a release or a move that
+    committed first is seen. The worker and ``attach_if_registered``'s
+    callers also hold the org lock. The approval (``_settle_sms_approval``)
+    does not: it holds the verification row lock, and a path that takes
+    the org lock and then writes a verification row (``cancel_verification``)
+    takes the two in the other order, so the org lock here could deadlock."""
     return (
         await db.execute(
             select(PhoneNumber)
@@ -212,6 +237,7 @@ async def _free_number(
                 *_ELIGIBLE_NUMBER,
             )
             .limit(1)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
@@ -222,6 +248,10 @@ def _record_attached(row: CarrierVerification, number: PhoneNumber) -> None:
     service = (row.provider_refs or {}).get("messaging_service_sid")
     if service:
         number.messaging_service_sid = service
+    _clear_refusal(number)
+
+
+def _clear_refusal(number: PhoneNumber) -> None:
     if _REFUSED in number.provisioning_metadata:
         number.provisioning_metadata = {
             k: v for k, v in number.provisioning_metadata.items() if k != _REFUSED
@@ -336,14 +366,15 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
     joined = await _attach(db, row, provider, number)
     if joined is not None and joined.id != number.id:
         # The carrier held another of the org's numbers: the approval and
-        # the worker write this row for theirs.
+        # the worker write this row for theirs. It names both numbers, so
+        # support sees why the number tried did not join.
         await write_audit_log(
             row.organization_id,
             None,
             "verification.sms_attached",
             "carrier_verification",
             row.id,
-            {"numbers": 1, "failed": 0},
+            {"numbers": 1, "failed": 0, "adopted": joined.e164, "tried": number.e164},
             actor_kind="system",
         )
 

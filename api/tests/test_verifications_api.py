@@ -5209,7 +5209,15 @@ async def test_enable_sms_records_the_persons_number_the_carrier_holds(
     assert "sms_attach_refused" not in second.provisioning_metadata
     assert await _audits(async_session, "verification.sms_attach_refused") == []
     attached = await _audits(async_session, "verification.sms_attached")
-    assert [a.payload for a in attached] == [{"numbers": 1, "failed": 0}]
+    # It names both numbers: support reads why the number tried did not join.
+    assert [a.payload for a in attached] == [
+        {
+            "numbers": 1,
+            "failed": 0,
+            "adopted": "+15125550100",
+            "tried": "+15125550101",
+        }
+    ]
     assert attached[0].resource_id == row.id
 
 
@@ -5280,6 +5288,131 @@ async def test_a_number_the_carrier_holds_outside_the_org_still_refuses(
         str(_holds("+15125550199")),
         str(_holds("+15125550198")),
     ]
+
+
+async def test_a_re_attach_does_not_add_the_number_the_carrier_holds(
+    client, org_and_key, async_session, sms_mock, monkeypatch
+) -> None:
+    # The person's number is on the registration in Hail; the carrier has
+    # another of the org's numbers. The registration keeps one number.
+    org_id, _, key = org_and_key
+    on = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    other = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    row, tried = await _person_twilio_row(
+        async_session, org_id, monkeypatch, refused=set()
+    )
+    on.sms_registration_id = row.id
+    await async_session.commit()
+    from hailhq.api.routes import numbers as numbers_routes
+
+    carrier = numbers_routes.get_verification_provider("twilio", "sms")
+
+    async def attach(refs, *, provider_resource_id, e164):
+        tried.append(provider_resource_id)
+        raise _holds("+15125550101")
+
+    monkeypatch.setattr(carrier, "attach_number", attach)
+    resp = await client.post(f"/numbers/{on.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert tried == ["PNA"]
+    assert await _numbers_on(async_session, str(row.id)) == ["PNA"]
+    await async_session.refresh(other)
+    assert other.sms_registration_id is None
+    assert await _audits(async_session, "verification.sms_attached") == []
+
+
+async def test_recording_the_held_number_clears_the_tried_numbers_wait(
+    client, org_and_key, async_session, sms_mock, monkeypatch
+) -> None:
+    # Both numbers were refused for this registration. enable-sms on the
+    # second finds the oldest at the carrier: the second keeps no wait.
+    from hailhq.api.routes import numbers as numbers_routes
+
+    org_id, _, key = org_and_key
+    oldest = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    row, _ = await _person_twilio_row(async_session, org_id, monkeypatch, refused=set())
+    for number in (oldest, second):
+        number.provisioning_metadata = {
+            "sms_attach_refused": {
+                "registration_id": str(row.id),
+                "wait_hours": 2,
+                "retry_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=2)
+                ).isoformat(),
+                "reason_hash": _reason_hash("timed out"),
+            }
+        }
+    await async_session.commit()
+    carrier = numbers_routes.get_verification_provider("twilio", "sms")
+
+    async def attach(refs, *, provider_resource_id, e164):
+        raise _holds("+15125550100")
+
+    monkeypatch.setattr(carrier, "attach_number", attach)
+    resp = await client.post(f"/numbers/{second.id}/enable-sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert await _numbers_on(async_session, str(row.id)) == ["PNA"]
+    await async_session.refresh(second)
+    assert "sms_attach_refused" not in second.provisioning_metadata
+
+
+async def test_the_held_number_is_locked_and_checked_again(
+    client, org_and_key, async_session, session_factory, sms_mock, monkeypatch
+) -> None:
+    # Another transaction releases the held number while Hail records it.
+    # Hail waits for that row and then sees it released: nothing joins.
+    from hailhq.api.routes import numbers as numbers_routes
+
+    org_id, _, key = org_and_key
+    held = await _us_number(
+        async_session, org_id, "+15125550100", provider="twilio", resource="PNA"
+    )
+    second = await _us_number(
+        async_session, org_id, "+15125550101", provider="twilio", resource="PNB"
+    )
+    row, _ = await _person_twilio_row(async_session, org_id, monkeypatch, refused=set())
+    held.provisioning_metadata = {
+        "sms_attach_refused": {
+            "registration_id": str(row.id),
+            "wait_hours": 1,
+            "retry_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "reason_hash": _reason_hash("timed out"),
+        }
+    }
+    await async_session.commit()
+    carrier = numbers_routes.get_verification_provider("twilio", "sms")
+
+    async def attach(refs, *, provider_resource_id, e164):
+        raise _holds("+15125550100")
+
+    monkeypatch.setattr(carrier, "attach_number", attach)
+    async with session_factory() as other:
+        await other.execute(
+            update(PhoneNumber)
+            .where(PhoneNumber.id == held.id)
+            .values(provisioning_state="released")
+        )
+        request = asyncio.create_task(
+            client.post(f"/numbers/{second.id}/enable-sms", headers=_auth(key))
+        )
+        await asyncio.sleep(0.5)
+        await other.commit()
+    resp = await request
+    assert resp.status_code == 200, resp.text
+    assert await _numbers_on(async_session, str(row.id)) == []
+    await async_session.refresh(second)
+    assert second.provisioning_metadata["sms_attach_refused"]["registration_id"] == (
+        str(row.id)
+    )
 
 
 async def test_a_business_registration_still_takes_every_number(

@@ -495,6 +495,10 @@ async def _settle_sms_approval(
     provider = registry(row.provider, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
         return status
+    # No org lock here: this holds the verification row lock, and
+    # cancel_verification takes the org lock before it writes a row, so the
+    # two would wait on each other. A number the carrier already holds is
+    # locked by its own row instead (sms_registration._free_number).
     attached, failed = await attach_org_numbers(db, row, provider)
     if attached or failed:
         await write_audit_log(
