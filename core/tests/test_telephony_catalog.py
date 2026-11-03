@@ -309,9 +309,12 @@ def test_capabilities_are_booleans_for_null_flags(tmp_path, monkeypatch):
     (tmp_path / "didww.json").write_text(json.dumps(empty))
     monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
     telephony_catalog._load.cache_clear()
-    assert telephony_catalog.effective_capabilities(row, "twilio") == ["sms"]
-    assert telephony_catalog.capabilities("SE", "mobile", "twilio") == {
-        "voice": False,
-        "sms": True,
-        "mms": False,
-    }
+    try:
+        assert telephony_catalog.effective_capabilities(row, "twilio") == ["sms"]
+        assert telephony_catalog.capabilities("SE", "mobile", "twilio") == {
+            "voice": False,
+            "sms": True,
+            "mms": False,
+        }
+    finally:
+        telephony_catalog._load.cache_clear()

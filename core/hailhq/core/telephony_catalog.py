@@ -39,7 +39,14 @@ def _path(provider: str) -> Path:
 @lru_cache(maxsize=8)
 def _load(provider: str) -> dict[tuple[str, str], dict]:
     raw = json.loads(_path(provider).read_text())
-    return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+    # Capability flags are bools for every reader: a null or missing flag is False.
+    return {
+        (n["country_code"], n["number_type"]): {
+            **n,
+            **{flag: bool(n.get(flag)) for flag in ("voice", "sms", "mms")},
+        }
+        for n in raw["numbers"]
+    }
 
 
 @lru_cache(maxsize=8)

@@ -1101,9 +1101,10 @@ def run_provider(
     costs_dir: Path,
     today: str,
     summary: list[str],
-    not_synced: list[str],
     shared_dial_codes: dict[str, str] | None = None,
     http_factory: Callable[[requests.Session], Http] = Http,
+    *,
+    not_synced: list[str],
 ) -> bool:
     """``shared_dial_codes`` is one dict for the whole run: DIDWW's country
     list fills it (every country, not only the ones it sells), and the
@@ -1212,8 +1213,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.costs_dir,
                 today,
                 body,
-                not_synced,
                 shared_dial_codes,
+                not_synced=not_synced,
             )
         except requests.RequestException as exc:
             not_synced.append(
