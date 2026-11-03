@@ -1315,14 +1315,10 @@ def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
 ):
     monkeypatch.delenv("TELNYX_API_KEY", raising=False)
     summary_file = tmp_path / "summary.md"
-    empty_env = tmp_path / "empty.env"
-    empty_env.write_text("")
     code = sync.main(
         [
             "--provider",
             "telnyx",
-            "--env-file",
-            str(empty_env),
             "--costs-dir",
             str(tmp_path),
             "--summary-file",
