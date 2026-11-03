@@ -823,3 +823,13 @@ def test_module_imports_in_a_fresh_interpreter(module) -> None:
         [sys.executable, "-c", f"import {module}"], capture_output=True, text=True
     )
     assert done.returncode == 0, done.stderr
+
+
+async def test_requirements_uses_given_rules_without_a_request() -> None:
+    fake = Telnyx(rules_answer("mobile"))
+    p = provider(fake)
+    rules = await p._rules("SE", "mobile")
+    before = len(fake.calls)
+    req = await p.requirements("SE", "mobile", "person", rules=rules)
+    assert len(fake.calls) == before
+    assert req.required is True

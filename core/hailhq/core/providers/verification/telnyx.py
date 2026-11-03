@@ -203,12 +203,20 @@ class TelnyxVerificationProvider(VerificationProvider):
         }
 
     async def requirements(
-        self, country_code: str, number_type: str, subject_type: SubjectType
+        self,
+        country_code: str,
+        number_type: str,
+        subject_type: SubjectType,
+        *,
+        rules: list[dict] | None = None,
     ) -> Requirements:
-        try:
-            rules = await self._rules(country_code, number_type)
-        except httpx.HTTPError as exc:
-            raise VerificationProviderError("Telnyx request failed") from exc
+        """``rules``: the already fetched rules for this country and type
+        (the catalog sync asks once for both kinds of buyer)."""
+        if rules is None:
+            try:
+                rules = await self._rules(country_code, number_type)
+            except httpx.HTTPError as exc:
+                raise VerificationProviderError("Telnyx request failed") from exc
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
         if subject_type not in allowed:
             raise UnsupportedSubjectType(

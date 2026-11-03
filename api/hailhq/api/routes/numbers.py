@@ -59,7 +59,6 @@ from hailhq.core.number_options import (
     offer_paperwork,
     option_key,
     option_status,
-    subject_accepted,
 )
 from hailhq.core.models import Agent, CarrierVerification, NumberOffer, PhoneNumber
 from hailhq.core.number_offers import (
@@ -949,13 +948,11 @@ def _for_subject(
         if offer.subject_types and subject not in offer.subject_types:
             continue
         needs = bool(offer.subject_types)
-        if needs and not subject_accepted(
-            offer.country_code, offer.number_type, offer.provider, subject
-        ):
-            continue
-        items, known = offer_paperwork(
+        items, known, accepted = offer_paperwork(
             offer.country_code, offer.number_type, offer.provider, subject, needs
         )
+        if not accepted:
+            continue
         usable = _usable_verifications(
             offer,
             verifications.get(

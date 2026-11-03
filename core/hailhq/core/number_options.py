@@ -77,30 +77,28 @@ class _Candidate:
         )
 
 
-def offer_paperwork(
-    country_code: str, number_type: str, provider: str, subject: str, needs: bool
-) -> tuple[list[PaperworkItem], bool]:
-    """The papers one subject must give for one carrier row, and whether the
-    catalog lists them. No verification needed: no papers, list known."""
-    if not needs:
-        return [], True
-    block = telephony_catalog.requirements(country_code, number_type, provider)
-    if block is None:
-        return [], False
-    side = block.get(subject) or {}
-    items = requirement_categories.paperwork(side.get("items", []))
-    return [PaperworkItem(**p) for p in items], True
-
-
-def subject_accepted(
-    country_code: str, number_type: str, provider: str, subject: str
-) -> bool:
-    """False when the catalog block for this row says ``subject`` is not
-    accepted. No block: unknown, so True."""
-    block = telephony_catalog.requirements(country_code, number_type, provider)
+def subject_accepted(block: dict | None, subject: str) -> bool:
+    """False when the catalog block says ``subject`` is not accepted. No
+    block: unknown, so True."""
     if block is None:
         return True
     return bool((block.get(subject) or {}).get("accepted", False))
+
+
+def offer_paperwork(
+    country_code: str, number_type: str, provider: str, subject: str, needs: bool
+) -> tuple[list[PaperworkItem], bool, bool]:
+    """The papers one subject must give for one carrier row, whether the
+    catalog lists them, and whether the catalog accepts that subject. No
+    verification needed: no papers, list known, accepted."""
+    if not needs:
+        return [], True, True
+    block = telephony_catalog.requirements(country_code, number_type, provider)
+    if block is None:
+        return [], False, True
+    side = block.get(subject) or {}
+    items = requirement_categories.paperwork(side.get("items", []))
+    return [PaperworkItem(**p) for p in items], True, subject_accepted(block, subject)
 
 
 def option_status(
@@ -161,7 +159,7 @@ def _candidates(
             for subject in SUBJECTS:
                 if needs and block is not None:
                     side = block.get(subject) or {}
-                    if not side.get("accepted", False):
+                    if not subject_accepted(block, subject):
                         continue
                     papers = requirement_categories.paperwork(side.get("items", []))
                 else:

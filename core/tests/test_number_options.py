@@ -310,10 +310,17 @@ def test_disallowed_copy_status_is_needs_check(catalog):
     assert p.more_options == 0
 
 
-def test_subject_accepted_follows_catalog_block(catalog):
-    catalog(twilio=[row(**need(person={"accepted": False, "items": []}))])
-    assert mod.subject_accepted("CH", "local", "twilio", "person") is False
-    assert mod.subject_accepted("CH", "local", "twilio", "business") is True
+def test_subject_accepted_follows_catalog_block():
+    block = {"person": {"accepted": False, "items": []}, "business": CH_BUSINESS}
+    assert mod.subject_accepted(block, "person") is False
+    assert mod.subject_accepted(block, "business") is True
     # No block: unknown, kept.
-    catalog(twilio=[row(verification_required=True)])
-    assert mod.subject_accepted("CH", "local", "twilio", "person") is True
+    assert mod.subject_accepted(None, "person") is True
+
+
+def test_offer_paperwork_returns_accepted_flag(catalog):
+    catalog(twilio=[row(**need(person={"accepted": False, "items": []}))])
+    _, known, accepted = mod.offer_paperwork("CH", "local", "twilio", "person", True)
+    assert known is True and accepted is False
+    _, _, accepted = mod.offer_paperwork("CH", "local", "twilio", "business", True)
+    assert accepted is True
