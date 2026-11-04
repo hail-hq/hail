@@ -511,10 +511,29 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
-      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
+      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "BE",
@@ -690,7 +709,7 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 85 areas",
+      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 86 areas",
       "requirements": null,
       "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",

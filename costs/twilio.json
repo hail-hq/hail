@@ -342,11 +342,33 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "BE",
@@ -820,10 +842,31 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Business ID"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "CZ",
@@ -1049,11 +1092,21 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": []
+        }
+      }
     },
     {
       "country_code": "EC",
@@ -1447,11 +1500,33 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "GH",
@@ -1501,11 +1576,34 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "ID or Passport Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "HK",
@@ -1901,10 +1999,30 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-05",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
-      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
+      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "JM",
@@ -3307,11 +3425,36 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://www.twilio.com/en-us/voice/pricing/za",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Proof of Authorized Representative Name"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "ZA",
