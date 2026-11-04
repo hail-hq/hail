@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -578,10 +578,15 @@ async def get_number_options(
             description="ISO alpha-2 country code, such as CH.",
         ),
     ],
-    sms_only: Annotated[
-        bool,
-        Query(description="True: only count options that can send and receive SMS."),
-    ] = False,
+    capabilities: Annotated[
+        list[Literal["voice", "sms"]] | None,
+        Query(
+            description=(
+                "Repeat to require several: only options whose capabilities "
+                "include all of them count. None: no filter."
+            ),
+        ),
+    ] = None,
 ) -> NumberOptionsResponse:
     """The number types sold in a country, one row each. For a person and for
     a business it gives the best option: price, capabilities, the papers
@@ -589,7 +594,7 @@ async def get_number_options(
     the bundled catalog and your verifications. It calls no carrier, so
     prices are catalog prices and the live quote may differ slightly."""
     verifications = await _offer_verifications(db, principal.organization_id)
-    return number_options(country_code.upper(), verifications, sms_only)
+    return number_options(country_code.upper(), verifications, capabilities)
 
 
 @router.get(
