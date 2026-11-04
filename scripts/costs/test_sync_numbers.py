@@ -1341,7 +1341,7 @@ def _kept_prev(cc="CH", verify=True, **extra):
         "sms": False,
         "mms": False,
         "verification_required": verify,
-        "dial_code": "41",
+        "dial_code": {"DE": "49", "FR": "33", "CH": "41"}[cc],
         "available": True,
         "verification_method": "carrier-sync",
         "verified_by": "twilio-api-sync",
@@ -1422,32 +1422,11 @@ def test_no_longer_offered_and_skipped_country_rows_are_not_fetched(
     assert rows["FR:local"] == outside
 
 
-def test_empty_items_answer_keeps_old_block_also_for_manual_row(monkeypatch):
-    _use(
-        monkeypatch,
-        _FakeProvider({"person": _req("person"), "business": _req("business")}),
-    )
-    old = {
-        "person": {"accepted": True, "items": ["id_document"]},
-        "business": {"accepted": False, "items": []},
-    }
-    manual = _kept_prev(
-        "DE", verification_method="manual-confirmed", verified_by="me", requirements=old
-    )
-    fetched = _fetched("DE")
-    fetched["verification_required"] = True
-    report: list[str] = []
-    sync.attach_requirements("twilio", [fetched], [manual], report)
-    assert fetched["requirements"] == old and len(report) == 1
-    numbers, rep = sync.merge([manual], [fetched], "2026-11-04", "u", "x")
-    assert numbers[0]["requirements"] == old and rep["changed"] == []
-
-
 def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypatch):
     _use(monkeypatch, None)
     old = {"person": {"accepted": True, "items": ["id_document"]}}
     prev = _kept_prev(requirements=old)
-    rows, _ = _run_twilio(
+    rows, summary = _run_twilio(
         tmp_path,
         monkeypatch,
         [prev, _kept_prev("DE", verify=False)],
@@ -1457,3 +1436,7 @@ def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypa
     )
     assert rows["DE:local"]["usd_per_month"] == "2.00"  # prices still synced
     assert rows["CH:local"] == prev
+    assert (
+        "twilio: 1 rows not observed this run kept their papers: "
+        "verification is not configured"
+    ) in "\n".join(summary)

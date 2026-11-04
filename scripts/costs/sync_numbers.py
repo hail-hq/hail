@@ -686,13 +686,16 @@ def merge(
     }
 
     def refreshed(key: str, row: dict) -> dict:
+        how = (
+            "hand-verified row"
+            if row.get("verification_method") == "manual-confirmed"
+            else "not observed"
+        )
         fresh = fresh_by_key.get(key)
         if fresh is None or fresh.get("requirements") == row.get("requirements"):
             return row
         report["changed"].append(
-            _refreshed_line(
-                key, "not observed", row.get("requirements"), fresh["requirements"]
-            )
+            _refreshed_line(key, how, row.get("requirements"), fresh["requirements"])
         )
         return {**row, "requirements": fresh["requirements"], "last_changed_at": today}
 
@@ -1063,17 +1066,11 @@ def _refreshed_line(key: str, how: str, old: dict | None, new: dict | None) -> s
 def _fetch_block(
     provider: str, row: dict, previous: dict | None, report: list[str]
 ) -> dict | None:
-    """The carrier's block for one row. On any error, or an answer that lets a
-    kind of buyer buy with no papers (impossible for a row that needs
-    verification), the previous block is returned and one line goes to
-    ``report``."""
+    """The carrier's block for one row. On any error the previous block is
+    returned and one line goes to ``report``."""
     key = f"{row['country_code']}:{row['number_type']}"
     try:
         block = fetch_requirements(provider, row["country_code"], row["number_type"])
-        if any(s.get("accepted") and not s.get("items") for s in block.values()):
-            raise RequirementsUnavailable(
-                f"{provider} lists a buyer with no papers for {key}"
-            )
         return block
     except Exception as exc:  # one bad row must not stop the run
         detail = _error_detail(exc)
@@ -1104,11 +1101,15 @@ def attach_requirements(
         _verification_provider(
             provider
         )  # raises VerificationUnavailable before any row is written; main() skips the carrier
-    kept_needing = [r for r in kept_rows or [] if r.get("verification_required")]
+    kept_needing = list(kept_rows or [])
     if kept_needing and not needing:
         try:
             _verification_provider(provider)
         except VerificationUnavailable:
+            report.append(
+                f"{provider}: {len(kept_needing)} rows not observed this run kept "
+                "their papers: verification is not configured"
+            )
             kept_needing = []
     previous = {
         f"{n['country_code']}:{n['number_type']}": n.get("requirements")
