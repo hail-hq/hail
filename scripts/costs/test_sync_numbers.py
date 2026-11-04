@@ -1329,3 +1329,88 @@ def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
     assert code == 1
     assert "## Carriers not synced\n- telnyx: skipped, TELNYX_API_KEY not set" in text
     assert text.count("telnyx: skipped, TELNYX_API_KEY not set") == 1
+
+
+def _kept_prev(verify=True, **extra):
+    return {
+        "country_code": "CH",
+        "number_type": "local",
+        "usd_per_month": "5.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": verify,
+        "dial_code": "41",
+        "available": True,
+        "verification_method": "carrier-sync",
+        "verified_by": "telnyx-api-sync",
+        "last_verified": "2026-10-01",
+        "last_changed_at": "2026-10-01",
+        **extra,
+    }
+
+
+def _kept_provider():
+    return _FakeProvider(
+        {
+            "person": _req("person", docs=("proof_of_identity",)),
+            "business": _req("business", docs=("business_address",)),
+        }
+    )
+
+
+def test_unobserved_row_needing_verification_gets_a_block(monkeypatch):
+    _use(monkeypatch, _kept_provider())
+    prev = _kept_prev()
+    errors: list[str] = []
+    blocks = sync.fetch_kept_requirements("twilio", [prev], set(), errors)
+    numbers, report = sync.merge(
+        [prev], [], "2026-11-04", "https://s", "x", {"CH:local"}, blocks
+    )
+    assert numbers[0]["requirements"] == blocks["CH:local"]
+    assert {k: v for k, v in numbers[0].items() if k != "requirements"} == {
+        **prev,
+        "last_changed_at": "2026-11-04",
+    }
+    assert report["unobserved"] == ["CH:local"] and len(report["changed"]) == 1
+    assert errors == []
+
+
+def test_no_longer_offered_row_gets_a_block(monkeypatch):
+    _use(monkeypatch, _kept_provider())
+    prev = _kept_prev()
+    blocks = sync.fetch_kept_requirements("twilio", [prev], set(), [])
+    numbers, report = sync.merge(
+        [prev], [], "2026-11-04", "https://s", "x", set(), blocks
+    )
+    assert numbers[0]["requirements"] == blocks["CH:local"]
+    assert numbers[0]["available"] is False
+    assert report["vanished"] == ["CH:local"] and len(report["changed"]) == 1
+
+
+def test_fetch_failure_on_kept_row_keeps_old_block(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("carrier down")
+
+    _use(monkeypatch, Boom())
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _kept_prev(requirements=old)
+    errors: list[str] = []
+    blocks = sync.fetch_kept_requirements("twilio", [prev], set(), errors)
+    assert blocks == {} and len(errors) == 1 and "CH:local" in errors[0]
+    numbers, report = sync.merge(
+        [prev], [], "2026-11-04", "https://s", "x", {"CH:local"}, blocks
+    )
+    assert numbers == [prev] and report["changed"] == []
+
+
+def test_kept_row_without_verification_gets_no_block(monkeypatch):
+    _use(monkeypatch, None)  # would raise if anything were fetched
+    prev = _kept_prev(verify=False)
+    blocks = sync.fetch_kept_requirements("twilio", [prev], set(), [])
+    assert blocks == {}
+    numbers, _ = sync.merge(
+        [prev], [], "2026-11-04", "https://s", "x", {"CH:local"}, blocks
+    )
+    assert numbers == [prev] and "requirements" not in numbers[0]
