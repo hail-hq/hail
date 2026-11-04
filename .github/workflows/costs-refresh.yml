@@ -171,6 +171,7 @@ jobs:
               echo
             fi
             echo "Rows with a new check date: $(grep -c '^+ *\"last_verified\"' /tmp/out/refresh.patch)."
+            echo "Validation passed: ${valid}."
             echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
             cat /tmp/out/cost.md
