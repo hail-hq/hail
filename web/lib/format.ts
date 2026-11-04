@@ -11,6 +11,20 @@ export function usd(value: string | undefined, fractionDigits: number): string {
   return `$${n.toFixed(fractionDigits)}`;
 }
 
+/** A row's price in the currency the vendor publishes: USD when it has one,
+ * otherwise EUR. The dataset never converts currencies. */
+export function price(
+  usdValue: string | undefined,
+  eurValue: string | undefined,
+  fractionDigits: number,
+): string {
+  if (usdValue !== undefined) return usd(usdValue, fractionDigits);
+  if (eurValue === undefined) return '—';
+  const n = Number(eurValue);
+  if (!Number.isFinite(n)) return '—';
+  return `€${n.toFixed(fractionDigits)}`;
+}
+
 export function num(value: string): number {
   return Number(value);
 }

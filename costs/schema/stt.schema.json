@@ -37,6 +37,7 @@
       ],
       "anyOf": [
         { "required": ["price_per_minute_usd"] },
+        { "required": ["price_per_minute_eur"] },
         { "required": ["price_per_second_usd"] }
       ],
       "properties": {
@@ -51,6 +52,11 @@
         "price_per_minute_usd": { "$ref": "#/$defs/decimal" },
         "price_per_second_usd": { "$ref": "#/$defs/decimal" },
         "price_per_minute_batch_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_minute_eur": {
+          "$ref": "#/$defs/decimal",
+          "description": "Set only when the vendor publishes no USD price. Never converted from another currency."
+        },
+        "price_per_minute_batch_eur": { "$ref": "#/$defs/decimal" },
         "diarization_per_minute_usd": { "$ref": "#/$defs/decimal" },
         "pii_redaction_per_minute_usd": { "$ref": "#/$defs/decimal" },
         "languages": {

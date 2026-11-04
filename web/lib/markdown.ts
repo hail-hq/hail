@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { langs, mostRecent, priceRange, usd } from './format';
+import { langs, mostRecent, price, priceRange, usd } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -43,8 +43,8 @@ function sttTable(rows: STTRow[]): string {
   const header = tableRow([
     'Provider',
     'Model',
-    '$/min',
-    '$/min batch',
+    'Price/min',
+    'Price/min batch',
     'Streaming',
     'Realtime',
     'Languages',
@@ -57,8 +57,8 @@ function sttTable(rows: STTRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      usd(r.price_per_minute_usd, 6),
-      usd(r.price_per_minute_batch_usd, 6),
+      price(r.price_per_minute_usd, r.price_per_minute_eur, 6),
+      price(r.price_per_minute_batch_usd, r.price_per_minute_batch_eur, 6),
       r.streaming ? 'yes' : 'no',
       r.realtime ? 'yes' : 'no',
       langs(r.languages),

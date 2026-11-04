@@ -5,7 +5,7 @@ import type { STTRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { langs, numOpt, priceRange, usd } from "@/lib/format";
+import { langs, numOpt, price, priceRange } from "@/lib/format";
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -25,16 +25,18 @@ const columns: ColumnDef<STTRow>[] = [
   {
     id: "price",
     accessorFn: (row) => numOpt(row.price_per_minute_usd),
-    header: "$/min",
-    cell: ({ row }) => usd(row.original.price_per_minute_usd, 4),
+    header: "Price/min",
+    cell: ({ row }) =>
+      price(row.original.price_per_minute_usd, row.original.price_per_minute_eur, 4),
     sortingFn: "basic",
     meta: { num: true, killer: true },
   },
   {
     id: "batch",
     accessorFn: (row) => numOpt(row.price_per_minute_batch_usd),
-    header: "$/min batch",
-    cell: ({ row }) => usd(row.original.price_per_minute_batch_usd, 4),
+    header: "Price/min batch",
+    cell: ({ row }) =>
+      price(row.original.price_per_minute_batch_usd, row.original.price_per_minute_batch_eur, 4),
     sortingFn: "basic",
     meta: { num: true },
   },

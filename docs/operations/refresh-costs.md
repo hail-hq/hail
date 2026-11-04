@@ -70,6 +70,7 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 
 1. **Two-source rule.** For every price-affecting change, cite the vendor pricing page plus one secondary source. A secondary source is a vendor announcement, a third-party aggregator, or the vendor API docs. If only one source is available, set `confidence: medium` on the row and give the reason in `notes`.
 2. **Decimal-string prices.** All `*_per_*_usd` fields are JSON strings, not numbers. They must match the pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`. The validator rejects floats.
+   **Currency.** Prices are USD. If a vendor publishes no USD price, use the `_eur` fields that the schema offers (STT only today) and leave the `_usd` ones unset. Never convert between currencies: rates change, and a converted price looks verified when it is not.
 3. **Canonical model_ids.** Use the vendor's real API model_id string. Do not invent one. If a marketing name does not have a stable API identifier, defer the row.
 4. **Two source verifications are the bar.** If the vendor pricing page is unreachable, or the model_id is not in the docs, defer the row with a documented reason. Do not guess.
 5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.

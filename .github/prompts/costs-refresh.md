@@ -26,7 +26,8 @@ You have no web search. Start from the URLs in the provider catalog and in each 
 8. Keep `source_url` unless the new page shows this row's price.
 9. Add an alias only when a live page shows the exact id.
 10. Track pay-as-you-go prices. If the vendor charges a promotional rate today, record it, say so in `notes`, and follow the runbook's promotions rule. `costs/sms.json` has no `promo_ends_at` field, so state the end date in `notes` there.
-11. Keep prices as decimal strings. Add a note only when something changed or a reader needs a caveat. Start it with `Re-verified {today}: ` or `Price changed {today}: `. Use plain short English, no first person, and no em dash.
+11. Never convert currencies. If a vendor lists only euros, follow the runbook's currency rule.
+12. Keep prices as decimal strings. Add a note only when something changed or a reader needs a caveat. Start it with `Re-verified {today}: ` or `Price changed {today}: `. Use plain short English, no first person, and no em dash.
 
 ## Security
 

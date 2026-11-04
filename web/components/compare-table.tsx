@@ -1,7 +1,7 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { formatCloning, langs, usd } from '@/lib/format';
+import { formatCloning, langs, price, usd } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
 import { TableWrap } from './table-wrap';
 
@@ -123,10 +123,14 @@ export function STTCompareTable({
   removable?: boolean;
 }) {
   const rows: CompareRow[] = [
-    { label: '$/min', cells: models.map((m) => usd(m.price_per_minute_usd, 6)), emphasis: true },
     {
-      label: '$/min batch',
-      cells: models.map((m) => usd(m.price_per_minute_batch_usd, 6)),
+      label: 'Price/min',
+      cells: models.map((m) => price(m.price_per_minute_usd, m.price_per_minute_eur, 6)),
+      emphasis: true,
+    },
+    {
+      label: 'Price/min batch',
+      cells: models.map((m) => price(m.price_per_minute_batch_usd, m.price_per_minute_batch_eur, 6)),
     },
     { label: 'Streaming', cells: models.map((m) => (m.streaming ? '✓' : '—')) },
     { label: 'Realtime', cells: models.map((m) => (m.realtime ? '✓' : '—')) },
