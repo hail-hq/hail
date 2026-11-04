@@ -70,6 +70,55 @@ def _parse_mcp_body(resp: httpx.Response) -> dict:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("oauth", [False, True])
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+async def test_favicon_is_public_and_points_to_bird(monkeypatch, oauth, method):
+    srv = _boot(monkeypatch, oauth=oauth)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.request(method, "/favicon.ico")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == (
+        "https://hail.so/assets/brand/icons/icon-512.png"
+    )
+    assert response.headers["cache-control"] == "public, max-age=3600"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("oauth", [False, True])
+async def test_initialize_advertises_bird_icon(monkeypatch, oauth):
+    srv = _boot(monkeypatch, oauth=oauth)
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            response = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "brand-check", "version": "1.0"},
+                    },
+                },
+            )
+
+    assert response.status_code == 200
+    info = _parse_mcp_body(response)["result"]["serverInfo"]
+    assert info["icons"] == [
+        {
+            "src": "https://hail.so/assets/brand/icons/icon-512.png",
+            "mimeType": "image/png",
+            "sizes": ["512x512"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_oauth_rs_unauth_initialize_succeeds(monkeypatch):
     """Capability discovery must not require a bearer.
 
