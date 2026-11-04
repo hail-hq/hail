@@ -196,8 +196,40 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "6.50",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            {
+              "other": "List of In-Service Australian Mobile Numbers (Purchaser Disclosure)"
+            },
+            {
+              "other": "Purchaser or Service Activator Confirmation (AU Mobile)"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            {
+              "other": "List of In-Service Australian Mobile Numbers (Purchaser Disclosure)"
+            },
+            {
+              "other": "Purchaser or Service Activator Confirmation (AU Mobile)"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
@@ -326,10 +358,27 @@
       "available": true,
       "setup_usd": "2.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            "company_id"
+          ]
+        }
+      }
     },
     {
       "country_code": "BM",
@@ -638,8 +687,26 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "1.00",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_area",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
@@ -1127,10 +1194,38 @@
       "available": true,
       "setup_usd": "40.00",
       "last_verified": "2026-10-26",
-      "last_changed_at": "2026-10-26",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            },
+            {
+              "other": "Power of Attorney "
+            },
+            {
+              "other": "Marketing Details (in German)"
+            },
+            {
+              "other": "Service Usage Description (in German)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "DK",
@@ -1442,10 +1537,28 @@
       "available": true,
       "setup_usd": "85.00",
       "last_verified": "2026-10-12",
-      "last_changed_at": "2026-09-28",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            {
+              "other": "Service Agreement Form (Service Acceptance Doc, Provided by NumberOps)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "ES",
@@ -1718,10 +1831,30 @@
       "available": true,
       "setup_usd": "1.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "FR",
@@ -2044,10 +2177,28 @@
       "available": true,
       "setup_usd": "40.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "GH",
@@ -2062,10 +2213,34 @@
       "available": true,
       "setup_usd": "30.00",
       "last_verified": "2026-10-26",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "GR",
@@ -2403,10 +2578,28 @@
       "available": true,
       "setup_usd": "20.00",
       "last_verified": "2026-10-05",
-      "last_changed_at": "2026-10-05",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            {
+              "other": "Service Usage Description"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "IL",
@@ -2729,10 +2922,30 @@
       "available": true,
       "setup_usd": "34.65",
       "last_verified": "2026-10-19",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "JP",
@@ -3248,11 +3461,29 @@
       "available": true,
       "setup_usd": "10.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-28",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "MT",
@@ -3267,10 +3498,30 @@
       "available": true,
       "setup_usd": "120.00",
       "last_verified": "2026-10-19",
-      "last_changed_at": "2026-09-28",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "MX",
@@ -3459,11 +3710,29 @@
       "available": true,
       "setup_usd": "1.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_name"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "NO",
@@ -3662,11 +3931,27 @@
       "available": true,
       "setup_usd": "13.50",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_area",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "PH",
@@ -3717,10 +4002,28 @@
       "available": true,
       "setup_usd": "30.00",
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country"
+          ]
+        }
+      }
     },
     {
       "country_code": "PK",
@@ -3821,10 +4124,30 @@
       "available": true,
       "setup_usd": "8.50",
       "last_verified": "2026-10-12",
-      "last_changed_at": "2026-09-25",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "PL",
@@ -4249,8 +4572,26 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "1.00",
-      "last_verified": "2026-10-26",
-      "last_changed_at": "2026-09-28",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
@@ -4344,10 +4685,26 @@
       "available": true,
       "setup_usd": "5.00",
       "last_verified": "2026-09-28",
-      "last_changed_at": "2026-09-28",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      }
     },
     {
       "country_code": "SI",
@@ -4537,10 +4894,32 @@
       "available": true,
       "setup_usd": "15.00",
       "last_verified": "2026-10-19",
-      "last_changed_at": "2026-09-28",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            {
+              "other": "Recently Signed Letter of Intent (LOI) Within 1 Month"
+            },
+            {
+              "other": "Service Usage Description"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "TT",
