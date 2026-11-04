@@ -179,6 +179,87 @@ def test_capabilities_voice_and_sms_need_both(catalog):
     assert number_options("US", {}, capabilities=both).types == []
 
 
+AU_FEW = need(
+    person={"accepted": True, "items": ["id_document"]},
+    business={"accepted": True, "items": ["company_name"]},
+)
+
+
+def test_default_prefers_option_with_every_capability(catalog):
+    catalog(
+        didww=[row("AU", "mobile", usd="8.00", sms=True, **AU_FEW)],
+        telnyx=[row("AU", "mobile", usd="8.00", sms=True, **need())],
+    )
+    # didww has fewer papers but routes no SMS: voice only.
+    o = one(number_options("AU", {}), "mobile", "business")
+    assert o.capabilities == ["voice", "sms"] and o.more_options == 1
+    v = one(number_options("AU", {}, capabilities=["voice"]), "mobile", "business")
+    assert v.capabilities == ["voice"] and v.more_options == 1
+
+
+def _mixed(catalog, voice_only, both):
+    catalog(
+        didww=[row("AU", "mobile", usd="8.00", **voice_only)],
+        telnyx=[row("AU", "mobile", usd="8.00", sms=True, **both)],
+    )
+    return one(number_options("AU", {}), "mobile", "person")
+
+
+def test_ready_voice_only_beats_needs_check_voice_and_sms(catalog):
+    o = _mixed(catalog, need(), need())
+    assert o.capabilities == ["voice", "sms"]
+    ready = {("didww", "AU", "mobile"): [ov("approved")]}
+    r = number_options("AU", ready)
+    assert one(r, "mobile", "person").capabilities == ["voice"]
+
+
+def test_buy_voice_only_beats_by_request_voice_and_sms(catalog):
+    catalog(
+        didww=[row("AU", "mobile", usd="8.00")],
+        telnyx=[row("AU", "mobile", usd="8.00", sms=True, by_request=True)],
+    )
+    o = one(number_options("AU", {}), "mobile", "person")
+    assert o.capabilities == ["voice"] and o.how == "buy"
+
+
+def test_voice_filter_picks_voice_only(catalog):
+    o = _mixed(catalog, {}, {})
+    assert o.capabilities == ["voice", "sms"]
+    v = one(number_options("AU", {}, capabilities=["voice"]), "mobile", "person")
+    assert v.capabilities == ["voice"] and v.monthly_cents == 800
+
+
+def test_person_and_business_share_one_union(catalog):
+    # twilio accepts only business, with SMS; telnyx accepts both, voice only.
+    catalog(
+        twilio=[
+            row(
+                "AU",
+                "mobile",
+                usd="8.00",
+                sms=True,
+                **need(person={"accepted": False, "items": []}, business=CH_BUSINESS),
+            )
+        ],
+        telnyx=[row("AU", "mobile", usd="9.00")],
+    )
+    ready = {("twilio", "AU", "mobile"): [ov("approved", "business")]}
+    r = number_options("AU", ready)
+    # One union {voice, sms} for the type: the business cell prefers its
+    # voice+sms option; the person cell only has the voice-only one.
+    assert one(r, "mobile", "person").capabilities == ["voice"]
+    assert one(r, "mobile", "business").capabilities == ["voice", "sms"]
+
+
+def test_default_disjoint_capabilities_voice_only_beats_sms_only(catalog):
+    catalog(
+        twilio=[row("US", usd="1.00", voice=False, sms=True)],
+        telnyx=[row("US", usd="2.00")],
+    )
+    o = one(number_options("US", {}))
+    assert o.capabilities == ["voice"] and o.more_options == 1
+
+
 def test_missing_requirements_block(catalog):
     catalog(twilio=[row(verification_required=True)])
     r = number_options("CH", {})
@@ -239,15 +320,20 @@ def test_by_request_ready_with_any_approval(catalog):
 
 
 def test_option_key_order():
-    assert option_key("ready", "by_request", 9, 900, 0) < option_key(
-        "in_review", "buy", 0, 1, 0
+    assert option_key("ready", "by_request", 0, 9, 900, 0) < option_key(
+        "in_review", "buy", 0, 0, 1, 0
     )
-    assert option_key("ready", "buy", 3, 1, 0) < option_key(
-        "ready", "by_request", 0, 1, 0
+    assert option_key("ready", "buy", 0, 3, 1, 0) < option_key(
+        "ready", "by_request", 0, 0, 1, 0
     )
-    assert option_key("ready", "buy", 1, 500, 0) < option_key("ready", "buy", 2, 1, 0)
-    assert option_key("ready", "buy", 1, 100, 50) < option_key(
-        "ready", "buy", 1, 200, 0
+    assert option_key("ready", "buy", 0, 3, 1, 0) < option_key(
+        "ready", "buy", 1, 0, 1, 0
+    )
+    assert option_key("ready", "buy", 1, 1, 500, 0) < option_key(
+        "ready", "buy", 1, 2, 1, 0
+    )
+    assert option_key("ready", "buy", 0, 1, 100, 50) < option_key(
+        "ready", "buy", 0, 1, 200, 0
     )
 
 
@@ -293,8 +379,8 @@ def test_unknown_paperwork_ranks_after_known(catalog):
     )
     o = one(number_options("CH", {}))
     assert o.paperwork_known is True and o.monthly_cents == 900
-    assert option_key("needs_check", "buy", 0, 1, 0, False) > option_key(
-        "needs_check", "buy", 5, 1, 0
+    assert option_key("needs_check", "buy", 0, 0, 1, 0, False) > option_key(
+        "needs_check", "buy", 0, 5, 1, 0
     )
 
 
@@ -358,3 +444,14 @@ def test_paperwork_from_block():
         "birth_date",
         "personal_details",
     ]
+
+
+def test_union_counts_buy_options_only_when_any_buy(catalog):
+    # The by-request row has sms; the buy-now rows do not. The union is
+    # {voice}, so the cheaper buy option is not penalised for lacking sms.
+    catalog(
+        didww=[row("AU", "mobile", usd="5.00")],
+        telnyx=[row("AU", "mobile", usd="9.00", sms=True, by_request=True)],
+    )
+    o = one(number_options("AU", {}), "mobile", "person")
+    assert o.how == "buy" and o.monthly_cents == 500

@@ -6,6 +6,7 @@ call. ``option_key`` is the one ranking order; ``/quotes`` reuses it.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
@@ -42,20 +43,33 @@ _IN_REVIEW_STATES = ("awaiting_review", "submitting", "submitted")
 _TYPE_ORDER = ("local", "mobile", "national", "toll_free")
 
 
+_JOB_WEIGHT = {"voice": 2, "sms": 1}
+
+
+def _missing_jobs(capabilities: Iterable[str], union: Collection[str]) -> int:
+    """Weight of the jobs in ``union`` the option lacks: a missing voice
+    counts 2, a missing sms 1."""
+    have = set(capabilities)
+    return sum(_JOB_WEIGHT.get(c, 1) for c in union if c not in have)
+
+
 def option_key(
     status: str,
     how: str,
+    missing: int,
     paperwork_count: int,
     monthly_cents: int,
     setup_cents: int,
     paperwork_known: bool = True,
-) -> tuple[int, int, int, int, int]:
-    """Sort key, best first: status, then buy before by request, then a known
+) -> tuple[int, int, int, int, int, int]:
+    """Sort key, best first: status, then buy before by request, then fewer
+    jobs missing from the type's union (see ``_missing_jobs``), then a known
     paper list before an unknown one, then fewer papers, then lower monthly
     plus setup."""
     return (
         _STATUS_RANK[status],
         0 if how == "buy" else 1,
+        missing,
         0 if paperwork_known else 1,
         paperwork_count,
         monthly_cents + setup_cents,
@@ -66,13 +80,15 @@ def option_key(
 class _Candidate:
     option: SubjectOption
     needs: bool
+    missing: int = 0  # jobs of the type's union this option lacks
 
     @property
-    def key(self) -> tuple[int, int, int, int, int]:
+    def key(self) -> tuple[int, int, int, int, int, int]:
         o = self.option
         return option_key(
             o.status,
             o.how,
+            self.missing,
             len(o.paperwork),
             o.monthly_cents,
             o.setup_cents,
@@ -217,10 +233,18 @@ def _candidates(
     return out
 
 
+def _jobs_union(candidates: list[_Candidate]) -> frozenset[str]:
+    """The jobs a number type offers: the capabilities of its buy-now
+    candidates (both subjects), or of all candidates when none is buy-now."""
+    buy = [c for c in candidates if c.option.how == "buy"]
+    return frozenset().union(*(c.option.capabilities for c in buy or candidates))
+
+
 def _best(cands: list[_Candidate]) -> _Candidate:
+    """Lowest key wins. ``more_options`` counts every other option."""
     best = min(cands, key=lambda c: c.key)
     option = best.option.model_copy(update={"more_options": len(cands) - 1})
-    return _Candidate(option, best.needs)
+    return _Candidate(option, best.needs, best.missing)
 
 
 def number_options(
@@ -228,6 +252,14 @@ def number_options(
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
     capabilities: list[Capability] | None = None,
 ) -> NumberOptionsResponse:
+    """One row per number type, with the best option per subject.
+
+    With a ``capabilities`` filter, only options that have all of them
+    compete. With none, after status and how, an option that does every job
+    its number type offers (the union over all options of that type, both
+    subjects) ranks before one that does fewer. ``more_options`` counts every
+    other option.
+    """
     cc = country_code.upper()
     by_type = _candidates(cc, verifications, capabilities or [])
     types: list[TypeOptions] = []
@@ -237,6 +269,11 @@ def number_options(
     )
     for nt in order:
         per = by_type[nt]
+        every = [c for s in SUBJECTS for c in per.get(s, [])]
+        if not capabilities:
+            union = _jobs_union(every)
+            for c in every:
+                c.missing = _missing_jobs(c.option.capabilities, union)
         best = {s: _best(per[s]) for s in SUBJECTS if per.get(s)}
         if not best:
             continue

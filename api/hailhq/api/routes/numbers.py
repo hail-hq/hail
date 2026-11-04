@@ -584,8 +584,12 @@ async def get_number_options(
         Query(
             max_length=2,
             description=(
-                "Repeat to require several: only options whose capabilities "
-                "include all of them count. None: no filter."
+                "Optional. Keep only options that do all these jobs. Without "
+                "it, each number type shows its best option in this order: "
+                "ready now, then buy now before order by hand, then options "
+                "that do every job the type offers (even when a number that "
+                "does fewer jobs costs less), then fewer papers, then lower "
+                "price."
             ),
         ),
     ] = None,
@@ -950,8 +954,9 @@ def _for_subject(
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
 ) -> tuple[list[CarrierOffer], dict[int, list[PaperworkItem]], set[int]]:
     """Keep the offers that accept ``subject``, best first by the same order
-    as GET /numbers/options, and the papers each one needs from that subject
-    (keyed by ``id(offer)``), and the ids of offers ready for ``subject``."""
+    as GET /numbers/options called with the same capabilities, and the papers
+    each one needs from that subject (keyed by ``id(offer)``), and the ids of
+    offers ready for ``subject``."""
     ranked: list[tuple[tuple[int, ...], CarrierOffer]] = []
     papers: dict[int, list[PaperworkItem]] = {}
     ready: set[int] = set()
@@ -977,6 +982,7 @@ def _for_subject(
         key = option_key(
             status,
             "by_request" if offer.by_request else "buy",
+            0,  # /quotes names its capabilities, so no "missing jobs" term
             len(found_papers.items),
             offer.monthly_cents,
             offer.setup_cents,
