@@ -37,7 +37,7 @@ from hailhq.core.models import (
     Suppression,
     UsageEvent,
 )
-from sqlalchemy import Text, and_, case, cast, func, literal, or_, select, true
+from sqlalchemy import and_, case, cast, func, literal, or_, select, true, tuple_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,10 +58,17 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
     window_start = datetime.now(timezone.utc) - timedelta(
         hours=settings.hail_sms_abuse_window_hours
     )
+    # Read before the counts; see _suspended_orgs.
+    already_suspended = await _suspended_orgs(db, "sms")
+    last_lift = _last_lift("sms")
 
     send_stmt = (
         select(UsageEvent.organization_id, func.count())
-        .where(UsageEvent.channel == "sms", UsageEvent.occurred_at >= window_start)
+        .outerjoin(last_lift, last_lift.c.organization_id == UsageEvent.organization_id)
+        .where(
+            UsageEvent.channel == "sms",
+            UsageEvent.occurred_at >= _counted_from(window_start, last_lift),
+        )
         .group_by(UsageEvent.organization_id)
     )
     send_counts = dict((await db.execute(send_stmt)).all())
@@ -75,18 +82,21 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
             Suppression.organization_id,
             func.count(func.distinct(Suppression.recipient)),
         )
+        .outerjoin(
+            last_lift, last_lift.c.organization_id == Suppression.organization_id
+        )
         .where(
             Suppression.channel == "sms",
             Suppression.source == "stop_keyword",
-            Suppression.created_at >= window_start,
+            Suppression.created_at >= _counted_from(window_start, last_lift),
             Suppression.organization_id.is_not(None),
         )
         .group_by(Suppression.organization_id)
     )
     opt_out_counts = dict((await db.execute(opt_out_stmt)).all())
 
-    already_suspended = await _suspended_orgs(db, "sms")
-
+    window = settings.hail_sms_abuse_window_hours
+    max_rate = settings.hail_sms_abuse_max_opt_out_rate
     suspended = 0
     for org_id, sends in send_counts.items():
         if org_id in already_suspended:
@@ -95,29 +105,23 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
             continue
         opt_outs = opt_out_counts.get(org_id, 0)
         rate = opt_outs / sends
-        if rate > settings.hail_sms_abuse_max_opt_out_rate:
-            db.add(
-                ChannelSuspension(
-                    organization_id=org_id,
-                    channel="sms",
-                    reason=(
-                        f"opt-out rate {rate:.1%} over {settings.hail_sms_abuse_window_hours}h "
-                        f"window ({opt_outs}/{sends}) exceeds "
-                        f"{settings.hail_sms_abuse_max_opt_out_rate:.1%} threshold"
-                    ),
-                )
-            )
-            logger.warning(
-                "suspending org=%s sms channel for abuse: rate=%.1f%%",
-                org_id,
-                rate * 100,
-            )
+        if rate <= max_rate:
+            continue
+        reason = (
+            f"opt-out rate {rate:.1%} over {window}h "
+            f"window ({opt_outs}/{sends}) exceeds {max_rate:.1%} threshold"
+        )
+        if await _suspend(db, org_id, "sms", reason):
             suspended += 1
     await db.flush()
     return suspended
 
 
 async def _suspended_orgs(db: AsyncSession, channel: str) -> set:
+    """Orgs with an active suspension on ``channel``. Callers read this
+    before their counts: a lift that commits during the pass then leaves the
+    org in this set, so the pass skips it instead of suspending it again on
+    counts from before the lift."""
     return set(
         (
             await db.execute(
@@ -130,6 +134,49 @@ async def _suspended_orgs(db: AsyncSession, channel: str) -> set:
         .scalars()
         .all()
     )
+
+
+def _last_lift(channel: str):
+    """Subquery: each org's latest lift time on ``channel``. After an
+    operator lifts a suspension, only activity after the lift counts, so
+    the activity that caused it does not suspend the org again."""
+    return (
+        select(
+            ChannelSuspension.organization_id,
+            func.max(ChannelSuspension.lifted_at).label("lifted_at"),
+        )
+        .where(
+            ChannelSuspension.channel == channel,
+            ChannelSuspension.lifted_at.is_not(None),
+        )
+        .group_by(ChannelSuspension.organization_id)
+        .subquery()
+    )
+
+
+def _counted_from(window_start: datetime, last_lift):
+    # GREATEST ignores NULL: an org never lifted counts the whole window.
+    return func.greatest(window_start, last_lift.c.lifted_at)
+
+
+async def _suspend(db: AsyncSession, org_id, channel: str, reason: str) -> bool:
+    """Insert an active suspension. Two API replicas can tick at once: the
+    partial unique index on active (org, channel) rows keeps one and the
+    other insert does nothing. Returns True iff a row was inserted."""
+    inserted = (
+        await db.execute(
+            pg_insert(ChannelSuspension)
+            .values(organization_id=org_id, channel=channel, reason=reason)
+            .on_conflict_do_nothing()
+            .returning(ChannelSuspension.id)
+        )
+    ).scalar_one_or_none()
+    if inserted is None:
+        return False
+    logger.warning(
+        "suspending org=%s %s channel for abuse: %s", org_id, channel, reason
+    )
+    return True
 
 
 def _bare_address(column):
@@ -156,23 +203,12 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     window_start = datetime.now(timezone.utc) - timedelta(
         hours=settings.hail_email_abuse_window_hours
     )
-
-    # After an operator lifts a suspension, count only mail sent after the
-    # lift: the bounces that caused it must not suspend the org again.
-    last_lift = (
-        select(
-            ChannelSuspension.organization_id,
-            func.max(ChannelSuspension.lifted_at).label("lifted_at"),
-        )
-        .where(
-            ChannelSuspension.channel == "email",
-            ChannelSuspension.lifted_at.is_not(None),
-        )
-        .group_by(ChannelSuspension.organization_id)
-        .subquery()
+    # Read before the counts; see _suspended_orgs.
+    already_suspended = await _suspended_orgs(db, "email")
+    last_lift = _last_lift("email")
+    in_window = and_(
+        _org_own_send(), Email.sent_at >= _counted_from(window_start, last_lift)
     )
-    counted_from = func.greatest(window_start, last_lift.c.lifted_at)
-    in_window = and_(_org_own_send(), Email.sent_at >= counted_from)
 
     # Each distinct address counts once per email, so repeating one address
     # in to/cc/bcc (also as "Name <address>") cannot inflate the denominator
@@ -191,9 +227,7 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     send_stmt = (
         select(
             Email.organization_id,
-            func.count(
-                func.distinct(func.concat(Email.id, ":", _bare_address(addr.c.addr)))
-            ),
+            func.count(func.distinct(tuple_(Email.id, _bare_address(addr.c.addr)))),
         )
         .select_from(Email)
         .join(addr, true())
@@ -206,7 +240,7 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     # One SES event can name several recipients; each (email, recipient)
     # counts once per kind, so a repeated feedback report for the same
     # recipient does not count twice. A complaint whose recipients the
-    # mailbox provider redacted still counts as one (keyed by the event).
+    # mailbox provider redacted counts once per email.
     payload_recipients = EmailEvent.payload["recipients"]
     event_addr = (
         func.jsonb_array_elements_text(
@@ -222,10 +256,8 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         .render_derived(name="event_recipients")
         .lateral()
     )
-    event_key = func.concat(
-        EmailEvent.email_id,
-        ":",
-        func.coalesce(_bare_address(event_addr.c.addr), cast(EmailEvent.id, Text)),
+    event_key = tuple_(
+        EmailEvent.email_id, func.coalesce(_bare_address(event_addr.c.addr), "")
     )
     hard_bounce = and_(
         EmailEvent.kind == "bounced",
@@ -261,7 +293,6 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         for org_id, bounces, complaints in (await db.execute(event_stmt)).all()
     }
 
-    already_suspended = await _suspended_orgs(db, "email")
     window = settings.hail_email_abuse_window_hours
     max_bounce = settings.hail_email_abuse_max_bounce_rate
     max_complaint = settings.hail_email_abuse_max_complaint_rate
@@ -287,29 +318,18 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             )
         else:
             continue
-        # Two API replicas can tick at once: the unique (org, channel) key
-        # keeps one row and the other insert does nothing.
-        inserted = (
-            await db.execute(
-                pg_insert(ChannelSuspension)
-                .values(organization_id=org_id, channel="email", reason=reason)
-                .on_conflict_do_nothing()
-                .returning(ChannelSuspension.id)
-            )
-        ).scalar_one_or_none()
-        if inserted is None:
-            continue
-        logger.warning("suspending org=%s email channel for abuse: %s", org_id, reason)
-        suspended += 1
+        if await _suspend(db, org_id, "email", reason):
+            suspended += 1
     await db.flush()
     return suspended
 
 
 class AbuseMonitorWorker:
     """Periodic poller that runs :func:`check_and_suspend_abusive_orgs` (SMS)
-    and :func:`check_and_suspend_email_orgs` on a fixed interval, mirroring ``DomainVerificationWorker``'s
-    session_factory / poll_interval / run_forever / stop contract so it
-    plugs into ``main.py``'s lifespan and ``_stop_worker`` helper unchanged.
+    and :func:`check_and_suspend_email_orgs` on a fixed interval, mirroring
+    ``DomainVerificationWorker``'s session_factory / poll_interval /
+    run_forever / stop contract so it plugs into ``main.py``'s lifespan and
+    ``_stop_worker`` helper unchanged.
     """
 
     def __init__(self, *, session_factory, poll_interval: float = 3600.0) -> None:
@@ -332,13 +352,16 @@ class AbuseMonitorWorker:
         self._stop.set()
 
     async def tick(self) -> int:
-        # One session and commit per channel: an email pass error must not
-        # roll back the SMS suspensions from the same tick.
+        # One session and commit per channel, and an error in one channel's
+        # pass is logged without skipping or rolling back the other.
         count = 0
         for check in (check_and_suspend_abusive_orgs, check_and_suspend_email_orgs):
-            async with self._session_factory() as session:
-                count += await check(session)
-                await session.commit()
+            try:
+                async with self._session_factory() as session:
+                    count += await check(session)
+                    await session.commit()
+            except Exception:
+                logger.exception("abuse monitor %s failed", check.__name__)
         if count:
             logger.info("abuse monitor suspended %d org(s) this run", count)
         return count

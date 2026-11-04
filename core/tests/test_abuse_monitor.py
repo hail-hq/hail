@@ -371,16 +371,17 @@ async def test_email_repeated_reports_for_one_recipient_count_once(
                 occurred_at=now - timedelta(minutes=i),
             )
         )
-    # A redacted complaint (no recipients) still counts as one.
-    async_session.add(
-        EmailEvent(
-            email_id=emails[1].id,
-            organization_id=org_id,
-            kind="complained",
-            payload={"recipients": []},
-            occurred_at=now,
+    # A redacted complaint (no recipients), reported twice: one per email.
+    for i in range(2):
+        async_session.add(
+            EmailEvent(
+                email_id=emails[1].id,
+                organization_id=org_id,
+                kind="complained",
+                payload={"recipients": []},
+                occurred_at=now - timedelta(minutes=i),
+            )
         )
-    )
     await async_session.commit()
 
     assert await check_and_suspend_email_orgs(async_session) == 1
@@ -419,3 +420,59 @@ async def test_email_lift_counts_only_mail_sent_after_it(
     await _seed_email_events(async_session, after[:2], "bounced", hard=True)
     await async_session.commit()
     assert await check_and_suspend_email_orgs(async_session) == 1
+
+
+async def test_sms_lift_counts_only_activity_after_it(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core import config
+
+    monkeypatch.setattr(config.settings, "hail_sms_abuse_min_sends", 10)
+    monkeypatch.setattr(config.settings, "hail_sms_abuse_max_opt_out_rate", 0.05)
+
+    org_id = uuid.uuid4()
+    await _seed_sends(async_session, org_id, 20)
+    await _seed_opt_outs(async_session, org_id, 5)
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id,
+            channel="sms",
+            reason="flagged",
+            lifted_at=datetime.now(timezone.utc) + timedelta(seconds=1),
+        )
+    )
+    await async_session.commit()
+
+    assert await check_and_suspend_abusive_orgs(async_session) == 0
+
+
+async def test_tick_runs_email_when_sms_pass_fails(async_session, monkeypatch) -> None:
+    from hailhq.core import abuse_monitor
+
+    async def broken(db):
+        raise RuntimeError("sms pass failed")
+
+    ran = []
+
+    async def email(db):
+        ran.append("email")
+        return 1
+
+    monkeypatch.setattr(abuse_monitor, "check_and_suspend_abusive_orgs", broken)
+    monkeypatch.setattr(abuse_monitor, "check_and_suspend_email_orgs", email)
+
+    class _Factory:
+        def __call__(self):
+            return self
+
+        async def __aenter__(self):
+            return async_session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    worker = abuse_monitor.AbuseMonitorWorker(session_factory=_Factory())
+    assert await worker.tick() == 1
+    assert ran == ["email"]
