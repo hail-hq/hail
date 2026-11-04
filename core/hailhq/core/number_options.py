@@ -21,6 +21,7 @@ from hailhq.core.carrier_offer import (
 )
 from hailhq.core.number_offers import PROVIDERS, by_request_quotable
 from hailhq.core.providers.verification import get_verification_provider
+from hailhq.core.schemas import Capability
 
 __all__ = [
     "SubjectPapers",
@@ -152,7 +153,7 @@ def option_status(
 def _candidates(
     country_code: str,
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
-    capabilities: list[str],
+    capabilities: list[Capability],
 ) -> dict[str, dict[str, list[_Candidate]]]:
     out: dict[str, dict[str, list[_Candidate]]] = {}
     for provider in PROVIDERS:
@@ -165,10 +166,13 @@ def _candidates(
             if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
             caps = telephony_catalog.effective_capabilities(row, provider)
-            if not caps or not all(c in caps for c in capabilities):
-                continue
-            # Same as /quotes: one rule for what a by-request row can be quoted for.
-            if by_request and not by_request_quotable(caps, capabilities or ["voice"]):
+            # By-request rows: the /quotes rule (needs voice plus all asked).
+            ok = (
+                by_request_quotable(caps, capabilities)
+                if by_request
+                else all(c in caps for c in capabilities)
+            )
+            if not caps or not ok:
                 continue
             nt = row["number_type"]
             block = (
@@ -222,7 +226,7 @@ def _best(cands: list[_Candidate]) -> _Candidate:
 def number_options(
     country_code: str,
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
-    capabilities: list[str] | None = None,
+    capabilities: list[Capability] | None = None,
 ) -> NumberOptionsResponse:
     cc = country_code.upper()
     by_type = _candidates(cc, verifications, capabilities or [])
