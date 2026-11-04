@@ -2566,15 +2566,26 @@ paths:
             description: ISO alpha-2 country code, such as CH.
             title: Country Code
           description: ISO alpha-2 country code, such as CH.
-        - name: sms_only
+        - name: capabilities
           in: query
           required: false
           schema:
-            type: boolean
-            description: "True: only count options that can send and receive SMS."
-            default: false
-            title: Sms Only
-          description: "True: only count options that can send and receive SMS."
+            anyOf:
+              - type: array
+                items:
+                  enum:
+                    - voice
+                    - sms
+                  type: string
+                maxItems: 2
+              - type: "null"
+            description:
+              "Repeat to require several: only options whose capabilities
+              include all of them count. None: no filter."
+            title: Capabilities
+          description:
+            "Repeat to require several: only options whose capabilities include
+            all of them count. None: no filter."
         - name: authorization
           in: header
           required: false

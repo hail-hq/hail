@@ -1329,3 +1329,114 @@ def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
     assert code == 1
     assert "## Carriers not synced\n- telnyx: skipped, TELNYX_API_KEY not set" in text
     assert text.count("telnyx: skipped, TELNYX_API_KEY not set") == 1
+
+
+def _kept_prev(cc="CH", verify=True, **extra):
+    return {
+        "country_code": cc,
+        "number_type": "local",
+        "display_name": f"{cc} local",
+        "usd_per_month": "5.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": verify,
+        "dial_code": {"DE": "49", "FR": "33", "CH": "41"}[cc],
+        "available": True,
+        "verification_method": "carrier-sync",
+        "verified_by": "twilio-api-sync",
+        "last_verified": "2026-10-01",
+        "last_changed_at": "2026-10-01",
+        **extra,
+    }
+
+
+def _kept_provider(calls=None):
+    return _FakeProvider(
+        {
+            "person": _req("person", docs=("proof_of_identity",)),
+            "business": _req("business", docs=("business_address",)),
+        },
+        calls,
+    )
+
+
+def _run_twilio(tmp_path, monkeypatch, existing, rows, skipped, observed):
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": existing}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    monkeypatch.setattr(sync, "fetch_twilio", lambda *a, **k: (rows, skipped, observed))
+    summary: list[str] = []
+    sync.run_provider(
+        "twilio",
+        {"TWILIO_ACCOUNT_SID": "s", "TWILIO_AUTH_TOKEN": "t"},
+        tmp_path,
+        "2026-11-04",
+        summary,
+        not_synced=[],
+    )
+    out = json.loads((tmp_path / "twilio.json").read_text())["numbers"]
+    return {f"{n['country_code']}:{n['number_type']}": n for n in out}, summary
+
+
+def _fetched(cc="DE"):
+    return {**_kept_prev(cc, verify=False), "usd_per_month": "1.00"}
+
+
+def test_unobserved_row_needing_verification_gets_a_block(tmp_path, monkeypatch):
+    calls: list = []
+    _use(monkeypatch, _kept_provider(calls))
+    prev = _kept_prev()
+    rows, summary = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [prev, _kept_prev("DE", verify=False)],
+        [_fetched()],
+        ["CH:local: no numbers offered to this account"],
+        {"DE:local"},
+    )
+    assert {c[0] for c in calls} == {"CH"}
+    got = {k: v for k, v in rows["CH:local"].items() if k != "requirements"}
+    assert got == {**prev, "last_changed_at": "2026-11-04"}
+    assert rows["CH:local"]["requirements"]["person"]["items"] == ["id_document"]
+    text = "\n".join(summary)
+    assert "CH:local (not observed, only requirements refreshed): none ->" in text
+
+
+def test_no_longer_offered_and_skipped_country_rows_are_not_fetched(
+    tmp_path, monkeypatch
+):
+    calls: list = []
+    _use(monkeypatch, _kept_provider(calls))
+    gone, outside = _kept_prev("CH"), _kept_prev("FR")
+    rows, _ = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [gone, outside, _kept_prev("DE", verify=False)],
+        [_fetched()],
+        [],
+        {"DE:local", "CH:local"},  # CH observed gone; FR outside the view
+    )
+    assert calls == []
+    assert rows["CH:local"]["available"] is False
+    assert "requirements" not in rows["CH:local"]
+    assert rows["FR:local"] == outside
+
+
+def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypatch):
+    _use(monkeypatch, None)
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _kept_prev(requirements=old)
+    rows, summary = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [prev, _kept_prev("DE", verify=False)],
+        [{**_fetched(), "usd_per_month": "2.00"}],
+        ["CH:local: no numbers offered to this account"],
+        {"DE:local"},
+    )
+    assert rows["DE:local"]["usd_per_month"] == "2.00"  # prices still synced
+    assert rows["CH:local"] == prev
+    assert (
+        "twilio: 1 rows not observed this run kept their papers: "
+        "verification is not configured"
+    ) in "\n".join(summary)

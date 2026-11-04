@@ -672,11 +672,33 @@ def merge(
     source_url: str,
     verified_by: str,
     unobserved: set[str] | frozenset[str] = frozenset(),
+    kept_rows: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Overlay fetched rows on the current catalog. Returns (numbers, report).
 
     ``unobserved`` names the keys the sync skipped this run; their rows are
-    kept as they are instead of being marked vanished."""
+    kept as they are instead of being marked vanished.
+
+    ``kept_rows`` holds copies of unobserved rows whose ``requirements`` were
+    refreshed by attach_requirements; only that field is taken from them."""
+    fresh_by_key = {
+        f"{n['country_code']}:{n['number_type']}": n for n in kept_rows or []
+    }
+
+    def refreshed(key: str, row: dict) -> dict:
+        how = (
+            "hand-verified row"
+            if row.get("verification_method") == "manual-confirmed"
+            else "not observed"
+        )
+        fresh = fresh_by_key.get(key)
+        if fresh is None or fresh.get("requirements") == row.get("requirements"):
+            return row
+        report["changed"].append(
+            _refreshed_line(key, how, row.get("requirements"), fresh["requirements"])
+        )
+        return {**row, "requirements": fresh["requirements"], "last_changed_at": today}
+
     prev_by_key = {f"{n['country_code']}:{n['number_type']}": n for n in existing}
     report: dict[str, list[str]] = {
         "kept": [],
@@ -733,8 +755,7 @@ def merge(
             kept = {**prev, "requirements": block}
             if old_block != block:
                 report["changed"].append(
-                    f"{key} (hand-verified row, only requirements refreshed): "
-                    f"{_block_summary(old_block)} -> {_block_summary(block)}"
+                    _refreshed_line(key, "hand-verified row", old_block, block)
                 )
                 kept["last_changed_at"] = today
             numbers.append(kept)
@@ -766,7 +787,7 @@ def merge(
             continue
         if key in unobserved:
             report["unobserved"].append(key)
-            numbers.append(prev)
+            numbers.append(refreshed(key, prev))
             continue
         if prev.get("verification_method") == "manual-confirmed":
             # A person vouched for this row; only a person takes it off sale.
@@ -1035,40 +1056,73 @@ def _block_summary(block: dict | None) -> str:
     return " | ".join(parts)
 
 
+def _refreshed_line(key: str, how: str, old: dict | None, new: dict | None) -> str:
+    return (
+        f"{key} ({how}, only requirements refreshed): "
+        f"{_block_summary(old)} -> {_block_summary(new)}"
+    )
+
+
+def _fetch_block(
+    provider: str, row: dict, previous: dict | None, report: list[str]
+) -> dict | None:
+    """The carrier's block for one row. On any error the previous block is
+    returned and one line goes to ``report``."""
+    key = f"{row['country_code']}:{row['number_type']}"
+    try:
+        block = fetch_requirements(provider, row["country_code"], row["number_type"])
+        return block
+    except Exception as exc:  # one bad row must not stop the run
+        detail = _error_detail(exc)
+        # The logs are public: only what the PR summary shows.
+        print(f"requirements failed for {provider} {key}: {detail}", file=sys.stderr)
+        kept = "kept the last block" if previous else "no block stored"
+        report.append(f"{key}: requirements failed ({detail}), {kept}")
+        return previous
+
+
 def attach_requirements(
-    provider: str, rows: list[dict], existing: list[dict], report: list[str]
+    provider: str,
+    rows: list[dict],
+    existing: list[dict],
+    report: list[str],
+    kept_rows: list[dict] | None = None,
 ) -> None:
     """Set ``requirements`` on each fetched row. A row that needs verification
     gets the carrier's block; on a carrier error it keeps the block of the
     current catalog (None when there is none) and the error goes to
-    ``report``. Any other row gets None."""
+    ``report``. Any other row gets None.
+
+    ``kept_rows`` are copies of catalog rows the fetch did not see but that
+    are still sold. Their block is refreshed in the same pass. They never
+    make the carrier fail: with no verification plug-in they stay as they are."""
     needing = [r for r in rows if r["verification_required"]]
     if needing:
         _verification_provider(
             provider
         )  # raises VerificationUnavailable before any row is written; main() skips the carrier
+    kept_needing = list(kept_rows or [])
+    if kept_needing and not needing:
+        try:
+            _verification_provider(provider)
+        except VerificationUnavailable:
+            report.append(
+                f"{provider}: {len(kept_needing)} rows not observed this run kept "
+                "their papers: verification is not configured"
+            )
+            kept_needing = []
     previous = {
         f"{n['country_code']}:{n['number_type']}": n.get("requirements")
         for n in existing
     }
     for row in rows:
         row["requirements"] = None
-        if not row["verification_required"]:
-            continue
+        if row["verification_required"]:
+            key = f"{row['country_code']}:{row['number_type']}"
+            row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
+    for row in kept_needing:
         key = f"{row['country_code']}:{row['number_type']}"
-        try:
-            row["requirements"] = fetch_requirements(
-                provider, row["country_code"], row["number_type"]
-            )
-        except Exception as exc:  # one bad row must not stop the run
-            detail = _error_detail(exc)
-            # The logs are public: only what the PR summary shows.
-            print(
-                f"requirements failed for {provider} {key}: {detail}", file=sys.stderr
-            )
-            row["requirements"] = previous.get(key)
-            kept = "kept the last block" if previous.get(key) else "no block stored"
-            report.append(f"{key}: requirements failed ({detail}), {kept}")
+        row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
 
 
 def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:
@@ -1164,7 +1218,18 @@ def run_provider(
             f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
     requirement_errors: list[str] = []
-    attach_requirements(provider, rows, existing, requirement_errors)
+    # Rows still sold but not seen this run (a skip with a reason). Rows the
+    # carrier dropped, or a country the sync could not look at, are not
+    # refreshed: their papers say nothing about a number anyone can buy.
+    fetched_keys = {f"{r['country_code']}:{r['number_type']}" for r in rows}
+    sold_unseen = skipped_keys(skipped) - fetched_keys
+    kept_rows = [
+        dict(n)
+        for n in existing
+        if f"{n['country_code']}:{n['number_type']}" in sold_unseen
+        and n.get("verification_required")
+    ]
+    attach_requirements(provider, rows, existing, requirement_errors, kept_rows)
     numbers, report = merge(
         existing,
         rows,
@@ -1172,6 +1237,7 @@ def run_provider(
         SOURCE_URLS[provider],
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
+        kept_rows=kept_rows,
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")

@@ -74,6 +74,7 @@ from hailhq.core.providers.verification import (
 from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.regions import REGIONS_RESPONSE, NumberRegionsResponse
 from hailhq.core.schemas import (
+    Capability,
     NumberAcquireRequest,
     NumberQuoteRequest,
     PhoneNumberListResponse,
@@ -578,10 +579,16 @@ async def get_number_options(
             description="ISO alpha-2 country code, such as CH.",
         ),
     ],
-    sms_only: Annotated[
-        bool,
-        Query(description="True: only count options that can send and receive SMS."),
-    ] = False,
+    capabilities: Annotated[
+        list[Capability] | None,
+        Query(
+            max_length=2,
+            description=(
+                "Repeat to require several: only options whose capabilities "
+                "include all of them count. None: no filter."
+            ),
+        ),
+    ] = None,
 ) -> NumberOptionsResponse:
     """The number types sold in a country, one row each. For a person and for
     a business it gives the best option: price, capabilities, the papers
@@ -589,7 +596,11 @@ async def get_number_options(
     the bundled catalog and your verifications. It calls no carrier, so
     prices are catalog prices and the live quote may differ slightly."""
     verifications = await _offer_verifications(db, principal.organization_id)
-    return number_options(country_code.upper(), verifications, sms_only)
+    return number_options(
+        country_code.upper(),
+        verifications,
+        list(dict.fromkeys(capabilities)) if capabilities else None,
+    )
 
 
 @router.get(
