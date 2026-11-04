@@ -13,6 +13,7 @@ import json
 
 import httpx
 import pytest
+import respx
 from hailhq.mcp import discovery_auth
 
 
@@ -20,14 +21,17 @@ def _boot(
     monkeypatch, *, oauth: bool, mcp_resource_url: str = "https://mcp.hail.so"
 ) -> object:
     """Reload server.py under a specific mode env."""
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.mcp_resource_url", mcp_resource_url
+    )
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.hail_base_url", "https://brand.test/site/"
+    )
     if oauth:
         monkeypatch.setattr(
             "hailhq.core.config.settings.hail_auth_url", "https://hail.so/api/auth"
         )
         monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "")
-        monkeypatch.setattr(
-            "hailhq.core.config.settings.mcp_resource_url", mcp_resource_url
-        )
     else:
         monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
         monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
@@ -72,23 +76,113 @@ def _parse_mcp_body(resp: httpx.Response) -> dict:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("oauth", [False, True])
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
-async def test_favicon_is_public_and_points_to_bird(monkeypatch, oauth, method):
+@respx.mock
+async def test_favicon_follows_website_brand_changes(monkeypatch, oauth, method):
     srv = _boot(monkeypatch, oauth=oauth)
+    manifest = respx.get("https://brand.test/site/site.webmanifest")
     transport = httpx.ASGITransport(app=srv.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        response = await c.request(method, "/favicon.ico")
+        for src, expected in [
+            ("/brand/current.png", "https://brand.test/brand/current.png"),
+            ("icons/new.jpg", "https://brand.test/site/icons/new.jpg"),
+            ("https://cdn.test/logo.png", "https://cdn.test/logo.png"),
+        ]:
+            manifest.respond(
+                json={
+                    "icons": [
+                        {"src": "icon.svg", "type": "image/svg+xml"},
+                        {
+                            "src": src,
+                            "type": (
+                                "image/jpeg" if src.endswith("jpg") else "image/png"
+                            ),
+                        },
+                    ]
+                }
+            )
+            response = await c.request(method, "/favicon.ico")
+            assert response.status_code == 307
+            assert response.headers["location"] == expected
+            assert response.headers["cache-control"] == "public, max-age=3600"
 
-    assert response.status_code == 307
-    assert response.headers["location"] == (
-        "https://hail.so/assets/brand/icons/icon-512.png"
-    )
-    assert response.headers["cache-control"] == "public, max-age=3600"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        None,
+        {},
+        [],
+        {"icons": {}},
+        {"icons": [None, {"type": "image/png"}]},
+        {"icons": [{"src": "logo.svg", "type": "image/svg+xml"}]},
+        {"icons": [{"src": "javascript:alert(1)", "type": "image/png"}]},
+    ],
+)
+@respx.mock
+async def test_favicon_returns_unavailable_for_broken_manifest(monkeypatch, manifest):
+    srv = _boot(monkeypatch, oauth=True)
+    route = respx.get("https://brand.test/site/site.webmanifest")
+    if manifest is None:
+        route.respond(status_code=503)
+    else:
+        route.respond(json=manifest)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/favicon.ico")
+    assert response.status_code == 503
+    assert "location" not in response.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "invalid-json"])
+@respx.mock
+async def test_favicon_handles_manifest_fetch_failure(monkeypatch, failure):
+    srv = _boot(monkeypatch, oauth=True)
+    route = respx.get("https://brand.test/site/site.webmanifest")
+    if failure == "timeout":
+        route.mock(side_effect=httpx.ReadTimeout("Website unavailable"))
+    else:
+        route.respond(text="<!doctype html>not a manifest")
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/favicon.ico")
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_self_host_without_website_has_no_external_branding(monkeypatch):
+    srv = _boot(monkeypatch, oauth=False, mcp_resource_url="")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_base_url", "")
+    _, _, app = srv._build_app()
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as c,
+    ):
+        favicon = await c.get("/favicon.ico")
+        response = await c.post(
+            "/",
+            headers={"Accept": _MCP_ACCEPT},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "brand-check", "version": "1.0"},
+                },
+            },
+        )
+    assert favicon.status_code == 404
+    assert "icons" not in _parse_mcp_body(response)["result"]["serverInfo"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("oauth", [False, True])
-async def test_initialize_advertises_bird_icon(monkeypatch, oauth):
-    srv = _boot(monkeypatch, oauth=oauth)
+async def test_initialize_advertises_stable_icon_endpoint(monkeypatch, oauth):
+    srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url="https://mcp.brand.test/")
     async with srv.app.router.lifespan_context(srv.app):
         transport = httpx.ASGITransport(app=srv.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
@@ -109,13 +203,7 @@ async def test_initialize_advertises_bird_icon(monkeypatch, oauth):
 
     assert response.status_code == 200
     info = _parse_mcp_body(response)["result"]["serverInfo"]
-    assert info["icons"] == [
-        {
-            "src": "https://hail.so/assets/brand/icons/icon-512.png",
-            "mimeType": "image/png",
-            "sizes": ["512x512"],
-        }
-    ]
+    assert info["icons"] == [{"src": "https://mcp.brand.test/favicon.ico"}]
 
 
 @pytest.mark.asyncio
@@ -519,9 +607,15 @@ async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypa
             auth=auth,
         )
 
-    async with srv.app.router.lifespan_context(srv.app), streamablehttp_client(
-        "http://t/", httpx_client_factory=factory
-    ) as (read, write, _), ClientSession(read, write) as session:
+    async with (
+        srv.app.router.lifespan_context(srv.app),
+        streamablehttp_client("http://t/", httpx_client_factory=factory) as (
+            read,
+            write,
+            _,
+        ),
+        ClientSession(read, write) as session,
+    ):
         await session.initialize()
         tools = await session.list_tools()
     names = {t.name for t in tools.tools}
