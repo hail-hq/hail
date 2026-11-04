@@ -181,7 +181,7 @@ export function TTSCompareTable({
       emphasis: true,
     },
     { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },
-    { label: 'Voice cloning', cells: models.map((m) => formatCloning(m.voice_cloning, '✓ included')) },
+    { label: 'Voice cloning', cells: models.map((m) => formatCloning(m.voice_cloning, '✓ included', m.currency)) },
     {
       label: 'Voice count',
       cells: models.map((m) => {

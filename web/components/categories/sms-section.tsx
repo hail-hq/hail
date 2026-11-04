@@ -4,7 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { SmsRateRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { VerifiedCell } from "../verified-cell";
-import { rowPrice, rowRange, usdSort } from "@/lib/format";
+import { priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<SmsRateRow>[] = [
   {
@@ -23,7 +23,7 @@ const columns: ColumnDef<SmsRateRow>[] = [
   {
     id: "price",
     accessorFn: (row) => usdSort(row, row.usd_per_segment),
-    header: "Price/segment (base)",
+    header: ({ table }) => priceLabel(rowsOf(table), "$/segment (base)", "Price/segment (base)"),
     cell: ({ row }) => rowPrice(row.original, row.original.usd_per_segment, 5),
     sortingFn: "basic",
     sortUndefined: "last",

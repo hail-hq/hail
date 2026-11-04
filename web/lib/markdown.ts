@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { langs, mostRecent, rowPrice, rowRange } from './format';
+import { formatCloning, langs, mostRecent, rowPrice, rowRange } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -92,7 +92,7 @@ function ttsTable(rows: TTSRow[]): string {
           ? r.voice_cloning
             ? 'yes'
             : 'no'
-          : `$${r.voice_cloning.price_usd} ${r.voice_cloning.unit}`;
+          : formatCloning(r.voice_cloning, 'yes', r.currency);
     return tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,

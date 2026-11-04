@@ -5,7 +5,7 @@ import type { LLMRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { rowPrice, rowRange, usdSort } from "@/lib/format";
+import { priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<LLMRow>[] = [
   {
@@ -25,7 +25,7 @@ const columns: ColumnDef<LLMRow>[] = [
   {
     id: "output",
     accessorFn: (row) => usdSort(row, row.output_per_mtok_usd),
-    header: "Output /MTok",
+    header: ({ table }) => priceLabel(rowsOf(table), "Output $/MTok", "Output /MTok"),
     cell: ({ row }) => rowPrice(row.original, row.original.output_per_mtok_usd, 2),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -34,7 +34,7 @@ const columns: ColumnDef<LLMRow>[] = [
   {
     id: "input",
     accessorFn: (row) => usdSort(row, row.input_per_mtok_usd),
-    header: "Input /MTok",
+    header: ({ table }) => priceLabel(rowsOf(table), "Input $/MTok", "Input /MTok"),
     cell: ({ row }) => rowPrice(row.original, row.original.input_per_mtok_usd, 2),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -43,7 +43,7 @@ const columns: ColumnDef<LLMRow>[] = [
   {
     id: "cached",
     accessorFn: (row) => usdSort(row, row.cache_read_per_mtok_usd),
-    header: "Cached /MTok",
+    header: ({ table }) => priceLabel(rowsOf(table), "Cached $/MTok", "Cached /MTok"),
     cell: ({ row }) => rowPrice(row.original, row.original.cache_read_per_mtok_usd, 4),
     sortingFn: "basic",
     sortUndefined: "last",

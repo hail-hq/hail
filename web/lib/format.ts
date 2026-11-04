@@ -44,16 +44,34 @@ export function rowRange<T extends Priced>(
   maxDigits: number,
   suffix: string,
 ): string {
-  const range = priceRange(rows.filter(isUsd).map(value), minDigits, maxDigits, suffix);
+  const usdRows = rows.filter(isUsd);
   const other = rows.filter((r) => !isUsd(r));
+  const currencies = [...new Set(other.map((r) => r.currency ?? 'USD'))];
+  // No USD rows but one other currency: show that currency's own range.
+  if (usdRows.length === 0 && currencies.length === 1) {
+    return priceRange(other.map(value), minDigits, maxDigits, suffix, symbolOf(currencies[0]));
+  }
+  const range = priceRange(usdRows.map(value), minDigits, maxDigits, suffix);
   if (other.length === 0) return range;
-  const currencies = [...new Set(other.map((r) => r.currency))].join(', ');
-  return `${range} · ${other.length} in ${currencies}`;
+  return `${range} · ${other.length} in ${currencies.join(', ')}`;
 }
 
-/** A compare row label: a pair that mixes currencies says so. */
+/** A price column label. One currency keeps its symbol, for example "$/min"
+ * or "€/min". Mixed currencies say so, because nothing is converted. */
 export function priceLabel(rows: Priced[], usdLabel: string, plainLabel: string): string {
-  return rows.every(isUsd) ? usdLabel : `${plainLabel} (mixed currencies, not converted)`;
+  const currencies = new Set(rows.map((r) => r.currency ?? 'USD'));
+  if (currencies.size === 0 || (currencies.size === 1 && currencies.has('USD'))) return usdLabel;
+  if (currencies.size === 1) return usdLabel.replace('$', symbolOf([...currencies][0]));
+  return `${plainLabel} (mixed currencies, not converted)`;
+}
+
+/** The rows a table holds, for header labels that depend on them. */
+export function rowsOf<T>(table: { getCoreRowModel: () => { rows: { original: T }[] } }): T[] {
+  return table.getCoreRowModel().rows.map((r) => r.original);
+}
+
+function symbolOf(currency: string): string {
+  return SYMBOL[currency] ?? `${currency} `;
 }
 
 export function num(value: string): number {
@@ -69,6 +87,7 @@ export function priceRange(
   minDigits: number,
   maxDigits: number,
   suffix: string,
+  symbol = '$',
 ): string {
   let min = Infinity;
   let max = -Infinity;
@@ -80,16 +99,17 @@ export function priceRange(
     if (n > max) max = n;
   }
   if (!Number.isFinite(min)) return '—';
-  return `$${min.toFixed(minDigits)} – $${max.toFixed(maxDigits)} / ${suffix}`;
+  return `${symbol}${min.toFixed(minDigits)} – ${symbol}${max.toFixed(maxDigits)} / ${suffix}`;
 }
 
 export function formatCloning(
   vc: TTSRow['voice_cloning'],
   includedLabel: string,
+  currency = 'USD',
 ): string {
   if (vc === undefined) return '—';
   if (typeof vc === 'boolean') return vc ? includedLabel : '—';
-  return `${usd(vc.price_usd, 2)} ${vc.unit}`;
+  return `${money(vc.price_usd, currency, 2)} ${vc.unit}`;
 }
 
 export function mostRecent(...groups: { last_verified: string }[][]): string {

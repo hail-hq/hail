@@ -5,7 +5,7 @@ import type { TTSRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { formatCloning, langs, rowPrice, rowRange, usdSort } from "@/lib/format";
+import { formatCloning, langs, priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<TTSRow>[] = [
   {
@@ -25,7 +25,7 @@ const columns: ColumnDef<TTSRow>[] = [
   {
     id: "price",
     accessorFn: (row) => usdSort(row, row.price_per_1m_chars_usd),
-    header: "Price/1M chars",
+    header: ({ table }) => priceLabel(rowsOf(table), "$/1M chars", "Price/1M chars"),
     cell: ({ row }) => rowPrice(row.original, row.original.price_per_1m_chars_usd, 2),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -41,7 +41,7 @@ const columns: ColumnDef<TTSRow>[] = [
     id: "cloning",
     accessorKey: "voice_cloning",
     header: "Cloning",
-    cell: ({ row }) => formatCloning(row.original.voice_cloning, "✓"),
+    cell: ({ row }) => formatCloning(row.original.voice_cloning, "✓", row.original.currency),
   },
   {
     id: "languages",
