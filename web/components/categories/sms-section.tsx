@@ -22,9 +22,9 @@ const columns: ColumnDef<SmsRateRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => usdSort(row, row.usd_per_segment),
+    accessorFn: (row) => usdSort(row, "usd_per_segment"),
     header: ({ table }) => priceLabel(rowsOf(table), "$/segment (base)", "Price/segment (base)"),
-    cell: ({ row }) => rowPrice(row.original, row.original.usd_per_segment, 5),
+    cell: ({ row }) => rowPrice(row.original, "usd_per_segment", 5),
     sortingFn: "basic",
     sortUndefined: "last",
     meta: { num: true, killer: true },
@@ -48,7 +48,7 @@ export function SmsSection({ data }: { data: SmsRateRow[] }) {
       count={data.length}
       rangeLabel={rowRange(
         data,
-        (r) => r.usd_per_segment,
+        "usd_per_segment",
         5,
         5,
         "segment",

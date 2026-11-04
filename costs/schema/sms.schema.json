@@ -31,22 +31,24 @@
         "provider",
         "country_code",
         "direction",
-        "usd_per_segment",
         "last_verified",
         "last_changed_at",
         "verification_method",
         "verified_by",
         "source_url"
       ],
+      "anyOf": [
+        { "required": ["usd_per_segment"] },
+        { "required": ["eur_per_segment"] }
+      ],
+      "if": { "anyOf": [{ "required": ["eur_per_segment"] }] },
+      "then": { "not": { "anyOf": [{ "required": ["usd_per_segment"] }] } },
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
-        "currency": {
-          "enum": ["USD", "EUR"],
-          "description": "Currency of every price field on this row. Absent means USD. Prices are never converted, so a row priced in EUR keeps the vendor's euro figures in the same fields."
-        },
         "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "direction": { "const": "outbound" },
         "usd_per_segment": { "$ref": "#/$defs/decimal" },
+        "eur_per_segment": { "$ref": "#/$defs/decimal" },
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["manual-confirmed", "community-pr"] },

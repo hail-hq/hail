@@ -76,7 +76,7 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.
 6. **Field order convention** (refer to "Field order" below). Match it exactly.
 7. **No destructive git in the shared tree.** In the default model of this runbook, every provider-agent edits the **same** working tree. Thus a subagent must never run a git command that reverts or discards the tree — `git checkout`, `git restore`, `git stash`, `git reset` — and must never run `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the full file and silently erases the in-flight edits of every other provider — one such error caused the loss of a full LLM sweep. Repair broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never with git. Leave the files modified but unstaged. Produce a commit message. Let the operator commit. (A separate git worktree for each provider makes git safe for each agent. But then you must add a step to collate the single-file edit of each worktree back. Thus the default is one shared tree plus sequential dispatch.)
-8. **Currency.** Record each price in the currency the vendor publishes. If it is not USD, set `currency` on the row (`EUR` today) and keep the same price fields. Never convert between currencies: rates change, and a converted price looks verified when it is not. `currency` exists on rows of `llm.json`, `stt.json`, `tts.json`, and `sms.json`. The number catalogs stay USD.
+8. **Currency.** Record each price in the currency the vendor publishes. If the vendor publishes no USD price, use the matching EUR fields instead: `_usd` becomes `_eur`, and `usd_per_segment` becomes `eur_per_segment`. A row uses one currency only. Never convert between currencies: rates change, and a converted price looks verified when it is not. EUR fields exist in `llm.json`, `stt.json`, `tts.json`, and `sms.json`. The number catalogs stay USD.
 
 **Promotions.** When a structured price field holds a promotional or introductory rate, set `promo_ends_at` to the last day that rate applies. When the promotion ends, record the list price and remove the field. The weekly `costs-stale.yml` run lists a row after its `promo_ends_at`, so a pass can fix it before the row goes stale. For the design, refer to [`docs/superpowers/specs/2026-11-02-costs-promo-end-date-design.md`](../superpowers/specs/2026-11-02-costs-promo-end-date-design.md).
 
@@ -149,12 +149,12 @@ Authoritative source: [`costs/schema/llm.schema.json`](../../costs/schema/llm.sc
 
 ## Field order (all categories)
 
-Keep this order the same across all rows. The order makes diffs easy to review and agrees with the existing committed data.
+Keep this order the same across all rows. An `_eur` field sits where its `_usd` twin would. The order makes diffs easy to review and agrees with the existing committed data.
 
 **LLM:**
 
 ```
-provider, provider_url, model_id, display_name, currency (when not USD), featured (when true),
+provider, provider_url, model_id, display_name, featured (when true),
 model_family, knowledge_cutoff, aliases (when present),
 context_window, max_output_tokens,
 input_per_mtok_usd, output_per_mtok_usd,
@@ -181,7 +181,6 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
-currency (when not USD),
 featured (when true),
 aliases (when present),
 price_per_minute_usd, price_per_second_usd (whichever applies),
@@ -203,7 +202,6 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
-currency (when not USD),
 featured (when true),
 aliases (when present),
 price_per_1m_chars_usd, price_per_second_usd (whichever applies),

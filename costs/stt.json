@@ -815,9 +815,8 @@
       "provider_url": "https://www.gladia.io",
       "model_id": "solaria-1",
       "display_name": "Gladia Solaria-1",
-      "currency": "EUR",
-      "price_per_minute_usd": "0.01133333",
-      "price_per_minute_batch_usd": "0.0045",
+      "price_per_minute_eur": "0.01133333",
+      "price_per_minute_batch_eur": "0.0045",
       "languages": "100+",
       "streaming": true,
       "realtime": true,
@@ -830,16 +829,15 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.gladia.io/pricing",
-      "notes": "Price changed 2026-11-04: Gladia now publishes euro prices only, with no USD list price, so this row is priced in EUR (currency: EUR) and is not converted. Self-serve real-time is 0.68 EUR/hr = 0.01133333 EUR/min. Async Solaria-1 is 0.27 EUR/hr = 0.0045 EUR/min for the first 100 hours a month, falling to 0.21 EUR/hr above 10,000 hours. Source: https://www.gladia.io/pricing (single source, so confidence is medium). Earlier notes, from when Gladia listed USD prices: Gladia's first-generation universal STT model `solaria-1`, supporting 100+ languages with automatic language detection and code-switching. Default model when `model` param is omitted (confirmed via docs.gladia.io pre-recorded transcription reference). Starter (PAYG) pricing: real-time $0.75/hr ($0.0125/min), async $0.61/hr (~$0.01017/min). Growth (committed) plan lowers real-time to $0.25/hr ($0.0042/min) and async to $0.20/hr ($0.0033/min). Sub-300ms streaming latency claimed on the pricing page. Speaker diarization and word-level timestamps included on all tiers. Model name confirmed via https://docs.gladia.io/. 2026-07-19 re-verify: still listed at the same rates on the pricing page (primary) and the pre-recorded API reference on docs.gladia.io (secondary, still the default model); no price change. 2026-08-11 re-verify: still listed at the same rates on the pricing page (primary); pre-recorded API reference on docs.gladia.io (secondary) still lists `solaria-1` as the default `model` value with 100+ languages and code-switching support; no price change. Free-tier wording corrected: the pricing page now describes a one-time 50€ signup credit (~80+ async hrs or ~60+ real-time hrs, no monthly reset), not the '10 free hours per month' previously noted here — likely a prior misread rather than a policy change, since no monthly-reset credit is documented on the current page. 2026-09-02 re-verify: still listed at the same rates on the pricing page (primary); docs.gladia.io models comparison page and pre-recorded API reference (secondary) still list `solaria-1` as the default model, 100+ languages, code-switching supported, async+live; no price change; no new Gladia STT models found."
+      "notes": "Price changed 2026-11-04: Gladia now publishes euro prices only, with no USD list price, so this row uses the _eur price fields and is not converted. Self-serve real-time is 0.68 EUR/hr = 0.01133333 EUR/min. Async Solaria-1 is 0.27 EUR/hr = 0.0045 EUR/min for the first 100 hours a month, falling to 0.21 EUR/hr above 10,000 hours. Source: https://www.gladia.io/pricing (single source, so confidence is medium). Earlier notes, from when Gladia listed USD prices: Gladia's first-generation universal STT model `solaria-1`, supporting 100+ languages with automatic language detection and code-switching. Default model when `model` param is omitted (confirmed via docs.gladia.io pre-recorded transcription reference). Starter (PAYG) pricing: real-time $0.75/hr ($0.0125/min), async $0.61/hr (~$0.01017/min). Growth (committed) plan lowers real-time to $0.25/hr ($0.0042/min) and async to $0.20/hr ($0.0033/min). Sub-300ms streaming latency claimed on the pricing page. Speaker diarization and word-level timestamps included on all tiers. Model name confirmed via https://docs.gladia.io/. 2026-07-19 re-verify: still listed at the same rates on the pricing page (primary) and the pre-recorded API reference on docs.gladia.io (secondary, still the default model); no price change. 2026-08-11 re-verify: still listed at the same rates on the pricing page (primary); pre-recorded API reference on docs.gladia.io (secondary) still lists `solaria-1` as the default `model` value with 100+ languages and code-switching support; no price change. Free-tier wording corrected: the pricing page now describes a one-time 50€ signup credit (~80+ async hrs or ~60+ real-time hrs, no monthly reset), not the '10 free hours per month' previously noted here — likely a prior misread rather than a policy change, since no monthly-reset credit is documented on the current page. 2026-09-02 re-verify: still listed at the same rates on the pricing page (primary); docs.gladia.io models comparison page and pre-recorded API reference (secondary) still list `solaria-1` as the default model, 100+ languages, code-switching supported, async+live; no price change; no new Gladia STT models found."
     },
     {
       "provider": "Gladia",
       "provider_url": "https://www.gladia.io",
       "model_id": "solaria-3",
       "display_name": "Gladia Solaria-3",
-      "currency": "EUR",
       "featured": true,
-      "price_per_minute_usd": "0.00266667",
+      "price_per_minute_eur": "0.00266667",
       "languages": ["en", "fr", "de", "es", "it"],
       "streaming": false,
       "realtime": false,
@@ -851,7 +849,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://www.gladia.io/pricing",
-      "notes": "Price changed 2026-11-04: Gladia now publishes euro prices only, with no USD list price, so this row is priced in EUR (currency: EUR) and is not converted. Async Solaria-3 is 0.16 EUR/hr = 0.00266667 EUR/min for the first 100 hours a month, falling to 0.12 EUR/hr above 10,000 hours. Source: https://www.gladia.io/pricing (single source, so confidence is medium). Earlier notes, from when Gladia listed USD prices: Starter async price is $0.61/hour, converted to $0.01016667/minute and rounded to eight decimal places. This corrects conversion precision without changing the vendor hourly rate. Confidence medium: exact numerical price is stated only at https://www.gladia.io/pricing; https://docs.gladia.io/chapters/introduction/models confirms solaria-3 supports pre-recorded audio in English, French, German, Spanish and Italian."
+      "notes": "Price changed 2026-11-04: Gladia now publishes euro prices only, with no USD list price, so this row uses the _eur price fields and is not converted. Async Solaria-3 is 0.16 EUR/hr = 0.00266667 EUR/min for the first 100 hours a month, falling to 0.12 EUR/hr above 10,000 hours. Source: https://www.gladia.io/pricing (single source, so confidence is medium). Earlier notes, from when Gladia listed USD prices: Starter async price is $0.61/hour, converted to $0.01016667/minute and rounded to eight decimal places. This corrects conversion precision without changing the vendor hourly rate. Confidence medium: exact numerical price is stated only at https://www.gladia.io/pricing; https://docs.gladia.io/chapters/introduction/models confirms solaria-3 supports pre-recorded audio in English, French, German, Spanish and Italian."
     },
     {
       "provider": "Soniox",

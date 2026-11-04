@@ -25,9 +25,9 @@ function llmTable(rows: LLMRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      rowPrice(r, r.output_per_mtok_usd, 2),
-      rowPrice(r, r.input_per_mtok_usd, 2),
-      rowPrice(r, r.cache_read_per_mtok_usd, 4),
+      rowPrice(r, 'output_per_mtok_usd', 2),
+      rowPrice(r, 'input_per_mtok_usd', 2),
+      rowPrice(r, 'cache_read_per_mtok_usd', 4),
       r.context_window.toLocaleString(),
       r.max_output_tokens.toLocaleString(),
       r.supports_tool_use ? 'yes' : 'no',
@@ -57,8 +57,8 @@ function sttTable(rows: STTRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      rowPrice(r, r.price_per_minute_usd, 6),
-      rowPrice(r, r.price_per_minute_batch_usd, 6),
+      rowPrice(r, 'price_per_minute_usd', 6),
+      rowPrice(r, 'price_per_minute_batch_usd', 6),
       r.streaming ? 'yes' : 'no',
       r.realtime ? 'yes' : 'no',
       langs(r.languages),
@@ -92,11 +92,11 @@ function ttsTable(rows: TTSRow[]): string {
           ? r.voice_cloning
             ? 'yes'
             : 'no'
-          : formatCloning(r.voice_cloning, 'yes', r.currency);
+          : formatCloning(r.voice_cloning, 'yes');
     return tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      rowPrice(r, r.price_per_1m_chars_usd, 2),
+      rowPrice(r, 'price_per_1m_chars_usd', 2),
       r.voice_quality,
       cloning,
       langs(r.languages),
@@ -133,9 +133,9 @@ export function renderCostsMarkdown(
   const providers = new Set<string>();
   for (const m of [...llm.models, ...stt.models, ...tts.models]) providers.add(m.provider);
 
-  const llmRange = rowRange(llm.models, (m) => m.output_per_mtok_usd, 2, 2, 'Mtok');
-  const sttRange = rowRange(stt.models, (m) => m.price_per_minute_usd, 6, 4, 'min');
-  const ttsRange = rowRange(tts.models, (m) => m.price_per_1m_chars_usd, 2, 2, '1M chars');
+  const llmRange = rowRange(llm.models, 'output_per_mtok_usd', 2, 2, 'Mtok');
+  const sttRange = rowRange(stt.models, 'price_per_minute_usd', 6, 4, 'min');
+  const ttsRange = rowRange(tts.models, 'price_per_1m_chars_usd', 2, 2, '1M chars');
 
   const verified = mostRecent(llm.models, stt.models, tts.models);
 
@@ -160,7 +160,7 @@ Public, validated pricing and capability data for AI model providers — large l
 - **LLM output range:** ${llmRange}
 - **STT range:** ${sttRange}
 - **TTS range:** ${ttsRange}
-- **Currency:** USD unless a row sets \`currency\`. Prices are never converted.
+- **Currency:** USD, except rows with \`_eur\` price fields, which are in EUR. Prices are never converted.
 - **Verified:** ${verified}
 
 ## For agents

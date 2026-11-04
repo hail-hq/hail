@@ -37,26 +37,49 @@
       ],
       "anyOf": [
         { "required": ["price_per_minute_usd"] },
-        { "required": ["price_per_second_usd"] }
+        { "required": ["price_per_minute_eur"] },
+        { "required": ["price_per_second_usd"] },
+        { "required": ["price_per_second_eur"] }
       ],
+      "if": {
+        "anyOf": [
+          { "required": ["price_per_minute_eur"] },
+          { "required": ["price_per_second_eur"] },
+          { "required": ["price_per_minute_batch_eur"] },
+          { "required": ["diarization_per_minute_eur"] },
+          { "required": ["pii_redaction_per_minute_eur"] }
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["price_per_minute_usd"] },
+            { "required": ["price_per_second_usd"] },
+            { "required": ["price_per_minute_batch_usd"] },
+            { "required": ["diarization_per_minute_usd"] },
+            { "required": ["pii_redaction_per_minute_usd"] }
+          ]
+        }
+      },
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
         "display_name": { "type": "string", "minLength": 1 },
-        "currency": {
-          "enum": ["USD", "EUR"],
-          "description": "Currency of every price field on this row. Absent means USD. Prices are never converted, so a row priced in EUR keeps the vendor's euro figures in the same fields."
-        },
         "featured": {
           "type": "boolean",
           "description": "Include this model in the prerendered /costs/compare/<a>-vs-<b> page set. Not cleared on deprecation — see docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md."
         },
         "price_per_minute_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_minute_eur": { "$ref": "#/$defs/decimal" },
         "price_per_second_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_second_eur": { "$ref": "#/$defs/decimal" },
         "price_per_minute_batch_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_minute_batch_eur": { "$ref": "#/$defs/decimal" },
         "diarization_per_minute_usd": { "$ref": "#/$defs/decimal" },
+        "diarization_per_minute_eur": { "$ref": "#/$defs/decimal" },
         "pii_redaction_per_minute_usd": { "$ref": "#/$defs/decimal" },
+        "pii_redaction_per_minute_eur": { "$ref": "#/$defs/decimal" },
         "languages": {
           "oneOf": [
             { "type": "array", "items": { "type": "string" }, "minItems": 1 },

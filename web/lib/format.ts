@@ -17,51 +17,71 @@ export function usd(value: string | undefined, fractionDigits: number): string {
   return money(value, 'USD', fractionDigits);
 }
 
-/** A row priced in another currency keeps the vendor's figures. Prices are
- * never converted, so such rows are shown with their own symbol, sort last,
- * and stay out of USD price ranges. */
-export type Priced = { currency?: string };
+/** Prices are USD fields (`*_usd`, `usd_*`) unless the vendor publishes no
+ * USD price. Then the row uses the matching EUR fields (`*_eur`, `eur_*`)
+ * instead. Prices are never converted, so EUR rows keep their own symbol,
+ * sort last, and stay out of USD price ranges. Callers name the USD field. */
+type Row = object;
 
-export function isUsd(row: Priced): boolean {
-  return row.currency === undefined || row.currency === 'USD';
+function eurField(usdField: string): string {
+  if (usdField.endsWith('_usd')) return `${usdField.slice(0, -4)}_eur`;
+  if (usdField.startsWith('usd_')) return `eur_${usdField.slice(4)}`;
+  return usdField;
+}
+
+function field(row: Row, name: string): string | undefined {
+  const v = (row as Record<string, unknown>)[name];
+  return typeof v === 'string' ? v : undefined;
+}
+
+/** The row's currency, from which price fields it uses. */
+export function currencyOf(row: Row): 'USD' | 'EUR' {
+  return Object.keys(row).some((k) => k.endsWith('_eur') || k.startsWith('eur_')) ? 'EUR' : 'USD';
+}
+
+export function isUsd(row: Row): boolean {
+  return currencyOf(row) === 'USD';
+}
+
+/** The amount for a USD field name, read from the EUR field on EUR rows. */
+export function amount(row: Row, usdField: string): string | undefined {
+  return isUsd(row) ? field(row, usdField) : field(row, eurField(usdField));
 }
 
 /** A price in the row's own currency. */
-export function rowPrice(row: Priced, value: string | undefined, fractionDigits: number): string {
-  return money(value, row.currency ?? 'USD', fractionDigits);
+export function rowPrice(row: Row, usdField: string, fractionDigits: number): string {
+  return money(amount(row, usdField), currencyOf(row), fractionDigits);
 }
 
-/** Sort value: USD rows only. Other currencies sort last. */
-export function usdSort(row: Priced, value: string | undefined): number | undefined {
-  return isUsd(row) ? numOpt(value) : undefined;
+/** Sort value: USD rows only. EUR rows sort last. */
+export function usdSort(row: Row, usdField: string): number | undefined {
+  return isUsd(row) ? numOpt(field(row, usdField)) : undefined;
 }
 
-/** The USD price range of some rows, with a count of rows in other currencies. */
-export function rowRange<T extends Priced>(
-  rows: T[],
-  value: (row: T) => string | undefined,
+/** The USD price range of some rows, with a count of EUR rows. A set with
+ * only EUR rows shows its euro range. */
+export function rowRange(
+  rows: Row[],
+  usdField: string,
   minDigits: number,
   maxDigits: number,
   suffix: string,
 ): string {
   const usdRows = rows.filter(isUsd);
-  const other = rows.filter((r) => !isUsd(r));
-  const currencies = [...new Set(other.map((r) => r.currency ?? 'USD'))];
-  // No USD rows but one other currency: show that currency's own range.
-  if (usdRows.length === 0 && currencies.length === 1) {
-    return priceRange(other.map(value), minDigits, maxDigits, suffix, symbolOf(currencies[0]));
+  const eurRows = rows.filter((r) => !isUsd(r));
+  if (usdRows.length === 0 && eurRows.length > 0) {
+    return priceRange(eurRows.map((r) => amount(r, usdField)), minDigits, maxDigits, suffix, '€');
   }
-  const range = priceRange(usdRows.map(value), minDigits, maxDigits, suffix);
-  if (other.length === 0) return range;
-  return `${range} · ${other.length} in ${currencies.join(', ')}`;
+  const range = priceRange(usdRows.map((r) => field(r, usdField)), minDigits, maxDigits, suffix);
+  return eurRows.length === 0 ? range : `${range} · ${eurRows.length} in EUR`;
 }
 
 /** A price column label. One currency keeps its symbol, for example "$/min"
  * or "€/min". Mixed currencies say so, because nothing is converted. */
-export function priceLabel(rows: Priced[], usdLabel: string, plainLabel: string): string {
-  const currencies = new Set(rows.map((r) => r.currency ?? 'USD'));
-  if (currencies.size === 0 || (currencies.size === 1 && currencies.has('USD'))) return usdLabel;
-  if (currencies.size === 1) return usdLabel.replace('$', symbolOf([...currencies][0]));
+export function priceLabel(rows: Row[], usdLabel: string, plainLabel: string): string {
+  const currencies = new Set(rows.map(currencyOf));
+  if (currencies.size <= 1 && !currencies.has('EUR')) return usdLabel;
+  if (currencies.size === 1) return usdLabel.replace('$', '€');
   return `${plainLabel} (mixed currencies, not converted)`;
 }
 
@@ -70,9 +90,6 @@ export function rowsOf<T>(table: { getCoreRowModel: () => { rows: { original: T 
   return table.getCoreRowModel().rows.map((r) => r.original);
 }
 
-function symbolOf(currency: string): string {
-  return SYMBOL[currency] ?? `${currency} `;
-}
 
 export function num(value: string): number {
   return Number(value);
@@ -105,11 +122,13 @@ export function priceRange(
 export function formatCloning(
   vc: TTSRow['voice_cloning'],
   includedLabel: string,
-  currency = 'USD',
 ): string {
   if (vc === undefined) return '—';
   if (typeof vc === 'boolean') return vc ? includedLabel : '—';
-  return `${money(vc.price_usd, currency, 2)} ${vc.unit}`;
+  const eurPrice = (vc as { price_eur?: string }).price_eur;
+  return eurPrice !== undefined
+    ? `${money(eurPrice, 'EUR', 2)} ${vc.unit}`
+    : `${money(vc.price_usd, 'USD', 2)} ${vc.unit}`;
 }
 
 export function mostRecent(...groups: { last_verified: string }[][]): string {

@@ -24,18 +24,18 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => usdSort(row, row.price_per_minute_usd),
+    accessorFn: (row) => usdSort(row, "price_per_minute_usd"),
     header: ({ table }) => priceLabel(rowsOf(table), "$/min", "Price/min"),
-    cell: ({ row }) => rowPrice(row.original, row.original.price_per_minute_usd, 4),
+    cell: ({ row }) => rowPrice(row.original, "price_per_minute_usd", 4),
     sortingFn: "basic",
     sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
     id: "batch",
-    accessorFn: (row) => usdSort(row, row.price_per_minute_batch_usd),
+    accessorFn: (row) => usdSort(row, "price_per_minute_batch_usd"),
     header: ({ table }) => priceLabel(rowsOf(table), "$/min batch", "Price/min batch"),
-    cell: ({ row }) => rowPrice(row.original, row.original.price_per_minute_batch_usd, 4),
+    cell: ({ row }) => rowPrice(row.original, "price_per_minute_batch_usd", 4),
     sortingFn: "basic",
     sortUndefined: "last",
     meta: { num: true },
@@ -77,7 +77,7 @@ export function STTSection({ data }: { data: STTRow[] }) {
       count={data.length}
       rangeLabel={rowRange(
         data,
-        (r) => r.price_per_minute_usd,
+        "price_per_minute_usd",
         6,
         4,
         "min",

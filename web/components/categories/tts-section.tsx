@@ -24,9 +24,9 @@ const columns: ColumnDef<TTSRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => usdSort(row, row.price_per_1m_chars_usd),
+    accessorFn: (row) => usdSort(row, "price_per_1m_chars_usd"),
     header: ({ table }) => priceLabel(rowsOf(table), "$/1M chars", "Price/1M chars"),
-    cell: ({ row }) => rowPrice(row.original, row.original.price_per_1m_chars_usd, 2),
+    cell: ({ row }) => rowPrice(row.original, "price_per_1m_chars_usd", 2),
     sortingFn: "basic",
     sortUndefined: "last",
     meta: { num: true, killer: true },
@@ -41,7 +41,7 @@ const columns: ColumnDef<TTSRow>[] = [
     id: "cloning",
     accessorKey: "voice_cloning",
     header: "Cloning",
-    cell: ({ row }) => formatCloning(row.original.voice_cloning, "✓", row.original.currency),
+    cell: ({ row }) => formatCloning(row.original.voice_cloning, "✓"),
   },
   {
     id: "languages",
@@ -79,7 +79,7 @@ export function TTSSection({ data }: { data: TTSRow[] }) {
       count={data.length}
       rangeLabel={rowRange(
         data,
-        (r) => r.price_per_1m_chars_usd,
+        "price_per_1m_chars_usd",
         2,
         2,
         "1M chars",

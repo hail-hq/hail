@@ -129,9 +129,7 @@ export default function CostsPage() {
               <div className="k">LLMs</div>
               <div className="v">{llm.models.length}</div>
               <div className="n">
-                {rowRange(
-                  llm.models,
-                  (m) => m.output_per_mtok_usd,
+                {rowRange(llm.models, 'output_per_mtok_usd',
                   2,
                   0,
                   "Mtok output",
@@ -142,9 +140,7 @@ export default function CostsPage() {
               <div className="k">STT</div>
               <div className="v">{stt.models.length}</div>
               <div className="n">
-                {rowRange(
-                  stt.models,
-                  (m) => m.price_per_minute_usd,
+                {rowRange(stt.models, 'price_per_minute_usd',
                   6,
                   4,
                   "min",
@@ -155,9 +151,7 @@ export default function CostsPage() {
               <div className="k">TTS</div>
               <div className="v">{tts.models.length}</div>
               <div className="n">
-                {rowRange(
-                  tts.models,
-                  (m) => m.price_per_1m_chars_usd,
+                {rowRange(tts.models, 'price_per_1m_chars_usd',
                   0,
                   0,
                   "1M chars",
@@ -168,9 +162,7 @@ export default function CostsPage() {
               <div className="k">SMS</div>
               <div className="v">{sms.providers.length}</div>
               <div className="n">
-                {rowRange(
-                  sms.providers,
-                  (r) => r.usd_per_segment,
+                {rowRange(sms.providers, 'usd_per_segment',
                   5,
                   5,
                   "segment",
