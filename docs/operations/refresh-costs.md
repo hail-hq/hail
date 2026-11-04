@@ -36,6 +36,7 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The agent reads untrusted web pages, so it runs with `--restricted --safe-mode --strict-mcp-config` and [`.github/prompts/costs-refresh-settings.json`](../../.github/prompts/costs-refresh-settings.json). It has no shell, it can edit only those four files, and it can fetch only the listed sites. A new vendor needs a line in that file. The `refresh` job has a read-only GitHub token.
 - The agent stops at a $30 budget and a 150-minute timeout. If validation fails, a short repair pass ($3, 15 minutes) reads the errors and fixes the rows.
 - If the finished rows pass validation, a PR opens. After an early stop it uses a dated `costs/partial-refresh-*` branch, so it cannot replace a complete PR, and the run stays red. Its report can be missing, so check the diff by hand.
+- Each run reports what its LLM use cost: a notice on the run page, a table of tokens and cost in the run summary, and the same table in the PR body. The figure is Claude Code's estimate at list price; the AWS bill for Bedrock can differ.
 - If validation still fails, no PR opens. The run's `costs-refresh` artifact holds the patch and the report for 7 days.
 - The PR body shows the agent's report in a code fence, so source links are plain text.
 - The agent never sets `featured`; it lists candidates. A person reviews and merges the PR.

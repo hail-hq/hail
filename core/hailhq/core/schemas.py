@@ -363,6 +363,7 @@ TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
 
 
 NumberType = Literal["local", "mobile", "toll_free", "national"]
+Capability = Literal["voice", "sms"]
 
 
 class CallResponse(BaseModel):
@@ -671,7 +672,7 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         description="Restrict number type; omit to compare all supported types.",
     )
-    capabilities: list[Literal["voice", "sms"]] = Field(
+    capabilities: list[Capability] = Field(
         min_length=1,
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
