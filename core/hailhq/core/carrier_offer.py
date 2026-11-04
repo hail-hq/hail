@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import UUID
 
 import phonenumbers
-from hailhq.core.schemas import NumberType
+from hailhq.core.schemas import Capability, NumberType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SubjectType = Literal["person", "business"]
@@ -223,9 +223,7 @@ class SubjectOption(BaseModel):
     )
     monthly_cents: int = Field(description="Catalog monthly price in USD cents.")
     setup_cents: int = Field(description="Catalog one-time setup price in USD cents.")
-    capabilities: list[Literal["voice", "sms"]] = Field(
-        description="What this option can do."
-    )
+    capabilities: list[Capability] = Field(description="What this option can do.")
     paperwork: list[PaperworkItem] = Field(
         description="Paper categories this subject needs. Empty when none, or when unknown."
     )

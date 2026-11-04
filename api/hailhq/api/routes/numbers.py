@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -74,6 +74,7 @@ from hailhq.core.providers.verification import (
 from hailhq.core.providers.voice import CarrierNotConfigured
 from hailhq.core.regions import REGIONS_RESPONSE, NumberRegionsResponse
 from hailhq.core.schemas import (
+    Capability,
     NumberAcquireRequest,
     NumberQuoteRequest,
     PhoneNumberListResponse,
@@ -579,8 +580,9 @@ async def get_number_options(
         ),
     ],
     capabilities: Annotated[
-        list[Literal["voice", "sms"]] | None,
+        list[Capability] | None,
         Query(
+            max_length=2,
             description=(
                 "Repeat to require several: only options whose capabilities "
                 "include all of them count. None: no filter."
@@ -594,7 +596,11 @@ async def get_number_options(
     the bundled catalog and your verifications. It calls no carrier, so
     prices are catalog prices and the live quote may differ slightly."""
     verifications = await _offer_verifications(db, principal.organization_id)
-    return number_options(country_code.upper(), verifications, capabilities)
+    return number_options(
+        country_code.upper(),
+        verifications,
+        list(dict.fromkeys(capabilities)) if capabilities else None,
+    )
 
 
 @router.get(

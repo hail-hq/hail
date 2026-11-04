@@ -2577,6 +2577,7 @@ paths:
                     - voice
                     - sms
                   type: string
+                maxItems: 2
               - type: "null"
             description:
               "Repeat to require several: only options whose capabilities

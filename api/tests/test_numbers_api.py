@@ -871,6 +871,40 @@ async def test_number_options_unknown_capability_is_422(client, org_and_key) -> 
     assert resp.status_code == 422, resp.text
 
 
+async def test_number_options_passes_capabilities_through(
+    client, org_and_key, ch_catalog, monkeypatch
+) -> None:
+    from hailhq.api.routes import numbers as numbers_mod
+
+    seen = []
+    real = numbers_mod.number_options
+
+    def spy(cc, verifications, capabilities=None):
+        seen.append(capabilities)
+        return real(cc, verifications, capabilities)
+
+    monkeypatch.setattr(numbers_mod, "number_options", spy)
+    _, _, plaintext = org_and_key
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "CH", "capabilities": ["voice", "sms"]},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen == [["voice", "sms"]]
+    assert resp.json()["types"] == []
+
+
+async def test_number_options_three_capabilities_is_422(client, org_and_key) -> None:
+    _, _, plaintext = org_and_key
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "CH", "capabilities": ["voice", "sms", "voice"]},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
 async def test_number_options_requires_auth(client) -> None:
     resp = await client.get("/numbers/options", params={"country_code": "CH"})
     assert resp.status_code == 401
