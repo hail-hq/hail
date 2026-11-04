@@ -1,7 +1,7 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { eurOnly, formatCloning, langs, price, usd } from '@/lib/format';
+import { formatCloning, langs, priceLabel, rowPrice } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
 import { TableWrap } from './table-wrap';
 
@@ -76,11 +76,15 @@ export function LLMCompareTable({
   removable?: boolean;
 }) {
   const rows: CompareRow[] = [
-    { label: 'Output $/MTok', cells: models.map((m) => usd(m.output_per_mtok_usd, 2)), emphasis: true },
-    { label: 'Input $/MTok', cells: models.map((m) => usd(m.input_per_mtok_usd, 2)) },
     {
-      label: 'Cached input $/MTok',
-      cells: models.map((m) => usd(m.cache_read_per_mtok_usd, 4)),
+      label: priceLabel(models, 'Output $/MTok', 'Output /MTok'),
+      cells: models.map((m) => rowPrice(m, m.output_per_mtok_usd, 2)),
+      emphasis: true,
+    },
+    { label: priceLabel(models, 'Input $/MTok', 'Input /MTok'), cells: models.map((m) => rowPrice(m, m.input_per_mtok_usd, 2)) },
+    {
+      label: priceLabel(models, 'Cached input $/MTok', 'Cached input /MTok'),
+      cells: models.map((m) => rowPrice(m, m.cache_read_per_mtok_usd, 4)),
     },
     { label: 'Context window', cells: models.map((m) => m.context_window.toLocaleString()) },
     { label: 'Output cap', cells: models.map((m) => m.max_output_tokens.toLocaleString()) },
@@ -124,14 +128,13 @@ export function STTCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      // Euro and dollar prices are not comparable, so a mixed pair says so.
-      label: eurOnly(models) > 0 ? 'Price/min (USD and EUR, not converted)' : '$/min',
-      cells: models.map((m) => price(m.price_per_minute_usd, m.price_per_minute_eur, 6)),
+      label: priceLabel(models, '$/min', 'Price/min'),
+      cells: models.map((m) => rowPrice(m, m.price_per_minute_usd, 6)),
       emphasis: true,
     },
     {
-      label: eurOnly(models) > 0 ? 'Price/min batch' : '$/min batch',
-      cells: models.map((m) => price(m.price_per_minute_batch_usd, m.price_per_minute_batch_eur, 6)),
+      label: priceLabel(models, '$/min batch', 'Price/min batch'),
+      cells: models.map((m) => rowPrice(m, m.price_per_minute_batch_usd, 6)),
     },
     { label: 'Streaming', cells: models.map((m) => (m.streaming ? '✓' : '—')) },
     { label: 'Realtime', cells: models.map((m) => (m.realtime ? '✓' : '—')) },
@@ -172,7 +175,11 @@ export function TTSCompareTable({
   removable?: boolean;
 }) {
   const rows: CompareRow[] = [
-    { label: '$/1M chars', cells: models.map((m) => usd(m.price_per_1m_chars_usd, 2)), emphasis: true },
+    {
+      label: priceLabel(models, '$/1M chars', 'Price/1M chars'),
+      cells: models.map((m) => rowPrice(m, m.price_per_1m_chars_usd, 2)),
+      emphasis: true,
+    },
     { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },
     { label: 'Voice cloning', cells: models.map((m) => formatCloning(m.voice_cloning, '✓ included')) },
     {

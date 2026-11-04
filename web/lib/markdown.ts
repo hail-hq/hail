@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { eurNote, eurOnly, langs, mostRecent, price, priceRange, usd } from './format';
+import { langs, mostRecent, rowPrice, rowRange } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -10,9 +10,9 @@ function llmTable(rows: LLMRow[]): string {
   const header = tableRow([
     'Provider',
     'Model',
-    'Output $/MTok',
-    'Input $/MTok',
-    'Cached $/MTok',
+    'Output /MTok',
+    'Input /MTok',
+    'Cached /MTok',
     'Context',
     'Out cap',
     'Tools',
@@ -25,9 +25,9 @@ function llmTable(rows: LLMRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      usd(r.output_per_mtok_usd, 2),
-      usd(r.input_per_mtok_usd, 2),
-      usd(r.cache_read_per_mtok_usd, 4),
+      rowPrice(r, r.output_per_mtok_usd, 2),
+      rowPrice(r, r.input_per_mtok_usd, 2),
+      rowPrice(r, r.cache_read_per_mtok_usd, 4),
       r.context_window.toLocaleString(),
       r.max_output_tokens.toLocaleString(),
       r.supports_tool_use ? 'yes' : 'no',
@@ -57,8 +57,8 @@ function sttTable(rows: STTRow[]): string {
     tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      price(r.price_per_minute_usd, r.price_per_minute_eur, 6),
-      price(r.price_per_minute_batch_usd, r.price_per_minute_batch_eur, 6),
+      rowPrice(r, r.price_per_minute_usd, 6),
+      rowPrice(r, r.price_per_minute_batch_usd, 6),
       r.streaming ? 'yes' : 'no',
       r.realtime ? 'yes' : 'no',
       langs(r.languages),
@@ -74,7 +74,7 @@ function ttsTable(rows: TTSRow[]): string {
   const header = tableRow([
     'Provider',
     'Model',
-    '$/1M chars',
+    'Price/1M chars',
     'Quality',
     'Cloning',
     'Languages',
@@ -96,7 +96,7 @@ function ttsTable(rows: TTSRow[]): string {
     return tableRow([
       r.provider,
       `${r.display_name} (\`${r.model_id}\`)`,
-      usd(r.price_per_1m_chars_usd, 2),
+      rowPrice(r, r.price_per_1m_chars_usd, 2),
       r.voice_quality,
       cloning,
       langs(r.languages),
@@ -133,10 +133,9 @@ export function renderCostsMarkdown(
   const providers = new Set<string>();
   for (const m of [...llm.models, ...stt.models, ...tts.models]) providers.add(m.provider);
 
-  const llmRange = priceRange(llm.models.map((m) => m.output_per_mtok_usd), 2, 2, 'Mtok');
-  const sttRange =
-    priceRange(stt.models.map((m) => m.price_per_minute_usd), 6, 4, 'min') + eurNote(eurOnly(stt.models));
-  const ttsRange = priceRange(tts.models.map((m) => m.price_per_1m_chars_usd), 2, 2, '1M chars');
+  const llmRange = rowRange(llm.models, (m) => m.output_per_mtok_usd, 2, 2, 'Mtok');
+  const sttRange = rowRange(stt.models, (m) => m.price_per_minute_usd, 6, 4, 'min');
+  const ttsRange = rowRange(tts.models, (m) => m.price_per_1m_chars_usd, 2, 2, '1M chars');
 
   const verified = mostRecent(llm.models, stt.models, tts.models);
 
@@ -161,6 +160,7 @@ Public, validated pricing and capability data for AI model providers — large l
 - **LLM output range:** ${llmRange}
 - **STT range:** ${sttRange}
 - **TTS range:** ${ttsRange}
+- **Currency:** USD unless a row sets \`currency\`. Prices are never converted.
 - **Verified:** ${verified}
 
 ## For agents

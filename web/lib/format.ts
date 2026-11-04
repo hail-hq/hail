@@ -4,36 +4,56 @@ export function langs(l: string[] | string): string {
   return Array.isArray(l) ? l.join(', ') : l;
 }
 
-function money(value: string | undefined, symbol: string, fractionDigits: number): string {
+const SYMBOL: Record<string, string> = { USD: '$', EUR: '€' };
+
+function money(value: string | undefined, currency: string, fractionDigits: number): string {
   if (value === undefined) return '—';
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
-  return `${symbol}${n.toFixed(fractionDigits)}`;
+  return `${SYMBOL[currency] ?? `${currency} `}${n.toFixed(fractionDigits)}`;
 }
 
 export function usd(value: string | undefined, fractionDigits: number): string {
-  return money(value, '$', fractionDigits);
+  return money(value, 'USD', fractionDigits);
 }
 
-/** A row's price in the currency the vendor publishes: USD when it has one,
- * otherwise EUR. The dataset never converts currencies. */
-export function price(
-  usdValue: string | undefined,
-  eurValue: string | undefined,
-  fractionDigits: number,
+/** A row priced in another currency keeps the vendor's figures. Prices are
+ * never converted, so such rows are shown with their own symbol, sort last,
+ * and stay out of USD price ranges. */
+export type Priced = { currency?: string };
+
+export function isUsd(row: Priced): boolean {
+  return row.currency === undefined || row.currency === 'USD';
+}
+
+/** A price in the row's own currency. */
+export function rowPrice(row: Priced, value: string | undefined, fractionDigits: number): string {
+  return money(value, row.currency ?? 'USD', fractionDigits);
+}
+
+/** Sort value: USD rows only. Other currencies sort last. */
+export function usdSort(row: Priced, value: string | undefined): number | undefined {
+  return isUsd(row) ? numOpt(value) : undefined;
+}
+
+/** The USD price range of some rows, with a count of rows in other currencies. */
+export function rowRange<T extends Priced>(
+  rows: T[],
+  value: (row: T) => string | undefined,
+  minDigits: number,
+  maxDigits: number,
+  suffix: string,
 ): string {
-  if (usdValue !== undefined) return money(usdValue, '$', fractionDigits);
-  return money(eurValue, '€', fractionDigits);
+  const range = priceRange(rows.filter(isUsd).map(value), minDigits, maxDigits, suffix);
+  const other = rows.filter((r) => !isUsd(r));
+  if (other.length === 0) return range;
+  const currencies = [...new Set(other.map((r) => r.currency))].join(', ');
+  return `${range} · ${other.length} in ${currencies}`;
 }
 
-/** Speech rows priced only in euros. They sit outside the USD price range. */
-export function eurOnly(rows: { price_per_minute_usd?: string; price_per_minute_eur?: string }[]): number {
-  return rows.filter((r) => r.price_per_minute_usd === undefined && r.price_per_minute_eur !== undefined).length;
-}
-
-/** Appended to a USD price range when some rows are priced in euros. */
-export function eurNote(count: number): string {
-  return count > 0 ? ` · ${count} in EUR` : '';
+/** A compare row label: a pair that mixes currencies says so. */
+export function priceLabel(rows: Priced[], usdLabel: string, plainLabel: string): string {
+  return rows.every(isUsd) ? usdLabel : `${plainLabel} (mixed currencies, not converted)`;
 }
 
 export function num(value: string): number {

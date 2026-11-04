@@ -5,7 +5,7 @@ import type { STTRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { eurNote, eurOnly, langs, numOpt, price, priceRange } from "@/lib/format";
+import { langs, rowPrice, rowRange, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -24,23 +24,19 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => numOpt(row.price_per_minute_usd),
+    accessorFn: (row) => usdSort(row, row.price_per_minute_usd),
     header: "Price/min",
-    cell: ({ row }) =>
-      price(row.original.price_per_minute_usd, row.original.price_per_minute_eur, 4),
+    cell: ({ row }) => rowPrice(row.original, row.original.price_per_minute_usd, 4),
     sortingFn: "basic",
-    // Euro rows have no USD value. Keep them last in both directions.
     sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
     id: "batch",
-    accessorFn: (row) => numOpt(row.price_per_minute_batch_usd),
+    accessorFn: (row) => usdSort(row, row.price_per_minute_batch_usd),
     header: "Price/min batch",
-    cell: ({ row }) =>
-      price(row.original.price_per_minute_batch_usd, row.original.price_per_minute_batch_eur, 4),
+    cell: ({ row }) => rowPrice(row.original, row.original.price_per_minute_batch_usd, 4),
     sortingFn: "basic",
-    // Euro rows have no USD value. Keep them last in both directions.
     sortUndefined: "last",
     meta: { num: true },
   },
@@ -79,14 +75,13 @@ export function STTSection({ data }: { data: STTRow[] }) {
       num="02"
       title="Speech to text"
       count={data.length}
-      rangeLabel={
-        priceRange(
-          data.map((r) => r.price_per_minute_usd),
-          6,
-          4,
-          "min",
-        ) + eurNote(eurOnly(data))
-      }
+      rangeLabel={rowRange(
+        data,
+        (r) => r.price_per_minute_usd,
+        6,
+        4,
+        "min",
+      )}
       data={data}
       columns={columns}
       defaultSort={{ id: "price", desc: false }}

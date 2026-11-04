@@ -4,7 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { SmsRateRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { VerifiedCell } from "../verified-cell";
-import { priceRange, usd } from "@/lib/format";
+import { rowPrice, rowRange, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<SmsRateRow>[] = [
   {
@@ -22,10 +22,11 @@ const columns: ColumnDef<SmsRateRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => Number(row.usd_per_segment),
-    header: "$/segment (base)",
-    cell: ({ row }) => usd(row.original.usd_per_segment, 5),
+    accessorFn: (row) => usdSort(row, row.usd_per_segment),
+    header: "Price/segment (base)",
+    cell: ({ row }) => rowPrice(row.original, row.original.usd_per_segment, 5),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
@@ -45,8 +46,9 @@ export function SmsSection({ data }: { data: SmsRateRow[] }) {
       num="05"
       title="SMS base rates"
       count={data.length}
-      rangeLabel={priceRange(
-        data.map((r) => r.usd_per_segment),
+      rangeLabel={rowRange(
+        data,
+        (r) => r.usd_per_segment,
         5,
         5,
         "segment",

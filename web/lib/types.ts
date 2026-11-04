@@ -16,6 +16,8 @@ export type DeploymentOption =
 export type Aggregator = 'openrouter';
 
 export type CommonFields = {
+  /** Currency of every price on the row. Absent means USD. */
+  currency?: 'USD' | 'EUR';
   provider: string;
   provider_url?: string;
   model_id: string;
@@ -79,9 +81,6 @@ export type STTRow = CommonFields & {
   price_per_minute_usd?: string;
   price_per_second_usd?: string;
   price_per_minute_batch_usd?: string;
-  // Set only when the vendor publishes no USD price. Never converted.
-  price_per_minute_eur?: string;
-  price_per_minute_batch_eur?: string;
   diarization_per_minute_usd?: string;
   pii_redaction_per_minute_usd?: string;
   languages: string[] | string;
@@ -177,6 +176,8 @@ export interface SmsRateRow extends TelephonyProvenance {
   provider: string;
   country_code: string;
   direction: 'outbound';
+  /** Currency of the price. Absent means USD. */
+  currency?: 'USD' | 'EUR';
   usd_per_segment: string;
 }
 

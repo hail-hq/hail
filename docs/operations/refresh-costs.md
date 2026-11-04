@@ -70,7 +70,7 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 
 1. **Two-source rule.** For every price-affecting change, cite the vendor pricing page plus one secondary source. A secondary source is a vendor announcement, a third-party aggregator, or the vendor API docs. If only one source is available, set `confidence: medium` on the row and give the reason in `notes`.
 2. **Decimal-string prices.** All `*_per_*_usd` fields are JSON strings, not numbers. They must match the pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`. The validator rejects floats.
-   **Currency.** Prices are USD. If a vendor publishes no USD price, use the `_eur` fields that the schema offers (STT only today) and leave the `_usd` ones unset. Never convert between currencies: rates change, and a converted price looks verified when it is not.
+   **Currency.** Record each price in the currency the vendor publishes. If it is not USD, set `currency` on the row (`EUR` today) and keep the same price fields. Never convert between currencies: rates change, and a converted price looks verified when it is not. Any row in any file can carry `currency`.
 3. **Canonical model_ids.** Use the vendor's real API model_id string. Do not invent one. If a marketing name does not have a stable API identifier, defer the row.
 4. **Two source verifications are the bar.** If the vendor pricing page is unreachable, or the model_id is not in the docs, defer the row with a documented reason. Do not guess.
 5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.
@@ -110,10 +110,10 @@ STT rows (`costs/stt.json`):
 ```
 Required: provider, provider_url, model_id, display_name, languages,
 streaming, last_verified, last_changed_at, verification_method,
-verified_by, source_url. PLUS one of price_per_minute_usd,
-price_per_minute_eur (euro-only vendors), OR price_per_second_usd.
+verified_by, source_url. PLUS one of price_per_minute_usd OR
+price_per_second_usd (v2.2 anyOf constraint).
 
-Optional: price_per_minute_batch_usd, price_per_minute_batch_eur, diarization_per_minute_usd,
+Optional: price_per_minute_batch_usd, diarization_per_minute_usd,
 pii_redaction_per_minute_usd, realtime, realtime_latency_ms, diarization
 enum, punctuation_included, formatting_included, min_billed_seconds,
 max_audio_minutes_per_file, concurrent_streams_included, wer_benchmark,
@@ -153,7 +153,7 @@ Keep this order the same across all rows. The order makes diffs easy to review a
 **LLM:**
 
 ```
-provider, provider_url, model_id, display_name, featured (when true),
+provider, provider_url, model_id, display_name, currency (when not USD), featured (when true),
 model_family, knowledge_cutoff, aliases (when present),
 context_window, max_output_tokens,
 input_per_mtok_usd, output_per_mtok_usd,
@@ -180,11 +180,11 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
+currency (when not USD),
 featured (when true),
 aliases (when present),
 price_per_minute_usd, price_per_second_usd (whichever applies),
 price_per_minute_batch_usd, diarization_per_minute_usd, pii_redaction_per_minute_usd (when set),
-price_per_minute_eur, price_per_minute_batch_eur (euro-only vendors: same position as the _usd fields they replace),
 languages, streaming, realtime, realtime_latency_ms (when set),
 diarization, punctuation_included, formatting_included (when set),
 min_billed_seconds, max_audio_minutes_per_file, concurrent_streams_included (when set),
@@ -202,6 +202,7 @@ source_url, notes
 
 ```
 provider, provider_url, model_id, display_name,
+currency (when not USD),
 featured (when true),
 aliases (when present),
 price_per_1m_chars_usd, price_per_second_usd (whichever applies),
