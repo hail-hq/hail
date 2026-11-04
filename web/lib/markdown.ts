@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { langs, mostRecent, price, priceRange, usd } from './format';
+import { eurNote, eurOnly, langs, mostRecent, price, priceRange, usd } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -134,7 +134,8 @@ export function renderCostsMarkdown(
   for (const m of [...llm.models, ...stt.models, ...tts.models]) providers.add(m.provider);
 
   const llmRange = priceRange(llm.models.map((m) => m.output_per_mtok_usd), 2, 2, 'Mtok');
-  const sttRange = priceRange(stt.models.map((m) => m.price_per_minute_usd), 6, 4, 'min');
+  const sttRange =
+    priceRange(stt.models.map((m) => m.price_per_minute_usd), 6, 4, 'min') + eurNote(eurOnly(stt.models));
   const ttsRange = priceRange(tts.models.map((m) => m.price_per_1m_chars_usd), 2, 2, '1M chars');
 
   const verified = mostRecent(llm.models, stt.models, tts.models);

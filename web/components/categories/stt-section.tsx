@@ -5,7 +5,7 @@ import type { STTRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { langs, numOpt, price, priceRange } from "@/lib/format";
+import { eurNote, eurOnly, langs, numOpt, price, priceRange } from "@/lib/format";
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -29,6 +29,8 @@ const columns: ColumnDef<STTRow>[] = [
     cell: ({ row }) =>
       price(row.original.price_per_minute_usd, row.original.price_per_minute_eur, 4),
     sortingFn: "basic",
+    // Euro rows have no USD value. Keep them last in both directions.
+    sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
@@ -38,6 +40,8 @@ const columns: ColumnDef<STTRow>[] = [
     cell: ({ row }) =>
       price(row.original.price_per_minute_batch_usd, row.original.price_per_minute_batch_eur, 4),
     sortingFn: "basic",
+    // Euro rows have no USD value. Keep them last in both directions.
+    sortUndefined: "last",
     meta: { num: true },
   },
   {
@@ -75,12 +79,14 @@ export function STTSection({ data }: { data: STTRow[] }) {
       num="02"
       title="Speech to text"
       count={data.length}
-      rangeLabel={priceRange(
-        data.map((r) => r.price_per_minute_usd),
-        6,
-        4,
-        "min",
-      )}
+      rangeLabel={
+        priceRange(
+          data.map((r) => r.price_per_minute_usd),
+          6,
+          4,
+          "min",
+        ) + eurNote(eurOnly(data))
+      }
       data={data}
       columns={columns}
       defaultSort={{ id: "price", desc: false }}

@@ -40,6 +40,15 @@
         { "required": ["price_per_minute_eur"] },
         { "required": ["price_per_second_usd"] }
       ],
+      "not": {
+        "anyOf": [
+          { "required": ["price_per_minute_usd", "price_per_minute_eur"] },
+          {
+            "required": ["price_per_minute_usd", "price_per_minute_batch_eur"]
+          },
+          { "required": ["price_per_minute_eur", "price_per_minute_batch_usd"] }
+        ]
+      },
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
         "provider_url": { "type": "string", "format": "uri" },

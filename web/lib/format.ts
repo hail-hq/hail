@@ -4,11 +4,15 @@ export function langs(l: string[] | string): string {
   return Array.isArray(l) ? l.join(', ') : l;
 }
 
-export function usd(value: string | undefined, fractionDigits: number): string {
+function money(value: string | undefined, symbol: string, fractionDigits: number): string {
   if (value === undefined) return '—';
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
-  return `$${n.toFixed(fractionDigits)}`;
+  return `${symbol}${n.toFixed(fractionDigits)}`;
+}
+
+export function usd(value: string | undefined, fractionDigits: number): string {
+  return money(value, '$', fractionDigits);
 }
 
 /** A row's price in the currency the vendor publishes: USD when it has one,
@@ -18,11 +22,18 @@ export function price(
   eurValue: string | undefined,
   fractionDigits: number,
 ): string {
-  if (usdValue !== undefined) return usd(usdValue, fractionDigits);
-  if (eurValue === undefined) return '—';
-  const n = Number(eurValue);
-  if (!Number.isFinite(n)) return '—';
-  return `€${n.toFixed(fractionDigits)}`;
+  if (usdValue !== undefined) return money(usdValue, '$', fractionDigits);
+  return money(eurValue, '€', fractionDigits);
+}
+
+/** Speech rows priced only in euros. They sit outside the USD price range. */
+export function eurOnly(rows: { price_per_minute_usd?: string; price_per_minute_eur?: string }[]): number {
+  return rows.filter((r) => r.price_per_minute_usd === undefined && r.price_per_minute_eur !== undefined).length;
+}
+
+/** Appended to a USD price range when some rows are priced in euros. */
+export function eurNote(count: number): string {
+  return count > 0 ? ` · ${count} in EUR` : '';
 }
 
 export function num(value: string): number {

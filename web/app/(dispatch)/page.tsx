@@ -5,7 +5,7 @@ import { TTSSection } from "@/components/categories/tts-section";
 import { SmsSection } from "@/components/categories/sms-section";
 import { TelephonySection } from "@/components/categories/telephony-section";
 import { Toolbar } from "@/components/toolbar";
-import { mostRecent, priceRange } from "@/lib/format";
+import { eurNote, eurOnly, mostRecent, priceRange } from "@/lib/format";
 import {
   COSTS_HERO_COPY,
   COSTS_SITE_DESCRIPTION,
@@ -146,7 +146,7 @@ export default function CostsPage() {
                   6,
                   4,
                   "min",
-                )}
+                ) + eurNote(eurOnly(stt.models))}
               </div>
             </div>
             <div className="stat">

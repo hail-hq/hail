@@ -1,7 +1,7 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { formatCloning, langs, price, usd } from '@/lib/format';
+import { eurOnly, formatCloning, langs, price, usd } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
 import { TableWrap } from './table-wrap';
 
@@ -124,12 +124,13 @@ export function STTCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      label: 'Price/min',
+      // Euro and dollar prices are not comparable, so a mixed pair says so.
+      label: eurOnly(models) > 0 ? 'Price/min (USD and EUR, not converted)' : '$/min',
       cells: models.map((m) => price(m.price_per_minute_usd, m.price_per_minute_eur, 6)),
       emphasis: true,
     },
     {
-      label: 'Price/min batch',
+      label: eurOnly(models) > 0 ? 'Price/min batch' : '$/min batch',
       cells: models.map((m) => price(m.price_per_minute_batch_usd, m.price_per_minute_batch_eur, 6)),
     },
     { label: 'Streaming', cells: models.map((m) => (m.streaming ? '✓' : '—')) },

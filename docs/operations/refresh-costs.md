@@ -110,10 +110,10 @@ STT rows (`costs/stt.json`):
 ```
 Required: provider, provider_url, model_id, display_name, languages,
 streaming, last_verified, last_changed_at, verification_method,
-verified_by, source_url. PLUS one of price_per_minute_usd OR
-price_per_second_usd (v2.2 anyOf constraint).
+verified_by, source_url. PLUS one of price_per_minute_usd,
+price_per_minute_eur (euro-only vendors), OR price_per_second_usd.
 
-Optional: price_per_minute_batch_usd, diarization_per_minute_usd,
+Optional: price_per_minute_batch_usd, price_per_minute_batch_eur, diarization_per_minute_usd,
 pii_redaction_per_minute_usd, realtime, realtime_latency_ms, diarization
 enum, punctuation_included, formatting_included, min_billed_seconds,
 max_audio_minutes_per_file, concurrent_streams_included, wer_benchmark,
@@ -184,6 +184,7 @@ featured (when true),
 aliases (when present),
 price_per_minute_usd, price_per_second_usd (whichever applies),
 price_per_minute_batch_usd, diarization_per_minute_usd, pii_redaction_per_minute_usd (when set),
+price_per_minute_eur, price_per_minute_batch_eur (euro-only vendors: same position as the _usd fields they replace),
 languages, streaming, realtime, realtime_latency_ms (when set),
 diarization, punctuation_included, formatting_included (when set),
 min_billed_seconds, max_audio_minutes_per_file, concurrent_streams_included (when set),
