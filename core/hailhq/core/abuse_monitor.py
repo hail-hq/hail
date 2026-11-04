@@ -239,8 +239,7 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
 
     # One SES event can name several recipients; each (email, recipient)
     # counts once per kind, so a repeated feedback report for the same
-    # recipient does not count twice. A complaint whose recipients the
-    # mailbox provider redacted counts once per email.
+    # recipient does not count twice.
     payload_recipients = EmailEvent.payload["recipients"]
     event_addr = (
         func.jsonb_array_elements_text(
@@ -256,9 +255,6 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         .render_derived(name="event_recipients")
         .lateral()
     )
-    event_key = tuple_(
-        EmailEvent.email_id, func.coalesce(_bare_address(event_addr.c.addr), "")
-    )
     hard_bounce = and_(
         EmailEvent.kind == "bounced",
         EmailEvent.payload["hard"].as_boolean().is_(True),
@@ -267,13 +263,29 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         func.coalesce(EmailEvent.payload["bounce_sub_type"].as_string(), "")
         != "OnAccountSuppressionList",
     )
-    event_stmt = (
-        select(
-            EmailEvent.organization_id,
-            func.count(func.distinct(event_key)).filter(hard_bounce),
-            func.count(func.distinct(event_key)).filter(
-                EmailEvent.kind == "complained"
+    complained = EmailEvent.kind == "complained"
+    named = _bare_address(event_addr.c.addr)
+
+    def _per_email(kind_filter):
+        # Named recipients count once each; an event with no recipients
+        # (redacted by the mailbox provider) counts once per event. The sum
+        # is capped at the email's recipient count, so repeated reports
+        # cannot count more people than the email went to.
+        return func.least(
+            func.count(func.distinct(named)).filter(kind_filter, named.is_not(None))
+            + func.count(func.distinct(EmailEvent.id)).filter(
+                kind_filter, event_addr.c.addr.is_(None)
             ),
+            func.cardinality(Email.to_addresses)
+            + func.coalesce(func.cardinality(Email.cc_addresses), 0)
+            + func.coalesce(func.cardinality(Email.bcc_addresses), 0),
+        )
+
+    per_email = (
+        select(
+            Email.organization_id.label("organization_id"),
+            _per_email(hard_bounce).label("bounces"),
+            _per_email(complained).label("complaints"),
         )
         .select_from(EmailEvent)
         .join(Email, Email.id == EmailEvent.email_id)
@@ -284,12 +296,18 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             # before the window must not count against a smaller recent send.
             in_window,
             EmailEvent.occurred_at >= window_start,
-            or_(hard_bounce, EmailEvent.kind == "complained"),
+            or_(hard_bounce, complained),
         )
-        .group_by(EmailEvent.organization_id)
+        .group_by(Email.id)
+        .subquery()
     )
+    event_stmt = select(
+        per_email.c.organization_id,
+        func.sum(per_email.c.bounces),
+        func.sum(per_email.c.complaints),
+    ).group_by(per_email.c.organization_id)
     event_counts = {
-        org_id: (bounces, complaints)
+        org_id: (int(bounces), int(complaints))
         for org_id, bounces, complaints in (await db.execute(event_stmt)).all()
     }
 

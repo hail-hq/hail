@@ -371,7 +371,8 @@ async def test_email_repeated_reports_for_one_recipient_count_once(
                 occurred_at=now - timedelta(minutes=i),
             )
         )
-    # A redacted complaint (no recipients), reported twice: one per email.
+    # A redacted complaint (no recipients) reported twice on a one-recipient
+    # email: capped at the email's one recipient.
     for i in range(2):
         async_session.add(
             EmailEvent(
@@ -476,3 +477,34 @@ async def test_tick_runs_email_when_sms_pass_fails(async_session, monkeypatch) -
     worker = abuse_monitor.AbuseMonitorWorker(session_factory=_Factory())
     assert await worker.tick() == 1
     assert ran == ["email"]
+
+
+async def test_email_redacted_complaints_count_per_report_up_to_recipients(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+    from hailhq.core.models import EmailEvent
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    # 1 email to 10 recipients plus 90 single-recipient emails: 100 recipients.
+    wide = await _seed_emails(async_session, org_id, 1, recipients=10)
+    await _seed_emails(async_session, org_id, 90)
+    now = datetime.now(timezone.utc)
+    # Three redacted complaints on the 10-recipient email: three people.
+    for i in range(3):
+        async_session.add(
+            EmailEvent(
+                email_id=wide[0].id,
+                organization_id=org_id,
+                kind="complained",
+                payload={"recipients": []},
+                occurred_at=now - timedelta(minutes=i),
+            )
+        )
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 1
+    assert "(3/100)" in (await _email_suspension(async_session, org_id)).reason
