@@ -12,7 +12,6 @@ from hailhq.core.directory import (
     resolve_member_emails,
 )
 from hailhq.core.models import Contact, OrganizationMember, User
-from sqlalchemy import text
 
 
 async def _add_member(session, org_id, name, email, phone_number=None):
@@ -75,38 +74,11 @@ async def test_list_directory_member_with_phone_number(async_session):
     assert entries[0].source == "member"
 
 
-async def test_list_directory_includes_manual_contacts(async_session):
-    org_a, org_b = uuid.uuid4(), uuid.uuid4()
-    await _add_member(async_session, org_a, "Alice", "alice@a.test")
-    await _add_contact(async_session, org_a, "Vendor Co", email="billing@vendor.test")
-    await _add_contact(async_session, org_a, "Maya", phone_e164="+15559876543")
-    await _add_contact(async_session, org_b, "Other Org Contact", email="x@b.test")
-
-    entries = await list_directory(async_session, org_a)
-    assert [e.name for e in entries] == ["Alice", "Maya", "Vendor Co"]
-
-    maya = next(e for e in entries if e.name == "Maya")
-    assert maya.source == "contact"
-    assert maya.has_email is False
-    assert maya.has_phone is True
-
-    vendor = next(e for e in entries if e.name == "Vendor Co")
-    assert vendor.source == "contact"
-    assert vendor.has_email is True
-    assert vendor.has_phone is False
-
-
-@pytest.mark.recreate_schema
-async def test_list_directory_tolerates_missing_contacts_table(async_session):
-    """Self-host posture: no `contacts` table -> members-only, not a 500.
-
-    Drops the real table (rather than mocking) so this exercises the
-    actual asyncpg ``UndefinedTable`` -> ``ProgrammingError`` path.
-    """
+async def test_list_directory_lists_members_only(async_session):
+    """Agent sends reach members only, so contacts are not listed."""
     org = uuid.uuid4()
     await _add_member(async_session, org, "Alice", "alice@a.test")
-    await async_session.execute(text("DROP TABLE contacts CASCADE"))
-    await async_session.commit()
+    await _add_contact(async_session, org, "Vendor Co", email="billing@vendor.test")
 
     entries = await list_directory(async_session, org)
     assert [e.name for e in entries] == ["Alice"]
