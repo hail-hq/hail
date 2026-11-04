@@ -861,6 +861,16 @@ async def test_number_options_bad_country_is_422(client, org_and_key) -> None:
     assert resp.status_code == 422, resp.text
 
 
+async def test_number_options_unknown_capability_is_422(client, org_and_key) -> None:
+    _, _, plaintext = org_and_key
+    resp = await client.get(
+        "/numbers/options",
+        params={"country_code": "CH", "capabilities": ["voice", "fax"]},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
 async def test_number_options_requires_auth(client) -> None:
     resp = await client.get("/numbers/options", params={"country_code": "CH"})
     assert resp.status_code == 401

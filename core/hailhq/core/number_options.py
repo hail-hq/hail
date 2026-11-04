@@ -152,7 +152,7 @@ def option_status(
 def _candidates(
     country_code: str,
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
-    sms_only: bool,
+    capabilities: list[str],
 ) -> dict[str, dict[str, list[_Candidate]]]:
     out: dict[str, dict[str, list[_Candidate]]] = {}
     for provider in PROVIDERS:
@@ -165,12 +165,10 @@ def _candidates(
             if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
             caps = telephony_catalog.effective_capabilities(row, provider)
-            if not caps or (sms_only and "sms" not in caps):
+            if not caps or not all(c in caps for c in capabilities):
                 continue
             # Same as /quotes: one rule for what a by-request row can be quoted for.
-            if by_request and not by_request_quotable(
-                caps, ["voice", "sms"] if sms_only else ["voice"]
-            ):
+            if by_request and not by_request_quotable(caps, capabilities or ["voice"]):
                 continue
             nt = row["number_type"]
             block = (
@@ -224,10 +222,10 @@ def _best(cands: list[_Candidate]) -> _Candidate:
 def number_options(
     country_code: str,
     verifications: dict[tuple[str, str, str], list[OfferVerification]],
-    sms_only: bool = False,
+    capabilities: list[str] | None = None,
 ) -> NumberOptionsResponse:
     cc = country_code.upper()
-    by_type = _candidates(cc, verifications, sms_only)
+    by_type = _candidates(cc, verifications, capabilities or [])
     types: list[TypeOptions] = []
     needs_paperwork = False
     order = sorted(

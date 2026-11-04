@@ -148,14 +148,35 @@ def test_monthly_includes_sms_fee(catalog):
     assert o.monthly_cents == 110 and o.capabilities == ["voice", "sms"]
 
 
-def test_sms_only_filters_options(catalog):
+def test_capabilities_sms_filters_options(catalog):
     catalog(
         telnyx=[row("US", usd="1.00", sms=True)],
         twilio=[row("US", usd="0.50")],
     )
-    assert one(number_options("US", {}, sms_only=True)).monthly_cents == 110
+    assert one(number_options("US", {}, capabilities=["sms"])).monthly_cents == 110
     catalog(twilio=[row("US")])
-    assert number_options("US", {}, sms_only=True).types == []
+    assert number_options("US", {}, capabilities=["sms"]).types == []
+
+
+def test_capabilities_voice_filters_options(catalog):
+    catalog(
+        telnyx=[row("US", usd="1.00", sms=True)],
+        twilio=[row("US", usd="0.50")],
+    )
+    assert one(number_options("US", {}, capabilities=["voice"])).monthly_cents == 50
+    catalog(twilio=[row("US", voice=False, sms=True)])
+    assert number_options("US", {}, capabilities=["voice"]).types == []
+
+
+def test_capabilities_voice_and_sms_need_both(catalog):
+    catalog(
+        telnyx=[row("US", usd="1.00", sms=True)],
+        twilio=[row("US", usd="0.50")],
+    )
+    both = ["voice", "sms"]
+    assert one(number_options("US", {}, capabilities=both)).monthly_cents == 110
+    catalog(twilio=[row("US", voice=False, sms=True)])
+    assert number_options("US", {}, capabilities=both).types == []
 
 
 def test_missing_requirements_block(catalog):
