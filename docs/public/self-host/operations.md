@@ -737,32 +737,35 @@ recipient over `HAIL_EMAIL_ABUSE_WINDOW_HOURS`. Past
 (once the org has `HAIL_EMAIL_ABUSE_MIN_SENDS` recipients), it inserts a
 `channel_suspensions` row with `channel = 'email'`. `check_email_allowed`
 then blocks `POST /v1/emails` and agent sends. Forwards and Hail's own
-notices are not counted and are not blocked.
+notices are not counted and are not blocked. After a lift, the email check
+counts only mail sent after `lifted_at`, so the old bounces do not suspend
+the org again.
 
 **You must lift a suspension manually for now — there is no CLI/route/expiry.**
-An auto-suspended org stays blocked until an operator runs raw SQL. Inspect
-and lift:
+An auto-suspended org stays blocked until an operator runs raw SQL. Lifting
+sets `lifted_at` and keeps the row. Inspect and lift:
 
 ```bash
 # See who is suspended and why
 psql "$DATABASE_URL" -c \
-  "SELECT organization_id, channel, reason, suspended_at FROM channel_suspensions;"
+  "SELECT organization_id, channel, reason, suspended_at FROM channel_suspensions WHERE lifted_at IS NULL;"
 
 # Lift one org's SMS suspension (re-enables outbound immediately)
 psql "$DATABASE_URL" -c \
-  "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'sms';"
+  "UPDATE channel_suspensions SET lifted_at = now() WHERE organization_id = '<org-uuid>' AND channel = 'sms' AND lifted_at IS NULL;"
 
 # Lift one org's email suspension
 psql "$DATABASE_URL" -c \
-  "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'email';"
+  "UPDATE channel_suspensions SET lifted_at = now() WHERE organization_id = '<org-uuid>' AND channel = 'email' AND lifted_at IS NULL;"
 ```
 
-Before you lift a suspension, confirm that the opt-out spike was benign (a
-burst of legitimate STOPs, not abuse), or that the org cleaned the list
-that bounced. Otherwise, the next hourly tick
-suspends the org again. There is no cooldown/backoff yet, so a
-persistently-abusive org trips again on the next run. If you see false
-positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
+Before you lift an SMS suspension, confirm that the opt-out spike was benign
+(a burst of legitimate STOPs, not abuse). Otherwise, the next hourly tick
+suspends the org again: the SMS check still counts opt-outs from before the
+lift. There is no cooldown/backoff yet, so a persistently-abusive org trips
+again on the next run. If you see false positives, tune
+`HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up. Before you lift an email suspension,
+confirm that the org cleaned the list that bounced.
 
 ## Carry-forwards / open work
 

@@ -31,8 +31,9 @@ INSERT INTO channel_suspensions (organization_id, channel, reason)
 VALUES ('<org>', '<email|sms|voice>', '<why — ticket/link>');
 
 To lift the suspension after you resolve the issue:
-DELETE FROM channel_suspensions
-WHERE organization_id = '<org>' AND channel = '<email|sms|voice>';
+UPDATE channel_suspensions SET lifted_at = now()
+WHERE organization_id = '<org>' AND channel = '<email|sms|voice>'
+  AND lifted_at IS NULL;
 
 ## Cap tuning
 

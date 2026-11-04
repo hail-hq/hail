@@ -440,6 +440,7 @@ async def check_channel_suspended(
         .where(
             ChannelSuspension.organization_id == organization_id,
             ChannelSuspension.channel == channel,
+            ChannelSuspension.lifted_at.is_(None),
         )
         .limit(1)
     )

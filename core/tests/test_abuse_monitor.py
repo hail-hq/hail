@@ -386,3 +386,36 @@ async def test_email_repeated_reports_for_one_recipient_count_once(
     assert await check_and_suspend_email_orgs(async_session) == 1
     row = await _email_suspension(async_session, org_id)
     assert "(2/100)" in row.reason
+
+
+async def test_email_lift_counts_only_mail_sent_after_it(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    before = await _seed_emails(async_session, org_id, 20)
+    for email in before:
+        email.sent_at = datetime.now(timezone.utc) - timedelta(days=2)
+    await _seed_email_events(async_session, before[:5], "bounced", hard=True)
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id,
+            channel="email",
+            reason="flagged",
+            lifted_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+    )
+    after = await _seed_emails(async_session, org_id, 20)
+    await async_session.commit()
+
+    # The old bounces were before the lift: no new suspension.
+    assert await check_and_suspend_email_orgs(async_session) == 0
+
+    # New bounces after the lift suspend the org again.
+    await _seed_email_events(async_session, after[:2], "bounced", hard=True)
+    await async_session.commit()
+    assert await check_and_suspend_email_orgs(async_session) == 1

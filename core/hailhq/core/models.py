@@ -329,8 +329,9 @@ class ChannelSuspension(Base):
     ``OrgClosure`` (whole-account closure) and from ``Suppression``
     (per-recipient opt-out). Backs the abuse-monitoring guardrail: when an
     org's opt-out rate on a channel crosses a threshold, a row here blocks
-    further sends on that channel until an operator lifts it (or, later,
-    an automated cooldown expires).
+    further sends on that channel until an operator lifts it by setting
+    ``lifted_at``. A lifted row is kept, so the monitor can count only
+    activity after the lift.
     """
 
     __tablename__ = "channel_suspensions"
@@ -346,14 +347,19 @@ class ChannelSuspension(Base):
     suspended_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+    lifted_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "channel IN ('sms','voice','email')",
             name="channel_suspensions_channel_check",
         ),
-        UniqueConstraint(
-            "organization_id", "channel", name="channel_suspensions_org_channel_uniq"
+        Index(
+            "channel_suspensions_active_uq",
+            "organization_id",
+            "channel",
+            unique=True,
+            postgresql_where=text("lifted_at IS NULL"),
         ),
     )
 

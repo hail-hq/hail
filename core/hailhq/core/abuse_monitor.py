@@ -122,7 +122,8 @@ async def _suspended_orgs(db: AsyncSession, channel: str) -> set:
         (
             await db.execute(
                 select(ChannelSuspension.organization_id).where(
-                    ChannelSuspension.channel == channel
+                    ChannelSuspension.channel == channel,
+                    ChannelSuspension.lifted_at.is_(None),
                 )
             )
         )
@@ -156,6 +157,23 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         hours=settings.hail_email_abuse_window_hours
     )
 
+    # After an operator lifts a suspension, count only mail sent after the
+    # lift: the bounces that caused it must not suspend the org again.
+    last_lift = (
+        select(
+            ChannelSuspension.organization_id,
+            func.max(ChannelSuspension.lifted_at).label("lifted_at"),
+        )
+        .where(
+            ChannelSuspension.channel == "email",
+            ChannelSuspension.lifted_at.is_not(None),
+        )
+        .group_by(ChannelSuspension.organization_id)
+        .subquery()
+    )
+    counted_from = func.greatest(window_start, last_lift.c.lifted_at)
+    in_window = and_(_org_own_send(), Email.sent_at >= counted_from)
+
     # Each distinct address counts once per email, so repeating one address
     # in to/cc/bcc (also as "Name <address>") cannot inflate the denominator
     # and hide a high rate. ``||`` with a NULL cc/bcc array returns the other
@@ -179,7 +197,8 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         )
         .select_from(Email)
         .join(addr, true())
-        .where(_org_own_send(), Email.sent_at >= window_start)
+        .outerjoin(last_lift, last_lift.c.organization_id == Email.organization_id)
+        .where(in_window)
         .group_by(Email.organization_id)
     )
     send_counts = dict((await db.execute(send_stmt)).all())
@@ -226,12 +245,12 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         )
         .select_from(EmailEvent)
         .join(Email, Email.id == EmailEvent.email_id)
+        .outerjoin(last_lift, last_lift.c.organization_id == Email.organization_id)
         .outerjoin(event_addr, true())
         .where(
-            _org_own_send(),
             # Same emails as the denominator: a late complaint on mail sent
             # before the window must not count against a smaller recent send.
-            Email.sent_at >= window_start,
+            in_window,
             EmailEvent.occurred_at >= window_start,
             or_(hard_bounce, EmailEvent.kind == "complained"),
         )
