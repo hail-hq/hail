@@ -16,8 +16,21 @@
       "available": true,
       "setup_usd": "64.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -34,8 +47,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -52,8 +79,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -70,8 +111,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -87,7 +142,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -106,7 +162,8 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -124,8 +181,25 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -141,8 +215,25 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -160,7 +251,8 @@
       "available": true,
       "setup_usd": "20.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -177,8 +269,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -194,8 +302,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -213,8 +339,24 @@
       "available": true,
       "setup_usd": "65.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -231,8 +373,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -250,8 +410,24 @@
       "available": true,
       "setup_usd": "115.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -268,8 +444,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -286,8 +476,25 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -321,8 +528,25 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -340,8 +564,27 @@
       "available": true,
       "setup_usd": "23.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -358,8 +601,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -377,8 +638,24 @@
       "available": true,
       "setup_usd": "75.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -395,7 +672,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -412,8 +690,9 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 86 areas",
-      "last_verified": "2026-11-02",
+      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 85 areas",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -430,7 +709,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -449,8 +729,23 @@
       "available": true,
       "setup_usd": "10.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -467,8 +762,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -485,7 +794,8 @@
       "verification_required": false,
       "available": true,
       "notes": "monthly price varies by area: 1.20 to 20.00 USD across 354 areas",
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -503,7 +813,8 @@
       "verification_required": false,
       "available": true,
       "setup_usd": "5.00",
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -521,8 +832,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -540,8 +869,23 @@
       "available": true,
       "setup_usd": "170.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -558,8 +902,27 @@
       "verification_required": true,
       "available": true,
       "notes": "monthly price varies by area: 6.00 to 20.00 USD across 25 areas",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -575,8 +938,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -593,8 +975,27 @@
       "verification_required": true,
       "available": true,
       "notes": "monthly price varies by area: 6.00 to 8.00 USD across 2 areas",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -612,8 +1013,27 @@
       "available": true,
       "setup_usd": "12.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -630,7 +1050,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -647,7 +1068,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -666,7 +1088,8 @@
       "available": true,
       "setup_usd": "30.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -684,8 +1107,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -702,8 +1139,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -719,8 +1170,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -737,8 +1206,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -756,7 +1243,8 @@
       "available": true,
       "setup_usd": "11.50",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -773,8 +1261,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -792,7 +1296,8 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -810,8 +1315,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -828,8 +1351,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -847,8 +1388,26 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -864,7 +1423,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -882,8 +1442,24 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -901,8 +1477,24 @@
       "available": true,
       "setup_usd": "7.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -919,8 +1511,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -937,7 +1543,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -956,7 +1563,8 @@
       "available": true,
       "setup_usd": "12.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -974,8 +1582,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -993,8 +1615,24 @@
       "available": true,
       "setup_usd": "170.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1011,8 +1649,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1028,8 +1684,21 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1047,7 +1716,8 @@
       "available": true,
       "setup_usd": "55.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1065,8 +1735,28 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1083,8 +1773,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1102,8 +1806,27 @@
       "available": true,
       "setup_usd": "8.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1120,8 +1843,24 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1138,8 +1877,24 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1156,8 +1911,23 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1175,8 +1945,24 @@
       "available": true,
       "setup_usd": "35.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1193,8 +1979,21 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1211,7 +2010,8 @@
       "verification_required": false,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1229,7 +2029,8 @@
       "verification_required": false,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1247,7 +2048,8 @@
       "verification_required": false,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1266,7 +2068,8 @@
       "available": true,
       "setup_usd": "5.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1284,8 +2087,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1301,8 +2118,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1318,8 +2153,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1337,8 +2190,26 @@
       "available": true,
       "setup_usd": "120.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1373,8 +2244,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1392,8 +2277,22 @@
       "available": true,
       "setup_usd": "8.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1410,7 +2309,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1428,8 +2328,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1447,8 +2361,24 @@
       "available": true,
       "setup_usd": "100.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1465,8 +2395,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1483,8 +2431,27 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1502,8 +2469,27 @@
       "available": true,
       "setup_usd": "5.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1519,8 +2505,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1536,8 +2541,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1555,7 +2578,8 @@
       "available": true,
       "setup_usd": "18.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1573,8 +2597,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1591,7 +2633,7 @@
       "verification_required": true,
       "available": false,
       "setup_usd": "35.00",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1609,8 +2651,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1627,8 +2685,23 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1646,8 +2719,23 @@
       "available": true,
       "setup_usd": "5.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1663,7 +2751,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1680,7 +2769,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1697,7 +2787,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1716,7 +2807,8 @@
       "available": true,
       "setup_usd": "20.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1734,8 +2826,27 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1753,8 +2864,24 @@
       "available": true,
       "setup_usd": "110.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1770,7 +2897,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1789,8 +2917,24 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1806,8 +2950,29 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "personal_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1825,8 +2990,29 @@
       "available": true,
       "setup_usd": "5.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "personal_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1843,8 +3029,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1862,8 +3062,22 @@
       "available": true,
       "setup_usd": "22.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1879,7 +3093,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1898,7 +3113,8 @@
       "available": true,
       "setup_usd": "43.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1917,7 +3133,8 @@
       "available": true,
       "setup_usd": "43.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1935,8 +3152,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1952,8 +3183,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1969,8 +3216,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -1986,7 +3251,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2004,7 +3270,8 @@
       "verification_required": false,
       "available": true,
       "setup_usd": "50.00",
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2022,8 +3289,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2041,8 +3326,26 @@
       "available": true,
       "setup_usd": "10.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2058,8 +3361,22 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2077,8 +3394,21 @@
       "available": true,
       "setup_usd": "20.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2096,7 +3426,8 @@
       "available": true,
       "setup_usd": "45.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2115,8 +3446,24 @@
       "available": true,
       "setup_usd": "44.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2133,8 +3480,21 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2151,8 +3511,26 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2168,7 +3546,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2185,8 +3564,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "personal_details",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2221,8 +3618,23 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2240,8 +3652,26 @@
       "available": true,
       "setup_usd": "55.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2258,8 +3688,24 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2292,8 +3738,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2309,7 +3771,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2326,8 +3789,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2345,8 +3824,22 @@
       "available": true,
       "setup_usd": "95.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2362,8 +3855,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2381,8 +3894,28 @@
       "available": true,
       "setup_usd": "55.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2398,8 +3931,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2417,7 +3966,8 @@
       "available": true,
       "setup_usd": "38.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2434,7 +3984,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2453,8 +4004,24 @@
       "available": true,
       "setup_usd": "16.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2471,8 +4038,22 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2489,7 +4070,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2508,8 +4090,22 @@
       "available": true,
       "setup_usd": "130.00",
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2526,8 +4122,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2543,8 +4157,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2560,8 +4192,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2579,8 +4229,26 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-12",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2596,7 +4264,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2614,8 +4283,21 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2633,8 +4315,21 @@
       "available": true,
       "setup_usd": "10.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2667,9 +4362,22 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "by_request": true,
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2686,8 +4394,24 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2705,8 +4429,24 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2743,8 +4483,23 @@
       "available": true,
       "setup_usd": "64.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2760,8 +4515,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2777,8 +4550,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2794,8 +4585,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2812,8 +4621,26 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "11.50",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2830,8 +4657,27 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2849,8 +4695,24 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2866,8 +4728,21 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2885,7 +4760,8 @@
       "available": true,
       "setup_usd": "5.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2902,8 +4778,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2920,8 +4815,27 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2939,8 +4853,27 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2957,7 +4890,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2975,8 +4909,23 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -2993,8 +4942,23 @@
       "verification_required": true,
       "available": true,
       "by_request": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3011,8 +4975,23 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3030,8 +5009,24 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3048,8 +5043,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3067,8 +5076,24 @@
       "available": true,
       "setup_usd": "43.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3085,8 +5110,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3103,8 +5146,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3122,7 +5183,8 @@
       "available": true,
       "setup_usd": "43.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3140,8 +5202,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3159,7 +5239,8 @@
       "available": true,
       "setup_usd": "50.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3176,8 +5257,9 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2170 areas",
-      "last_verified": "2026-11-02",
+      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2169 areas",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3195,7 +5277,8 @@
       "verification_required": false,
       "available": true,
       "setup_usd": "5.00",
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3214,8 +5297,24 @@
       "available": true,
       "setup_usd": "110.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3232,8 +5331,22 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3250,7 +5363,8 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3269,7 +5383,8 @@
       "available": true,
       "setup_usd": "38.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3286,8 +5401,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3303,8 +5436,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3320,8 +5471,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3339,8 +5508,26 @@
       "available": true,
       "setup_usd": "16.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
@@ -3357,8 +5544,26 @@
       "verification_required": true,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-07",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "address_in_country",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
       "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
