@@ -29,6 +29,9 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 _guard_engine: AsyncEngine | None = None
 _guard_sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
+ORGANIZATION_DELETE_PREPARING = "organization_delete_preparing"
+ORGANIZATION_DELETE = "organization_delete"
+
 
 _SCHEME_ALIASES = (
     "postgresql+asyncpg://",
@@ -156,7 +159,8 @@ async def org_lock(db: AsyncSession, org: UUID) -> None:
 async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
     """Drain mutations before deletion, including across external I/O.
 
-    Deletion publishes its marker, then takes FOR UPDATE to drain admission.
+    Deletion stops admission with a preparing marker, then drains existing
+    requests before publishing the final marker that rejects metadata writes.
     A caller holds this KEY SHARE lock until its transaction ends. HTTP
     callers use a separate session so route commits do not release it early.
     Inbound writers use their ingest transaction. A tombstone rejects callers
@@ -174,4 +178,7 @@ async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
         .with_for_update(read=True, key_share=True)
     )
     closure = await db.get(OrgClosure, org)
-    return closure is None or closure.source != "organization_delete"
+    return closure is None or closure.source not in (
+        ORGANIZATION_DELETE_PREPARING,
+        ORGANIZATION_DELETE,
+    )

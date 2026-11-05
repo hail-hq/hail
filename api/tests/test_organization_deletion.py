@@ -1,5 +1,6 @@
 """Organization cleanup must fail closed and leave other tenants intact."""
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -53,6 +54,305 @@ async def prepare(body, db, **overrides):
         lambda name, purpose: None,
         overrides.get("mail", mail),
     )
+
+
+@pytest.fixture
+async def strict_domain_guard(session_factory):
+    """Exercise the website's final-only trigger around the API-owned drain."""
+    from sqlalchemy import text
+
+    async with session_factory() as db:
+        await db.execute(text("""
+            CREATE OR REPLACE FUNCTION test_guard_deleted_organization() RETURNS trigger
+            LANGUAGE plpgsql AS $$
+            BEGIN
+                PERFORM id FROM organizations
+                WHERE id = NEW.organization_id FOR KEY SHARE;
+                IF EXISTS (SELECT 1 FROM org_closures
+                           WHERE organization_id = NEW.organization_id
+                             AND source = 'organization_delete') THEN
+                    RAISE EXCEPTION 'organization deletion is in progress'
+                    USING ERRCODE = '55000';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+        """))
+        await db.execute(text("""
+            CREATE TRIGGER test_guard_deleted_organization
+            BEFORE INSERT OR UPDATE OF organization_id ON email_domains
+            FOR EACH ROW EXECUTE FUNCTION test_guard_deleted_organization()
+        """))
+        await db.commit()
+    try:
+        yield
+    finally:
+        async with session_factory() as db:
+            await db.execute(
+                text("DROP FUNCTION test_guard_deleted_organization() CASCADE")
+            )
+            await db.commit()
+
+
+def observe_failed_drain_probe(db, monkeypatch):
+    from sqlalchemy.exc import DBAPIError
+
+    failed_probe = asyncio.Event()
+    execute = db.execute
+
+    async def observed_execute(*args, **kwargs):
+        try:
+            return await execute(*args, **kwargs)
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) == "55P03":
+                failed_probe.set()
+            raise
+
+    monkeypatch.setattr(db, "execute", observed_execute)
+    return failed_probe
+
+
+@pytest.mark.parametrize("previous_source", [None, "hail_website"])
+async def test_admitted_domain_finishes_metadata_before_closure_erases_identity(
+    session_factory, strict_domain_guard, monkeypatch, previous_source
+):
+    from fastapi import Request, Response
+    from hailhq.api.deps import Principal
+    from hailhq.api.routes.email_domains import create_email_domain
+    from hailhq.core.db import lock_open_organization
+    from hailhq.core.providers.email.base import ProviderIdentity
+    from hailhq.core.schemas import EmailDomainCreate
+    from sqlalchemy import select
+    from sqlalchemy.exc import DBAPIError
+
+    async with session_factory() as setup:
+        body = await seed(setup)
+        if previous_source:
+            setup.add(
+                OrgClosure(
+                    organization_id=body.organization_id,
+                    closed_at=datetime.now(timezone.utc),
+                    source=previous_source,
+                )
+            )
+            await setup.commit()
+    identities = set()
+    identity_created = asyncio.Event()
+    finish_create = asyncio.Event()
+
+    async def create_identity(domain):
+        identities.add(domain)
+        identity_created.set()
+        await finish_create.wait()
+        return ProviderIdentity(
+            domain=domain,
+            verification_status="pending",
+            dkim_records=[],
+            provider_resource_id=domain,
+        )
+
+    async def delete_identity(domain):
+        async with session_factory() as observer:
+            closure = await observer.get(OrgClosure, body.organization_id)
+            assert (
+                closure.source == "organization_delete"
+            ), "final closure must already be durable"
+            assert (
+                await observer.scalar(
+                    select(EmailDomain).where(
+                        EmailDomain.organization_id == body.organization_id,
+                        EmailDomain.domain == domain,
+                    )
+                )
+                is not None
+            )
+        identities.remove(domain)
+
+    provider = SimpleNamespace(
+        create_identity=create_identity, delete_identity=delete_identity
+    )
+
+    async def admitted_create():
+        async with session_factory() as guard, session_factory() as route_db:
+            assert await lock_open_organization(guard, body.organization_id)
+            return await create_email_domain(
+                EmailDomainCreate(kind="custom", domain="admitted.example.com"),
+                Response(),
+                Request({"type": "http", "path": "/email-domains", "headers": []}),
+                Principal(
+                    auth_kind="jwt",
+                    api_key_id=None,
+                    user_id=body.user_id,
+                    organization_id=body.organization_id,
+                    scopes=["*"],
+                ),
+                route_db,
+                provider,
+            )
+
+    request = asyncio.create_task(admitted_create())
+    try:
+        await asyncio.wait_for(identity_created.wait(), timeout=5)
+        async with session_factory() as deletion_db:
+            failed_probe = observe_failed_drain_probe(deletion_db, monkeypatch)
+            cleanup = asyncio.create_task(
+                prepare(body, deletion_db, email_provider=provider)
+            )
+            try:
+                # The trigger must still obtain KEY SHARE after a failed drain
+                # probe. A queued FOR UPDATE would block this admitted writer.
+                await asyncio.wait_for(failed_probe.wait(), timeout=2)
+                finish_create.set()
+                domain, result = await asyncio.wait_for(
+                    asyncio.gather(request, cleanup), timeout=5
+                )
+            finally:
+                if not cleanup.done():
+                    cleanup.cancel()
+                await asyncio.gather(cleanup, return_exceptions=True)
+        assert result["ready"] is True
+        assert domain.domain == "admitted.example.com"
+        assert identities == set()
+        async with session_factory() as late_writer:
+            late_writer.add(
+                EmailDomain(
+                    organization_id=body.organization_id,
+                    kind="custom",
+                    domain="late.example.com",
+                )
+            )
+            with pytest.raises(
+                DBAPIError, match="organization deletion is in progress"
+            ):
+                await late_writer.commit()
+    finally:
+        finish_create.set()
+        if not request.done():
+            request.cancel()
+        await asyncio.gather(request, return_exceptions=True)
+
+
+async def test_retry_does_not_downgrade_final_closure_while_draining(
+    session_factory, strict_domain_guard, monkeypatch
+):
+    from sqlalchemy import select
+    from sqlalchemy.exc import DBAPIError
+
+    async with session_factory() as setup:
+        body = await seed(setup)
+        setup.add(
+            OrgClosure(
+                organization_id=body.organization_id,
+                closed_at=datetime.now(timezone.utc),
+                source="organization_delete",
+            )
+        )
+        await setup.commit()
+    async with session_factory() as old_guard, session_factory() as deletion_db:
+        await old_guard.execute(
+            select(Organization.id)
+            .where(Organization.id == body.organization_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        failed_probe = observe_failed_drain_probe(deletion_db, monkeypatch)
+        cleanup = asyncio.create_task(prepare(body, deletion_db))
+        try:
+            await asyncio.wait_for(failed_probe.wait(), timeout=2)
+            async with session_factory() as late_writer:
+                late_writer.add(
+                    EmailDomain(
+                        organization_id=body.organization_id,
+                        kind="custom",
+                        domain="late.example.com",
+                    )
+                )
+                with pytest.raises(
+                    DBAPIError, match="organization deletion is in progress"
+                ):
+                    await late_writer.commit()
+        finally:
+            await old_guard.rollback()
+            if not failed_probe.is_set():
+                cleanup.cancel()
+                await asyncio.gather(cleanup, return_exceptions=True)
+            else:
+                await asyncio.wait_for(cleanup, timeout=5)
+
+
+@pytest.mark.parametrize(
+    "previous_source",
+    [None, "organization_delete_preparing", "organization_delete", "hail_website"],
+)
+async def test_drain_timeout_only_reopens_a_fresh_attempt(
+    session_factory, monkeypatch, previous_source
+):
+    from hailhq.api.routes.internal import organization_deletion
+    from hailhq.core.db import lock_open_organization
+    from sqlalchemy import select
+
+    monkeypatch.setattr(
+        organization_deletion, "_DRAIN_TIMEOUT_SECONDS", 0.03, raising=False
+    )
+    async with session_factory() as setup:
+        body = await seed(setup)
+        if previous_source:
+            setup.add(
+                OrgClosure(
+                    organization_id=body.organization_id,
+                    closed_at=datetime.now(timezone.utc),
+                    source=previous_source,
+                )
+            )
+        setup.add(
+            EmailDomain(
+                organization_id=body.organization_id,
+                kind="custom",
+                domain="keep.example.com",
+            )
+        )
+        await setup.commit()
+    identities = {"keep.example.com"}
+
+    async def delete_identity(domain):
+        identities.remove(domain)
+
+    async with session_factory() as old_guard, session_factory() as deletion_db:
+        await old_guard.execute(
+            select(Organization.id)
+            .where(Organization.id == body.organization_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(
+                prepare(
+                    body,
+                    deletion_db,
+                    email_provider=SimpleNamespace(delete_identity=delete_identity),
+                ),
+                timeout=1,
+            )
+        assert exc.value.status_code == 409
+        assert identities == {"keep.example.com"}
+        async with session_factory() as observer:
+            closure = await observer.get(OrgClosure, body.organization_id)
+            assert bool(closure) == bool(previous_source)
+            if closure:
+                assert closure.source == (
+                    "organization_delete"
+                    if previous_source == "organization_delete"
+                    else "organization_delete_preparing"
+                )
+            assert (
+                await observer.scalar(
+                    select(EmailDomain).where(
+                        EmailDomain.organization_id == body.organization_id
+                    )
+                )
+                is not None
+            )
+            assert await lock_open_organization(observer, body.organization_id) == (
+                not previous_source
+            )
 
 
 @pytest.mark.parametrize("role", ["admin", "member"])
@@ -232,8 +532,12 @@ async def test_old_oauth_jwt_cannot_fall_through_to_another_org(
     assert exc.value.status_code == 401
 
 
+@pytest.mark.parametrize(
+    "closure_source", ["organization_delete_preparing", "organization_delete"]
+)
 async def test_mutation_guard_drains_before_deletion_and_rejects_closed_org(
     session_factory,
+    closure_source,
 ):
     from hailhq.core.db import lock_open_organization
     from sqlalchemy import select, text
@@ -261,7 +565,7 @@ async def test_mutation_guard_drains_before_deletion_and_rejects_closed_org(
             OrgClosure(
                 organization_id=body.organization_id,
                 closed_at=datetime.now(timezone.utc),
-                source="organization_delete",
+                source=closure_source,
             )
         )
         await deleter.commit()
@@ -640,19 +944,22 @@ async def test_closing_org_prevents_background_verification_submission(
     assert row.state == "awaiting_review"
 
 
-@pytest.mark.parametrize("already_closed", [False, True])
+@pytest.mark.parametrize(
+    "previous_source",
+    [None, "organization_delete_preparing", "organization_delete", "hail_website"],
+)
 async def test_post_drain_pending_work_only_reopens_a_new_attempt(
-    async_session: AsyncSession, monkeypatch, already_closed
+    async_session: AsyncSession, monkeypatch, previous_source
 ):
     from hailhq.api.routes.internal import organization_deletion
     from hailhq.core.db import lock_open_organization
 
     body = await seed(async_session)
-    if already_closed:
+    if previous_source:
         async_session.add(
             OrgClosure(
                 organization_id=body.organization_id,
-                source="organization_delete",
+                source=previous_source,
                 closed_at=datetime.now(timezone.utc),
             )
         )
@@ -667,10 +974,20 @@ async def test_post_drain_pending_work_only_reopens_a_new_attempt(
     assert exc.value.status_code == 409
     assert (
         await async_session.get(OrgClosure, body.organization_id) is not None
-    ) == already_closed
+    ) == bool(previous_source)
     assert await lock_open_organization(async_session, body.organization_id) == (
-        not already_closed
+        not previous_source
     )
+    if previous_source:
+        closure = await async_session.get(
+            OrgClosure, body.organization_id, populate_existing=True
+        )
+        expected_source = (
+            "organization_delete"
+            if previous_source == "organization_delete"
+            else "organization_delete_preparing"
+        )
+        assert closure.source == expected_source
     assert await async_session.get(Organization, body.organization_id) is not None
 
 

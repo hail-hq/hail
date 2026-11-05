@@ -1,7 +1,8 @@
 """Fail-closed external cleanup for website-owned organization deletion.
 
 The website serializes account/org teardown, locks the owner membership, and
-calls this route. This route publishes a marker before draining admitted work.
+calls this route. This route stops admission, drains existing work, then
+publishes a final marker before cleanup or rejection of metadata writes.
 The website then locks the organization and purges scoped rows atomically. Reuse
 org_closures for the deletion tombstone: it holds lifecycle state already.
 No new table fits better. Its tombstone and retired mail addresses survive.
@@ -29,7 +30,11 @@ from hailhq.api.routes.verifications import (
 from hailhq.core import inbound_routing
 from hailhq.core.carrier_routing import CARRIERS, sms_route
 from hailhq.core.config import settings
-from hailhq.core.db import get_session
+from hailhq.core.db import (
+    ORGANIZATION_DELETE,
+    ORGANIZATION_DELETE_PREPARING,
+    get_session,
+)
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
     Call,
@@ -52,6 +57,7 @@ from livekit import api
 from pydantic import BaseModel
 from sqlalchemy import Text, any_, bindparam, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -59,6 +65,33 @@ router = APIRouter(
     include_in_schema=False,
     dependencies=[Depends(verify_internal_request)],
 )
+
+_DRAIN_TIMEOUT_SECONDS = 5.0
+_DRAIN_RETRY_SECONDS = 0.05
+
+
+async def _drain_organization(db: AsyncSession, org: UUID) -> None:
+    # Never queue FOR UPDATE behind an admission guard: the admitted route
+    # may still need KEY SHARE on another connection to save provider IDs.
+    deadline = asyncio.get_running_loop().time() + _DRAIN_TIMEOUT_SECONDS
+    while True:
+        try:
+            await db.execute(
+                select(Organization.id)
+                .where(Organization.id == org)
+                .with_for_update(nowait=True)
+            )
+            return
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) != "55P03":
+                raise
+            await db.rollback()
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise HTTPException(
+                409, "Work is still finishing. Wait, then retry deletion."
+            )
+        await asyncio.sleep(min(_DRAIN_RETRY_SECONDS, remaining))
 
 
 class OrganizationDeletionIn(BaseModel):
@@ -169,14 +202,15 @@ async def prepare_organization_deletion(
             400, "Type the exact organization name to confirm deletion."
         )
     await check_pending(db, org)
-    # Persist before irreversible cleanup. A retry remains possible through
-    # this HMAC-only route; ordinary API requests can no longer start work.
+    # Stop new API work while already-admitted requests finish saving their
+    # provider/storage references. The strict DB trigger rejects only the
+    # final marker, published after those writers drain.
     marker = await db.execute(
         insert(OrgClosure)
         .values(
             organization_id=org,
             closed_at=datetime.now(timezone.utc),
-            source="organization_delete",
+            source=ORGANIZATION_DELETE_PREPARING,
         )
         .on_conflict_do_nothing(index_elements=["organization_id"])
         .returning(OrgClosure.organization_id)
@@ -185,34 +219,47 @@ async def prepare_organization_deletion(
     if not created_marker:
         await db.execute(
             update(OrgClosure)
-            .where(OrgClosure.organization_id == org)
-            .values(source="organization_delete")
+            .where(
+                OrgClosure.organization_id == org,
+                OrgClosure.source != ORGANIZATION_DELETE,
+            )
+            .values(source=ORGANIZATION_DELETE_PREPARING)
         )
     await db.commit()
     # Closing is visible before taking the row lock. Existing billing writers
     # drain without a row/advisory-lock cycle; new debits skip the closed org.
-    await db.execute(
-        select(Organization.id).where(Organization.id == org).with_for_update()
-    )
-    closure = await db.get(OrgClosure, org, populate_existing=True)
-    if closure is None:
-        raise HTTPException(409, "Deletion state changed. Reload settings and retry.")
     try:
+        await _drain_organization(db, org)
+        closure = await db.get(OrgClosure, org, populate_existing=True)
+        if closure is None:
+            raise HTTPException(
+                409, "Deletion state changed. Reload settings and retry."
+            )
         await check_pending(db, org)
     except HTTPException:
         if created_marker:
             # Nothing irreversible has run. Restore access so a request that
             # raced admission can finish its review or other pending work.
-            # Hold the org lock until removal commits, so another prepare
-            # cannot start cleanup against a stale marker.
+            # The website serializes attempts. Delete only our preparing
+            # marker; an existing final marker must never reopen access.
             await db.execute(
                 delete(OrgClosure).where(
                     OrgClosure.organization_id == org,
-                    OrgClosure.source == "organization_delete",
+                    OrgClosure.source == ORGANIZATION_DELETE_PREPARING,
                 )
             )
             await db.commit()
         raise
+
+    # Publish final closure while the drained org lock is still held. Commit
+    # before any irreversible cleanup, so late inserts cannot lose references
+    # after cleanup's inventory has been read. Retries never downgrade final.
+    await db.execute(
+        update(OrgClosure)
+        .where(OrgClosure.organization_id == org)
+        .values(source=ORGANIZATION_DELETE)
+    )
+    await db.commit()
 
     numbers = (
         (
