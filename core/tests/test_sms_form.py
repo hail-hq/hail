@@ -524,10 +524,72 @@ def test_keyword_enrollment_requires_actual_confirmation_before_submission():
         "opt_in_message": "",
     }
     assert "opt_in_message" in error_fields(fields, provider=TWILIO)
-    fields["opt_in_message"] = (
-        "Acme: Enrolled for appointment updates. Reply HELP for help, STOP to stop."
-    )
+    fields["opt_in_message"] = GOOD["opt_in_message"]
     assert not errors(fields, provider=TWILIO)
     assert campaign_text(fields, "person").opt_in_keywords == [
         fields["keyword_keyword"]
     ]
+
+
+@pytest.mark.parametrize(
+    "missing,replace",
+    [
+        ("sender", ("Acme", "Other sender")),
+        ("frequency", ("once per appointment", "regularly")),
+        ("rates", ("Msg and data rates may apply.", "Our service rates are low.")),
+        ("HELP", ("HELP for help", "helpful assistance")),
+        ("STOP", ("STOP to stop", "nonstop updates")),
+    ],
+)
+def test_confirmation_requires_real_sender_cadence_rates_and_help_stop(
+    missing, replace
+):
+    confirmation = GOOD["opt_in_message"].replace(*replace)
+    problems = errors({**GOOD, "opt_in_message": confirmation})
+    assert any(
+        field == "opt_in_message" and missing.casefold() in message.casefold()
+        for field, message in problems
+    )
+    # Validation must never repair the filed response by adding unsupported copy.
+    assert (
+        campaign_text({**GOOD, "opt_in_message": confirmation}, "person").opt_in_message
+        == confirmation
+    )
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        "Msg & data rates",
+        "Msg. & data charges",
+        "Message and data rates",
+        "Message/data rates",
+    ],
+)
+def test_confirmation_accepts_real_rate_abbreviations(rates):
+    confirmation = GOOD["opt_in_message"].replace("Msg and data rates", rates)
+    assert not errors({**GOOD, "opt_in_message": confirmation})
+
+
+@pytest.mark.parametrize(
+    "flag", ["has_links", "has_phone", "age_gated", "direct_lending"]
+)
+@pytest.mark.parametrize("answer", ["YES", "NO"])
+def test_content_flag_whitespace_is_identical_in_validation_and_filing(flag, answer):
+    plain = {**GOOD, flag: answer}
+    padded = {**GOOD, flag: f"  {answer}\n"}
+    assert errors(padded) == errors(plain)
+    assert getattr(campaign_text(padded, "person"), flag) is (answer == "YES")
+
+
+def test_attestation_whitespace_does_not_change_compiled_flow():
+    data = {**GOOD, "consent_optional": " YES ", "marketing_consent": " YES "}
+    assert errors(data) == errors(
+        {**data, "consent_optional": "YES", "marketing_consent": "YES"}
+    )
+    assert (
+        campaign_text(data, "person").message_flow
+        == campaign_text(
+            {**data, "consent_optional": "YES", "marketing_consent": "YES"}, "person"
+        ).message_flow
+    )

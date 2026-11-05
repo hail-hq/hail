@@ -60,6 +60,17 @@ _DESCRIPTION_MAX = 4096
 _SAMPLE_MAX = 1024
 _FLOW_MAX = 2048  # carrier maximum for the opt-in description
 _URL_MAX = 512  # per link
+_MESSAGE_DATA_RATES = re.compile(
+    r"\b(?:messages?|msgs?|messaging)\.?\s*(?:and|&|/|\+)\s*data\s+(?:rates?|charges?)\b",
+    re.IGNORECASE,
+)
+
+
+def _answer(fields: dict[str, str], name: str) -> str:
+    """Trim answers consistently in validation and the persisted filing text."""
+    return fields.get(name, "").strip()
+
+
 # New applications describe their actual consent journey. Never append claims
 # about consent, disclosures or confirmation that the applicant did not supply.
 _OPT_IN_MAX = 1024
@@ -331,7 +342,7 @@ _CAMPAIGN_FIELDS = (
         label="Actual subscription confirmation",
         required=False,
         max_length=320,
-        help="Enter the confirmation your existing system actually sends, including sender, enrollment, frequency, rates, HELP and STOP. Required for keyword enrollment and when this form marks it required. Registration declares this response; it does not configure or send it.",
+        help="Enter the confirmation your existing system actually sends, including the public program name, enrollment, the exact frequency wording above, message and data rates, HELP and STOP. Required for keyword enrollment and when this form marks it required. Registration declares this response; it does not configure or send it.",
     ),
     FieldSpec(
         name="has_links", label="Do any messages contain links?", options=_YES_NO
@@ -523,7 +534,7 @@ def _application_problems(
         problems.append(Problem(field=name, message=message))
 
     def val(name: str) -> str:
-        return fields.get(name, "").strip()
+        return _answer(fields, name)
 
     country = val("sender_country")
     if country and not re.fullmatch(r"[A-Z]{2}", country):
@@ -618,6 +629,31 @@ def _application_problems(
             "opt_in_message",
             "Use at least 20 characters with the actual subscription confirmation.",
         )
+    confirmation = val("opt_in_message")
+    if confirmation:
+        missing: list[str] = []
+        if (
+            not val("program_name")
+            or val("program_name").casefold() not in confirmation.casefold()
+        ):
+            missing.append("public sender/program name")
+        if (
+            not val("message_frequency")
+            or val("message_frequency").casefold() not in confirmation.casefold()
+        ):
+            missing.append("exact message frequency")
+        if not _MESSAGE_DATA_RATES.search(confirmation):
+            missing.append("message and data rates")
+        for keyword in ("HELP", "STOP"):
+            if not re.search(rf"\b{keyword}\b", confirmation, re.IGNORECASE):
+                missing.append(keyword + " instructions")
+        if missing:
+            issue(
+                "opt_in_message",
+                "Your actual subscription confirmation must include "
+                + ", ".join(missing)
+                + ". Update the real response before filing; Hail will not add this wording for you.",
+            )
     if "KEYWORD" in methods and val("keyword_keyword").upper() in {
         "STOP",
         "STOPALL",
@@ -706,11 +742,7 @@ def _application_problems(
         ]
         if any(
             part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not re.search(
-            r"\b(?:messages?|msgs?|messaging)\.?\s*(?:and|&|/|\+)\s*data\s+(?:rates?|charges?)\b",
-            disclosure,
-            re.IGNORECASE,
-        ):
+        ) or not _MESSAGE_DATA_RATES.search(disclosure):
             issue(
                 "consent_disclosure",
                 "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",
@@ -741,11 +773,11 @@ def _structured_flow(fields: dict[str, str]) -> str:
     ):
         if fields.get(name, "").strip():
             parts.append(f"{label}: {fields[name].strip()}")
-    if fields.get("consent_optional") == "YES":
+    if _answer(fields, "consent_optional") == "YES":
         parts.append(
             "Applicant confirms SMS consent is optional, separate and initially unselected."
         )
-    if fields.get("marketing_consent") == "YES":
+    if _answer(fields, "marketing_consent") == "YES":
         parts.append(
             "Applicant confirms separate written agreement to promotional messages."
         )
@@ -778,7 +810,7 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     particular, never truncate evidence or pad text with invented statements.
     """
     purposes = picked(fields.get("text_types"))
-    structured = bool(fields.get("consent_methods"))
+    structured = bool(_answer(fields, "consent_methods"))
     return CampaignText(
         use_case=(
             "SOLE_PROPRIETOR"
@@ -796,16 +828,16 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
             for i in range(1, 6)
             if fields.get(f"sample_{i}", "").strip()
         ],
-        has_links=fields.get("has_links", "").upper() == "YES",
+        has_links=_answer(fields, "has_links").upper() == "YES",
         privacy_policy_url=fields["privacy_policy_url"].strip(),
         terms_url=fields["terms_url"].strip(),
         text_types=purposes,
         contact_email=fields.get(
             "email" if subject_type == "person" else "rep_email", ""
         ).strip(),
-        has_phone=fields.get("has_phone", "").upper() == "YES",
-        age_gated=fields.get("age_gated", "").upper() == "YES",
-        direct_lending=fields.get("direct_lending", "").upper() == "YES",
+        has_phone=_answer(fields, "has_phone").upper() == "YES",
+        age_gated=_answer(fields, "age_gated").upper() == "YES",
+        direct_lending=_answer(fields, "direct_lending").upper() == "YES",
         opt_in_message=fields.get("opt_in_message", "").strip(),
         opt_in_keywords=(
             [fields["keyword_keyword"].strip()]
