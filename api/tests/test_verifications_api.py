@@ -4937,3 +4937,316 @@ async def test_person_identity_mobile_cannot_be_a_hail_number(
     assert response.status_code == 422, response.text
     assert response.json()["detail"][0]["loc"] == ["body", "mobile_phone_number"]
     assert not sms_carrier.drafts
+
+
+async def _needs_information_application(
+    client, key, sms_carrier, async_session, monkeypatch, subject="business", saved=True
+):
+    from hailhq.core.providers.verification.sms_form import sms_requirements
+
+    fields = dict(_TELNYX_PERSON if subject == "person" else _TELNYX_BUSINESS)
+    address = json.loads(_sms_submission()["address"])
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements(sms_carrier, subject_type)
+
+    async def recover(refs):
+        return False
+
+    async def identity(refs, subject_type):
+        return {"fields": fields, "address": address}
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    monkeypatch.setattr(sms_carrier, "recover_campaign", recover)
+    monkeypatch.setattr(sms_carrier, "application_identity", identity)
+    sms_carrier.campaign_key = "campaign_id"
+    response = await _post_sms(
+        client, key, subject_type=subject, fields=json.dumps(fields)
+    )
+    assert response.status_code == 201, response.text
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    refs = {
+        **row.provider_refs,
+        "needs_information": True,
+        "identity_verified": True,
+        "campaign": {},
+    }
+    if not saved:
+        refs.pop("application", None)
+    row.provider_refs = refs
+    await async_session.commit()
+    return vid, {"fields": fields, "address": address}
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("subject", ["person", "business"])
+@pytest.mark.parametrize("saved", [True, False])
+async def test_amendment_keeps_same_row_brand_and_original_charge(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, subject, saved
+):
+    org_id, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, subject, saved
+    )
+    initial = await _balance(async_session, org_id)
+    # Reading/list polling an incomplete application does not file anything.
+    waiting = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert (
+        waiting.json()["state"] == "submitted"
+        and waiting.json()["step"] == "needs_information"
+    )
+    assert sms_carrier.status_calls == 0
+    first = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["id"] == vid and first.json()["state"] == "submitted"
+    assert first.json()["step"] == "filing"
+    assert sms_carrier.status_calls == 0 and len(sms_carrier.drafts) == 1
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert (
+        row.provider_refs["brand_sid"] == "BN1"
+        and "needs_information" not in row.provider_refs
+    )
+    assert await _balance(async_session, org_id) == initial
+    # The later normal poll creates a campaign once; identical PATCH stays safe.
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    repeat = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert repeat.status_code == 200 and repeat.json()["id"] == vid
+    assert sms_carrier.campaigns_created == 1 and len(sms_carrier.drafts) == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_concurrent_retries_are_idempotent(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    restore = _per_request_sessions(session_factory)
+    try:
+        responses = await asyncio.gather(
+            *(
+                client.patch(
+                    f"/verifications/{vid}/application",
+                    headers=_auth(key),
+                    json=answers,
+                )
+                for _ in range(2)
+            )
+        )
+    finally:
+        restore()
+    assert [response.status_code for response in responses] == [200, 200]
+    assert len(sms_carrier.drafts) == 1 and sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"legal_name": "Different Company"},
+        {"ein": "99-9999999"},
+        {"rep_email": "different@acme.org"},
+    ],
+)
+async def test_amendment_cannot_replace_original_sender(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, change
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    answers["fields"] = {**answers["fields"], **change}
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409, response.text
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitted" and row.provider_refs["needs_information"]
+    assert row.provider_refs["brand_sid"] == "BN1" and len(sms_carrier.drafts) == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_unverifiable_identity_requires_support_and_retains_brand(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+
+    async def missing(refs, subject):
+        return None
+
+    monkeypatch.setattr(sms_carrier, "application_identity", missing)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409 and "support" in response.json()["detail"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs["brand_sid"] == "BN1" and row.state == "submitted"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_is_org_scoped_and_validates_before_any_filing(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    _, _, other_key = await insert_org_and_key(async_session)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(other_key), json=answers
+    )
+    assert response.status_code == 404
+    bad = {**answers, "fields": {**answers["fields"], "consent_methods": ""}}
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=bad
+    )
+    assert response.status_code == 422 and len(sms_carrier.drafts) == 1
+    assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_recovers_lost_campaign_before_changing_answers(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+
+    async def found(refs):
+        refs["campaign_id"] = "Cexisting"
+        refs.pop("needs_information", None)
+        return True
+
+    monkeypatch.setattr(sms_carrier, "recover_campaign", found)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409 and "recovered" in response.json()["detail"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert (
+        row.provider_refs["campaign_id"] == "Cexisting"
+        and row.provider_refs["campaign"] == {}
+    )
+    assert row.provider_refs["brand_sid"] == "BN1" and len(sms_carrier.drafts) == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_saved_legacy_identity_recovery_does_not_submit(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+    response = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["fields"]["ein"] == answers["fields"]["ein"]
+    assert (
+        response.headers["cache-control"] == "no-store" and len(sms_carrier.drafts) == 1
+    )
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_accepted_runtime_setup_can_cancel_and_rates_before_discard(
+    client, org_and_key, sms_carrier, async_session, rated
+):
+    _, _, key = org_and_key
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_id": "C1",
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+    response = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "cancelled"
+    assert rated[0][1]["campaign_id"] == "C1" and sms_carrier.discarded
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_runtime_cancellation_rechecks_after_billing_and_detaches_racing_approval(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    org_id, _, key = org_and_key
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_id": "C1",
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+
+    async def approve_while_rated(_):
+        await async_session.refresh(row)
+        row.state = "approved"
+        number = (
+            (
+                await async_session.execute(
+                    select(PhoneNumber).where(PhoneNumber.organization_id == org_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        number.sms_registration_id = row.id
+        await async_session.commit()
+
+    monkeypatch.setattr(
+        verifications_routes, "rate_sms_registration", approve_while_rated
+    )
+    response = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "cancelled" and sms_carrier.detached
+    number = (
+        (
+            await async_session.execute(
+                select(PhoneNumber)
+                .where(PhoneNumber.organization_id == org_id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert number.sms_registration_id is None
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_incomplete_legacy_provider_address_returns_support_guidance(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, _ = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+
+    async def incomplete(refs, subject):
+        return {
+            "fields": {"legal_name": "Acme"},
+            "address": {"country_code": "US", "street": None},
+        }
+
+    monkeypatch.setattr(sms_carrier, "application_identity", incomplete)
+    response = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert response.status_code == 404 and "support" in response.json()["detail"]

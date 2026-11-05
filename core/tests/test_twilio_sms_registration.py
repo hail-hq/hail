@@ -323,7 +323,8 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
         "campaign": old,
     }
     result = await p.status(refs)
-    assert result.state == "rejected" and "consent evidence" in result.reason
+    assert result.state == "pending" and "consent evidence" in result.reason
+    assert refs["needs_information"] is True
     assert not _calls(p, "us_app_to_person.create")
 
 
@@ -564,8 +565,10 @@ async def test_draft_4xx_becomes_neutral_problem() -> None:
 async def test_draft_4xx_unknown_message_is_generic() -> None:
     r = _ok_responses()
     r["brand_registrations.create"] = _raise(_tw(400, "Twilio internal thing"))
-    draft = await _draft(_provider(r))
-    assert draft.problems[0].message.startswith("The 10DLC registry refused a detail")
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(r))
 
 
 async def test_draft_5xx_raises_provider_error() -> None:
@@ -916,3 +919,90 @@ async def test_keyword_campaign_sends_actual_confirmation_and_content_flags():
     assert posted["opt_in_message"] == fields["opt_in_message"]
     assert posted["opt_in_keywords"] == ["JOIN"]
     assert posted["age_gated"] is True and posted["direct_lending"] is True
+
+
+@pytest.mark.parametrize(
+    "status,message",
+    [
+        (401, "Invalid credentials"),
+        (403, "Forbidden"),
+        (404, "Not found"),
+        (409, "Conflict"),
+        (429, "Slow down"),
+        (400, "Account configuration missing"),
+        (422, "Messaging service configuration invalid"),
+    ],
+)
+async def test_campaign_operational_errors_are_retryable(status, message):
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = _raise(_tw(status, message))
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
+    with pytest.raises(VerificationProviderError):
+        await _provider(responses).status(refs)
+    assert refs["brand_sid"] == "BN1" and "campaign_sid" not in refs
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED"
+    )
+    provider = _provider(responses)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": subject,
+        "campaign": {},
+    }
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information" and refs["brand_sid"] == "BN1"
+    assert not _calls(provider, "us_app_to_person.create")
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_twilio_recovers_original_sender_and_address_readonly(subject):
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", customer_profile_bundle_sid="BU1"
+    )
+    responses["customer_profiles_entity_assignments.list"] = [
+        SimpleNamespace(object_sid="IT1"),
+        SimpleNamespace(object_sid="RD1"),
+    ]
+    responses["end_users.fetch"] = SimpleNamespace(
+        type=(
+            "starter_customer_profile_information"
+            if subject == "person"
+            else "customer_profile_business_information"
+        ),
+        attributes={
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@acme.org",
+            "phone_number": "+15125550199",
+            "business_name": "Acme",
+            "business_registration_number": "123456789",
+            "business_registration_identifier": "EIN",
+        },
+    )
+    responses["supporting_documents.fetch"] = SimpleNamespace(
+        type="customer_profile_address", attributes={"address_sids": "AD1"}
+    )
+    responses["addresses.fetch"] = SimpleNamespace(
+        street="1 Main St",
+        city="Austin",
+        region="TX",
+        postal_code="78701",
+        iso_country="US",
+    )
+    provider = _provider(responses)
+    identity = await provider.application_identity(
+        {"brand_sid": "BN1", "profile_sid": "BU1"}, subject
+    )
+    assert identity["fields"]["sender_country"] == "US"
+    assert identity["address"]["street"] == "1 Main St"
+    assert not any(name.endswith(".create") for name, _ in provider._client.calls)

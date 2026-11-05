@@ -285,7 +285,8 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
         },
     }
     result = await _provider(handler).status(refs)
-    assert result.state == "rejected" and "consent evidence" in result.reason
+    assert result.state == "pending" and "consent evidence" in result.reason
+    assert refs["needs_information"] is True
     assert posted == []
 
 
@@ -735,7 +736,7 @@ async def _lookup_answering(status: int):
 
 
 async def test_a_refused_lookup_files_a_new_brand() -> None:
-    draft = await _lookup_answering(400)
+    draft = await _lookup_answering(404)
     assert draft.problems == []
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
 
@@ -1162,17 +1163,10 @@ async def test_a_failed_read_keeps_waiting_instead_of_deleting_the_brand() -> No
     assert not any(m == "DELETE" for m, _ in calls)
 
 
-async def test_odd_error_bodies_give_a_neutral_problem() -> None:
-    bodies = iter([{"errors": 5}, {"errors": [{"source": "/email"}]}])
-
-    def handler(req):
-        if req.url.path.endswith("/10dlc/brand"):
-            return httpx.Response(400, json=next(bodies))
-        return httpx.Response(204)
-
-    for _ in range(2):
-        draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-        assert [p.field for p in draft.problems] == [""]
+async def test_unknown_error_body_is_retryable():
+    provider = _provider(lambda req: httpx.Response(400, json={"errors": 5}))
+    with pytest.raises(VerificationProviderError):
+        await _draft(provider, "person", PERSON_FIELDS)
 
 
 async def test_4xx_pointing_at_a_field_names_that_field() -> None:
@@ -1328,7 +1322,8 @@ async def test_a_failure_after_the_brand_reports_it_billed() -> None:
         return httpx.Response(204)
 
     draft = await _draft(_provider(handler))
-    assert draft.problems and draft.billed_refs["brand_id"] == "B1"
+    assert not draft.problems and draft.refs["brand_id"] == "B1"
+    assert draft.refs["vetting_requested"] is False
 
 
 def _outage_after_the_brand(step: str, failure, calls: list):
@@ -1503,8 +1498,8 @@ async def test_a_4xx_on_the_brand_call_bills_nothing() -> None:
             return httpx.Response(400, json={"errors": [{"code": "10015"}]})
         return httpx.Response(204)
 
-    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-    assert draft.problems and draft.billed_refs == {}
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
 
 
 @pytest.mark.parametrize("blank", [None, "", "   "])
@@ -2148,9 +2143,9 @@ async def test_legacy_confirmed_person_keeps_paid_brand_for_evidence_repair():
 
     provider = _provider(handler)
     refs = {"subject_type": "person", "brand_id": "B1", "campaign": {}}
-    assert (await provider.status(refs)).state == "rejected"
-    assert provider.keeps_brand(refs)
-    assert await provider.discard_rejected(refs) == {"kept_brand_id": "B1"}
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information"
+    assert refs["brand_id"] == "B1"
     assert not any(method in {"DELETE", "POST"} for method, _ in calls)
 
 
@@ -2163,3 +2158,80 @@ async def test_telnyx_requires_actual_confirmation_before_paid_brand():
     assert calls == []
     req = await provider.requirements("US", "local", "business")
     assert next(spec for spec in req.fields if spec.name == "opt_in_message").required
+
+
+@pytest.mark.parametrize(
+    "status,detail",
+    [
+        (401, "Invalid credentials"),
+        (403, "Forbidden"),
+        (404, "Not found"),
+        (409, "Conflict"),
+        (429, "Slow down"),
+        (400, "Account configuration missing"),
+        (422, "Messaging service configuration invalid"),
+    ],
+)
+async def test_campaign_operational_errors_keep_the_brand_retryable(status, detail):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            return httpx.Response(status, json={"errors": [{"detail": detail}]})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    with pytest.raises(VerificationProviderError):
+        await _provider(handler).status(refs)
+    assert refs["brand_id"] == "B1" and "campaign_needs_repair" not in refs
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+    calls = []
+
+    def handler(req):
+        calls.append(req.method)
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    provider = _provider(handler)
+    refs = {"brand_id": "B1", "subject_type": subject, "campaign": {}}
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information" and refs["brand_id"] == "B1"
+    assert set(calls) == {"GET"}
+
+
+async def test_telnyx_recovers_authoritative_person_identity_readonly():
+    calls = []
+    brand = {
+        **KEPT_BRAND,
+        "country": "US",
+        "street": ADDRESS.street,
+        "city": ADDRESS.city,
+        "state": ADDRESS.region,
+        "postalCode": ADDRESS.postal_code,
+    }
+    provider = _provider(
+        lambda req: calls.append(req.method) or httpx.Response(200, json=brand)
+    )
+    identity = await provider.application_identity({"brand_id": "B9"}, "person")
+    assert identity["fields"]["email"].casefold() == PERSON_FIELDS["email"].casefold()
+    assert identity["address"]["street"] == ADDRESS.street and calls == ["GET"]
+
+
+async def test_invalid_confirmation_content_never_creates_a_paid_brand():
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    draft = await _draft(
+        provider,
+        fields={
+            **FIELDS,
+            "opt_in_message": "Thank you, your subscription is now active.",
+        },
+    )
+    assert any(problem.field == "opt_in_message" for problem in draft.problems)
+    assert calls == []

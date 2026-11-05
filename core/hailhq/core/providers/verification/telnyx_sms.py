@@ -36,6 +36,7 @@ from hailhq.core.providers.verification.sms_form import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
+    application_validation_error,
     campaign_repair_reason,
 )
 
@@ -418,7 +419,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             # The lookup is optional: a refusal must not block the filing.
             # An outage or 429 raises: retrying beats paying for a new brand.
             status = exc.response.status_code
-            if status < 500 and status != 429:
+            if status == 404:
                 logger.warning("10DLC kept brand lookup failed: status=%s", status)
                 return False
             raise
@@ -645,23 +646,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if "campaign_id" not in refs:
                 # A campaign filed by an earlier call whose answer was lost
                 # (a timeout): take it. Each campaign sent for review is paid.
-                found = await self._api.request(
-                    "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
-                )
-                existing = [
-                    r
-                    for r in found.get("records") or []
-                    if isinstance(r, dict) and r.get("campaignId")
-                ]
-                if existing:
-                    refs["campaign_id"] = existing[0]["campaignId"]
-                    _store_replies(refs, existing[0], brand)
+                if await self.recover_campaign(refs, brand):
                     await self._set_replies(refs)
                     return ProviderStatus(state="pending")
                 text = refs["campaign"]
                 if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
-                    refs["campaign_needs_repair"] = True
-                    return ProviderStatus(state="rejected", reason=LEGACY_APPLICATION)
+                    refs["needs_information"] = True
+                    return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
                 replies = _campaign_replies(brand, refs)
                 campaign = await self._api.request(
                     "POST",
@@ -854,6 +845,85 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         refs["messaging_profile_id"] = profile
         return profile
 
+    async def recover_campaign(self, refs, brand=None) -> bool:
+        if self.campaign_filed(refs):
+            return True
+        try:
+            found = await self._api.request(
+                "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
+            )
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Campaign discovery unavailable") from exc
+        existing = [
+            item
+            for item in found.get("records") or []
+            if isinstance(item, dict) and item.get("campaignId")
+        ]
+        if existing:
+            refs["campaign_id"] = existing[0]["campaignId"]
+            _store_replies(refs, existing[0], brand or {})
+            refs.pop("needs_information", None)
+            return True
+        return False
+
+    async def application_identity(self, refs, subject_type) -> dict | None:
+        if not refs.get("brand_id"):
+            return None
+        try:
+            brand = await self._api.request(
+                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
+        except (httpx.HTTPError, KeyError) as exc:
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
+        if brand.get("identityStatus") not in _VERIFIED or brand.get("failureReasons"):
+            return None
+        country = brand.get("country")
+        fields = {
+            "sender_country": country,
+            "has_tax_id": "NO" if subject_type == "person" else "YES",
+        }
+        mapping = (
+            {
+                "first_name": "firstName",
+                "last_name": "lastName",
+                "email": "email",
+                "mobile_phone_number": "mobilePhone",
+            }
+            if subject_type == "person"
+            else {
+                "legal_name": "companyName",
+                "ein": "ein",
+                "business_type": "entityType",
+                "industry": "vertical",
+                "website": "website",
+                "rep_email": "email",
+                "rep_phone": "phone",
+            }
+        )
+        fields.update(
+            {key: brand[value] for key, value in mapping.items() if brand.get(value)}
+        )
+        if subject_type == "business":
+            fields["registration_country"] = country
+        return {
+            "fields": fields,
+            "address": {
+                "street": brand.get("street"),
+                "city": brand.get("city"),
+                "region": brand.get("state"),
+                "postal_code": brand.get("postalCode"),
+                "country_code": country,
+            },
+        }
+
     async def purchase_handle(self, refs) -> dict:
         return {}
 
@@ -956,10 +1026,10 @@ def _refused(exc: Exception) -> bool:
     """Telnyx refused a value (a 4xx). Not 429 (slow down), and not 404:
     for about 2 seconds after a new brand, its PIN and vetting calls answer
     404, so the brand is kept and the background pass asks again."""
-    return isinstance(exc, httpx.HTTPStatusError) and (
-        400 <= exc.response.status_code < 500
-        and exc.response.status_code not in (404, 429)
-    )
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    errors = _errors(exc.response)
+    return application_validation_error(exc.response.status_code, errors)
 
 
 def _failure(exc: Exception) -> str:

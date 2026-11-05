@@ -1,5 +1,7 @@
 """Local SMS preflight and fixed, customer-safe repair guidance."""
 
+import re
+
 import phonenumbers
 from hailhq.core.providers.verification.base import (
     CAMPAIGN_REJECTED,
@@ -82,3 +84,117 @@ def campaign_repair_reason(raw: object) -> str:
         if any(word in text for word in words):
             return message
     return CAMPAIGN_REJECTED
+
+
+def application_validation_error(status: int | None, raw: object) -> bool:
+    """Only definite field/content validation is a terminal application refusal.
+
+    Auth, account configuration, billing and unknown provider errors must keep
+    the filing retryable; HTTP 4xx by itself does not identify customer error.
+    """
+    if status not in (400, 422):
+        return False
+    text = str(raw or "").lower()
+    if any(
+        word in text
+        for word in (
+            "credential",
+            "api key",
+            "authentication",
+            "permission",
+            "unauthorized",
+            "forbidden",
+            "account suspend",
+            "account inactive",
+            "insufficient balance",
+            "messaging service",
+            "configuration",
+        )
+    ):
+        return False
+    return any(
+        re.search(rf"\b{re.escape(word)}\b", text)
+        for word in (
+            "privacy policy",
+            "terms and conditions",
+            "message flow",
+            "messageflow",
+            "sample message",
+            "message sample",
+            "opt-in",
+            "optin",
+            "use case",
+            "usecase",
+            "tax id",
+            "ein",
+            "registration number",
+            "phone number",
+            "mobile number",
+            "first name",
+            "last name",
+            "email",
+            "website",
+            "postal",
+            "street address",
+        )
+    )
+
+
+_IDENTITY_FIELDS = {
+    "person": (
+        "sender_country",
+        "has_tax_id",
+        "first_name",
+        "last_name",
+        "email",
+        "mobile_phone_number",
+    ),
+    "business": (
+        "sender_country",
+        "has_tax_id",
+        "legal_name",
+        "business_type",
+        "registration_country",
+        "ein",
+        "industry",
+        "website",
+        "rep_name",
+        "rep_email",
+        "rep_phone",
+        "rep_title",
+    ),
+}
+
+
+def same_sender(
+    original: dict, fields: dict[str, str], address: Address, subject_type: str
+) -> bool:
+    """Compare authoritative sender identity; missing core data fails closed."""
+    previous = original.get("fields") or {}
+    location = original.get("address") or {}
+    minimum = (
+        ("first_name", "last_name", "email", "mobile_phone_number")
+        if subject_type == "person"
+        else ("legal_name", "ein", "registration_country")
+    )
+    if any(not previous.get(key) for key in minimum) or any(
+        not location.get(key)
+        for key in ("street", "city", "region", "postal_code", "country_code")
+    ):
+        return False
+
+    def normalized(key, value):
+        text = " ".join(str(value or "").split()).casefold()
+        if key in {"mobile_phone_number", "rep_phone", "ein"}:
+            return re.sub(r"\D", "", text)
+        return text
+
+    return all(
+        normalized(key, previous[key]) == normalized(key, fields.get(key))
+        for key in _IDENTITY_FIELDS[subject_type]
+        if key in previous
+    ) and all(
+        normalized(key, value) == normalized(key, getattr(address, key, None))
+        for key, value in location.items()
+        if key != "customer_name"
+    )

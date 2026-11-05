@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import time
@@ -76,7 +77,12 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
-from hailhq.core.schemas import VerificationResponse
+from hailhq.core.providers.verification.sms_review import same_sender
+from hailhq.core.schemas import (
+    SmsApplicationAmendRequest,
+    SmsApplicationResponse,
+    VerificationResponse,
+)
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, select, text, update
@@ -421,6 +427,8 @@ def _pollable(row: CarrierVerification) -> bool:
     submitted, or was cut off while submitting long enough ago that no approve
     can still be running."""
     if row.state not in _POLLED_STATES:
+        return False
+    if row.purpose == "sms" and (row.provider_refs or {}).get("needs_information"):
         return False
     if row.state == "submitting":
         return datetime.now(timezone.utc) - row.updated_at >= _SUBMITTING_STUCK_AFTER
@@ -1017,10 +1025,17 @@ async def _sms_mobile_problems(
 
 
 class SmsPreviewRequest(BaseModel):
-    subject_type: SubjectType
-    number_id: UUID | None = None
-    fields: dict[str, str]
-    address: Address | None = None
+    subject_type: SubjectType = Field(
+        description="Sender route to preview: person or business."
+    )
+    number_id: UUID | None = Field(
+        default=None,
+        description="Owned US local number selecting the carrier, required when ambiguous.",
+    )
+    fields: dict[str, str] = Field(description="Current registration form answers.")
+    address: Address | None = Field(
+        default=None, description="Sender address required by the registration form."
+    )
 
 
 @router.post("/sms/preview", operation_id="preview_sms_application")
@@ -1877,15 +1892,6 @@ async def get_verification(
     return _out(row, registry)
 
 
-class SmsApplicationResponse(BaseModel):
-    """Private submitted answers for repairing an SMS application."""
-
-    schema_version: int = 1
-    subject_type: SubjectType
-    fields: dict[str, str]
-    address: Address | None = None
-
-
 @router.get(
     "/{verification_id}/application",
     response_model=SmsApplicationResponse,
@@ -1896,22 +1902,175 @@ async def get_verification_application(
     response: Response,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> SmsApplicationResponse:
     """Read your organization's saved SMS answers, including after rejection.
 
-    Older applications did not retain these answers; a 404 asks the user to
-    complete the current form. The ordinary verification list never contains
-    application fields or addresses. No carrier call or charge occurs here.
+    Older applications may recover their verified sender identity through
+    read-only provider calls; a 404 asks for original details and support when
+    these cannot be recovered. The ordinary list never contains application
+    fields or addresses. No records are filed or charged here.
     """
     row = await _org_row_or_404(db, principal, verification_id)
     application = (row.provider_refs or {}).get("application")
+    if row.purpose == "sms" and not isinstance(application, dict):
+        provider = registry(row.provider, "sms")
+        if isinstance(provider, SmsRegistrationProvider):
+            try:
+                identity = await provider.application_identity(
+                    row.provider_refs or {}, row.subject_type
+                )
+            except VerificationProviderError as exc:
+                raise _carrier_unavailable() from exc
+            if identity and all(
+                isinstance((identity.get("address") or {}).get(key), str)
+                and identity["address"][key].strip()
+                for key in ("street", "city", "region", "postal_code", "country_code")
+            ):
+                fields = {
+                    key: value
+                    for key, value in identity.get("fields", {}).items()
+                    if isinstance(value, str)
+                }
+                address = {
+                    **identity["address"],
+                    "customer_name": row.subject_name or "Sender",
+                }
+                application = {
+                    "schema_version": 1,
+                    "subject_type": row.subject_type,
+                    "fields": fields,
+                    "address": address,
+                }
     if row.purpose != "sms" or not isinstance(application, dict):
         raise HTTPException(
             status_code=404,
-            detail="Saved answers are unavailable for this older application. Complete the current registration form.",
+            detail="Saved answers are unavailable. Complete the current registration form with the original sender details; contact support if the original identity cannot be verified.",
         )
     response.headers["Cache-Control"] = "no-store"
     return SmsApplicationResponse.model_validate(application)
+
+
+@router.patch(
+    "/{verification_id}/application",
+    response_model=VerificationResponse,
+    operation_id="amend_sms_application",
+)
+async def amend_sms_application(
+    verification_id: UUID,
+    body: SmsApplicationAmendRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+) -> VerificationResponse:
+    """Repair missing evidence on the same sender, brand and registration.
+
+    No paid provider action occurs here. Only the campaign answers change;
+    carrier review resumes on a later poll. Original sender identity/address
+    must match stored or authoritative provider details. An identical retry
+    is safe even after the campaign has subsequently been filed.
+    """
+    row = await _org_row_or_404(db, principal, verification_id)
+    await org_lock(db, principal.organization_id)
+    await db.refresh(row, with_for_update=True)
+    provider = registry(row.provider, row.purpose)
+    if row.purpose != "sms" or not isinstance(provider, SmsRegistrationProvider):
+        raise HTTPException(
+            status_code=409, detail="Only an existing SMS registration can be amended."
+        )
+    raw = json.dumps(
+        body.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+    )
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    refs = row.provider_refs or {}
+    if refs.get("application_amendment_hash") == digest and row.state in (
+        "submitted",
+        "approved",
+    ):
+        return _out(row, registry)
+    if (
+        row.state != "submitted"
+        or not refs.get("needs_information")
+        or provider.campaign_filed(refs)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This registration is not waiting for application information. Keep its existing filing and contact support for changes.",
+        )
+    requirements = await provider.requirements("US", "local", row.subject_type)
+    problems = length_problems(requirements, body.fields, {})
+    problems.extend(
+        provider.validate_application(body.fields, body.address, row.subject_type)
+    )
+    problems.extend(await _sms_mobile_problems(db, row.subject_type, body.fields))
+    if problems:
+        raise _problems_422(problems, row.organization_id, row.provider)
+    original = refs.get("application")
+    try:
+        if not isinstance(original, dict):
+            original = await provider.application_identity(refs, row.subject_type)
+        if (
+            not original
+            or body.address is None
+            or not same_sender(original, body.fields, body.address, row.subject_type)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The original sender identity or address cannot be verified against these answers. Keep the original sender details and contact support; this registration and its paid brand have been retained.",
+            )
+        # A previous create may have succeeded while its response was lost.
+        # Recover it under the same lock before permitting campaign edits.
+        if await provider.recover_campaign(refs):
+            _stamp_campaign_filed(provider, refs)
+            flag_modified(row, "provider_refs")
+            await db.commit()
+            _notify_billing([row])
+            raise HTTPException(
+                status_code=409,
+                detail="The carrier already has this campaign. Its existing filing has been recovered; wait for review instead of amending it.",
+            )
+    except VerificationProviderError as exc:
+        raise _carrier_unavailable() from exc
+    from dataclasses import asdict
+
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    refs["campaign"] = asdict(campaign_text(body.fields, row.subject_type))
+    refs["application"] = {
+        "schema_version": 1,
+        "subject_type": row.subject_type,
+        "fields": {
+            field.name: body.fields[field.name]
+            for field in requirements.fields
+            if field.name in body.fields
+        },
+        "address": body.address.model_dump(),
+    }
+    refs["application_amendment_hash"] = digest
+    refs.pop("needs_information", None)
+    refs.pop("campaign_needs_repair", None)
+    row.provider_refs = refs
+    row.requirements_version = requirements.version
+    row.updated_at = datetime.now(timezone.utc)
+    row.rejection_reason = None
+    flag_modified(row, "provider_refs")
+    _last_polled.pop(row.id, None)
+    await db.commit()
+    return _out(row, registry)
+
+
+def _can_cancel(row: CarrierVerification) -> bool:
+    if row.state in ("awaiting_review", "rejected"):
+        return True
+    refs = row.provider_refs or {}
+    return row.purpose == "sms" and (
+        row.state == "approved"
+        or (
+            row.state == "submitted"
+            and refs.get("campaign_accepted") is True
+            and refs.get("runtime_ready") is False
+        )
+    )
 
 
 @router.delete(
@@ -1931,7 +2090,8 @@ async def cancel_verification(
     carrier for the next filing. One that is under review cannot be
     cancelled: wait for the result; if it is rejected, dismiss it.
 
-    An approved US SMS registration (`purpose=sms`) can be cancelled too:
+    An accepted campaign waiting on runtime setup can be cancelled, as can
+    an approved US SMS registration (`purpose=sms`):
     its numbers leave the campaign, the campaign is deleted at the carrier,
     and US-to-US texts from those numbers get 422 again. Its monthly fee is
     charged through the month of the cancellation, then stops. Some carriers
@@ -1939,24 +2099,30 @@ async def cancel_verification(
     cancelled sooner is still charged for that many months (prices: see the
     console)."""
     row = await _org_row_or_404(db, principal, verification_id)
-    if row.state in ("submitting", "submitted"):
+    await db.refresh(row, with_for_update=True)
+    if not _can_cancel(row):
         raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="this verification is under review; wait for the result",
-        )
-    approved_sms = row.state == "approved" and row.purpose == "sms"
-    if row.state not in ("awaiting_review", "rejected") and not approved_sms:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"cannot cancel a verification that is {row.state}",
+            status_code=409,
+            detail="This verification is under review or cannot be cancelled in its current state.",
         )
     provider = registry(row.provider, row.purpose)
-    # Before org_lock: the rater takes the same lock.
+    # Billing releases the transaction so its own org lock can be acquired.
+    # Re-read under both locks afterwards: a poll may have approved/attached
+    # the campaign, or another cancellation may have completed meanwhile.
     await _rate_before_wipe(db, row, provider)
+    await db.commit()
+    await org_lock(db, row.organization_id)
+    await db.refresh(row, with_for_update=True)
+    if row.state == "cancelled":
+        return _out(row, registry)
+    if not _can_cancel(row):
+        raise HTTPException(
+            status_code=409,
+            detail="The verification changed while cancellation was prepared; refresh its current status.",
+        )
+    approved_sms = row.purpose == "sms" and row.state in ("approved", "submitted")
+    state_before = row.state
     if approved_sms:
-        # Serialize with purchases, routing and releases: they attach and
-        # detach numbers too.
-        await org_lock(db, row.organization_id)
         await _detach_registration(db, row, provider)
     kept: dict = {}
     if isinstance(provider, SmsRegistrationProvider) and row.state == "rejected":
@@ -1976,7 +2142,7 @@ async def cancel_verification(
             "verification.cancel",
             "carrier_verification",
             row.id,
-            {"purpose": row.purpose, "state_before": "approved"},
+            {"purpose": row.purpose, "state_before": state_before},
             actor_user_id=actor_user_id,
             actor_kind=actor_kind,
         )

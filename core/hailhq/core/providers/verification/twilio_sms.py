@@ -31,6 +31,7 @@ from hailhq.core.providers.verification.sms_form import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
+    application_validation_error,
     campaign_repair_reason,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
@@ -165,7 +166,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC draft failed: status=%s code=%s", exc.status, exc.code
                 )
-                if 400 <= (exc.status or 0) < 500:
+                if application_validation_error(exc.status, exc.msg):
                     return DraftResult(
                         refs={},
                         problems=[Problem(field="", message=_safe_message(exc.msg))],
@@ -352,16 +353,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         svc = self._client.messaging.v1.services(refs["messaging_service_sid"])
         if "campaign_sid" not in refs:
             # Recover a paid submission whose response was lost before retrying.
-            existing = svc.us_app_to_person.list(limit=20)
-            matching = [
-                c for c in existing if c.brand_registration_sid == refs["brand_sid"]
-            ]
-            if matching:
-                refs["campaign_sid"] = matching[0].sid
+            if self._recover_campaign(refs):
                 return ProviderStatus(state="pending")
             text = refs["campaign"]
             if text.get("schema_version", 1) < 2:
-                return ProviderStatus(state="rejected", reason=LEGACY_APPLICATION)
+                refs["needs_information"] = True
+                return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
             try:
                 campaign = svc.us_app_to_person.create(
                     brand_registration_sid=refs["brand_sid"],
@@ -387,7 +384,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     **_policy_links(text),
                 )
             except TwilioRestException as exc:
-                if 400 <= (exc.status or 0) < 500 and exc.status not in (404, 429):
+                if application_validation_error(exc.status, exc.msg):
                     return ProviderStatus(
                         state="rejected",
                         reason=campaign_repair_reason(exc.msg),
@@ -412,6 +409,122 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
+
+    def _recover_campaign(self, refs) -> bool:
+        if self.campaign_filed(refs):
+            return True
+        existing = self._client.messaging.v1.services(
+            refs["messaging_service_sid"]
+        ).us_app_to_person.list(limit=20)
+        matching = [
+            campaign
+            for campaign in existing
+            if campaign.brand_registration_sid == refs["brand_sid"]
+        ]
+        if matching:
+            refs["campaign_sid"] = matching[0].sid
+            refs.pop("needs_information", None)
+            return True
+        return False
+
+    async def recover_campaign(self, refs) -> bool:
+        try:
+            return await asyncio.to_thread(self._recover_campaign, refs)
+        except TwilioException as exc:
+            raise VerificationProviderError("Campaign discovery unavailable") from exc
+
+    async def application_identity(self, refs, subject_type) -> dict | None:
+        def read():
+            brand = self._client.messaging.v1.a2p.brand_registrations(
+                refs["brand_sid"]
+            ).fetch()
+            if brand.status != "APPROVED" or (
+                subject_type == "person" and brand.identity_status != "VERIFIED"
+            ):
+                return None
+            if getattr(brand, "customer_profile_bundle_sid", None) != refs.get(
+                "profile_sid"
+            ):
+                return None
+            th = self._client.trusthub.v1
+            users = {}
+            address = None
+            for item in th.customer_profiles(
+                refs["profile_sid"]
+            ).customer_profiles_entity_assignments.list():
+                if item.object_sid.startswith("IT"):
+                    user = th.end_users(item.object_sid).fetch()
+                    users[user.type] = user.attributes or {}
+                elif item.object_sid.startswith("RD"):
+                    doc = th.supporting_documents(item.object_sid).fetch()
+                    if doc.type == "customer_profile_address":
+                        sid = (doc.attributes or {}).get("address_sids")
+                        if isinstance(sid, list):
+                            sid = sid[0] if len(sid) == 1 else None
+                        if (
+                            isinstance(sid, str)
+                            and sid.startswith("AD")
+                            and "," not in sid
+                        ):
+                            record = self._client.addresses(sid).fetch()
+                            address = {
+                                "street": record.street,
+                                "city": record.city,
+                                "region": record.region,
+                                "postal_code": record.postal_code,
+                                "country_code": record.iso_country,
+                            }
+            if not address:
+                return None
+            fields = {
+                "sender_country": address["country_code"],
+                "has_tax_id": "NO" if subject_type == "person" else "YES",
+            }
+            if subject_type == "person":
+                person = users.get("starter_customer_profile_information", {})
+                fields.update(
+                    {
+                        key: person.get(value)
+                        for key, value in {
+                            "first_name": "first_name",
+                            "last_name": "last_name",
+                            "email": "email",
+                            "mobile_phone_number": "phone_number",
+                        }.items()
+                    }
+                )
+            else:
+                business = users.get("customer_profile_business_information", {})
+                identifier = business.get("business_registration_identifier")
+                fields.update(
+                    {
+                        "legal_name": business.get("business_name"),
+                        "ein": business.get("business_registration_number"),
+                        "registration_country": {"EIN": "US", "CBN": "CA"}.get(
+                            identifier
+                        ),
+                    }
+                )
+                representative = users.get("authorized_representative_1", {})
+                if representative:
+                    fields.update(
+                        {
+                            "rep_email": representative.get("email"),
+                            "rep_phone": representative.get("phone_number"),
+                        }
+                    )
+            return {"fields": fields, "address": address}
+
+        try:
+            return await asyncio.to_thread(read)
+        except TwilioRestException as exc:
+            if exc.status == 404:
+                return None
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
+        except (KeyError, AttributeError, TypeError):
+            return None
 
     def confirmation(self, refs) -> str | None:
         # The person answers the carrier's text; there is no code to enter.
