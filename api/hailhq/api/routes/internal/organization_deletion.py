@@ -1,7 +1,8 @@
 """Fail-closed external cleanup for website-owned organization deletion.
 
-The website locks the owner membership and organization row, calls this route,
-then purges scoped rows and the organization in one transaction. Reuse
+The website serializes account/org teardown, locks the owner membership, and
+calls this route. This route publishes a marker before draining admitted work.
+The website then locks the organization and purges scoped rows atomically. Reuse
 org_closures for the deletion tombstone: it holds lifecycle state already.
 No new table fits better. Its tombstone and retired mail addresses survive.
 No Stripe calls belong here. References remain until the website commits, so
@@ -49,8 +50,8 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from livekit import api
 from pydantic import BaseModel
-from sqlalchemy import delete, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Text, any_, bindparam, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -291,25 +292,39 @@ async def prepare_organization_deletion(
             await _rate_before_wipe(db, row, provider)
             await _detach_registration(db, row, provider)
         if provider is not None:
-            # Full erasure also discards confirmed brands intentionally kept
-            # by the ordinary rejected-registration dismissal flow.
-            await provider.discard(row.provider_refs, strict=True)
+            if row.provider == "didww":
+                await provider.discard_organization(
+                    row.provider_refs, organization_id=str(org)
+                )
+            elif row.provider == "telnyx" and row.purpose == "sms":
+                # A cancelled filing can retain a brand reused by a later
+                # campaign. Clear every campaign before deleting any brand.
+                await provider.discard(
+                    {"campaign_id": row.provider_refs.get("campaign_id")}, strict=True
+                )
+            else:
+                await provider.discard(row.provider_refs, strict=True)
             row.state = "cancelled"
             # Retain retry IDs until the website's final purge commits. A
             # later cleanup step can fail after this cancellation succeeds.
             row.cancelled_at = datetime.now(timezone.utc)
             await db.commit()
 
-    # Several filings can reuse one identity. The creator may run before
-    # its last reused address is removed, so finish identity cleanup only
-    # after every filing's first pass. Shared identities stay at the carrier.
     for row in verifications:
-        if row.provider_refs.get("identity_created") and row.provider_refs.get(
-            "identity_id"
-        ):
+        if row.provider == "telnyx" and row.purpose == "sms":
             provider = registry(row.provider, row.purpose)
             if provider is not None:
-                await provider.discard(row.provider_refs, strict=True)
+                await provider.discard(
+                    {
+                        key: row.provider_refs[key]
+                        for key in ("brand_id", "kept_brand_id")
+                        if row.provider_refs.get(key)
+                    },
+                    strict=True,
+                )
+
+    # DIDWW reconciles every filing's org-owned identity after its address
+    # deletion. The last reused address therefore also releases the identity.
 
     used_sms_providers = (
         (
@@ -326,7 +341,14 @@ async def prepare_organization_deletion(
         await sms_route(provider_name).delete_organization_services(org, ids)
 
     calls = (
-        (await db.execute(select(Call).where(Call.organization_id == org)))
+        (
+            await db.execute(
+                select(Call)
+                .where(Call.organization_id == org)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
         .scalars()
         .all()
     )
@@ -374,11 +396,15 @@ async def prepare_organization_deletion(
     if keys:
         # One inbound MIME object can back copies delivered to several orgs.
         # Attachments/uploads can also reference a reused storage key.
+        # One array bind keeps arbitrarily large inventories below asyncpg's
+        # argument limit. Reuse the same inventory in each ownership lookup.
+        storage_keys = bindparam("storage_keys", list(keys), type_=ARRAY(Text))
         shared_raw = (
             (
                 await db.execute(
                     select(Email.raw_s3_key).where(
-                        Email.organization_id != org, Email.raw_s3_key.in_(keys)
+                        Email.organization_id != org,
+                        Email.raw_s3_key == any_(storage_keys),
                     )
                 )
             )
@@ -391,7 +417,8 @@ async def prepare_organization_deletion(
                     select(EmailAttachment.s3_key)
                     .join(Email, Email.id == EmailAttachment.email_id)
                     .where(
-                        Email.organization_id != org, EmailAttachment.s3_key.in_(keys)
+                        Email.organization_id != org,
+                        EmailAttachment.s3_key == any_(storage_keys),
                     )
                 )
             )
@@ -403,7 +430,7 @@ async def prepare_organization_deletion(
                 await db.execute(
                     select(EmailAttachmentUpload.s3_key).where(
                         EmailAttachmentUpload.organization_id != org,
-                        EmailAttachmentUpload.s3_key.in_(keys),
+                        EmailAttachmentUpload.s3_key == any_(storage_keys),
                     )
                 )
             )

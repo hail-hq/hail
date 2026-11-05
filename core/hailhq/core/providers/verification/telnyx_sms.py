@@ -902,6 +902,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             ("campaign", refs.get("campaign_id")),
             ("brand", refs.get("brand_id")),
         )
+        # Rejected personal registrations keep a confirmed brand for reuse.
+        # Organization erasure must remove that retained resource too.
+        if strict and refs.get("kept_brand_id") != refs.get("brand_id"):
+            steps += (("brand", refs.get("kept_brand_id")),)
         for key, resource_id in steps:
             if not resource_id:
                 continue

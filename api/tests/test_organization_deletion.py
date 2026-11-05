@@ -311,6 +311,10 @@ async def test_reused_identity_is_deleted_after_all_addresses(
         if refs.get("identity_created") and not addresses:
             identity["exists"] = False
 
+    async def discard_organization(refs, *, organization_id):
+        assert organization_id == str(body.organization_id)
+        await discard({**refs, "identity_created": True}, strict=True)
+
     for index in (1, 2):
         async_session.add(
             CarrierVerification(
@@ -326,7 +330,7 @@ async def test_reused_identity_is_deleted_after_all_addresses(
                 provider_refs={
                     "address_id": f"address-{index}",
                     "identity_id": "shared-identity",
-                    "identity_created": index == 1,
+                    "identity_created": False,
                 },
             )
         )
@@ -336,11 +340,84 @@ async def test_reused_identity_is_deleted_after_all_addresses(
         async_session,
         SimpleNamespace(delete_identity=AsyncMock()),
         None,
-        lambda name, purpose: SimpleNamespace(discard=discard),
+        lambda name, purpose: SimpleNamespace(
+            discard=discard, discard_organization=discard_organization
+        ),
         SimpleNamespace(delete=AsyncMock()),
     )
     assert result["ready"] is True
     assert not identity["exists"]
+
+
+@pytest.mark.parametrize("historical_first", [True, False])
+async def test_sms_erasure_removes_all_campaigns_before_reused_brand(
+    async_session: AsyncSession, monkeypatch, historical_first
+):
+    from hailhq.api.routes.internal import organization_deletion
+    from hailhq.core.models import CarrierVerification
+
+    body = await seed(async_session)
+    historical = {"kept_brand_id": "B1"}
+    live = {"brand_id": "B1", "campaign_id": "C1"}
+    saved_refs = [historical, live] if historical_first else [live, historical]
+    rows = []
+    for index, refs in enumerate(saved_refs):
+        row = CarrierVerification(
+            organization_id=body.organization_id,
+            provider="telnyx",
+            country_code="US",
+            number_type="local",
+            subject_type="person",
+            subject_name=f"Person {index}",
+            purpose="sms",
+            state="approved" if refs.get("campaign_id") else "cancelled",
+            requirements_version="test",
+            provider_refs=refs,
+        )
+        rows.append(row)
+        async_session.add(row)
+    await async_session.commit()
+    campaigns, brands = {"C1"}, {"B1"}
+    erased = []
+
+    async def discard(refs, *, strict=False):
+        assert strict is True
+        if refs.get("campaign_id") in campaigns:
+            campaigns.remove(refs["campaign_id"])
+            erased.append("campaign:C1")
+        for key in ("brand_id", "kept_brand_id"):
+            if refs.get(key) not in brands:
+                continue
+            if campaigns:
+                raise RuntimeError("brand still has a campaign")
+            brands.remove(refs[key])
+            erased.append("brand:B1")
+
+    monkeypatch.setattr(organization_deletion, "_rate_before_wipe", AsyncMock())
+    monkeypatch.setattr(organization_deletion, "_detach_registration", AsyncMock())
+    monkeypatch.setattr(
+        organization_deletion,
+        "sms_route",
+        lambda name: SimpleNamespace(delete_organization_services=AsyncMock()),
+    )
+    result = await prepare_organization_deletion(
+        body,
+        async_session,
+        SimpleNamespace(delete_identity=AsyncMock()),
+        None,
+        lambda name, purpose: SimpleNamespace(discard=discard),
+        SimpleNamespace(delete=AsyncMock()),
+    )
+    assert result["ready"] is True
+    assert campaigns == brands == set()
+    assert erased == ["campaign:C1", "brand:B1"]
+    # Every retry input survives, including the historical retained brand.
+    expected_refs = [{"kept_brand_id": "B1"}, {"brand_id": "B1", "campaign_id": "C1"}]
+    if not historical_first:
+        expected_refs.reverse()
+    for row in rows:
+        await async_session.refresh(row)
+    assert [row.provider_refs for row in rows] == expected_refs
 
 
 async def test_failed_first_sms_attach_still_cleans_named_service(
@@ -595,3 +672,61 @@ async def test_post_drain_pending_work_only_reopens_a_new_attempt(
         not already_closed
     )
     assert await async_session.get(Organization, body.organization_id) is not None
+
+
+async def test_explicit_surviving_workspace_oauth_token_ignores_legacy_cutoff(
+    async_session: AsyncSession, monkeypatch
+):
+    from hailhq.api import deps
+    from hailhq.core.models import User
+
+    body = await seed(async_session)
+    cutoff = datetime.now(timezone.utc)
+    async_session.add(
+        User(
+            id=body.user_id,
+            name="Alex",
+            email="bound@example.com",
+            created_at=cutoff,
+            oauth_tokens_valid_after=cutoff,
+        )
+    )
+    await async_session.commit()
+    monkeypatch.setattr(deps, "get_jwks_cache", lambda: object())
+    monkeypatch.setattr(
+        deps,
+        "verify_jwt",
+        AsyncMock(
+            return_value={
+                "sub": str(body.user_id),
+                "azp": "bound-client",
+                "activeOrganizationId": str(body.organization_id),
+                "iat": cutoff.timestamp() - 10,
+            }
+        ),
+    )
+    principal = await deps._principal_from_jwt("bound-signed-token", async_session)
+    assert principal.organization_id == body.organization_id
+
+
+async def test_large_file_inventory_does_not_exceed_driver_bind_limit(
+    async_session: AsyncSession,
+):
+    from sqlalchemy import text
+
+    body = await seed(async_session)
+    await async_session.execute(
+        text("""
+        INSERT INTO email_attachment_uploads
+            (id, organization_id, filename, content_type, size_bytes, s3_key, created_at)
+        SELECT gen_random_uuid(), :org, 'x.txt', 'text/plain', 1,
+               'outbound-attachments/' || n, now()
+        FROM generate_series(1, 32767) n
+    """),
+        {"org": body.organization_id},
+    )
+    await async_session.commit()
+    mail = SimpleNamespace(delete=AsyncMock())
+    result = await prepare(body, async_session, mail=mail)
+    assert result["ready"] is True
+    assert mail.delete.await_count == 32767

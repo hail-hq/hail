@@ -15,6 +15,7 @@ from hailhq.core.recordings import (
     recording_retention_days,
     recording_state,
 )
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from livekit import api
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,11 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
     try:
         async with session_scope() as db:
             call = await db.get(Call, call_id, with_for_update=True)
-            if call is None or not (call.metadata_ or {}).get("recording_enabled"):
+            if (
+                call is None
+                or call.status in TERMINAL_CALL_STATUSES
+                or not (call.metadata_ or {}).get("recording_enabled")
+            ):
                 return
             if (call.metadata_ or {}).get("recording_status") != "requested":
                 return
@@ -38,6 +43,7 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
             await recording_state(
                 db, call_id, recording_status="starting", recording_object_key=key
             )
+            # Keep the key durable if cancellation leaves an ambiguous Egress.
             await db.commit()
         request = api.RoomCompositeEgressRequest(
             room_name=room_name,
@@ -63,10 +69,22 @@ async def start_recording(call_id: UUID, room_name: str, lkapi) -> None:
                 )
             ],
         )
-        info = await asyncio.wait_for(
-            lkapi.egress.start_room_composite_egress(request), timeout=5
-        )
         async with session_scope() as db:
+            # Erasure takes this same lock and reloads metadata before cleanup.
+            # Hold it through the provider call so cleanup cannot miss a start.
+            call = await db.get(
+                Call, call_id, with_for_update=True, populate_existing=True
+            )
+            if (
+                call is None
+                or call.status in TERMINAL_CALL_STATUSES
+                or (call.metadata_ or {}).get("recording_status") != "starting"
+                or (call.metadata_ or {}).get("recording_object_key") != key
+            ):
+                return
+            info = await asyncio.wait_for(
+                lkapi.egress.start_room_composite_egress(request), timeout=5
+            )
             await recording_state(db, call_id, recording_egress_id=info.egress_id)
             call = await db.get(Call, call_id, populate_existing=True)
             if call:

@@ -386,7 +386,9 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
             status_code=status.HTTP_403_FORBIDDEN, detail=not_member_detail
         )
 
-    if "azp" in claims:
+    if "azp" in claims and active_org_uuid is None:
+        # Only unbound legacy JWTs can fall through to a new default org.
+        # Explicit workspace tokens are constrained by membership above.
         # OAuth resource JWTs are signed but not stored as access-token rows.
         # Deleting grants alone cannot revoke one or prevent tenant fallback.
         valid_after = (

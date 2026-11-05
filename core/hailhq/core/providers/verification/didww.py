@@ -618,6 +618,30 @@ class DidwwVerificationProvider(VerificationProvider):
     async def discard(self, refs: dict, *, strict: bool = False) -> None:
         await asyncio.to_thread(self._discard_sync, refs, strict=strict)
 
+    async def discard_organization(self, refs: dict, *, organization_id: str) -> None:
+        """Erase an org's registration, including an identity another filing
+        created. Verify its owner at DIDWW before overriding draft reuse.
+        Keep an identity while any address remains. Only 404 is success
+        after a failed request, so callers can retry with the same refs.
+        """
+        await asyncio.to_thread(self._discard_organization_sync, refs, organization_id)
+
+    def _discard_organization_sync(self, refs: dict, organization_id: str) -> None:
+        owned_identity = False
+        if refs.get("identity_id"):
+            try:
+                identity = self._client.get(f"identities/{refs['identity_id']}")["data"]
+            except DidwwApiError as exc:
+                if carrier_status(exc) != 404:
+                    raise
+            else:
+                if identity["attributes"].get("external_reference_id") != (
+                    f"hail-{organization_id}"
+                ):
+                    raise VerificationProviderError("DIDWW identity owner mismatch")
+                owned_identity = True
+        self._discard_sync({**refs, "identity_created": owned_identity}, strict=True)
+
     def _discard_sync(self, refs: dict, *, strict: bool = False) -> None:
         paths = [f"proofs/{p}" for p in refs.get("proof_ids", [])]
         paths += [f"encrypted_files/{f}" for f in refs.get("file_ids", [])]

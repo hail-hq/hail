@@ -432,6 +432,56 @@ async def test_discard_order_and_never_raises() -> None:
     await p.discard({})
 
 
+async def test_strict_discard_erases_brand_kept_by_rejected_registration() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={})
+
+    p = _provider(handler)
+    kept = await p.discard_rejected(
+        {
+            "brand_id": "B1",
+            "campaign_id": "C1",
+            "subject_type": "person",
+            "identity_verified": True,
+        }
+    )
+    calls.clear()
+    await p.discard(kept)
+    assert calls == []  # Ordinary cancellation preserves reuse.
+    await p.discard(kept, strict=True)
+    assert calls == [("DELETE", "/v2/10dlc/brand/B1")]
+
+
+@pytest.mark.parametrize("status", [400, 429, 500])
+async def test_strict_discard_retained_brand_failure_stops_erasure(status) -> None:
+    def handler(req):
+        return httpx.Response(status, json={})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _provider(handler).discard({"kept_brand_id": "B1"}, strict=True)
+
+
+async def test_strict_discard_erases_distinct_active_and_retained_brands() -> None:
+    calls = []
+
+    def handler(req):
+        calls.append(req.url.path)
+        return httpx.Response(404, json={})
+
+    await _provider(handler).discard(
+        {"campaign_id": "C1", "brand_id": "B2", "kept_brand_id": "B1"},
+        strict=True,
+    )
+    assert calls == [
+        "/v2/10dlc/campaign/C1",
+        "/v2/10dlc/brand/B2",
+        "/v2/10dlc/brand/B1",
+    ]
+
+
 @pytest.mark.parametrize(
     ("campaign_status", "state"),
     [

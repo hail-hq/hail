@@ -6,6 +6,7 @@ import json
 
 import pytest
 import responses
+from didww.exceptions import DidwwApiError
 from hailhq.core.config import settings
 from hailhq.core.providers.verification import (
     Address,
@@ -14,7 +15,11 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
-from hailhq.core.providers.verification.base import NOT_ACCEPTED, SubmitRefused
+from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    SubmitRefused,
+    VerificationProviderError,
+)
 from hailhq.core.providers.verification.didww import DidwwVerificationProvider
 from hailhq.core.providers.voice import didww as voice_mod
 from responses import matchers
@@ -838,6 +843,162 @@ async def test_discard_keeps_identity_when_the_lookup_fails(provider):
     )
     await provider.discard(_created_refs())
     assert "identities/id-1" not in _deleted()
+
+
+@responses.activate
+async def test_org_erasure_removes_identity_after_its_creator_was_cancelled(provider):
+    for path in ("proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"):
+        responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    responses.add(
+        responses.GET,
+        f"{BASE}/addresses",
+        json={"data": [{"id": "addr-2", "type": "addresses", "attributes": {}}]},
+    )
+    # The ordinary dismissal loses the creator's refs, while a reused
+    # registration remains. Only the reused registration reaches erasure.
+    await provider.discard(_created_refs())
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities/id-1",
+        json={
+            "data": {
+                "id": "id-1",
+                "type": "identities",
+                "attributes": {"external_reference_id": f"hail-{ORG}"},
+            }
+        },
+    )
+    responses.add(responses.DELETE, f"{BASE}/addresses/addr-2", status=204)
+    responses.add(responses.GET, f"{BASE}/addresses", json={"data": []})
+    responses.add(responses.DELETE, f"{BASE}/identities/id-1", status=204)
+    await provider.discard_organization(
+        {"identity_id": "id-1", "identity_created": False, "address_id": "addr-2"},
+        organization_id=ORG,
+    )
+    assert _deleted() == [
+        "proofs/proof-1",
+        "encrypted_files/file-1",
+        "addresses/addr-1",
+        "addresses/addr-2",
+        "identities/id-1",
+    ]
+    assert all(
+        "filter%5Bidentity.id%5D=id-1" in c.request.url
+        for c in responses.calls
+        if c.request.url.split("?")[0] == f"{BASE}/addresses"
+    )
+
+
+@responses.activate
+@pytest.mark.parametrize("external_reference", ["hail-other-org", None])
+async def test_org_erasure_refuses_identity_without_exact_org_owner(
+    provider, external_reference
+):
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities/id-1",
+        json={
+            "data": {
+                "id": "id-1",
+                "type": "identities",
+                "attributes": {"external_reference_id": external_reference},
+            }
+        },
+    )
+    with pytest.raises(VerificationProviderError):
+        await provider.discard_organization(_created_refs(), organization_id=ORG)
+    assert _deleted() == []
+
+
+@responses.activate
+async def test_org_erasure_keeps_identity_while_another_address_remains(provider):
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities/id-1",
+        json={"data": {"attributes": {"external_reference_id": f"hail-{ORG}"}}},
+    )
+    responses.add(responses.DELETE, f"{BASE}/addresses/addr-2", status=204)
+    responses.add(
+        responses.GET,
+        f"{BASE}/addresses",
+        json={"data": [{"id": "other-address", "type": "addresses"}]},
+    )
+    await provider.discard_organization(
+        {"identity_id": "id-1", "identity_created": False, "address_id": "addr-2"},
+        organization_id=ORG,
+    )
+    assert _deleted() == ["addresses/addr-2"]
+
+
+@responses.activate
+async def test_org_erasure_retries_when_identity_was_already_deleted(provider):
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities/id-1",
+        status=404,
+        json={"errors": [{"title": "Not found"}]},
+    )
+    for path in ("proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"):
+        responses.add(
+            responses.DELETE,
+            f"{BASE}/{path}",
+            status=404,
+            json={"errors": [{"title": "Not found"}]},
+        )
+    await provider.discard_organization(_created_refs(), organization_id=ORG)
+    assert _deleted() == [
+        "proofs/proof-1",
+        "encrypted_files/file-1",
+        "addresses/addr-1",
+    ]
+
+
+@responses.activate
+@pytest.mark.parametrize("failing_lookup", ["identities/id-1", "addresses"])
+async def test_org_erasure_lookup_failure_blocks_completion(provider, failing_lookup):
+    if failing_lookup == "addresses":
+        responses.add(
+            responses.GET,
+            f"{BASE}/identities/id-1",
+            json={"data": {"attributes": {"external_reference_id": f"hail-{ORG}"}}},
+        )
+    responses.add(
+        responses.GET,
+        f"{BASE}/{failing_lookup}",
+        status=500,
+        json={"errors": [{"title": "Unavailable"}]},
+    )
+    with pytest.raises(DidwwApiError):
+        await provider.discard_organization(
+            {"identity_id": "id-1", "identity_created": False}, organization_id=ORG
+        )
+    assert _deleted() == []
+
+
+@responses.activate
+@pytest.mark.parametrize("resource", ["proofs/proof-1", "identities/id-1"])
+async def test_org_erasure_delete_failure_blocks_completion(provider, resource):
+    responses.add(
+        responses.GET,
+        f"{BASE}/identities/id-1",
+        json={"data": {"attributes": {"external_reference_id": f"hail-{ORG}"}}},
+    )
+    responses.add(responses.GET, f"{BASE}/addresses", json={"data": []})
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/{resource}",
+        status=422,
+        json={"errors": [{"title": "In use"}]},
+    )
+    with pytest.raises(DidwwApiError):
+        await provider.discard_organization(
+            {
+                "identity_id": "id-1",
+                "identity_created": False,
+                "proof_ids": ["proof-1"] if resource.startswith("proofs/") else [],
+            },
+            organization_id=ORG,
+        )
 
 
 def test_registered_when_configured():

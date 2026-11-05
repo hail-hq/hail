@@ -156,7 +156,7 @@ async def org_lock(db: AsyncSession, org: UUID) -> None:
 async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
     """Drain mutations before deletion, including across external I/O.
 
-    The website holds FOR UPDATE on the org for its entire delete flow.
+    Deletion publishes its marker, then takes FOR UPDATE to drain admission.
     A caller holds this KEY SHARE lock until its transaction ends. HTTP
     callers use a separate session so route commits do not release it early.
     Inbound writers use their ingest transaction. A tombstone rejects callers
