@@ -576,19 +576,19 @@ async def test_background_sync_finishes_failed_sms_setup_and_refreshes_services(
     assert sms_mock.ensure_messaging_service.await_count == calls
 
 
-async def test_prompt_templates_show_the_full_prompt_per_channel(client, org) -> None:
+async def test_private_prompt_templates_are_not_exposed(client, org) -> None:
+    from hailhq.api.main import app
+    from hailhq.core import prompts
+
     _, headers = org
     r = await client.get("/agents/prompt-templates", headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    marker = body["instructions_placeholder"]
-    for channel in ("calls_in", "calls_out", "texts"):
-        assert body[channel].count(marker) == 1
-    assert "answering the call" in body["calls_in"]
-    assert "placing the call" in body["calls_out"]
-    assert "SMS" in body["texts"]
-    # The agent's own text follows Hail's framing, never leads it.
-    assert body["calls_in"].index(marker) > body["calls_in"].index("# Guardrails")
+    assert r.status_code == 410, r.text
+    assert r.json() == {"detail": "Prompt templates are no longer available."}
+    for private in (prompts.VOICE_PREAMBLE, prompts.TEXT_PREAMBLE):
+        assert private not in r.text
+    schema = app.openapi()
+    assert "/v1/agents/prompt-templates" not in schema["paths"]
+    assert "AgentPromptTemplates" not in schema["components"]["schemas"]
 
 
 async def _contact(client, headers, name="Sam", phone="+14155550111") -> str:

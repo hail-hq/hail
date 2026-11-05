@@ -83,6 +83,13 @@ Internal runbooks (not published) live in `docs/operations/`:
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
 
+## Agent prompt maintenance
+
+Shared runtime instructions live in `core/hailhq/core/prompts.py`. Keep them out of customer APIs and the console.
+Customer-authored instructions remain editable. Do not restore the retired prompt-template endpoint or full-prompt preview.
+When changing call or agent settings, update `VOICE_CONFIGURATION_HELP`, its tests, and the matching console labels together.
+Follow [docs/operations/agent-prompts.md](docs/operations/agent-prompts.md) for the privacy boundary and conversational checks.
+
 ## Style
 
 - **Python**: ruff (lint, `--fix`) + black (format); ruff, black and pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
