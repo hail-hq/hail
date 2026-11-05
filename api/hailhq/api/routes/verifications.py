@@ -45,7 +45,7 @@ from hailhq.core import sms_registration_fees, sms_setup
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
-from hailhq.core.db import get_session, org_lock
+from hailhq.core.db import get_session, lock_open_organization, org_lock
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
     rate_sms_registration,
@@ -690,6 +690,8 @@ async def _lock_for_poll(db: AsyncSession, row: CarrierVerification) -> bool:
     the carrier's answer: an SMS plug-in would create two campaigns, and the
     owners would get two decision emails. The lock is held until the caller
     commits."""
+    if not await lock_open_organization(db, row.organization_id):
+        return False
     locked = (
         await db.execute(
             select(CarrierVerification)
@@ -1484,6 +1486,15 @@ async def _lock_waiting(
 ) -> CarrierVerification | None:
     """The row, locked, if it is still 'awaiting_review'. None when an admin
     holds it (admin_approve locks the same way) or it moved on."""
+    org = (
+        await db.execute(
+            select(CarrierVerification.organization_id).where(
+                CarrierVerification.id == verification_id
+            )
+        )
+    ).scalar_one_or_none()
+    if org is None or not await lock_open_organization(db, org):
+        return None
     return (
         await db.execute(
             select(CarrierVerification)
@@ -1570,6 +1581,8 @@ async def _relock(
     """Lock the row again after a commit ended its lock, waiting for a poll
     that holds it, and reload it. False when it changed meanwhile (its
     state or ``updated_at`` differ): leave it as it is."""
+    if not await lock_open_organization(db, row.organization_id):
+        return False
     relocked = (
         await db.execute(
             select(CarrierVerification)
@@ -1989,6 +2002,15 @@ async def admin_list(
 
 async def _admin_row(db: AsyncSession, verification_id: UUID) -> CarrierVerification:
     # Locked until the request commits, so two admins cannot both act on it.
+    org = (
+        await db.execute(
+            select(CarrierVerification.organization_id).where(
+                CarrierVerification.id == verification_id
+            )
+        )
+    ).scalar_one_or_none()
+    if org is not None and not await lock_open_organization(db, org):
+        raise HTTPException(409, "This organization is being deleted.")
     row = (
         await db.execute(
             select(CarrierVerification)

@@ -8,6 +8,7 @@ No Stripe calls belong here. References remain until the website commits, so
 failed provider/storage cleanup can be retried without losing its inputs.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -43,9 +44,10 @@ from hailhq.core.models import (
     Sms,
 )
 from hailhq.core.providers.email import EmailProvider
-from hailhq.core.recordings import delete_recording
+from hailhq.core.recordings import EGRESS_TERMINAL, delete_recording
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from livekit import api
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -102,6 +104,41 @@ async def check_pending(db: AsyncSession, org: UUID) -> None:
             )
 
 
+async def ensure_recording_stopped(call: Call, lk: LiveKitClient | None) -> None:
+    meta = call.metadata_ or {}
+    if not meta.get("recording_object_key") or meta.get("recording_status") in {
+        "ready",
+        "failed",
+    }:
+        return
+    if lk is None or not call.livekit_room:
+        raise HTTPException(
+            503,
+            "Recording cleanup is unavailable. Contact support, then retry deletion.",
+        )
+    # Closing a terminal call's room prevents an ambiguous start from
+    # beginning a new upload after the reconciliation query below.
+    try:
+        await asyncio.wait_for(lk.delete_room(call.livekit_room), timeout=5)
+    except api.ServerError as exc:
+        if exc.code != api.ServerErrorCode.NOT_FOUND:
+            raise
+    egress_id = meta.get("recording_egress_id")
+    infos = await asyncio.wait_for(
+        (
+            lk.list_egress(egress_id)
+            if egress_id
+            else lk.list_room_egress(call.livekit_room)
+        ),
+        timeout=5,
+    )
+    if any(info.status not in EGRESS_TERMINAL for info in infos):
+        # An erasure tombstone must outlive the final Egress upload.
+        raise HTTPException(
+            409, "A recording is still processing. Wait, then retry deletion."
+        )
+
+
 @router.post("/prepare")
 async def prepare_organization_deletion(
     body: OrganizationDeletionIn,
@@ -145,6 +182,11 @@ async def prepare_organization_deletion(
         )
     )
     await db.commit()
+    # Closing is visible before taking the row lock. Existing billing writers
+    # drain without a row/advisory-lock cycle; new debits skip the closed org.
+    await db.execute(
+        select(Organization.id).where(Organization.id == org).with_for_update()
+    )
     await check_pending(db, org)
 
     numbers = (
@@ -171,15 +213,31 @@ async def prepare_organization_deletion(
     verifications = (
         (
             await db.execute(
-                select(CarrierVerification).where(
-                    CarrierVerification.organization_id == org
-                )
+                select(CarrierVerification)
+                .with_for_update()
+                .where(CarrierVerification.organization_id == org)
             )
         )
         .scalars()
         .all()
     )
     service_ids: dict[str, set[str]] = {}
+    await check_pending(db, org)
+    previous_states = {row.id: row.state for row in verifications}
+    for row in verifications:
+        if registry(row.provider, row.purpose) is None and (
+            row.provider_refs or row.state == "approved"
+        ):
+            raise HTTPException(
+                503,
+                "Registration cleanup is unavailable. Contact support, then retry deletion.",
+            )
+    # Disarm waiting workers under the same row locks they use to claim work.
+    # Keep every provider reference until the final organization purge.
+    for row in verifications:
+        row.state = "cancelled"
+        row.cancelled_at = row.cancelled_at or datetime.now(timezone.utc)
+    await db.commit()
     for number in numbers:
         carrier = CARRIERS.get(number.provider)
         if carrier is not None and carrier.sms_route is not None:
@@ -198,12 +256,14 @@ async def prepare_organization_deletion(
                     ids.add(row.provider_refs[key])
     for row in verifications:
         provider = registry(row.provider, row.purpose)
-        if provider is None and (row.provider_refs or row.state == "approved"):
+        if provider is None and (
+            row.provider_refs or previous_states[row.id] == "approved"
+        ):
             raise HTTPException(
                 503,
                 "Registration cleanup is unavailable. Contact support, then retry deletion.",
             )
-        if row.state == "approved" and row.purpose == "sms":
+        if previous_states[row.id] == "approved" and row.purpose == "sms":
             await _rate_before_wipe(db, row, provider)
             await _detach_registration(db, row, provider)
         if provider is not None:
@@ -249,16 +309,7 @@ async def prepare_organization_deletion(
     for call in calls:
         # A terminal call's egress may still be writing audio. Keep its row
         # until that process ends, rather than lose the erasure tombstone.
-        meta = call.metadata_ or {}
-        if meta.get("recording_object_key") and meta.get("recording_status") not in {
-            "ready",
-            "failed",
-            "erased",
-            "disabled",
-        }:
-            raise HTTPException(
-                409, "A recording is still processing. Wait, then retry deletion."
-            )
+        await ensure_recording_stopped(call, lk)
         await delete_recording(call)
     await db.commit()
 

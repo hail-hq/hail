@@ -8,7 +8,7 @@ import logging
 from uuid import UUID
 
 from hailhq.api.audit import write_audit_log
-from hailhq.core.db import org_lock
+from hailhq.core.db import lock_open_organization, org_lock
 from hailhq.core.models import CarrierVerification, PhoneNumber
 from hailhq.core.providers.verification.base import SmsRegistrationProvider
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
@@ -205,6 +205,9 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
         try:
             row = await db.get(CarrierVerification, registration_id)
             if row is None:
+                continue
+            if not await lock_open_organization(db, row.organization_id):
+                await db.rollback()
                 continue
             await org_lock(db, row.organization_id)
             await db.refresh(row)

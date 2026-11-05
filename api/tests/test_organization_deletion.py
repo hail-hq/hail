@@ -412,3 +412,152 @@ async def test_http_guard_survives_route_commits(session_factory, monkeypatch):
             .where(Organization.id == body.organization_id)
             .with_for_update()
         )
+
+
+async def test_guard_pool_does_not_starve_authenticated_routes(
+    session_factory, db, monkeypatch
+):
+    import asyncio
+
+    from hailhq.api import deps
+    from hailhq.core import db as core_db
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    async with session_factory() as setup_db:
+        body = await seed(setup_db)
+    normal = create_async_engine(db.url, pool_size=2, max_overflow=0, pool_timeout=0.3)
+    guards = create_async_engine(db.url, pool_size=2, max_overflow=0, pool_timeout=0.3)
+    normal_factory = async_sessionmaker(normal, expire_on_commit=False)
+    monkeypatch.setattr(core_db, "_sessionmaker", normal_factory)
+    monkeypatch.setattr(
+        core_db,
+        "_guard_sessionmaker",
+        async_sessionmaker(guards, expire_on_commit=False),
+    )
+    barrier = asyncio.Event()
+    count = 0
+    principal = deps.Principal(
+        auth_kind="jwt",
+        api_key_id=None,
+        user_id=body.user_id,
+        organization_id=body.organization_id,
+        scopes=["*"],
+    )
+
+    async def authenticate(token, auth_db):
+        nonlocal count
+        await auth_db.execute(text("SELECT 1"))
+        count += 1
+        if count == 2:
+            barrier.set()
+        await barrier.wait()
+        return principal
+
+    monkeypatch.setattr(deps, "_authenticate_principal", authenticate)
+
+    async def request():
+        async with normal_factory() as route_db:
+            admission = deps.get_current_principal("Bearer test", route_db)
+            try:
+                await anext(admission)
+                await route_db.execute(text("SELECT 1"))
+                await route_db.commit()
+                await route_db.execute(text("SELECT 1"))
+            finally:
+                await admission.aclose()
+
+    try:
+        await asyncio.wait_for(asyncio.gather(request(), request()), timeout=5)
+    finally:
+        await normal.dispose()
+        await guards.dispose()
+
+
+async def test_self_hosted_guard_does_not_query_website_tables():
+    from hailhq.core.config import SELF_HOSTED_ORG_ID
+    from hailhq.core.db import lock_open_organization
+
+    missing_website = SimpleNamespace(
+        execute=AsyncMock(side_effect=AssertionError("website table queried"))
+    )
+    assert await lock_open_organization(missing_website, SELF_HOSTED_ORG_ID)
+
+
+async def test_erased_recording_waits_for_egress_completion():
+    from hailhq.api.routes.internal.organization_deletion import (
+        ensure_recording_stopped,
+    )
+    from livekit import api
+
+    call = SimpleNamespace(
+        metadata_={
+            "recording_status": "erased",
+            "recording_object_key": "audio",
+            "recording_egress_id": "EG1",
+        },
+        livekit_room="hail-call",
+    )
+    lk = SimpleNamespace(
+        delete_room=AsyncMock(),
+        list_egress=AsyncMock(return_value=[SimpleNamespace(status=api.EGRESS_ENDING)]),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await ensure_recording_stopped(call, lk)
+    assert exc.value.status_code == 409
+    lk.list_egress.return_value = [SimpleNamespace(status=api.EGRESS_COMPLETE)]
+    await ensure_recording_stopped(call, lk)
+
+
+async def test_unavailable_recording_start_reconciles_by_room():
+    from hailhq.api.routes.internal.organization_deletion import (
+        ensure_recording_stopped,
+    )
+
+    call = SimpleNamespace(
+        metadata_={"recording_status": "unavailable", "recording_object_key": "audio"},
+        livekit_room="hail-call",
+    )
+    lk = SimpleNamespace(
+        delete_room=AsyncMock(), list_room_egress=AsyncMock(return_value=[])
+    )
+    await ensure_recording_stopped(call, lk)
+    lk.delete_room.assert_awaited_once_with("hail-call")
+    lk.list_room_egress.assert_awaited_once_with("hail-call")
+
+
+async def test_closing_org_prevents_background_verification_submission(
+    async_session: AsyncSession,
+):
+    from hailhq.api.routes.verifications import _retry_submit
+    from hailhq.core.models import CarrierVerification
+
+    body = await seed(async_session)
+    row = CarrierVerification(
+        organization_id=body.organization_id,
+        provider="didww",
+        country_code="GB",
+        number_type="local",
+        subject_type="business",
+        purpose="number",
+        state="awaiting_review",
+        requirements_version="test",
+        provider_refs={},
+    )
+    async_session.add_all(
+        [
+            row,
+            OrgClosure(
+                organization_id=body.organization_id,
+                source="organization_delete",
+                closed_at=datetime.now(timezone.utc),
+            ),
+        ]
+    )
+    await async_session.commit()
+    assert not await _retry_submit(
+        async_session,
+        row.id,
+        lambda name, purpose: (_ for _ in ()).throw(AssertionError("provider called")),
+    )
+    assert row.state == "awaiting_review"

@@ -57,6 +57,7 @@ async def db(
     from hailhq.core.models import Base
 
     engine = create_async_engine(to_async_url(database_url))
+    guard_engine = create_async_engine(to_async_url(database_url))
 
     async with engine.begin() as conn:
         await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
@@ -65,6 +66,11 @@ async def db(
 
     monkeypatch.setattr(
         core_db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
+    )
+    monkeypatch.setattr(
+        core_db,
+        "_guard_sessionmaker",
+        async_sessionmaker(guard_engine, expire_on_commit=False),
     )
 
     yield engine
@@ -76,6 +82,7 @@ async def db(
         task.cancel()
     await asyncio.gather(*pending, return_exceptions=True)
     await engine.dispose()
+    await guard_engine.dispose()
 
 
 @pytest.fixture()

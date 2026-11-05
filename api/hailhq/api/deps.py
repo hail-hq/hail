@@ -31,7 +31,12 @@ from hailhq.api.auth import (
     verify_jwt,
 )
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, lock_open_organization, session_scope
+from hailhq.core.db import (
+    get_session,
+    lock_open_organization,
+    organization_guard_scope,
+    session_scope,
+)
 from hailhq.core.models import ApiKey, Organization, OrganizationMember, User
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import telemetry_enabled
@@ -434,12 +439,15 @@ async def get_current_principal(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_session),
 ) -> AsyncIterator[Principal]:
-    principal = await _authenticate_principal(authorization, db)
+    # Close the read-only authentication transaction before waiting for a
+    # guard. No waiter may retain a connection that admitted routes need.
+    async with session_scope() as auth_db:
+        principal = await _authenticate_principal(authorization, auth_db)
     if principal.auth_kind == "shared":
         yield principal
         return
     # Keep the row lock through every route commit and provider/storage await.
-    async with session_scope() as guard:
+    async with organization_guard_scope() as guard:
         if not await lock_open_organization(guard, principal.organization_id):
             raise HTTPException(
                 403,

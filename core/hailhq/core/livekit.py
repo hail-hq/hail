@@ -81,6 +81,13 @@ class LiveKitClient:
         )
         return list(result.items)
 
+    async def list_room_egress(self, room_name: str) -> list[api.EgressInfo]:
+        """Find ambiguous starts whose Egress ID was never saved."""
+        result = await self._lkapi.egress.list_egress(
+            api.ListEgressRequest(room_name=room_name)
+        )
+        return list(result.items)
+
     async def create_room(self, call_id: UUID) -> str:
         """Provision a LiveKit room named ``hail-<call_id>``.
 

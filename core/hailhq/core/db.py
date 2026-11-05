@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import logfire
-from hailhq.core.config import settings
+from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.telemetry import instrument, telemetry_enabled
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -26,6 +26,8 @@ from sqlalchemy.ext.asyncio import (
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_guard_engine: AsyncEngine | None = None
+_guard_sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 _SCHEME_ALIASES = (
@@ -107,11 +109,15 @@ def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
 
 
 async def dispose_engine() -> None:
-    global _engine, _sessionmaker
+    global _engine, _sessionmaker, _guard_engine, _guard_sessionmaker
     if _engine is not None:
         await _engine.dispose()
     _engine = None
     _sessionmaker = None
+    if _guard_engine is not None:
+        await _guard_engine.dispose()
+    _guard_engine = None
+    _guard_sessionmaker = None
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -124,6 +130,17 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
     async with _ensure_initialized()() as session:
+        yield session
+
+
+@asynccontextmanager
+async def organization_guard_scope() -> AsyncIterator[AsyncSession]:
+    """A separate pool prevents admission guards from starving route queries."""
+    global _guard_engine, _guard_sessionmaker
+    if _guard_sessionmaker is None:
+        _guard_engine = create_async_engine(to_async_url(settings.database_url))
+        _guard_sessionmaker = async_sessionmaker(_guard_engine, expire_on_commit=False)
+    async with _guard_sessionmaker() as session:
         yield session
 
 
@@ -147,6 +164,9 @@ async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
     """
     from hailhq.core.models import Organization, OrgClosure
     from sqlalchemy import select
+
+    if org == SELF_HOSTED_ORG_ID:
+        return True
 
     await db.execute(
         select(Organization.id)
