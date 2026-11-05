@@ -1851,6 +1851,7 @@ async def test_soft_cap_stamps_reason_and_drops_room_before_shutdown(failure) ->
     including when the goodbye or room API fails."""
     session = FakeAnnouncingSession()
     fired: list[bool] = []
+    attempts = 3 if failure == "delete_room" else 1
 
     class Context(FakeJobContext):
         def delete_room(self):
@@ -1861,7 +1862,7 @@ async def test_soft_cap_stamps_reason_and_drops_room_before_shutdown(failure) ->
             return super().delete_room()
 
         def shutdown(self, reason=""):
-            assert self.delete_room_calls == 1
+            assert self.delete_room_calls == attempts
             super().shutdown(reason)
 
     ctx = Context()
@@ -1881,7 +1882,7 @@ async def test_soft_cap_stamps_reason_and_drops_room_before_shutdown(failure) ->
         delay_seconds=0,
         on_fire=lambda: fired.append(True),
     )
-    assert ctx.delete_room_calls == 1
+    assert ctx.delete_room_calls == attempts
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
@@ -2016,6 +2017,25 @@ async def test_bridge_answer_starts_the_handover_limit_from_the_answer() -> None
     assert fired == [True]
     assert SPOKEN_LINES["en"].soft_cap in session.said
     assert ctx.delete_room_calls == 1
+
+
+async def test_bridge_answer_arms_handover_limit_without_initial_cap() -> None:
+    """Disabling the agent call cap must not disable the handover cap."""
+    ctx = FakeJobContext()
+    session = FakeBridgeSession()
+    state: dict = {"human": None, "connected": False}
+    out = await make_agent_bridge(
+        ctx,
+        session,
+        CALL_ID,
+        state,
+        handover_seconds=0.01,
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam"))
+    assert out.outcome == "answered"
+    assert "soft_cap_task" in state
+    await state["soft_cap_task"]
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
 async def test_soft_cap_while_ringing_ends_both_legs() -> None:
