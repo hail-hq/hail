@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}\Z")
 
 
 def _e164_or_error(v: str | None) -> str | None:
@@ -1208,10 +1208,26 @@ class EventStreamResponse(BaseModel):
 # Email schemas.
 # --------------------------------------------------------------------------- #
 
-# A liberal regex — RFC 5322 in full is a tarpit. This catches the obvious
-# mistakes (no @, whitespace, missing TLD) without rejecting things SES
-# would accept. SES does its own validation at send time.
-EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+# An allowlist, because each field holds one plain address. RFC 5322 in full
+# is a tarpit, so quoted local parts are refused. Dots in the local part stay
+# free, since some real mailboxes break the RFC rules for them. Any non-ASCII
+# text passes, because Python's ``\w`` misses the marks in many scripts. SES
+# does its own validation at send time. ``\Z`` because ``$`` would let a
+# trailing newline through.
+_NON_ASCII = "¡-\U0010ffff"
+_LOCAL_PART = rf"[A-Za-z0-9.!#$%&'*+/=?^_`{{|}}~{_NON_ASCII}-]+"
+_DOMAIN_LABEL = rf"[\w{_NON_ASCII}](?:[\w{_NON_ASCII}-]*[\w{_NON_ASCII}])?"
+EMAIL_ADDR = re.compile(
+    rf"^(?!.*\s){_LOCAL_PART}@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
+)
+
+
+def is_email_address(value: str) -> bool:
+    """Whether ``value`` is one plain address. ``isprintable`` refuses the
+    invisible format characters that the regex's non-ASCII range lets through."""
+    return bool(EMAIL_ADDR.match(value)) and value.isprintable()
+
+
 DOMAIN_NAME = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 )
@@ -1467,11 +1483,13 @@ class EmailDomainPatch(BaseModel):
     def _forward_to_look_like_addresses(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return v
+        out: list[str] = []
         for addr in v:
-            local, sep, domain = addr.rpartition("@")
-            if not sep or not local or "." not in domain:
+            stripped = addr.strip()
+            if not is_email_address(stripped):
                 raise ValueError(f"forward_to entry {addr!r} is not an email address")
-        return v
+            out.append(stripped)
+        return out
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
@@ -1833,7 +1851,7 @@ class EmailCreate(ConsentAttestationMixin):
     def _validate_optional_email(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if not EMAIL_ADDR.match(v):
+        if not is_email_address(v):
             raise ValueError("must be a valid email address (local@domain.tld)")
         return _normalize_domain(v)
 
@@ -1844,7 +1862,7 @@ class EmailCreate(ConsentAttestationMixin):
             return v
         out: list[str] = []
         for addr in v:
-            if not EMAIL_ADDR.match(addr):
+            if not is_email_address(addr):
                 raise ValueError(
                     f"invalid email address {addr!r} (expected local@domain.tld)"
                 )
@@ -2394,7 +2412,7 @@ def _normalize_contact_email(v: str | None) -> str | None:
     no backfill."""
     if v is None:
         return v
-    if not EMAIL_ADDR.match(v):
+    if not is_email_address(v):
         raise ValueError("must be a valid email address (local@domain.tld)")
     return _normalize_domain(v).lower()
 

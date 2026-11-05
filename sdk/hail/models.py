@@ -23,7 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}\Z")
 
 
 def _e164_or_error(v: str | None) -> str | None:
@@ -411,7 +411,18 @@ class EventStreamResponse(BaseModel):
 # by hand; codegen will replace this once openapi → SDK is wired.
 # --------------------------------------------------------------------------- #
 
-EMAIL_ADDR = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_NON_ASCII = "¡-\U0010ffff"
+_LOCAL_PART = rf"[A-Za-z0-9.!#$%&'*+/=?^_`{{|}}~{_NON_ASCII}-]+"
+_DOMAIN_LABEL = rf"[\w{_NON_ASCII}](?:[\w{_NON_ASCII}-]*[\w{_NON_ASCII}])?"
+EMAIL_ADDR = re.compile(
+    rf"^(?!.*\s){_LOCAL_PART}@{_DOMAIN_LABEL}(?:\.{_DOMAIN_LABEL})+\Z"
+)
+
+
+def is_email_address(value: str) -> bool:
+    """Whether ``value`` is one plain address. ``isprintable`` refuses the
+    invisible format characters that the regex's non-ASCII range lets through."""
+    return bool(EMAIL_ADDR.match(value)) and value.isprintable()
 
 
 def _normalize_domain(addr: str) -> str:
@@ -475,7 +486,7 @@ class EmailCreate(BaseModel):
     def _validate_optional_email(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if not EMAIL_ADDR.match(v):
+        if not is_email_address(v):
             raise ValueError("must be a valid email address (local@domain.tld)")
         return _normalize_domain(v)
 
@@ -486,7 +497,7 @@ class EmailCreate(BaseModel):
             return v
         out: list[str] = []
         for addr in v:
-            if not EMAIL_ADDR.match(addr):
+            if not is_email_address(addr):
                 raise ValueError(
                     f"invalid email address {addr!r} (expected local@domain.tld)"
                 )
