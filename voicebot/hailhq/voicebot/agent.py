@@ -1344,7 +1344,7 @@ async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
     try:
         await ctx.delete_room()
     except Exception:
-        logger.exception("call_id=%s delete_room failed after handover", call_id)
+        logger.exception("call_id=%s delete_room failed during call teardown", call_id)
 
 
 async def drop_handover_leg(
@@ -1585,7 +1585,8 @@ async def soft_cap_announce_and_hangup(
 
     Soft cap (not a hard cutoff): the agent speaks the announcement,
     waits for playback to finish so the caller actually hears it, then
-    requests ``ctx.shutdown()``. The existing shutdown callback runs
+    deletes the room to disconnect the phone leg before requesting
+    ``ctx.shutdown()``. The existing shutdown callback runs
     ``on_call_end`` → writes the ``usage_events`` row → fires the rater
     webhook. Same lifecycle as a natural call end.
 
@@ -1602,9 +1603,8 @@ async def soft_cap_announce_and_hangup(
     once the wait is over, so a cap already announcing is not cut short).
     With a contact leg in the room (connected, or picked up and still in
     the silence check) the agent's output audio may be off, so it is turned back
-    on for the announcement (both people hear it). With a
-    contact leg ringing or connected the room is deleted before shutdown,
-    so no leg outlives the job.
+    on for the announcement (both people hear it). The room is deleted
+    with or without a handover, so no phone leg outlives the job.
     """
     try:
         await asyncio.sleep(delay_seconds)
@@ -1637,8 +1637,13 @@ async def soft_cap_announce_and_hangup(
         )
     if on_fire is not None:
         on_fire()
-    if bridge_state is not None:
-        await drop_handover_leg(ctx, bridge_state, call_id)
+    # Shutdown alone leaves the SIP participant connected. End ordinary
+    # calls too, and suppress disconnect/shutdown callbacks repeating a
+    # handover teardown once deletion starts.
+    if bridge_state is None or not bridge_state.get("ending"):
+        if bridge_state is not None:
+            bridge_state["ending"] = True
+        await _drop_room(ctx, call_id)
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
 
 

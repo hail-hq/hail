@@ -1289,6 +1289,7 @@ async def test_soft_cap_speaks_announcement_then_shuts_down() -> None:
     assert allow_interruptions is False
     assert session.last_handle is not None
     assert session.last_handle.played_out is True
+    assert ctx.delete_room_calls == 1
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
@@ -1307,6 +1308,7 @@ async def test_soft_cap_cancelled_before_firing_does_not_speak() -> None:
     await asyncio.gather(task, return_exceptions=True)
 
     assert session.say_calls == []
+    assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
 
 
@@ -1825,7 +1827,7 @@ async def test_soft_cap_while_connected_unmutes_announces_and_drops_room() -> No
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
-async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
+async def test_soft_cap_without_handover_deletes_room() -> None:
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state = {"human": None, "connected": False}
@@ -1838,7 +1840,48 @@ async def test_soft_cap_without_handover_keeps_audio_and_room() -> None:
     )
     assert session.output.enabled == []
     assert session.said == [SPOKEN_LINES["en"].soft_cap]
-    assert ctx.delete_room_calls == 0
+    assert state["ending"] is True
+    assert ctx.delete_room_calls == 1
+    assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
+
+
+@pytest.mark.parametrize("failure", [None, "announcement", "delete_room"])
+async def test_soft_cap_stamps_reason_and_drops_room_before_shutdown(failure) -> None:
+    """The phone leg must end before job shutdown finalizes the usage row,
+    including when the goodbye or room API fails."""
+    session = FakeAnnouncingSession()
+    fired: list[bool] = []
+
+    class Context(FakeJobContext):
+        def delete_room(self):
+            assert fired == [True]
+            assert self.shutdown_calls == []
+            if failure != "announcement":
+                assert session.last_handle.played_out is True
+            return super().delete_room()
+
+        def shutdown(self, reason=""):
+            assert self.delete_room_calls == 1
+            super().shutdown(reason)
+
+    ctx = Context()
+    if failure == "delete_room":
+        ctx.delete_room_error = RuntimeError("room API unavailable")
+    if failure == "announcement":
+
+        def fail_say(*args, **kwargs):
+            raise RuntimeError("TTS unavailable")
+
+        session.say = fail_say
+
+    await soft_cap_announce_and_hangup(
+        ctx,
+        session,
+        CALL_ID,
+        delay_seconds=0,
+        on_fire=lambda: fired.append(True),
+    )
+    assert ctx.delete_room_calls == 1
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
