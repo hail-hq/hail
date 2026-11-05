@@ -134,3 +134,24 @@ async def org_lock(db: AsyncSession, org: UUID) -> None:
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": str(org)},
     )
+
+
+async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
+    """Drain mutations before deletion, including across external I/O.
+
+    The website holds FOR UPDATE on the org for its entire delete flow.
+    A caller holds this KEY SHARE lock until its transaction ends. HTTP
+    callers use a separate session so route commits do not release it early.
+    Inbound writers use their ingest transaction. A tombstone rejects callers
+    that waited for deletion and callers retrying while cleanup is paused.
+    """
+    from hailhq.core.models import Organization, OrgClosure
+    from sqlalchemy import select
+
+    await db.execute(
+        select(Organization.id)
+        .where(Organization.id == org)
+        .with_for_update(read=True, key_share=True)
+    )
+    closure = await db.get(OrgClosure, org)
+    return closure is None or closure.source != "organization_delete"

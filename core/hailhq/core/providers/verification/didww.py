@@ -84,7 +84,11 @@ def draft_address_ref(org: str, country: str, kind: str) -> str:
 
 
 def _field(name: str) -> FieldSpec:
-    return FieldSpec(name=name, label=_LABELS.get(name, name.replace("_", " ").capitalize()), kind=_KINDS.get(name, "text"))  # type: ignore[arg-type]
+    return FieldSpec(
+        name=name,
+        label=_LABELS.get(name, name.replace("_", " ").capitalize()),
+        kind=_KINDS.get(name, "text"),
+    )  # type: ignore[arg-type]
 
 
 def _slots(
@@ -611,16 +615,16 @@ class DidwwVerificationProvider(VerificationProvider):
         # DIDWW registers the end user by the address: it is both ids.
         return {"verification_id": refs["address_id"], "address_id": refs["address_id"]}
 
-    async def discard(self, refs: dict) -> None:
-        await asyncio.to_thread(self._discard_sync, refs)
+    async def discard(self, refs: dict, *, strict: bool = False) -> None:
+        await asyncio.to_thread(self._discard_sync, refs, strict=strict)
 
-    def _discard_sync(self, refs: dict) -> None:
+    def _discard_sync(self, refs: dict, *, strict: bool = False) -> None:
         paths = [f"proofs/{p}" for p in refs.get("proof_ids", [])]
         paths += [f"encrypted_files/{f}" for f in refs.get("file_ids", [])]
         if refs.get("address_id"):
             paths.append(f"addresses/{refs['address_id']}")
         for path in paths:
-            self._delete(path)
+            self._delete(path, strict=strict)
         if refs.get("identity_id") and refs.get("identity_created"):
             # A later registration may have reused the identity this draft
             # created. Delete it only when no address is left on it.
@@ -633,6 +637,8 @@ class DidwwVerificationProvider(VerificationProvider):
                     },
                 )["data"]
             except Exception:
+                if strict:
+                    raise
                 logger.warning(
                     "didww identity %s kept: address lookup failed",
                     refs["identity_id"],
@@ -640,10 +646,17 @@ class DidwwVerificationProvider(VerificationProvider):
                 )
                 return
             if not in_use:
-                self._delete(f"identities/{refs['identity_id']}")
+                self._delete(f"identities/{refs['identity_id']}", strict=strict)
 
-    def _delete(self, path: str) -> None:
+    def _delete(self, path: str, *, strict: bool = False) -> None:
         try:
             self._client.delete(path)
+        except DidwwApiError as exc:
+            if getattr(exc, "status_code", None) != 404 and strict:
+                raise
+            if getattr(exc, "status_code", None) != 404:
+                logger.warning("didww discard of %s failed", path, exc_info=True)
         except Exception:
+            if strict:
+                raise
             logger.warning("didww discard of %s failed", path, exc_info=True)

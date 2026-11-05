@@ -37,7 +37,7 @@ async def test_authenticated_actor_identity_comes_from_database(
     )
     monkeypatch.setattr(deps, "telemetry_enabled", lambda: True)
     with identity_scope({}):
-        result = await deps.get_current_principal("Bearer test", async_session)
+        result = await deps._authenticate_principal("Bearer test", async_session)
         assert result is principal
         assert get_identity() == {
             "organization_id": str(org_id),
@@ -63,5 +63,5 @@ async def test_disabled_telemetry_does_not_lookup_identity(monkeypatch):
     )
     monkeypatch.setattr(deps, "telemetry_enabled", lambda: False)
     db = SimpleNamespace(execute=AsyncMock())
-    assert await deps.get_current_principal("Bearer test", db) is principal
+    assert await deps._authenticate_principal("Bearer test", db) is principal
     db.execute.assert_not_awaited()

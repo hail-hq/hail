@@ -104,6 +104,23 @@ class TelnyxSmsProvider(SmsProvider):
         )
         return result["data"]["id"]
 
+    async def delete_organization_services(
+        self, organization_id: UUID, service_ids: set[str]
+    ) -> None:
+        name = f"hail-{organization_id}"
+        found = await self.client.request(
+            "GET", "/messaging_profiles", params={"filter[name]": name}
+        )
+        ids = service_ids | {p["id"] for p in found["data"] if p.get("name") == name}
+        for profile_id in ids:
+            try:
+                await self.client.request(
+                    "DELETE", f"/messaging_profiles/{path_id(profile_id)}"
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+
     async def attach_number(
         self, messaging_service_sid: str, provider_resource_id: str
     ) -> None:

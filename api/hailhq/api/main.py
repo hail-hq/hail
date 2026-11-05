@@ -42,6 +42,9 @@ from hailhq.api.routes.internal import call_settings as internal_call_settings
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import numbers as internal_numbers
 from hailhq.api.routes.internal import org_closures as internal_org_closures
+from hailhq.api.routes.internal import (
+    organization_deletion as internal_organization_deletion,
+)
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.routes.internal import voices as internal_voices
@@ -469,6 +472,7 @@ for _router in _CUSTOMER_ROUTERS:
 
 app.include_router(internal_ses_events.router)
 app.include_router(internal_org_closures.router)
+app.include_router(internal_organization_deletion.router)
 app.include_router(internal_provider_config.router)
 app.include_router(internal_call_settings.router)
 app.include_router(internal_voices.router)

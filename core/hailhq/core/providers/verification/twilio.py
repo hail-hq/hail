@@ -535,7 +535,7 @@ class TwilioVerificationProvider(VerificationProvider):
 
     # -- discard -----------------------------------------------------------
 
-    def _discard_sync(self, refs: dict) -> None:
+    def _discard_sync(self, refs: dict, *, strict: bool = False) -> None:
         steps = []
         if refs.get("bundle_sid"):
             steps.append(self._rc.bundles(refs["bundle_sid"]).delete)
@@ -550,8 +550,17 @@ class TwilioVerificationProvider(VerificationProvider):
         for step in steps:
             try:
                 step()
-            except Exception:  # best effort; a stray draft is harmless
+            except TwilioRestException as exc:
+                if exc.status != 404 and strict:
+                    raise
+                if exc.status != 404:
+                    logger.warning(
+                        "twilio verification cleanup step failed", exc_info=True
+                    )
+            except Exception:
+                if strict:
+                    raise
                 logger.warning("twilio verification cleanup step failed", exc_info=True)
 
-    async def discard(self, refs: dict) -> None:
-        await asyncio.to_thread(self._discard_sync, refs)
+    async def discard(self, refs: dict, *, strict: bool = False) -> None:
+        await asyncio.to_thread(self._discard_sync, refs, strict=strict)

@@ -112,6 +112,8 @@ class User(Base):
     )
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     phone_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Website-owned credential revocation, applied with its auth migration.
+    oauth_tokens_valid_after: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
 
 class Contact(Base):
