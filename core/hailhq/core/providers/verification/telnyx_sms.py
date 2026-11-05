@@ -131,6 +131,39 @@ _FORM_FIELDS = {
         **_ADDRESS_FIELDS,
     },
 }
+# Campaign content and consent declarations filed from the application.
+# Resource IDs, messaging-profile configuration and number pooling are not
+# customer-editable evidence and must not turn operational errors into refusals.
+_CAMPAIGN_FIELDS = {
+    "usecase",
+    "subUsecases",
+    "description",
+    "messageFlow",
+    "sample1",
+    "sample2",
+    "sample3",
+    "sample4",
+    "sample5",
+    "embeddedLink",
+    "embeddedPhone",
+    "ageGated",
+    "directLending",
+    "subscriberOptin",
+    "subscriberOptout",
+    "subscriberHelp",
+    "optinKeywords",
+    "optoutKeywords",
+    "helpKeywords",
+    "optinMessage",
+    "optoutMessage",
+    "helpMessage",
+    "termsAndConditions",
+    "privacyPolicyLink",
+    "termsAndConditionsLink",
+}
+_APPLICATION_POINTERS = {
+    f"/{field}" for field in _CAMPAIGN_FIELDS | set().union(*_FORM_FIELDS.values())
+}
 _DUPLICATE = {
     "mobile_phone_number": "This mobile number is on too many registrations. Use another one.",
     "email": "This email is on too many registrations. Use another one.",
@@ -1027,14 +1060,9 @@ def _refused(exc: Exception) -> bool:
     if not isinstance(exc, httpx.HTTPStatusError):
         return False
     errors = _errors(exc.response)
-    # Brand payload fields are top-level. Do not treat arbitrary provider
-    # paths (e.g. account configuration) as customer application fields.
-    known_field = any(
-        _pointer(error) == f"/{field}"
-        for error in errors
-        for fields in _FORM_FIELDS.values()
-        for field in fields
-    )
+    # Application payload fields are top-level. Keep both brand and campaign
+    # validation evidence without interpreting arbitrary operational paths.
+    known_field = any(_pointer(error) in _APPLICATION_POINTERS for error in errors)
     prose = " ".join(
         f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
     )

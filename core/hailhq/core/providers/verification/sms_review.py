@@ -64,7 +64,16 @@ def campaign_repair_reason(raw: object) -> str:
             "Review the public SMS terms: include the program, frequency, rates, support and opt-out instructions.",
         ),
         (
-            ("opt-in", "opt in", "consent", "message flow", "30917", "30925"),
+            (
+                "opt-in",
+                "opt in",
+                "optin",
+                "consent",
+                "message flow",
+                "messageflow",
+                "30917",
+                "30925",
+            ),
             "Review recipient consent: provide the exact opt-in steps, disclosure and accessible redacted evidence for every method used.",
         ),
         (

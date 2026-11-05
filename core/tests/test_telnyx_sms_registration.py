@@ -2192,6 +2192,111 @@ async def test_campaign_submission_refusal_returns_safe_repair_guidance():
     assert "campaign_id" not in refs
 
 
+@pytest.mark.parametrize("status", [400, 422])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "messageFlow",
+        "usecase",
+        "subUsecases",
+        "description",
+        "sample1",
+        "sample2",
+        "sample3",
+        "sample4",
+        "sample5",
+        "embeddedLink",
+        "embeddedPhone",
+        "ageGated",
+        "directLending",
+        "subscriberOptin",
+        "subscriberOptout",
+        "subscriberHelp",
+        "optinKeywords",
+        "optoutKeywords",
+        "helpKeywords",
+        "optinMessage",
+        "optoutMessage",
+        "helpMessage",
+        "termsAndConditions",
+        "privacyPolicyLink",
+        "termsAndConditionsLink",
+    ],
+)
+async def test_campaign_structured_validation_requests_repair(status, field):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    writes = []
+
+    def handler(req):
+        if req.method != "GET":
+            writes.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={
+                    "errors": [
+                        {"detail": "Invalid value", "source": {"pointer": f"/{field}"}}
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    result = await _provider(handler).status(refs)
+    assert result.state == "rejected" and result.reason
+    assert refs["campaign_needs_repair"] is True
+    assert refs["brand_id"] == "B1" and "campaign_id" not in refs
+    assert writes == [("POST", "/v2/10dlc/campaignBuilder")]
+    if field == "messageFlow":
+        assert "consent" in result.reason
+    if field == "usecase":
+        assert "purposes" in result.reason
+
+
+@pytest.mark.parametrize(
+    ("status", "pointer", "detail"),
+    [
+        (400, "/brandId", "Invalid value"),
+        (422, "/numberPool", "Invalid value"),
+        (422, "/messagingProfileId", "Invalid value"),
+        (400, "/unknown", "Invalid value"),
+        (422, "/account/email", "Invalid value"),
+        (401, "/messageFlow", "Invalid value"),
+        (403, "/usecase", "Invalid value"),
+        (400, "/messageFlow", "Account configuration missing"),
+        (422, "/usecase", "Invalid API key"),
+    ],
+)
+async def test_campaign_operational_pointers_remain_retryable(status, pointer, detail):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    writes = []
+
+    def handler(req):
+        if req.method != "GET":
+            writes.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={"errors": [{"detail": detail, "source": {"pointer": pointer}}]},
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    with pytest.raises(VerificationProviderError):
+        await _provider(handler).status(refs)
+    assert "campaign_needs_repair" not in refs and "campaign_id" not in refs
+    assert refs["brand_id"] == "B1"
+    assert writes == [("POST", "/v2/10dlc/campaignBuilder")]
+
+
 async def test_legacy_confirmed_person_keeps_paid_brand_for_evidence_repair():
     calls = []
 
