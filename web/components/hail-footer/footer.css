@@ -54,7 +54,8 @@
 }
 .hail-footer-social {
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 8px 20px;
 }
 .hail-footer-column {
   display: flex;
