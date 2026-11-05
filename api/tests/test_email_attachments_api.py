@@ -101,21 +101,17 @@ async def test_metadata_commit_failure_does_not_write_storage(session_factory):
         objects[key] = payload
 
     async with session_factory() as db:
-        await db.execute(
-            text("""
+        await db.execute(text("""
             CREATE FUNCTION reject_test_upload() RETURNS trigger AS $$
             BEGIN
                 RAISE EXCEPTION 'metadata write failed';
             END;
             $$ LANGUAGE plpgsql
-        """)
-        )
-        await db.execute(
-            text("""
+        """))
+        await db.execute(text("""
             CREATE TRIGGER reject_test_upload BEFORE INSERT ON email_attachment_uploads
             FOR EACH ROW EXECUTE FUNCTION reject_test_upload()
-        """)
-        )
+        """))
         await db.commit()
         try:
             with pytest.raises(DBAPIError, match="metadata write failed"):
@@ -175,9 +171,9 @@ async def test_closure_during_storage_put_keeps_reference_discoverable(session_f
                     EmailAttachmentUpload.organization_id == org_id
                 )
             )
-            assert row is not None, (
-                "closure must find the reference before bytes are written"
-            )
+            assert (
+                row is not None
+            ), "closure must find the reference before bytes are written"
             assert row.s3_key == key
         objects[key] = payload
 
@@ -214,9 +210,9 @@ async def test_cancelled_upload_waits_for_storage_to_settle(session_factory, put
             for _ in range(2):
                 upload.cancel()
                 await asyncio.sleep(0)
-                assert not upload.done(), (
-                    "admission must remain held during storage I/O"
-                )
+                assert (
+                    not upload.done()
+                ), "admission must remain held during storage I/O"
             finish.set()
             with pytest.raises(asyncio.CancelledError):
                 await upload
