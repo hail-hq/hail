@@ -1222,3 +1222,149 @@ async def test_sms_runtime_readiness_survives_mcp_response(client: HailClient) -
     assert result["step"] == "runtime_setup"
     assert result["campaign_accepted"] is True
     assert result["runtime_ready"] is False
+
+
+@respx.mock
+async def test_get_sms_application_uses_authenticated_same_row(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    application = {
+        "schema_version": 2,
+        "subject_type": "person",
+        "fields": {"program_name": "Acme"},
+        "address": None,
+    }
+    route = respx.get(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        return_value=httpx.Response(200, json=application)
+    )
+    assert (
+        await tools.get_sms_application(client=client, verification_id=vid)
+        == application
+    )
+    assert route.calls[0].request.headers["authorization"] == f"Bearer {_API_KEY}"
+    assert len(respx.calls) == 1
+
+
+@respx.mock
+async def test_amend_sms_application_patches_same_row_without_create_or_cancel(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    fields = {
+        "program_name": "Acme",
+        "consent_methods": "WEBSITE",
+        "website_evidence_url": "https://acme.org/evidence",
+    }
+    address = _kwargs(client)["address"]
+    route = respx.patch(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        return_value=httpx.Response(
+            200,
+            json=_verification(
+                vid,
+                purpose="sms",
+                step="needs_information",
+                information_reason="Complete consent evidence",
+                campaign_accepted=False,
+                runtime_ready=False,
+            ),
+        )
+    )
+    result = await tools.amend_sms_application(
+        client=client,
+        verification_id=vid,
+        fields=fields,
+        address=address,
+        attest_authorized=True,
+    )
+    assert result["id"] == vid and result["step"] == "needs_information"
+    assert result["runtime_ready"] is False
+    request = route.calls[0].request
+    assert request.headers["authorization"] == f"Bearer {_API_KEY}"
+    assert json.loads(request.content) == {"fields": fields, "address": address}
+    assert len(respx.calls) == 1 and request.method == "PATCH"
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"attest_authorized": False},
+        {"fields": {f"f{i}": "x" for i in range(101)}},
+        {"fields": {"x": "x" * 65537}},
+        {"fields": {"private": [_FIELD_VALUE]}},
+        {"address": None},
+        {"address": {"private": [_FIELD_VALUE]}},
+    ],
+)
+async def test_amend_sms_application_refuses_invalid_envelope_without_sending(
+    client: HailClient, over
+) -> None:
+    args = {
+        "client": client,
+        "verification_id": str(uuid4()),
+        "fields": {"program_name": "Acme"},
+        "address": _kwargs(client)["address"],
+        "attest_authorized": True,
+    }
+    args.update(over)
+    result = await tools.amend_sms_application(**args)
+    assert "error" in result and _FIELD_VALUE not in json.dumps(result)
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_amend_sms_application_field_errors_strip_private_input(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.patch(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "loc": ["body", "fields", "opt_in_message"],
+                        "msg": "Include message frequency",
+                        "input": _FIELD_VALUE,
+                        "ctx": {"private": _NAME},
+                    }
+                ]
+            },
+        )
+    )
+    result = await tools.amend_sms_application(
+        client=client,
+        verification_id=vid,
+        fields={"program_name": "Acme"},
+        address=_kwargs(client)["address"],
+        attest_authorized=True,
+    )
+    assert result["problems"] == [
+        {
+            "loc": ["body", "fields", "opt_in_message"],
+            "msg": "Include message frequency",
+        }
+    ]
+    assert _FIELD_VALUE not in json.dumps(result) and _NAME not in json.dumps(result)
+    assert "same verification_id" in result["error"]
+
+
+@respx.mock
+async def test_amend_sms_application_timeout_keeps_recovery_on_same_row(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.patch(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        side_effect=httpx.ReadTimeout("private details")
+    )
+    result = await tools.amend_sms_application(
+        client=client,
+        verification_id=vid,
+        fields={"program_name": "Acme"},
+        address=_kwargs(client)["address"],
+        attest_authorized=True,
+    )
+    assert "same verification_id" in result["error"]
+    assert "private details" not in result["error"]
+    assert len(respx.calls) == 1

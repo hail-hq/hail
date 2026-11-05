@@ -40,7 +40,10 @@ Exposes the following tools to the calling agent:
 * ``submit_verification`` — send the user's details and documents to the
   carrier (irreversible once submitted; needs ``attest_authorized=True``)
 * ``list_verifications`` — the org's verifications and their states
-* ``get_verification`` — one verification; poll it until ``approved``
+* ``get_verification`` — one verification; poll or repair its reported step
+* ``get_sms_application`` — read the saved application or recover the original sender
+* ``amend_sms_application`` — correct evidence on the same paid sender and row
+  (needs ``attest_authorized=True``)
 * ``cancel_verification`` — cancel or dismiss (``awaiting_review``/``rejected``, or an
   approved US SMS registration)
 * ``confirm_verification`` — enter the code the carrier texted a person
@@ -992,6 +995,78 @@ async def get_verification(
     except Exception:
         # No exception text: a decode or validation error can carry a body.
         return {"error": _UNEXPECTED_ERROR}
+
+
+async def get_sms_application(
+    *, client: HailClient, verification_id: str
+) -> dict[str, Any]:
+    verification_id_ = _as_uuid(verification_id)
+    if verification_id_ is None:
+        return _not_uuid("verification_id")
+    try:
+        return _without_carrier(await client.get_sms_application(verification_id_))
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        return {"error": _UNEXPECTED_ERROR}
+
+
+async def amend_sms_application(
+    *,
+    client: HailClient,
+    verification_id: str,
+    fields: Any,
+    attest_authorized: bool,
+    address: Any = None,
+) -> dict[str, Any]:
+    verification_id_ = _as_uuid(verification_id)
+    if verification_id_ is None:
+        return _not_uuid("verification_id")
+    if attest_authorized is not True:
+        return {
+            "error": "attest_authorized must be true only after the user reviews and authorizes these corrected answers. Nothing was sent."
+        }
+    if address is None:
+        return {
+            "error": "address is required; use the saved address only if still correct. Nothing was sent."
+        }
+    shape_error = _verification_shape_error(fields, {}, [], address)
+    if shape_error:
+        return {"error": f"{shape_error}. Nothing was sent."}
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return {
+            "error": f"too many fields (at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
+        }
+    if (
+        sum(len(json.dumps(part)) for part in (fields, address or {}))
+        > _VERIFICATION_MAX_DETAILS_BYTES
+    ):
+        return {
+            "error": f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
+        }
+    try:
+        return _without_carrier(
+            await client.amend_sms_application(
+                verification_id_, fields=fields, address=address
+            )
+        )
+    except HailAPIError as exc:
+        if exc.status == 422:
+            return {
+                "error": "Correct the listed application fields with the user, then amend the same verification_id.",
+                "problems": exc.problems or [],
+            }
+        return _format_api_error(exc)
+    except httpx.TransportError:
+        return {
+            "error": "request timed out; the amendment may have been saved. Call get_verification with the same verification_id before retrying. Do not create or cancel a registration."
+        }
+    except Exception:
+        return {
+            "error": "unexpected error; call get_verification with the same verification_id to check the amendment before retrying."
+        }
 
 
 async def cancel_verification(
@@ -2741,7 +2816,8 @@ def register_tools(
         "updated_at", "submitted_at", "approved_at", "confirmation",
         "step", "identity_confirmed"}]}``. ``step`` says where a US texting
         filing in progress is: ``confirm_identity``, ``filing`` or
-        ``carrier_review``, or ``runtime_setup`` (accepted but required response
+        ``carrier_review``, ``needs_information`` (repair the existing application),
+        or ``runtime_setup`` (accepted but required response
         configuration is still pending). ``campaign_accepted`` alone does not
         authorize sending; check ``runtime_ready`` and number attachment.
         ``identity_confirmed`` on a person's newest
@@ -2780,6 +2856,10 @@ def register_tools(
         few minutes to hours, not every few seconds; the state refreshes from
         the carrier at most once a minute.
 
+        On SMS ``step=needs_information``: use get_sms_application, collect
+        corrections and call amend_sms_application with the SAME id. Do not
+        cancel and recreate the paid brand.
+
         On ``approved``: call quote_numbers again. The offer is now
         ``ready``; then acquire_number. On ``rejected``: read
         ``rejection_reason``, ask the user, dismiss it with
@@ -2792,6 +2872,83 @@ def register_tools(
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_verification(
                     client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="get_sms_application",
+        title="Read saved SMS application",
+        annotations=ToolAnnotations(
+            title="Read saved SMS application",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def get_sms_application_tool(
+        ctx: Context, verification_id: str
+    ) -> dict[str, Any]:
+        """Read this organization's saved SMS registration answers for correction.
+
+        This returns private applicant fields and address; do not publish them.
+        When get_verification reports step needs_information, retrieve these
+        answers, collect missing facts from the user using the current requirements,
+        and use amend_sms_application on the SAME verification_id. A 404 means
+        this older application did not retain its answers: ask for the actual
+        current answers. Do not cancel and recreate a paid brand for this repair.
+        This read may recover existing sender details; it never creates a brand
+        or files a campaign.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await get_sms_application(
+                    client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="amend_sms_application",
+        title="Correct an existing SMS application",
+        annotations=ToolAnnotations(
+            title="Correct an existing SMS application",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def amend_sms_application_tool(
+        ctx: Context,
+        verification_id: str,
+        fields: _JsonObject,
+        attest_authorized: StrictBool,
+        address: _JsonObjectOrNone = None,
+    ) -> dict[str, Any]:
+        """Repair consent evidence on the existing needs_information SMS registration.
+
+        Read get_sms_application and current get_verification_requirements first.
+        Pass the complete corrected fields and required actual address from the
+        user; reuse the saved address only if it remains correct.
+        Keep the SAME verification_id; this preserves the paid identity/brand.
+        Identity changes are refused. Do not cancel or call submit_verification
+        to work around a refusal. The API validates facts and resumes the existing
+        application; a later campaign filing can incur its normal review fee.
+        attest_authorized must be true only after the user reviews and authorizes
+        these corrections. Never invent consent evidence or confirmation text.
+        Maximum 100 fields and 64 KiB of fields/address combined. No documents.
+        After a timeout inspect get_verification before retrying the same row.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await amend_sms_application(
+                    client=client,
+                    verification_id=verification_id,
+                    fields=fields,
+                    address=address,
+                    attest_authorized=attest_authorized,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
@@ -2821,7 +2978,9 @@ def register_tools(
         least 3 monthly fees from approval, so cancelling sooner can still
         charge 3 months. Ask the user first. A
         ``submitting`` or ``submitted`` verification is under review and
-        cannot be cancelled (409): wait for the result with get_verification.
+        cannot be cancelled (409), except an accepted SMS campaign waiting
+        in ``runtime_setup``. To repair ``needs_information``, amend the existing
+        application instead of cancelling it.
 
         Returns the verification with ``state: "cancelled"``, or
         ``{"error": "<message>"}``."""

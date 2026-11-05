@@ -42,6 +42,8 @@ existing number doesn't support.`,
 	cmd.AddCommand(newNumberEnableSmsCmd(opts))
 	cmd.AddCommand(newNumberRouteCmd(opts))
 	cmd.AddCommand(newNumberRegisterSmsCmd(opts))
+	cmd.AddCommand(newNumberGetSmsApplicationCmd(opts))
+	cmd.AddCommand(newNumberAmendSmsCmd(opts))
 	cmd.AddCommand(newNumberConfirmSmsCmd(opts))
 	cmd.AddCommand(newNumberCancelSmsCmd(opts))
 	return cmd

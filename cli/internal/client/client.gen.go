@@ -1058,10 +1058,11 @@ func (e VerificationRequirementsSubjectTypes) Valid() bool {
 
 // Defines values for VerificationResponseStep.
 const (
-	CarrierReview   VerificationResponseStep = "carrier_review"
-	ConfirmIdentity VerificationResponseStep = "confirm_identity"
-	Filing          VerificationResponseStep = "filing"
-	RuntimeSetup    VerificationResponseStep = "runtime_setup"
+	CarrierReview    VerificationResponseStep = "carrier_review"
+	ConfirmIdentity  VerificationResponseStep = "confirm_identity"
+	Filing           VerificationResponseStep = "filing"
+	NeedsInformation VerificationResponseStep = "needs_information"
+	RuntimeSetup     VerificationResponseStep = "runtime_setup"
 )
 
 // Valid indicates whether the value is a known member of the VerificationResponseStep enum.
@@ -1072,6 +1073,8 @@ func (e VerificationResponseStep) Valid() bool {
 	case ConfirmIdentity:
 		return true
 	case Filing:
+		return true
+	case NeedsInformation:
 		return true
 	case RuntimeSetup:
 		return true
@@ -1553,12 +1556,23 @@ func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
 
 // Address defines model for Address.
 type Address struct {
-	City         string `json:"city"`
-	CountryCode  string `json:"country_code"`
+	// City City or locality.
+	City string `json:"city"`
+
+	// CountryCode ISO alpha-2 address country.
+	CountryCode string `json:"country_code"`
+
+	// CustomerName Name associated with the address.
 	CustomerName string `json:"customer_name"`
-	PostalCode   string `json:"postal_code"`
-	Region       string `json:"region"`
-	Street       string `json:"street"`
+
+	// PostalCode Postal or ZIP code.
+	PostalCode string `json:"postal_code"`
+
+	// Region State, province or region.
+	Region string `json:"region"`
+
+	// Street Street address.
+	Street string `json:"street"`
 }
 
 // AgentCreate A saved agent: what a number answers with, and what POST /calls can
@@ -3225,15 +3239,31 @@ type SenderIdResponse struct {
 	EffectiveDefault *string `json:"effective_default,omitempty"`
 }
 
-// SmsApplicationResponse Private submitted answers for repairing an SMS application.
-type SmsApplicationResponse struct {
-	Address       *Address                          `json:"address,omitempty"`
-	Fields        map[string]string                 `json:"fields"`
-	SchemaVersion *int                              `json:"schema_version,omitempty"`
-	SubjectType   SmsApplicationResponseSubjectType `json:"subject_type"`
+// SmsApplicationAmendRequest Complete replacement answers for an existing sender's missing evidence.
+type SmsApplicationAmendRequest struct {
+	// Address Original sender address; changing it requires support.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Complete current form answers. The legal sender must remain unchanged.
+	Fields map[string]string `json:"fields"`
 }
 
-// SmsApplicationResponseSubjectType defines model for SmsApplicationResponse.SubjectType.
+// SmsApplicationResponse Private submitted SMS answers, or verified sender details for an old filing.
+type SmsApplicationResponse struct {
+	// Address Original sender address, when available.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Saved application answers; legacy responses may contain only verified sender details.
+	Fields map[string]string `json:"fields"`
+
+	// SchemaVersion Version of this saved-answer response format.
+	SchemaVersion *int `json:"schema_version,omitempty"`
+
+	// SubjectType Original sender route: person or business.
+	SubjectType SmsApplicationResponseSubjectType `json:"subject_type"`
+}
+
+// SmsApplicationResponseSubjectType Original sender route: person or business.
 type SmsApplicationResponseSubjectType string
 
 // SmsCreate defines model for SmsCreate.
@@ -3277,13 +3307,20 @@ type SmsListResponse struct {
 
 // SmsPreviewRequest defines model for SmsPreviewRequest.
 type SmsPreviewRequest struct {
-	Address     *Address                     `json:"address,omitempty"`
-	Fields      map[string]string            `json:"fields"`
-	NumberId    *openapi_types.UUID          `json:"number_id,omitempty"`
+	// Address Sender address required by the registration form.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Current registration form answers.
+	Fields map[string]string `json:"fields"`
+
+	// NumberId Owned US local number selecting the carrier, required when ambiguous.
+	NumberId *openapi_types.UUID `json:"number_id,omitempty"`
+
+	// SubjectType Sender route to preview: person or business.
 	SubjectType SmsPreviewRequestSubjectType `json:"subject_type"`
 }
 
-// SmsPreviewRequestSubjectType defines model for SmsPreviewRequest.SubjectType.
+// SmsPreviewRequestSubjectType Sender route to preview: person or business.
 type SmsPreviewRequestSubjectType string
 
 // SmsResponse defines model for SmsResponse.
@@ -3523,7 +3560,7 @@ type VerificationResponse struct {
 	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
 	State string `json:"state"`
 
-	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration. Null otherwise.
+	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration; needs_information when the existing sender needs current campaign evidence before filing. Null otherwise.
 	Step *VerificationResponseStep `json:"step,omitempty"`
 
 	// SubjectName Name of the person or company this verification is for, taken from the form (for example the business name, or the first and last name). Null when unknown.
@@ -3539,7 +3576,7 @@ type VerificationResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration. Null otherwise.
+// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration; needs_information when the existing sender needs current campaign evidence before filing. Null otherwise.
 type VerificationResponseStep string
 
 // VoiceConfig defines model for VoiceConfig.
@@ -4159,6 +4196,11 @@ type GetVerificationApplicationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// AmendSmsApplicationParams defines parameters for AmendSmsApplication.
+type AmendSmsApplicationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ConfirmVerificationParams defines parameters for ConfirmVerification.
 type ConfirmVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4272,6 +4314,9 @@ type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePos
 
 // PreviewSmsApplicationJSONRequestBody defines body for PreviewSmsApplication for application/json ContentType.
 type PreviewSmsApplicationJSONRequestBody = SmsPreviewRequest
+
+// AmendSmsApplicationJSONRequestBody defines body for AmendSmsApplication for application/json ContentType.
+type AmendSmsApplicationJSONRequestBody = SmsApplicationAmendRequest
 
 // ConfirmVerificationJSONRequestBody defines body for ConfirmVerification for application/json ContentType.
 type ConfirmVerificationJSONRequestBody = ConfirmRequest
@@ -4889,6 +4934,11 @@ type ClientInterface interface {
 
 	// GetVerificationApplication request
 	GetVerificationApplication(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AmendSmsApplicationWithBody request with any body
+	AmendSmsApplicationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AmendSmsApplication(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ConfirmVerificationWithBody request with any body
 	ConfirmVerificationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5964,6 +6014,30 @@ func (c *Client) GetVerification(ctx context.Context, verificationId openapi_typ
 
 func (c *Client) GetVerificationApplication(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVerificationApplicationRequest(c.Server, verificationId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AmendSmsApplicationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAmendSmsApplicationRequestWithBody(c.Server, verificationId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AmendSmsApplication(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAmendSmsApplicationRequest(c.Server, verificationId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10285,6 +10359,68 @@ func NewGetVerificationApplicationRequest(server string, verificationId openapi_
 	return req, nil
 }
 
+// NewAmendSmsApplicationRequest calls the generic AmendSmsApplication builder with application/json body
+func NewAmendSmsApplicationRequest(server string, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAmendSmsApplicationRequestWithBody(server, verificationId, params, "application/json", bodyReader)
+}
+
+// NewAmendSmsApplicationRequestWithBody generates requests for AmendSmsApplication with any type of body
+func NewAmendSmsApplicationRequestWithBody(server string, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s/application", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewConfirmVerificationRequest calls the generic ConfirmVerification builder with application/json body
 func NewConfirmVerificationRequest(server string, verificationId openapi_types.UUID, params *ConfirmVerificationParams, body ConfirmVerificationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -11187,6 +11323,11 @@ type ClientWithResponsesInterface interface {
 
 	// GetVerificationApplicationWithResponse request
 	GetVerificationApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*GetVerificationApplicationResponse, error)
+
+	// AmendSmsApplicationWithBodyWithResponse request with any body
+	AmendSmsApplicationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error)
+
+	AmendSmsApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error)
 
 	// ConfirmVerificationWithBodyWithResponse request with any body
 	ConfirmVerificationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmVerificationResponse, error)
@@ -12778,6 +12919,29 @@ func (r GetVerificationApplicationResponse) StatusCode() int {
 	return 0
 }
 
+type AmendSmsApplicationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r AmendSmsApplicationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AmendSmsApplicationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ConfirmVerificationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -13791,6 +13955,23 @@ func (c *ClientWithResponses) GetVerificationApplicationWithResponse(ctx context
 		return nil, err
 	}
 	return ParseGetVerificationApplicationResponse(rsp)
+}
+
+// AmendSmsApplicationWithBodyWithResponse request with arbitrary body returning *AmendSmsApplicationResponse
+func (c *ClientWithResponses) AmendSmsApplicationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error) {
+	rsp, err := c.AmendSmsApplicationWithBody(ctx, verificationId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAmendSmsApplicationResponse(rsp)
+}
+
+func (c *ClientWithResponses) AmendSmsApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error) {
+	rsp, err := c.AmendSmsApplication(ctx, verificationId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAmendSmsApplicationResponse(rsp)
 }
 
 // ConfirmVerificationWithBodyWithResponse request with arbitrary body returning *ConfirmVerificationResponse
@@ -16045,6 +16226,39 @@ func ParseGetVerificationApplicationResponse(rsp *http.Response) (*GetVerificati
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SmsApplicationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAmendSmsApplicationResponse parses an HTTP response from a AmendSmsApplicationWithResponse call
+func ParseAmendSmsApplicationResponse(rsp *http.Response) (*AmendSmsApplicationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AmendSmsApplicationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

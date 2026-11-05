@@ -110,15 +110,41 @@ must not be uploaded as evidence. URL syntax checks do not establish reachabilit
 
 The application compiler uses the applicant's actual disclosures, recording process, evidence
 and policy links. It never pads a short answer with a consent assertion. Short answers and
-inconsistent content flags return field errors before a paid filing. Fix the real enrollment
+inconsistent content flags return field errors before a paid filing. Content flags and
+consent attestations are trimmed consistently when validating and compiling the filing. Fix the real enrollment
 flow before confirming its disclosures. Unsupported or restricted programs require support
 review. Sole proprietor eligibility is distinct from an account's individual/company label.
 
 SMS answers survive rejection and cancellation. Retrieve them through the authenticated,
 organization-scoped `GET /verifications/{id}/application` endpoint; its response is `no-store`.
-The ordinary verification response never includes the application. Older applications without
-saved answers return 404 and require completion of the current form. Review and correct the
-answers before resubmitting. A saved application is not proof of recipient consent.
+The ordinary verification response never includes the application. For an older application,
+the API may recover the original sender fields through a read-only provider lookup. If they
+cannot be recovered, a 404 asks for the actual original details; do not guess them. A provider
+outage returns a retryable error. A saved application is not proof of recipient consent.
+
+A legacy brand-only registration that lacks current campaign evidence stays `submitted` with
+`step=needs_information`. It retains the same registration, sender identity, paid brand and
+provider IDs. It is not a carrier rejection and must not be cancelled and recreated to repair
+its evidence. Already-filed campaigns continue normal review, and approved registrations
+remain approved; this evidence gate applies before a new campaign is filed.
+
+Use `PATCH /verifications/{id}/application` with the complete replacement `fields` and complete
+actual `address` to repair that same row. The API validates the current form and requires the
+sender identity and address to match the retained application or authoritative provider data.
+It refuses identity changes and unverifiable identity with actionable 409 guidance; the brand
+and row remain intact. A provider lookup outage returns 503 without changing the application.
+If a previous campaign create succeeded but its response was lost, the API recovers that
+existing filing before allowing changes. The PATCH performs no paid provider action: it clears
+the information hold only after validation, then a later poll resumes campaign filing and its
+normal review fee. An identical retry is safe, including after that campaign has been filed.
+
+CLI recovery uses `hail numbers get-sms-application <verification-id>` followed by
+`hail numbers amend-sms <verification-id> --field ... --address ...`. Supply the complete current
+answers and address; these are not partial field updates. MCP exposes `get_sms_application`
+and `amend_sms_application`; amendment requires explicit `attest_authorized=true` after the
+user reviews the corrections. Both preserve the existing ID and use authenticated API routes.
+After an uncertain timeout, check that same registration before retrying. Neither recovery
+client creates or cancels a registration as a fallback.
 
 Each organization registers its own US A2P 10DLC brand and campaign. Fees are priced and
 charged per step by the website's US texting rater. The console reviews the whole application
@@ -127,22 +153,22 @@ compiled campaign without a provider filing or charge. It takes `subject_type`, 
 `fields` and `address`; the number must belong to the caller organization. Toll-free verification is a separate provider process; this local-number
 registration does not verify toll-free messaging.
 
-| State             | Meaning                                                                   |
-| ----------------- | ------------------------------------------------------------------------- |
-| `awaiting_review` | Profile and brand created at the carrier, not yet submitted.              |
-| `submitting`      | Hail is submitting the brand.                                             |
-| `submitted`       | Brand in vetting, or brand approved and campaign in carrier review.       |
+| State             | Meaning                                                                           |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `awaiting_review` | Profile and brand created at the carrier, not yet submitted.                      |
+| `submitting`      | Hail is submitting the brand.                                                     |
+| `submitted`       | Brand in vetting, or brand approved and campaign in carrier review.               |
 | `approved`        | Campaign approved and required setup complete; each number must also be attached. |
-| `rejected`        | Brand or campaign refused. Customer-facing guidance is sanitized. |
-| `cancelled`       | Customer withdrew or dismissed.                                           |
+| `rejected`        | Brand or campaign refused. Customer-facing guidance is sanitized.                 |
+| `cancelled`       | Customer withdrew or dismissed.                                                   |
 
 - **Fees.** This repo holds no prices and takes no money for a registration. Hail Cloud's website rater charges each step at its private prices, keyed by the `carrier_verifications` row: a submission (any row except one that reused a brand, `provider_refs.brand_reused`, and including a brand the carrier billed and then refused, saved as `rejected` with `provider_refs.refused_at_filing`), and a carrier review (`provider_refs.campaign_filed_at`, which the API writes once the plug-in's `campaign_ref` key holds a campaign; a data migration added it to rows that held a campaign before). The API pings it after each commit that changes a row's state or `provider_refs` (`notify_sms_registration_changed`, `POST /api/internal/sms-registrations/rate`); a retry that found the carrier down changes nothing and sends no ping. The rater is idempotent and also sweeps. Cancel and reject empty `provider_refs` (the private `application`, `brand_reused` and, on a cancel, `kept_brand_id` stay), so when the refs hold a campaign id the API first calls the rater and waits for its answer (`rate_sms_registration`, up to 5 seconds, before taking the organization's lock), then wipes them. Monthly fees are rated by the website too. The API only checks that the balance covers the carrier cost (`costs/sms-registration.json`) before filing (402). With a kept brand that cost is the campaign review alone. A kept brand that cannot be reused, with too little credit for a new brand, returns 402 and files no brand. Rows filed before this change carry a single `sms_registration:<id>` debit and are not charged again.
 - **Adding a carrier.** One plug-in module (a `SmsRegistrationProvider`) plus one `register_verification_provider(..., purpose="sms")` call that registers the class itself. The plug-in sets `campaign_ref` (the refs key of its filed campaign; a test fails without it), `field_limits` (its maximums for fields of the shared form in [`sms_form.py`](../../core/hailhq/core/providers/verification/sms_form.py)) and `extra_fields` (fields only it asks for, such as `text_types_field`). The shared form never checks a carrier's name. Hail Cloud also needs a price block for the carrier in the website; until then it charges the default prices.
 - **Attach step.** After the campaign is approved, Hail attaches the organization's US long-code numbers to it, each on its own, and records each one in `phone_numbers.sms_registration_id`. The send gate lets a US-to-US text leave a long code only when that column points at an approved registration; `POST /sms` without `from` prefers such a number. A person's registration holds one number: on Twilio it sits in its own messaging service (`hail-org-<org>-person`) that holds only that number. The row is approved even when a number fails; the failure is logged with the number id and counted in the `verification.sms_attached` audit row (`failed`). `POST /numbers/{id}/enable-sms` attaches that number again. Until approval, texts from a US long code to a US number return 422.
 - **Telnyx brand wait.** Telnyx registers a new 10DLC brand in the background: for about 2 seconds the brand id gets 404 from `smsOtp` and `externalVetting`, and 400 from `DELETE`. The draft reads the brand (up to 10 reads, 1 second apart) before it sends the PIN or asks for vetting. A refused brand (`failureReasons`), or a 4xx other than 404 and 429 on the PIN or vetting call, is a 422 on the form fields it names; Telnyx bills the brand anyway, so it is kept as a `rejected` row (`provider_refs.refused_at_filing`) and the website charges its submission. A brand still registering after the wait, or one that exists when any later step fails another way (5xx, 429, 404, no answer, a body that is not JSON or not the expected shape), is kept as a normal filing (a retry would bill a new brand), and the background pass sends the PIN (`otp_sent_at` unset) or asks for vetting (`refs.vetting_requested` is `false`; a row without the key was filed before it existed and already asked). Each vetting request is billed, and one that timed out may have reached Telnyx: before asking again the background pass lists the brand's vettings (`GET /10dlc/brand/{id}/externalVetting`); if one is listed, or Telnyx answers the request with error `10012` (a vetting in progress or passed), it only sets `vetting_requested` to `true`. A read that fails with 429 or 5xx, or whose body is not JSON, counts as "still registering". The background pass does nothing while the brand is `REGISTRATION_PENDING`, and rejects a `REGISTRATION_FAILED` brand.
 - **Campaign classification.** Both forms collect one to five actual messaging purposes. Company campaigns use a single purpose when selected, or `MIXED` for multiple purposes. Telnyx sends sub-use cases only for mixed and sole proprietor filings. Samples cover every purpose. Link, phone-number and content attributes come from validated answers. Legacy brand-only snapshots missing the new evidence need correction before a new campaign filing; already-filed campaigns continue normal status recovery.
-- **Readiness.** The verification step can be `confirm_identity`, `filing`, `carrier_review` or `runtime_setup`. `campaign_accepted` records the carrier decision; `runtime_ready` records verified runtime setup, or is null where not independently tracked. Number attachment remains separate and the send gate checks each number's registration link.
-- **Telnyx STOP and HELP replies.** Hail configures the filed responses on the messaging profile. If setup fails, the same accepted campaign remains pending in `runtime_setup` and later polls retry setup. There is no approval fallback after a retry count. The application includes only a subscription confirmation that the applicant says the actual system sends; this helper does not configure an initial subscription reply. Keep `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=false` when the provider sends replies, to avoid duplicates. Test actual account behavior before making claims about it.
+- **Readiness.** The verification step can be `confirm_identity`, `filing`, `carrier_review`, `needs_information` or `runtime_setup`. `needs_information` is a hold for evidence repair on the existing paid sender, not a rejection. `campaign_accepted` records the carrier decision; `runtime_ready` records verified runtime setup, or is null where not independently tracked. Number attachment remains separate and the send gate checks each number's registration link.
+- **Telnyx STOP and HELP replies.** Hail configures the filed responses on the messaging profile. If setup fails, the same accepted campaign remains pending in `runtime_setup` and later polls retry setup. There is no approval fallback after a retry count. Telnyx requires the actual subscription confirmation before creating a paid brand. Keyword enrollment also requires it on Twilio. The submitted confirmation must identify the public sender/program, contain the exact declared frequency, message/data-rate disclosure, HELP and STOP. Common wording such as “Msg & data rates” is accepted. Invalid content returns field-specific errors before paid filing; Hail never invents missing text. This helper configures STOP/HELP only, not an initial subscription reply: the applicant must already operate the confirmation they declare. Keep `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=false` when the provider sends replies, to avoid duplicates. Test actual account behavior before making claims about it.
 - **Person confirm step.** A person's brand waits on the person. The row shows `confirmation`: `code` (Telnyx texts a PIN; the person enters it in Hail), `reply` (Twilio texts them; they answer that text), or `null`. A code goes to `POST /verifications/{id}/confirm`; on success Hail marks `identity_verified` in the refs and files the campaign at once. A wrong or expired code is 422 on `code`; anything else is 409. After 5 wrong codes the route returns 429 without calling the carrier, until a new code is sent (`refs.confirm_attempts` resets to 0). Telnyx sends a new PIN when the last one is over 24 hours old (on the next poll). The code is never stored or logged; the `verification.confirm` audit row holds `{"ok", "attempts"}`, never the code.
 
   ```bash
@@ -163,7 +189,7 @@ registration does not verify toll-free messaging.
 
 - `awaiting_review` → `cancelled`, draft discarded at the carrier.
 - `rejected` → `cancelled` (dismiss), draft discarded. Exception for a Telnyx person (`purpose=sms`) whose PIN was confirmed and whose campaign was filed: only the campaign is deleted, the brand stays at Telnyx, and the cancelled row holds `provider_refs.kept_brand_id`. The next filing reuses that brand when Telnyx still shows it confirmed and first name, last name, email and mobile match: no new brand, no PIN, `provider_refs.brand_reused`, no submission fee. Otherwise it files a new brand, or returns 402 with no brand when the credit does not cover one. The kept brand then stays at Telnyx, as does the brand of a customer who never files again: Telnyx refuses to delete a brand for 3 months after its campaign.
-- `submitting`, `submitted` → **409** `this verification is under review; wait for the result`. The carrier keeps a draft it is reviewing, so cancelling would leave the customer's documents at the carrier with nothing pointing at them.
+- `submitting`, `submitted` → **409** while review is pending. Exception: an SMS campaign already accepted by the carrier but waiting in `runtime_setup` (`campaign_accepted=true`, `runtime_ready=false`) can be cancelled. The API rates the existing campaign before discarding it and rechecks eligibility under locks, preserving normal billing and provider cleanup behavior. A `needs_information` registration is repaired with PATCH on its existing row, not cancellation.
 - `approved` with `purpose=sms` → `cancelled`. Each number on it (`phone_numbers.sms_registration_id`) leaves the campaign (Telnyx unlink; a person's Twilio number leaves the person's service and is set up in the org's service again), then the campaign, brand, bundle and profile are discarded. `cancelled_at` is set; the website rater bills the monthly fee through that month. Telnyx bills at least 3 monthly fees from approval, so for Telnyx the rater bills through the later of the cancel month and the approval month + 2 (`minimum_months` in `costs/sms-registration.json`). Audit row `verification.cancel`.
 - `approved` with `purpose=number`, `cancelled` → 409.
 
@@ -179,6 +205,13 @@ registration does not verify toll-free messaging.
 - Tests: [`api/tests/test_verifications_api.py`](../../api/tests/test_verifications_api.py) (`FakeCarrier` stands in for the carrier). Run: `cd api && uv run pytest tests/test_verifications_api.py -q`.
 - Is the pass running? `docker compose logs api | grep "verification worker"`. The line appears only on a pass that changed something.
 - Audit trail: `SELECT action, actor_kind, payload FROM audit_log WHERE target_type = 'carrier_verification' ORDER BY created_at DESC LIMIT 20;`
+
+### SMS recovery regression coverage
+
+- [Shared form tests](../../core/tests/test_sms_form.py) cover missing confirmation sender/frequency/rates/HELP/STOP, accepted rate abbreviations, and whitespace-preserving content attributes and consent claims.
+- [Telnyx registration tests](../../core/tests/test_telnyx_sms_registration.py) and [Twilio registration tests](../../core/tests/test_twilio_sms_registration.py) cover legacy brand-only evidence repair, lost campaign-create response recovery and provider-outage retries without a second paid filing. Existing campaign approval tests (`test_status_approved_and_rejected_from_campaign`, `test_status_approved_when_campaign_verified`) exercise already-filed applications independently of the new-form gate.
+- [Verification API tests](../../api/tests/test_verifications_api.py) cover same-row amendments, original-identity enforcement, organization isolation, idempotent retries and cancellation during runtime setup. Existing `test_cancel_an_approved_sms_registration` and approved-registration attachment tests retain completed-registration coverage.
+- [CLI recovery tests](../../cli/internal/cmd/number_sms_application_test.go) and [MCP verification tests](../../mcp/tests/test_verification_tools.py) assert authenticated same-ID GET/PATCH requests, no create/delete fallback, payload bounds, sanitized field errors and readiness in JSON.
 
 ## Known gaps
 
