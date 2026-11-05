@@ -561,3 +561,37 @@ async def test_closing_org_prevents_background_verification_submission(
         lambda name, purpose: (_ for _ in ()).throw(AssertionError("provider called")),
     )
     assert row.state == "awaiting_review"
+
+
+@pytest.mark.parametrize("already_closed", [False, True])
+async def test_post_drain_pending_work_only_reopens_a_new_attempt(
+    async_session: AsyncSession, monkeypatch, already_closed
+):
+    from hailhq.api.routes.internal import organization_deletion
+    from hailhq.core.db import lock_open_organization
+
+    body = await seed(async_session)
+    if already_closed:
+        async_session.add(
+            OrgClosure(
+                organization_id=body.organization_id,
+                source="organization_delete",
+                closed_at=datetime.now(timezone.utc),
+            )
+        )
+        await async_session.commit()
+    monkeypatch.setattr(
+        organization_deletion,
+        "check_pending",
+        AsyncMock(side_effect=[None, HTTPException(409, "A review started meanwhile")]),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await prepare(body, async_session)
+    assert exc.value.status_code == 409
+    assert (
+        await async_session.get(OrgClosure, body.organization_id) is not None
+    ) == already_closed
+    assert await lock_open_organization(async_session, body.organization_id) == (
+        not already_closed
+    )
+    assert await async_session.get(Organization, body.organization_id) is not None

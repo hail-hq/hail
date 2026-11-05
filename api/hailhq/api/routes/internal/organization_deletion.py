@@ -49,7 +49,7 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from livekit import api
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -170,24 +170,48 @@ async def prepare_organization_deletion(
     await check_pending(db, org)
     # Persist before irreversible cleanup. A retry remains possible through
     # this HMAC-only route; ordinary API requests can no longer start work.
-    await db.execute(
+    marker = await db.execute(
         insert(OrgClosure)
         .values(
             organization_id=org,
             closed_at=datetime.now(timezone.utc),
             source="organization_delete",
         )
-        .on_conflict_do_update(
-            index_elements=["organization_id"], set_={"source": "organization_delete"}
-        )
+        .on_conflict_do_nothing(index_elements=["organization_id"])
+        .returning(OrgClosure.organization_id)
     )
+    created_marker = marker.scalar_one_or_none() is not None
+    if not created_marker:
+        await db.execute(
+            update(OrgClosure)
+            .where(OrgClosure.organization_id == org)
+            .values(source="organization_delete")
+        )
     await db.commit()
     # Closing is visible before taking the row lock. Existing billing writers
     # drain without a row/advisory-lock cycle; new debits skip the closed org.
     await db.execute(
         select(Organization.id).where(Organization.id == org).with_for_update()
     )
-    await check_pending(db, org)
+    closure = await db.get(OrgClosure, org, populate_existing=True)
+    if closure is None:
+        raise HTTPException(409, "Deletion state changed. Reload settings and retry.")
+    try:
+        await check_pending(db, org)
+    except HTTPException:
+        if created_marker:
+            # Nothing irreversible has run. Restore access so a request that
+            # raced admission can finish its review or other pending work.
+            # Hold the org lock until removal commits, so another prepare
+            # cannot start cleanup against a stale marker.
+            await db.execute(
+                delete(OrgClosure).where(
+                    OrgClosure.organization_id == org,
+                    OrgClosure.source == "organization_delete",
+                )
+            )
+            await db.commit()
+        raise
 
     numbers = (
         (
