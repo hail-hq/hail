@@ -781,7 +781,7 @@ _SLOT_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _SLOT_RULE = "use 1 to 64 letters, digits, - or _"
 _PDF_MARKER_WINDOW = 1024
 _VERIFICATION_MAX_FILES = 20
-_VERIFICATION_MAX_FIELDS = 20
+_VERIFICATION_MAX_FIELDS = 100
 # Largest base64 text a legal file can have; checked before decoding.
 _VERIFICATION_MAX_B64_CHARS = (_VERIFICATION_MAX_FILE_BYTES + 2) // 3 * 4
 
@@ -2562,7 +2562,12 @@ def register_tools(
         ``subject_type`` is required: ``person`` (the user) or ``business``
         (the user's company). Never guess it: ask the user "you or your
         company?". The result's ``subject_types`` lists what the carrier
-        accepts. The organization may hold one verification of each. ``quote_id`` is the
+        accepts. For SMS, establish the actual sender country and whether they
+        hold a business tax number first: only US/Canadian senders without a
+        business tax number use the individual route. Collect every selected
+        consent method and its conditionally required evidence, even when
+        those method-specific fields are marked optional in the shared schema.
+        The organization may hold one verification of each. ``quote_id`` is the
         offer's ``quote_id`` from quote_numbers. It is required for
         ``purpose='number'``: the form is the one for that offer.
 
@@ -2676,7 +2681,7 @@ def register_tools(
         and match letters, digits, - and _ (at most 64).
         ``content_type`` is ``image/jpeg``, ``image/png`` or
         ``application/pdf``. Limits: 10 MiB per file, 29 MiB in total, at
-        most 20 files and 20 fields. Compress images to JPG or PNG under about
+        most 20 files and 100 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
 
         Returns the verification: ``id``, ``state`` and ``subject_name``.
@@ -2736,7 +2741,10 @@ def register_tools(
         "updated_at", "submitted_at", "approved_at", "confirmation",
         "step", "identity_confirmed"}]}``. ``step`` says where a US texting
         filing in progress is: ``confirm_identity``, ``filing`` or
-        ``carrier_review``. ``identity_confirmed`` on a person's newest
+        ``carrier_review``, or ``runtime_setup`` (accepted but required response
+        configuration is still pending). ``campaign_accepted`` alone does not
+        authorize sending; check ``runtime_ready`` and number attachment.
+        ``identity_confirmed`` on a person's newest
         filing, when cancelled or rejected: the next one with the same person
         needs no code. Dismiss a rejected filing first.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,

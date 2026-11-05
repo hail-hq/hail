@@ -835,3 +835,53 @@ func TestNumberAcquire_HintWithoutTypeDoesNotGuessIt(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestNumberRegisterSms_PreservesSenderCountryAndEvidence(t *testing.T) {
+	for _, country := range []string{"CA", "GB"} {
+		t.Run(country, func(t *testing.T) {
+			parts, _ := registerSmsParts(t, "--address", "country_code="+country,
+				"--field", "sender_country="+country,
+				"--field", "consent_methods=WEBSITE,PAPER",
+				"--field", "paper_evidence_url=https://acme.org/blank.pdf")
+			if parts["country_code"] != "US" {
+				t.Fatalf("number country = %s", parts["country_code"])
+			}
+			var address, fields map[string]string
+			if err := json.Unmarshal([]byte(parts["address"]), &address); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(parts["fields"]), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if address["country_code"] != country || fields["sender_country"] != country {
+				t.Fatalf("address=%v fields=%v", address, fields)
+			}
+			if fields["consent_methods"] != "WEBSITE,PAPER" || fields["paper_evidence_url"] != "https://acme.org/blank.pdf" {
+				t.Fatalf("fields=%v", fields)
+			}
+		})
+	}
+}
+
+func TestNumberRegisterSms_JSONPreservesRuntimeReadiness(t *testing.T) {
+	response := map[string]any{
+		"id":    "11111111-1111-1111-1111-111111111111",
+		"state": "submitted", "purpose": "sms", "country_code": "US",
+		"number_type": "local", "subject_type": "business",
+		"created_at": "2026-10-13T00:00:00Z", "updated_at": "2026-10-13T00:00:00Z",
+		"step": "runtime_setup", "campaign_accepted": true, "runtime_ready": false,
+	}
+	srv := newFakeServer(t, http.StatusCreated, response)
+	stdout, _, err := runRoot(t, map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"--json", "numbers", "register-sms", "--subject-type", "business")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["step"] != "runtime_setup" || got["campaign_accepted"] != true || got["runtime_ready"] != false {
+		t.Fatalf("readiness lost from JSON: %s", stdout)
+	}
+}

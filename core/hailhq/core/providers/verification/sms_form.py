@@ -230,8 +230,9 @@ _CAMPAIGN_FIELDS = (
     ),
     FieldSpec(
         name="message_frequency",
-        label="Actual expected message frequency",
+        label="Exact frequency wording in the consent disclosure",
         max_length=120,
+        help="Copy the actual cadence shown to recipients; this exact text must appear in the disclosure.",
     ),
     *(
         spec
@@ -271,6 +272,12 @@ _CAMPAIGN_FIELDS = (
         label="Exact SMS disclosure recipients see or hear",
         max_length=1024,
         help="Include your public sender name, purposes, frequency, message/data rates, STOP, HELP and policy links. Copy the actual disclosure; fix your enrollment flow before filing if anything is missing.",
+    ),
+    FieldSpec(
+        name="disclosure_purposes_confirmed",
+        label="Does this exact disclosure cover every selected messaging purpose?",
+        options=_YES_NO,
+        help="Confirm the disclosure actually shown to recipients includes all the purposes you selected. This is your attestation, not an automated website or legal compliance check.",
     ),
     FieldSpec(
         name="consent_records",
@@ -541,7 +548,12 @@ def _application_problems(
             "ein",
             "Enter the nine-digit US EIN or Canadian Business Number for the selected registration country.",
         )
-    for name in ("consent_optional", "evidence_redacted", "policies_confirmed"):
+    for name in (
+        "consent_optional",
+        "evidence_redacted",
+        "policies_confirmed",
+        "disclosure_purposes_confirmed",
+    ):
         if val(name) == "NO":
             issue(name, "Make this true in your actual program before submitting.")
     if val("restricted_content") == "RESTRICTED":
@@ -590,6 +602,20 @@ def _application_problems(
         issue(
             "keyword_keyword",
             "Enter the single advertised keyword, using letters and digits.",
+        )
+    if "KEYWORD" in methods and val("keyword_keyword").upper() in {
+        "STOP",
+        "STOPALL",
+        "UNSUBSCRIBE",
+        "CANCEL",
+        "END",
+        "QUIT",
+        "HELP",
+        "INFO",
+    }:
+        issue(
+            "keyword_keyword",
+            "Choose your advertised opt-in keyword. STOP/opt-out and HELP/info keywords cannot enroll recipients.",
         )
     for name, minimum in (("campaign_description", 40), ("opt_in_description", 40)):
         if val(name) and text_length(val(name)) < minimum:
@@ -657,6 +683,7 @@ def _application_problems(
     if disclosure:
         required = [
             val("program_name"),
+            val("message_frequency"),
             "STOP",
             "HELP",
             val("privacy_policy_url"),
@@ -664,10 +691,14 @@ def _application_problems(
         ]
         if any(
             part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not re.search(r"rates", disclosure, re.I):
+        ) or not re.search(
+            r"\b(?:messages?|msgs?|messaging)\.?\s*(?:and|&|/|\+)\s*data\s+(?:rates?|charges?)\b",
+            disclosure,
+            re.I,
+        ):
             issue(
                 "consent_disclosure",
-                "The actual disclosure must identify your program and include rates, STOP, HELP and both policy links. Update the real flow before submitting.",
+                "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",
             )
     if methods and text_length(_structured_flow(fields)) > _FLOW_MAX:
         issue(

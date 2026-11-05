@@ -529,6 +529,8 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "confirmation",
         "step",
         "identity_confirmed",
+        "campaign_accepted",
+        "runtime_ready",
     }
     _assert_no_sentinel(result)
 
@@ -579,7 +581,7 @@ _BAD_CASES = {
         "files": [_file(slot=f"s{i}") for i in range(21)],
         "documents": {f"s{i}": {"option": "x", "fields": {}} for i in range(21)},
     },
-    "too_many_fields": {"fields": {f"f{i}": _FIELD_VALUE for i in range(21)}},
+    "too_many_fields": {"fields": {f"f{i}": _FIELD_VALUE for i in range(101)}},
     "malformed_file_entry": {"files": [{"slot": "identity", "extra": _NAME}]},
     "file_not_a_dict": {"files": [_NAME]},
     "fields_too_large": {"fields": {"f": _FIELD_VALUE * 5000}},
@@ -1161,3 +1163,62 @@ async def test_subject_type_must_be_asked_for(client: HailClient) -> None:
         result = await tools.submit_verification(**_kwargs(client, subject_type=bad))
         assert "Nothing was sent" in result["error"]
     assert not route.called
+
+
+@respx.mock
+async def test_sms_submission_accepts_full_evidence_field_count(
+    client: HailClient,
+) -> None:
+    # Every dynamic form field must survive the tool envelope, including
+    # method-specific evidence. The API remains responsible for semantics.
+    from hailhq.core.providers.verification.sms_form import sms_requirements
+    from hailhq.core.providers.verification.telnyx_sms import (
+        TelnyxSmsRegistrationProvider,
+    )
+
+    specs = sms_requirements(
+        TelnyxSmsRegistrationProvider(api_key="test"), "business"
+    ).fields
+    fields = {spec.name: f"supplied-{spec.name}" for spec in specs}
+    assert 20 < len(fields) <= 100
+    route = respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(201, json=_verification(purpose="sms"))
+    )
+    result = await tools.submit_verification(
+        **_kwargs(
+            client,
+            purpose="sms",
+            country_code="US",
+            number_type="local",
+            quote_id=None,
+            fields=fields,
+            documents={},
+            files=[],
+        )
+    )
+    assert "error" not in result
+    request = route.calls[0].request
+    body = request.content.decode()
+    for name in fields:
+        assert name in body
+
+
+@respx.mock
+async def test_sms_runtime_readiness_survives_mcp_response(client: HailClient) -> None:
+    vid = str(uuid4())
+    respx.get(f"{_BASE_URL}/verifications/{vid}").mock(
+        return_value=httpx.Response(
+            200,
+            json=_verification(
+                vid,
+                purpose="sms",
+                step="runtime_setup",
+                campaign_accepted=True,
+                runtime_ready=False,
+            ),
+        )
+    )
+    result = await tools.get_verification(client=client, verification_id=vid)
+    assert result["step"] == "runtime_setup"
+    assert result["campaign_accepted"] is True
+    assert result["runtime_ready"] is False

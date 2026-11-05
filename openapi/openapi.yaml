@@ -4854,6 +4854,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/preview:
+    post:
+      tags:
+        - verifications
+      summary: Preview Sms Application
+      description:
+        "Compile the exact campaign text without creating or charging a
+        filing.
+
+
+        Checks answers locally. This does not establish policy accessibility,
+
+        carrier acceptance, identity ownership or runtime messaging readiness."
+      operationId: preview_sms_application
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsPreviewRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Preview Sms Application
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications:
     post:
       tags:
@@ -5162,6 +5227,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}/application:
+    get:
+      tags:
+        - verifications
+      summary: Get Verification Application
+      description:
+        "Read your organization's saved SMS answers, including after rejection.
+
+
+        Older applications did not retain these answers; a 404 asks the user to
+
+        complete the current form. The ordinary verification list never contains
+
+        application fields or addresses. No carrier call or charge occurs here."
+      operationId: get_verification_application
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsApplicationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/{verification_id}/confirm:
     post:
       tags:
@@ -5253,6 +5383,35 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    Address:
+      properties:
+        customer_name:
+          type: string
+          title: Customer Name
+        street:
+          type: string
+          title: Street
+        city:
+          type: string
+          title: City
+        region:
+          type: string
+          title: Region
+        postal_code:
+          type: string
+          title: Postal Code
+        country_code:
+          type: string
+          title: Country Code
+      type: object
+      required:
+        - customer_name
+        - street
+        - city
+        - region
+        - postal_code
+        - country_code
+      title: Address
     AgentCreate:
       properties:
         name:
@@ -8965,6 +9124,33 @@ components:
       required:
         - custom_sender_id
       title: SenderIdResponse
+    SmsApplicationResponse:
+      properties:
+        schema_version:
+          type: integer
+          title: Schema Version
+          default: 1
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsApplicationResponse
+      description: Private submitted answers for repairing an SMS application.
     SmsCreate:
       properties:
         recipient_consent:
@@ -9060,6 +9246,34 @@ components:
       required:
         - items
       title: SmsListResponse
+    SmsPreviewRequest:
+      properties:
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+        number_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Number Id
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsPreviewRequest
     SmsResponse:
       properties:
         id:
@@ -9521,13 +9735,31 @@ components:
                 - confirm_identity
                 - filing
                 - carrier_review
+                - runtime_setup
             - type: "null"
           title: Step
           description:
             "For a US texting registration that is not yet approved or
             rejected: 'confirm_identity' while the person must confirm (see `confirmation`),
             'filing' while Hail files the details with the carriers, 'carrier_review'
-            once the carriers are reviewing them (1 to 7 business days). Null otherwise."
+            once the carriers are reviewing them (1 to 7 business days), or runtime_setup
+            when accepted but required messaging responses still need configuration.
+            Null otherwise."
+        campaign_accepted:
+          type: boolean
+          title: Campaign Accepted
+          description:
+            The carrier accepted the SMS campaign; this alone does not
+            mean a number is ready to send.
+          default: false
+        runtime_ready:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Runtime Ready
+          description:
+            True when required runtime configuration was verified, false
+            while setup retries, null when not independently tracked.
         identity_confirmed:
           type: boolean
           title: Identity Confirmed

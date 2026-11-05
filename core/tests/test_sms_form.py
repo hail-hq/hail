@@ -27,7 +27,8 @@ GOOD = {
     "mobile_phone_number": "+15125550199",
     "program_name": "Acme",
     "campaign_description": "Acme sends appointment reminders and replies to customer support questions.",
-    "message_frequency": "One reminder per appointment; replies when requested.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
     "text_types": "CUSTOMER_CARE",
     "sample_1": "Acme: Your appointment is tomorrow at 2pm. Reply STOP to opt out.",
     "sample_1_type": "CUSTOMER_CARE",
@@ -454,3 +455,61 @@ def test_dates_and_short_login_codes_are_not_treated_as_phone_numbers():
         "sample_1": "Acme: Your code is 12345678, valid on 2026-11-05. Reply STOP to opt out.",
     }
     assert "has_phone" not in error_fields(data)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"message_frequency": "20 promotional texts daily"},
+        {
+            "consent_disclosure": "Acme reminders. Message and data rates may apply. STOP HELP https://acme.org/privacy https://acme.org/terms"
+        },
+        {
+            "consent_disclosure": "Acme once per appointment. Our service rates are low. STOP HELP https://acme.org/privacy https://acme.org/terms"
+        },
+    ],
+)
+def test_disclosure_requires_actual_cadence_and_message_data_rates(change):
+    assert "consent_disclosure" in error_fields({**GOOD, **change})
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        "Message and data rates",
+        "Msg & data rates",
+        "Msg. & data charges",
+        "Message/data rates",
+    ],
+)
+def test_disclosure_accepts_equivalent_rate_wording(rates):
+    data = {
+        **GOOD,
+        "consent_disclosure": GOOD["consent_disclosure"].replace(
+            "Message and data rates", rates
+        ),
+    }
+    assert not errors(data)
+
+
+def test_disclosure_purpose_coverage_requires_affirmative_fact():
+    assert "disclosure_purposes_confirmed" in error_fields(
+        {**GOOD, "disclosure_purposes_confirmed": "NO"}
+    )
+    missing = {**GOOD}
+    del missing["disclosure_purposes_confirmed"]
+    assert "disclosure_purposes_confirmed" in error_fields(missing)
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    ["STOP", "stopall", "UNSUBSCRIBE", "Cancel", "END", "QUIT", "HELP", "INFO"],
+)
+def test_reserved_help_and_opt_out_keywords_cannot_enroll_recipients(keyword):
+    data = {
+        **GOOD,
+        "consent_methods": "KEYWORD",
+        **METHODS["KEYWORD"],
+        "keyword_keyword": keyword,
+    }
+    assert "keyword_keyword" in error_fields(data)

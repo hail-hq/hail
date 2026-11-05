@@ -662,7 +662,11 @@ charged from prepaid credit per step: when the details are submitted, when the
 carriers start their review, then monthly after approval (prices:
 https://hail.so/pricing). Required fields:
 GET /v1/verifications/requirements?purpose=sms&country_code=US&number_type=local&subject_type=business
---subject-type is required: person (you) or business (your company).`,
+--subject-type is required. For SMS, determine the actual sender country and tax
+registration first: person is only for US/Canadian senders without a business
+tax number; otherwise use the supported business route. Supply all fields from
+the current requirements, including each selected consent method's evidence.
+Use --address country_code=CA for a Canadian sender address (defaults to US).`,
 		Example: `  hail numbers register-sms --subject-type business \
     --field legal_name="Acme Inc" --field ein=12-3456789 \
     --address customer_name="Acme Inc" --address street="1 Main St" \
@@ -729,7 +733,7 @@ GET /v1/verifications/requirements?purpose=sms&country_code=US&number_type=local
 	_ = cmd.Flags().MarkDeprecated("subject", "use --subject-type")
 	cmd.Flags().StringVar(&f.numberID, "number-id", "", "Id of the US number to register (from `hail numbers list`). Needed when your US numbers are with more than one carrier.")
 	cmd.Flags().StringArrayVar(&f.fields, "field", nil, "Registration field as key=value (repeatable)")
-	cmd.Flags().StringArrayVar(&f.address, "address", nil, "Address part as key=value (repeatable): street, city, region, postal_code, customer_name")
+	cmd.Flags().StringArrayVar(&f.address, "address", nil, "Address part as key=value (repeatable): street, city, region, postal_code, customer_name, country_code (sender country; defaults to US)")
 	return cmd
 }
 
@@ -747,13 +751,15 @@ func parseKeyValues(pairs []string, flag string) (map[string]string, error) {
 }
 
 // buildRegisterSmsBody builds the multipart body for POST /v1/verifications
-// with purpose=sms. The address always carries country_code US.
+// with purpose=sms. The number country is US; preserve the actual sender address country.
 func buildRegisterSmsBody(numberID, subject string, fields, address map[string]string) ([]byte, string, error) {
 	addr := make(map[string]string, len(address)+1)
 	for k, v := range address {
 		addr[k] = v
 	}
-	addr["country_code"] = "US"
+	if _, supplied := addr["country_code"]; !supplied {
+		addr["country_code"] = "US"
+	}
 	fieldsJSON, err := json.Marshal(fields)
 	if err != nil {
 		return nil, "", err
