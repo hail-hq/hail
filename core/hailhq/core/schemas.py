@@ -2738,15 +2738,26 @@ class VerificationResponse(BaseModel):
             "is pending."
         ),
     )
-    step: Literal["confirm_identity", "filing", "carrier_review"] | None = Field(
+    step: (
+        Literal["confirm_identity", "filing", "carrier_review", "runtime_setup"] | None
+    ) = Field(
         default=None,
         description=(
             "For a US texting registration that is not yet approved or "
             "rejected: 'confirm_identity' while the person must confirm (see "
             "`confirmation`), 'filing' while Hail files the details with the "
             "carriers, 'carrier_review' once the carriers are reviewing them "
-            "(1 to 7 business days). Null otherwise."
+            "(1 to 7 business days), or runtime_setup when accepted but required "
+            "messaging responses still need configuration. Null otherwise."
         ),
+    )
+    campaign_accepted: bool = Field(
+        default=False,
+        description="The carrier accepted the SMS campaign; this alone does not mean a number is ready to send.",
+    )
+    runtime_ready: bool | None = Field(
+        default=None,
+        description="True when required runtime configuration was verified, false while setup retries, null when not independently tracked.",
     )
     identity_confirmed: bool = Field(
         default=False,

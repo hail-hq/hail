@@ -6,7 +6,6 @@ import pytest
 from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
-    CAMPAIGN_REJECTED,
     Address,
     Problem,
     VerificationProviderError,
@@ -22,11 +21,36 @@ def _no_brand_wait(monkeypatch):
 
 
 FIELDS = {
+    **{
+        "sender_country": "US",
+        "has_tax_id": "YES",
+        "program_name": "Acme",
+        "message_frequency": "once per appointment",
+        "disclosure_purposes_confirmed": "YES",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "ACCOUNT_NOTIFICATION",
+        "consent_methods": "WEBSITE",
+        "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+        "consent_optional": "YES",
+        "marketing_consent": "NO",
+        "evidence_redacted": "YES",
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence/booking.png",
+        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+        "policies_confirmed": "YES",
+        "has_phone": "NO",
+        "age_gated": "NO",
+        "direct_lending": "NO",
+        "restricted_content": "NONE",
+        "registration_country": "US",
+    },
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -37,8 +61,8 @@ FIELDS = {
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
     "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 ADDRESS = Address(
     customer_name="Acme Inc",
@@ -111,7 +135,7 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
     assert (method, path) == ("POST", "/v2/10dlc/brand")
     assert body["entityType"] == "PRIVATE_PROFIT" and body["ein"] == "123456789"
     assert body["country"] == "US" and body["state"] == "TX"
-    assert body["website"] == "https://acme.example"
+    assert body["website"] == "https://acme.org"
     assert calls[1][:2] == ("GET", "/v2/10dlc/brand/B1")
     assert calls[2][:2] == ("POST", "/v2/10dlc/brand/B1/externalVetting")
     assert calls[2][2] == {"evpId": "AEGIS", "vettingClass": "STANDARD"}
@@ -128,7 +152,7 @@ async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     draft = await _draft(
         _provider(handler), fields={**FIELDS, "terms_url": "acme.example/terms"}
     )
-    assert [p.field for p in draft.problems] == ["terms_url"]
+    assert "terms_url" in [p.field for p in draft.problems]
     assert draft.refs == {} and calls == []
 
 
@@ -181,8 +205,13 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
+            "schema_version": 2,
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+            "privacy_policy_url": "https://acme.org/privacy",
+            "terms_url": "https://acme.org/terms",
         },
     }
     st = await p.status(refs)
@@ -190,8 +219,8 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["usecase"] == "MIXED" and posted[0]["brandId"] == "B1"
     assert posted[0]["sample1"] == "s" * 20 and posted[0]["embeddedLink"] is False
     assert posted[0]["optoutKeywords"] == "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
-    assert posted[0]["privacyPolicyLink"] == "https://acme.example/privacy"
-    assert posted[0]["termsAndConditionsLink"] == "https://acme.example/terms"
+    assert posted[0]["privacyPolicyLink"] == "https://acme.org/privacy"
+    assert posted[0]["termsAndConditionsLink"] == "https://acme.org/terms"
     # MIXED needs 2 or more sub use cases; Telnyx refuses with 400 without.
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
     assert posted[0]["termsAndConditions"] is True
@@ -199,7 +228,7 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["subscriberOptout"] is True
     # No name on the brand read: the replies are filed without one.
     assert posted[0]["optoutMessage"] == (
-        "You are unsubscribed and will get no more messages from this number."
+        "You are unsubscribed and will get no more messages from this workspace."
     )
 
 
@@ -218,7 +247,7 @@ def test_campaign_replies_open_with_the_brand_name() -> None:
         ),
         "optoutMessage": (
             "Acme Dental: You are unsubscribed and will get no more messages "
-            "from this number."
+            "from this workspace."
         ),
     }
     person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"}, refs)
@@ -249,10 +278,16 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
+            "schema_version": 1,
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
         },
     }
-    assert (await _provider(handler).status(refs)).state == "pending"
-    assert "privacyPolicyLink" not in posted[0]
+    result = await _provider(handler).status(refs)
+    assert result.state == "rejected" and "consent evidence" in result.reason
+    assert posted == []
 
 
 async def test_status_waits_while_identity_not_verified() -> None:
@@ -314,7 +349,7 @@ async def test_status_approved_and_rejected_from_campaign() -> None:
         }
     )
     st = await p.status(refs)
-    assert st.state == "rejected" and st.reason == CAMPAIGN_REJECTED
+    assert st.state == "rejected" and "message examples" in st.reason
     assert "opt-out" in st.raw_reason
 
 
@@ -471,6 +506,31 @@ async def test_campaign_status_mapping(campaign_status, state) -> None:
 
 
 PERSON_FIELDS = {
+    **{
+        "sender_country": "US",
+        "has_tax_id": "NO",
+        "program_name": "Ada",
+        "message_frequency": "once per appointment",
+        "disclosure_purposes_confirmed": "YES",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "ACCOUNT_NOTIFICATION",
+        "consent_methods": "WEBSITE",
+        "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
+        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+        "consent_optional": "YES",
+        "marketing_consent": "NO",
+        "evidence_redacted": "YES",
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence/booking.png",
+        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+        "policies_confirmed": "YES",
+        "has_phone": "NO",
+        "age_gated": "NO",
+        "direct_lending": "NO",
+        "restricted_content": "NONE",
+        "registration_country": "US",
+    },
     "first_name": "Ada",
     "last_name": "Lovelace",
     "email": "ada@example.com",
@@ -481,8 +541,8 @@ PERSON_FIELDS = {
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
     "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://ada.example/privacy",
-    "terms_url": "https://ada.example/terms",
+    "privacy_policy_url": "https://ada.org/privacy",
+    "terms_url": "https://ada.org/terms",
 }
 
 
@@ -772,7 +832,8 @@ async def test_person_mobile_must_be_us_or_canadian() -> None:
     )
     assert draft.problems == [
         Problem(
-            field="mobile_phone_number", message="Use a US or Canadian mobile number."
+            field="mobile_phone_number",
+            message="Use your own US or Canadian mobile number, not a Hail or other internet phone number.",
         )
     ]
     assert calls == []
@@ -838,8 +899,13 @@ def _person_refs(**extra) -> dict:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
+            "schema_version": 2,
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+            "privacy_policy_url": "https://acme.org/privacy",
+            "terms_url": "https://acme.org/terms",
         },
         **extra,
     }
@@ -1150,6 +1216,10 @@ async def test_status_files_the_picked_text_types() -> None:
         "message_flow": "f",
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
+        "schema_version": 2,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
         "text_types": ["2FA", "SECURITY_ALERT"],
     }
     refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
@@ -1207,6 +1277,11 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
         "message_flow": "f",
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
+        "schema_version": 2,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+        "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
     }
     refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
     await _provider(handler).status(refs)
@@ -1518,6 +1593,11 @@ def _filing_refs():
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
+            "schema_version": 2,
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
             "contact_email": "help@acme.example",
         },
     }
@@ -1549,8 +1629,9 @@ async def test_status_sets_the_profile_auto_replies_to_the_filed_texts() -> None
     ]
     assert sent["info"]["keywords"] == ["HELP", "INFO"]
     assert {b["country_code"] for b in sent.values()} == {"US"}
-    assert refs["replies_set"] is True and refs["replies"]["optoutMessage"] == (
-        filed["optoutMessage"]
+    assert (
+        refs["replies_set"] is True
+        and refs["replies"]["optoutMessage"] == (filed["optoutMessage"])
     )
     # Set once: the next poll leaves the profile alone.
     calls.clear()
@@ -1665,7 +1746,7 @@ _FILED = {
         "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
     ),
     "optoutMessage": (
-        "Acme: You are unsubscribed and will get no more messages from this number."
+        "Acme: You are unsubscribed and will get no more messages from this workspace."
     ),
 }
 
@@ -1697,7 +1778,9 @@ async def test_approval_waits_until_the_auto_replies_are_set() -> None:
     refs = _campaign_refs()
     failing = _provider(_approved_handler(calls, replies_fail=True))
     assert (await failing.status(refs)).state == "pending"
-    assert "replies_set" not in refs and refs["replies_waits"] == 1
+    assert "replies_set" not in refs
+    assert refs["campaign_accepted"] is True and refs["runtime_ready"] is False
+    assert failing.step(refs) == "runtime_setup"
     working = _provider(_approved_handler(calls))
     assert (await working.status(refs)).state == "approved"
     assert refs["replies_set"] is True
@@ -1707,17 +1790,16 @@ async def test_approval_waits_until_the_auto_replies_are_set() -> None:
     }
 
 
-async def test_approval_goes_through_after_the_last_wait(caplog) -> None:
-    """A Telnyx call that keeps failing never blocks approval for good."""
-    p = _provider(_approved_handler([], replies_fail=True))
+async def test_failed_runtime_setup_never_approves_or_refiles() -> None:
+    calls = []
+    p = _provider(_approved_handler(calls, replies_fail=True))
     refs = _campaign_refs()
-    for _ in range(telnyx_sms._REPLY_WAITS):
+    for _ in range(12):
         assert (await p.status(refs)).state == "pending"
-    with caplog.at_level("ERROR"):
-        assert (await p.status(refs)).state == "approved"
-    assert "replies_set" not in refs
-    errors = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert errors and "campaign=C1" in errors[0].getMessage()
+    assert refs["campaign_accepted"] is True
+    assert refs["runtime_ready"] is False
+    assert p.step(refs) == "runtime_setup"
+    assert not any(path.endswith("campaignBuilder") for _, path, _ in calls)
 
 
 async def test_approved_at_once_when_the_replies_are_set() -> None:
@@ -1924,7 +2006,7 @@ def test_every_reply_caps_the_name() -> None:
         # Cut at a word boundary.
         assert name.split(" ")[-1] == "Acme", key
     assert replies["optoutMessage"].endswith(
-        ": You are unsubscribed and will get no more messages from this number."
+        ": You are unsubscribed and will get no more messages from this workspace."
     )
     assert replies["optinMessage"].endswith(
         ": You are opted in. Msg frequency varies. "
@@ -1950,3 +2032,121 @@ def test_a_long_contact_email_gives_hail_support_not_a_cut_name() -> None:
         {"displayName": name}, {"campaign": {"contact_email": email}}
     )["helpMessage"]
     assert help_text == (f"{name}: Reply STOP to opt out. For help contact hi@hail.so.")
+
+
+async def test_single_purpose_payload_uses_all_real_attributes_and_samples():
+    posted = []
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    text = {
+        "schema_version": 2,
+        "use_case": "CUSTOMER_CARE",
+        "text_types": ["CUSTOMER_CARE"],
+        "description": "Actual support replies",
+        "message_flow": "Actual consent flow",
+        "samples": [f"Acme sample {i}" for i in range(5)],
+        "has_links": True,
+        "has_phone": True,
+        "age_gated": True,
+        "direct_lending": True,
+        "privacy_policy_url": "https://acme.org/privacy",
+        "terms_url": "https://acme.org/terms",
+        "opt_in_message": "Acme: your actual subscription confirmation.",
+    }
+    await _provider(handler).status(
+        {"brand_id": "B1", "subject_type": "business", "campaign": text}
+    )
+    assert len(posted) == 1
+    body = posted[0]
+    assert body["usecase"] == "CUSTOMER_CARE" and "subUsecases" not in body
+    assert [body[f"sample{i}"] for i in range(1, 6)] == text["samples"]
+    assert body["embeddedPhone"] and body["ageGated"] and body["directLending"]
+    assert body["privacyPolicyLink"] == text["privacy_policy_url"]
+    assert body["termsAndConditionsLink"] == text["terms_url"]
+    assert body["optinMessage"] == text["opt_in_message"]
+
+
+def test_new_application_does_not_invent_subscription_confirmation():
+    replies = telnyx_sms._campaign_replies(
+        {"displayName": "Acme"}, {"campaign": {"schema_version": 2}}
+    )
+    assert "optinMessage" not in replies
+    assert "workspace" in replies["optoutMessage"]
+
+
+@pytest.mark.parametrize("mobile", ["+12425550123", "+17875550123", "+447700900123"])
+async def test_person_phone_geo_is_checked_before_carrier_calls(mobile):
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    result = await _draft(
+        provider, "person", {**PERSON_FIELDS, "mobile_phone_number": mobile}
+    )
+    assert any(p.field == "mobile_phone_number" for p in result.problems)
+    assert not calls
+
+
+async def test_address_country_must_match_eligibility():
+    provider = _provider(lambda req: pytest.fail("must not contact carrier"))
+    result = await _draft(provider, fields={**FIELDS, "sender_country": "CA"})
+    assert any(p.field == "address.country_code" for p in result.problems)
+
+
+def test_provider_repair_reason_never_echoes_personal_details():
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    message = campaign_repair_reason(
+        "Privacy policy absent for Person Secret, mobile +15125550199, EIN 12-3456789"
+    )
+    assert "privacy policy" in message
+    assert not any(
+        value in message for value in ("Person Secret", "+15125550199", "12-3456789")
+    )
+
+
+async def test_campaign_submission_refusal_returns_safe_repair_guidance():
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            return httpx.Response(
+                400,
+                json={
+                    "errors": [
+                        {
+                            "detail": "Privacy policy absent for Ada Secret EIN 12-3456789"
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    result = await _provider(handler).status(refs)
+    assert result.state == "rejected" and "privacy policy" in result.reason
+    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert "Ada Secret" in result.raw_reason
+    assert "campaign_id" not in refs
+
+
+async def test_legacy_confirmed_person_keeps_paid_brand_for_evidence_repair():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    provider = _provider(handler)
+    refs = {"subject_type": "person", "brand_id": "B1", "campaign": {}}
+    assert (await provider.status(refs)).state == "rejected"
+    assert provider.keeps_brand(refs)
+    assert await provider.discard_rejected(refs) == {"kept_brand_id": "B1"}
+    assert not any(method in {"DELETE", "POST"} for method, _ in calls)

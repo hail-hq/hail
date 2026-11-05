@@ -2,9 +2,11 @@
 carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
-Files and details pass through this process in memory to the carrier. Nothing
-identifying is written to the database, disk or logs (see the design spec),
-except the name of the person or company (``subject_name``), which the
+Number-verification files and details pass through in memory to the carrier.
+SMS applications keep submitted text fields and address privately for repair;
+only the organization-scoped application endpoint returns them. Files are
+never stored. Other identifying data is not written to disk or logs, except
+the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
 kept in the audit row (``payload.carrier_reason``), never in logs and never
@@ -26,7 +28,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import phonenumbers
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
@@ -260,9 +264,11 @@ def _wiped_refs(row: CarrierVerification) -> dict:
     """``provider_refs`` once emptied. A filing that reused a brand keeps the
     mark: the fee rater reads it on every sweep, and without it would bill
     the submission."""
-    return (
-        {"brand_reused": True} if (row.provider_refs or {}).get("brand_reused") else {}
-    )
+    refs = row.provider_refs or {}
+    kept = {"brand_reused": True} if refs.get("brand_reused") else {}
+    if row.purpose == "sms" and isinstance(refs.get("application"), dict):
+        kept["application"] = copy.deepcopy(refs["application"])
+    return kept
 
 
 async def _kept_brand(
@@ -783,6 +789,11 @@ def _out(
             "confirmation": confirmation,
             "step": step,
             "identity_confirmed": identity_confirmed,
+            "campaign_accepted": bool(refs.get("campaign_accepted"))
+            or (row.purpose == "sms" and row.state == "approved"),
+            "runtime_ready": refs.get("runtime_ready")
+            if row.purpose == "sms"
+            else None,
         }
     )
 
@@ -969,6 +980,82 @@ async def get_requirements(
     return VerificationRequirements.model_validate(
         requirements.model_dump(exclude={"provider"})
     )
+
+
+async def _sms_mobile_problems(
+    db: AsyncSession, subject_type: SubjectType, fields: dict[str, str]
+) -> list[Problem]:
+    """A Hail number cannot be the person's independently owned mobile.
+
+    This local check covers every provider; the carrier's identity flow still
+    establishes ownership. Unknown or invalid inputs are handled by preflight.
+    """
+    if subject_type != "person" or not fields.get("mobile_phone_number"):
+        return []
+    try:
+        parsed = phonenumbers.parse(fields["mobile_phone_number"])
+        mobile = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException:
+        return []
+    owned = (
+        await db.execute(
+            select(PhoneNumber.id)
+            .where(
+                PhoneNumber.e164 == mobile,
+                PhoneNumber.provisioning_state != "released",
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if owned is not None:
+        return [
+            Problem(
+                field="mobile_phone_number",
+                message="Use your own mobile number, not a Hail number.",
+            )
+        ]
+    return []
+
+
+class SmsPreviewRequest(BaseModel):
+    subject_type: SubjectType
+    number_id: UUID | None = None
+    fields: dict[str, str]
+    address: Address | None = None
+
+
+@router.post("/sms/preview", operation_id="preview_sms_application")
+async def preview_sms_application(
+    body: SmsPreviewRequest,
+    response: Response,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+) -> dict:
+    """Compile the exact campaign text without creating or charging a filing.
+
+    Checks answers locally. This does not establish policy accessibility,
+    carrier acceptance, identity ownership or runtime messaging readiness.
+    """
+    from dataclasses import asdict
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    provider_name = await _sms_provider_name(
+        db, principal.organization_id, body.number_id, "body"
+    )
+    provider = _provider_or_404(registry, provider_name, "sms")
+    if not isinstance(provider, SmsRegistrationProvider):
+        raise HTTPException(status_code=404, detail="SMS registration is unavailable.")
+    requirements = await provider.requirements("US", "local", body.subject_type)
+    problems = length_problems(requirements, body.fields, {})
+    problems.extend(
+        provider.validate_application(body.fields, body.address, body.subject_type)
+    )
+    problems.extend(await _sms_mobile_problems(db, body.subject_type, body.fields))
+    if problems:
+        raise _problems_422(problems, principal.organization_id, provider_name)
+    response.headers["Cache-Control"] = "no-store"
+    return asdict(campaign_text(body.fields, body.subject_type))
 
 
 class _DocumentPart(BaseModel):
@@ -1256,6 +1343,13 @@ async def create_verification(
             ),
         )
 
+    if sub.purpose == "sms":
+        mobile_problems = await _sms_mobile_problems(db, sub.subject_type, sub.fields)
+        if mobile_problems:
+            raise _problems_422(
+                mobile_problems, principal.organization_id, provider_name
+            )
+
     draft_kwargs: dict = {}
     if sub.purpose == "sms":
         # Hail Cloud charges each step of the filing from prepaid credit (the
@@ -1294,10 +1388,10 @@ async def create_verification(
             # The floor above assumes the brand is reused. Only the carrier
             # can tell, so the plug-in stops if it needs a new one.
             draft_kwargs["new_brand_funded"] = new_brand_funded
-        draft_kwargs["messaging_service_sid"] = (
-            await sms_setup.org_messaging_service_sid(
-                db, principal.organization_id, provider_name
-            )
+        draft_kwargs[
+            "messaging_service_sid"
+        ] = await sms_setup.org_messaging_service_sid(
+            db, principal.organization_id, provider_name
         )
 
     try:
@@ -1329,8 +1423,24 @@ async def create_verification(
                 f"applies. Add credit at {BILLING_URL} and file again."
             ),
         )
+    if sub.purpose == "sms":
+        # Stored privately for rejected-application repair; no files, provider
+        # feedback, or arbitrary extra multipart fields belong in this record.
+        draft.refs["application"] = {
+            "schema_version": 1,
+            "subject_type": sub.subject_type,
+            "fields": {
+                field.name: sub.fields[field.name]
+                for field in requirements.fields
+                if field.name in sub.fields
+            },
+            "address": sub.address.model_dump() if sub.address else None,
+        }
+
     _stamp_campaign_filed(provider, draft.refs)
     if draft.billed_refs:
+        if sub.purpose == "sms":
+            draft.billed_refs["application"] = copy.deepcopy(draft.refs["application"])
         _stamp_campaign_filed(provider, draft.billed_refs)
     if draft.problems:
         if draft.billed_refs:
@@ -1765,6 +1875,43 @@ async def get_verification(
     row = await _org_row_or_404(db, principal, verification_id)
     await _refresh(db, row, registry)
     return _out(row, registry)
+
+
+class SmsApplicationResponse(BaseModel):
+    """Private submitted answers for repairing an SMS application."""
+
+    schema_version: int = 1
+    subject_type: SubjectType
+    fields: dict[str, str]
+    address: Address | None = None
+
+
+@router.get(
+    "/{verification_id}/application",
+    response_model=SmsApplicationResponse,
+    operation_id="get_verification_application",
+)
+async def get_verification_application(
+    verification_id: UUID,
+    response: Response,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SmsApplicationResponse:
+    """Read your organization's saved SMS answers, including after rejection.
+
+    Older applications did not retain these answers; a 404 asks the user to
+    complete the current form. The ordinary verification list never contains
+    application fields or addresses. No carrier call or charge occurs here.
+    """
+    row = await _org_row_or_404(db, principal, verification_id)
+    application = (row.provider_refs or {}).get("application")
+    if row.purpose != "sms" or not isinstance(application, dict):
+        raise HTTPException(
+            status_code=404,
+            detail="Saved answers are unavailable for this older application. Complete the current registration form.",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    return SmsApplicationResponse.model_validate(application)
 
 
 @router.delete(

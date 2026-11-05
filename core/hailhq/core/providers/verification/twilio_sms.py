@@ -15,7 +15,6 @@ from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
-    CAMPAIGN_REJECTED,
     SMS_REFUSED,
     DraftResult,
     Problem,
@@ -27,9 +26,12 @@ from hailhq.core.providers.verification.base import (
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
-    field_problems,
     sms_requirements,
     sms_subject_name,
+)
+from hailhq.core.providers.verification.sms_review import (
+    LEGACY_APPLICATION,
+    campaign_repair_reason,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
@@ -40,15 +42,13 @@ _SECONDARY_PROFILE_POLICY = "RNdfbf3fae0e1107f8aded0e7cead80bf5"
 _STARTER_PROFILE_POLICY = "RN806dd6cd175f314e1f96a9727ee271f4"
 _A2P_TRUST_POLICY = "RNb0d4771c2c98518d916a3d4cd70a8f8b"
 _SOLE_PROP_TRUST_POLICY = "RN670d5d2e282a6130ae063b234b6019c8"
-_EIN = re.compile(r"^\d{2}-?\d{7}$")
 # A person's brand waits for them to confirm the code sent to their mobile.
 # Past this age, the code is sent again.
 _OTP_RESEND_AFTER = timedelta(hours=24)
 
 
 def _policy_links(text: dict) -> dict:
-    """Privacy and terms links for the campaign. Drafts filed before these
-    fields existed carry no links; they are filed without them."""
+    """File dedicated policy fields exactly as saved, without invented links."""
     links = {}
     if text.get("privacy_policy_url"):
         links["privacy_policy_url"] = text["privacy_policy_url"]
@@ -106,22 +106,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return bool(
                 self._client.incoming_phone_numbers.list(phone_number=e164, limit=1)
             )
-        except TwilioRestException:
-            return False
-
-    def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self, fields, subject_type)
-        if (
-            subject_type == "business"
-            and fields.get("ein")
-            and not _EIN.match(fields["ein"])
-        ):
-            problems.append(
-                Problem(field="ein", message="Nine digits, like 12-3456789.")
-            )
-        if address is None:
-            problems.append(Problem(field="address", message="An address is required."))
-        return problems
+        except TwilioRestException as exc:
+            raise VerificationProviderError(
+                "Could not check the mobile number. Try again."
+            ) from exc
 
     async def create_draft(
         self,
@@ -135,7 +123,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         messaging_service_sid=None,
     ) -> DraftResult:
         subject_type = requirements.subject_type
-        problems = self._validate(fields, address, subject_type)
+        problems = self.validate_application(fields, address, subject_type)
         mobile = fields.get("mobile_phone_number")
         if (
             subject_type == "person"
@@ -229,7 +217,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 attributes={
                     "business_name": fields["legal_name"],
                     "business_type": _business_type(fields["business_type"]),
-                    "business_registration_identifier": "EIN",
+                    "business_registration_identifier": "CBN"
+                    if fields.get("registration_country") == "CA"
+                    else "EIN",
                     "business_registration_number": fields["ein"].replace("-", ""),
                     "business_industry": fields["industry"],
                     "business_identity": "direct_customer",
@@ -361,21 +351,42 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             refs["identity_verified"] = True
         svc = self._client.messaging.v1.services(refs["messaging_service_sid"])
         if "campaign_sid" not in refs:
+            # Recover a paid submission whose response was lost before retrying.
+            existing = svc.us_app_to_person.list(limit=20)
+            matching = [
+                c for c in existing if c.brand_registration_sid == refs["brand_sid"]
+            ]
+            if matching:
+                refs["campaign_sid"] = matching[0].sid
+                return ProviderStatus(state="pending")
             text = refs["campaign"]
-            campaign = svc.us_app_to_person.create(
-                brand_registration_sid=refs["brand_sid"],
-                description=text["description"],
-                message_flow=text["message_flow"],
-                message_samples=text["samples"],
-                us_app_to_person_usecase=text["use_case"],
-                has_embedded_links=text["has_links"],
-                has_embedded_phone=False,
-                **_policy_links(text),
-            )
+            if text.get("schema_version", 1) < 2:
+                return ProviderStatus(state="rejected", reason=LEGACY_APPLICATION)
+            try:
+                campaign = svc.us_app_to_person.create(
+                    brand_registration_sid=refs["brand_sid"],
+                    description=text["description"],
+                    message_flow=text["message_flow"],
+                    message_samples=text["samples"],
+                    us_app_to_person_usecase=text["use_case"],
+                    has_embedded_links=text["has_links"],
+                    has_embedded_phone=text["has_phone"],
+                    **_policy_links(text),
+                )
+            except TwilioRestException as exc:
+                if 400 <= (exc.status or 0) < 500 and exc.status not in (404, 429):
+                    return ProviderStatus(
+                        state="rejected",
+                        reason=campaign_repair_reason(exc.msg),
+                        raw_reason=exc.msg,
+                    )
+                raise
             refs["campaign_sid"] = campaign.sid
             return ProviderStatus(state="pending")
         campaign = svc.us_app_to_person(refs["campaign_sid"]).fetch()
         if campaign.campaign_status == "VERIFIED":
+            refs["campaign_accepted"] = True
+            # Custom runtime responses are not configured or verified by this adapter.
             return ProviderStatus(state="approved")
         if campaign.campaign_status == "FAILED":
             errors = campaign.errors or []
@@ -383,7 +394,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 e.get("description", "") for e in errors if isinstance(e, dict)
             )
             return ProviderStatus(
-                state="rejected", reason=CAMPAIGN_REJECTED, raw_reason=raw or None
+                state="rejected",
+                reason=campaign_repair_reason(raw),
+                raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
 
@@ -511,9 +524,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         steps = [
             (
                 "campaign_sid",
-                lambda: client.messaging.v1.services(ms)
-                .us_app_to_person(refs["campaign_sid"])
-                .delete(),
+                lambda: (
+                    client.messaging.v1.services(ms)
+                    .us_app_to_person(refs["campaign_sid"])
+                    .delete()
+                ),
             ),
             (
                 "trust_sid",

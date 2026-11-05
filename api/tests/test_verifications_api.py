@@ -3803,7 +3803,9 @@ async def test_a_cancel_rates_the_campaign_before_its_id_is_wiped(
     # Then the wipe, and the usual ping for the new state.
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "cancelled" and row.provider_refs == {}
+    assert row.state == "cancelled" and not any(
+        key != "application" for key in row.provider_refs
+    )
     assert pinged == [vid]
 
 
@@ -3884,7 +3886,9 @@ async def test_a_refusal_leaves_a_row_cancelled_while_it_was_rated(
     )
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "cancelled" and row.provider_refs == {}
+    assert row.state == "cancelled" and not any(
+        key != "application" for key in row.provider_refs
+    )
     assert discarded == []
 
 
@@ -4232,11 +4236,36 @@ async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
 # -- Telnyx outage after the brand ----------------------------------------
 
 _TELNYX_BUSINESS = {
+    **{
+        "sender_country": "US",
+        "has_tax_id": "YES",
+        "program_name": "Acme",
+        "message_frequency": "once per appointment",
+        "disclosure_purposes_confirmed": "YES",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "ACCOUNT_NOTIFICATION",
+        "consent_methods": "WEBSITE",
+        "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+        "consent_optional": "YES",
+        "marketing_consent": "NO",
+        "evidence_redacted": "YES",
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence/booking.png",
+        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+        "policies_confirmed": "YES",
+        "has_phone": "NO",
+        "age_gated": "NO",
+        "direct_lending": "NO",
+        "restricted_content": "NONE",
+        "registration_country": "US",
+    },
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -4247,10 +4276,35 @@ _TELNYX_BUSINESS = {
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
     "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 _TELNYX_PERSON = {
+    **{
+        "sender_country": "US",
+        "has_tax_id": "NO",
+        "program_name": "Ada",
+        "message_frequency": "once per appointment",
+        "disclosure_purposes_confirmed": "YES",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "ACCOUNT_NOTIFICATION",
+        "consent_methods": "WEBSITE",
+        "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
+        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+        "consent_optional": "YES",
+        "marketing_consent": "NO",
+        "evidence_redacted": "YES",
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence/booking.png",
+        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+        "policies_confirmed": "YES",
+        "has_phone": "NO",
+        "age_gated": "NO",
+        "direct_lending": "NO",
+        "restricted_content": "NONE",
+        "registration_country": "US",
+    },
     "first_name": "Ada",
     "last_name": "Lovelace",
     "email": "ada@example.com",
@@ -4261,8 +4315,8 @@ _TELNYX_PERSON = {
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
     "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://ada.example/privacy",
-    "terms_url": "https://ada.example/terms",
+    "privacy_policy_url": "https://ada.org/privacy",
+    "terms_url": "https://ada.org/terms",
 }
 
 
@@ -4730,3 +4784,159 @@ async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
     await async_session.refresh(row)
     assert row.provider_refs["campaign_id"] == "C1"
     assert row.provider_refs["campaign_filed_at"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_saved_sms_application_is_private_and_survives_repair(
+    client, org_and_key, sms_carrier, async_session
+):
+    _, _, key = org_and_key
+    response = await _post_sms(
+        client,
+        key,
+        fields=json.dumps(
+            {
+                "legal_name": "Acme",
+                "campaign_description": "Appointment reminders",
+                "unrecognized_secret": "must not be stored",
+            }
+        ),
+    )
+    assert response.status_code == 201, response.text
+    vid = response.json()["id"]
+    assert "fields" not in response.json() and "application" not in response.text
+    path = f"/verifications/{vid}/application"
+    saved = await client.get(path, headers=_auth(key))
+    assert saved.status_code == 200
+    assert saved.headers["cache-control"] == "no-store"
+    assert saved.json()["fields"] == {
+        "legal_name": "Acme",
+        "campaign_description": "Appointment reminders",
+    }
+    assert saved.json()["address"]["country_code"] == "US"
+    _, _, other_key = await insert_org_and_key(async_session)
+    assert (await client.get(path, headers=_auth(other_key))).status_code == 404
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "rejected"
+    await async_session.commit()
+    cancelled = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert cancelled.status_code == 200, cancelled.text
+    repaired = await client.get(path, headers=_auth(key))
+    assert repaired.json() == saved.json()
+    # Reading a saved application performs no submission or provider poll.
+    assert len(sms_carrier.drafts) == 1 and sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_legacy_application_has_actionable_missing_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    _, _, key = org_and_key
+    response = await _post_sms(client, key)
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {"brand_sid": "BN1"}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404
+    assert "Complete the current registration form" in saved.json()["detail"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_campaign_acceptance_is_distinct_from_runtime_readiness(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    response = await _post_sms(client, key)
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+    monkeypatch.setattr(sms_carrier, "step", lambda refs: "runtime_setup")
+    response = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200
+    assert response.json()["state"] == "submitted"
+    assert response.json()["step"] == "runtime_setup"
+    assert response.json()["campaign_accepted"] is True
+    assert response.json()["runtime_ready"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_sms_preview_is_exact_and_has_no_carrier_writes(
+    client, org_and_key, sms_carrier, monkeypatch
+):
+    from dataclasses import asdict
+    from hailhq.core.providers.verification.sms_form import (
+        campaign_text,
+        sms_requirements,
+    )
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements(sms_carrier, subject_type)
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    _, _, key = org_and_key
+    response = await client.post(
+        "/verifications/sms/preview",
+        headers=_auth(key),
+        json={
+            "subject_type": "business",
+            "fields": _TELNYX_BUSINESS,
+            "address": json.loads(_sms_submission()["address"]),
+        },
+    )
+    assert response.status_code == 200, response.text
+    expected = json.loads(
+        json.dumps(asdict(campaign_text(_TELNYX_BUSINESS, "business")))
+    )
+    assert response.json() == expected
+    assert not sms_carrier.drafts and not sms_carrier.submitted
+    invalid = await client.post(
+        "/verifications/sms/preview",
+        headers=_auth(key),
+        json={
+            "subject_type": "business",
+            "fields": {**_TELNYX_BUSINESS, "consent_methods": ""},
+            "address": json.loads(_sms_submission()["address"]),
+        },
+    )
+    assert invalid.status_code == 422
+    assert any(
+        item["loc"] == ["body", "consent_methods"] for item in invalid.json()["detail"]
+    )
+    assert not sms_carrier.drafts
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_person_identity_mobile_cannot_be_a_hail_number(
+    client, org_and_key, sms_carrier, async_session
+):
+    org_id, _, key = org_and_key
+    number = (
+        (
+            await async_session.execute(
+                select(PhoneNumber).where(PhoneNumber.organization_id == org_id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    # Normalize formatting before comparing with allocated numbers.
+    response = await _post_sms(
+        client,
+        key,
+        subject_type="person",
+        fields=json.dumps(
+            {
+                "legal_name": "Ada",
+                "mobile_phone_number": number.e164[:2] + " " + number.e164[2:],
+            }
+        ),
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "mobile_phone_number"]
+    assert not sms_carrier.drafts

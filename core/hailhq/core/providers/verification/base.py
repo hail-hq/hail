@@ -461,6 +461,19 @@ class SmsRegistrationProvider(VerificationProvider):
     # (``sms_form``), by field name.
     field_limits: Mapping[str, int] = MappingProxyType({})
 
+    def validate_application(
+        self, fields: dict[str, str], address: Address | None, subject_type: SubjectType
+    ) -> list[Problem]:
+        """Local preflight shared by review previews and paid submissions."""
+        from hailhq.core.providers.verification.sms_form import field_problems
+        from hailhq.core.providers.verification.sms_review import sender_problems
+
+        problems = field_problems(self, fields, subject_type)
+        problems.extend(sender_problems(fields, address, subject_type))
+        if address is None:
+            problems.append(Problem(field="address", message="An address is required."))
+        return problems
+
     def extra_fields(self, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
         """Fields this carrier asks for on top of the shared US form. They
         follow the campaign description."""

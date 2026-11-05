@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED, Address
+from hailhq.core.providers.verification.base import Address
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 
 
@@ -64,15 +64,41 @@ def _ok_responses():
             sid="BN1", status="PENDING", identity_status="UNVERIFIED"
         ),
         "services.create": SimpleNamespace(sid="MG1"),
+        "us_app_to_person.list": [],
     }
 
 
 FIELDS = {
+    **{
+        "sender_country": "US",
+        "has_tax_id": "YES",
+        "program_name": "Acme",
+        "message_frequency": "once per appointment",
+        "disclosure_purposes_confirmed": "YES",
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "ACCOUNT_NOTIFICATION",
+        "consent_methods": "WEBSITE",
+        "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+        "consent_optional": "YES",
+        "marketing_consent": "NO",
+        "evidence_redacted": "YES",
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence/booking.png",
+        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+        "policies_confirmed": "YES",
+        "has_phone": "NO",
+        "age_gated": "NO",
+        "direct_lending": "NO",
+        "restricted_content": "NONE",
+        "registration_country": "US",
+    },
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -83,8 +109,8 @@ FIELDS = {
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
     "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 ADDRESS = Address(
     customer_name="Acme Inc",
@@ -162,6 +188,7 @@ async def test_person_draft_uses_sole_proprietor_and_sends_otp() -> None:
     p = _provider()
     fields = {
         **FIELDS,
+        "has_tax_id": "NO",
         "first_name": "Ada",
         "last_name": "Lovelace",
         "email": "ada@example.com",
@@ -199,6 +226,7 @@ async def test_person_draft_refuses_hail_number_as_mobile(monkeypatch) -> None:
     monkeypatch.setattr(p, "_is_hail_number", lambda e164: e164 == "+15125550199")
     fields = {
         **FIELDS,
+        "has_tax_id": "NO",
         "first_name": "Ada",
         "last_name": "Lovelace",
         "email": "ada@example.com",
@@ -225,8 +253,13 @@ def _campaign(use_case="MIXED"):
         "message_flow": "f" * 40,
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
-        "privacy_policy_url": "https://acme.example/privacy",
-        "terms_url": "https://acme.example/terms",
+        "schema_version": 2,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+        "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+        "privacy_policy_url": "https://acme.org/privacy",
+        "terms_url": "https://acme.org/terms",
     }
 
 
@@ -269,8 +302,8 @@ async def test_status_creates_campaign_once_brand_approved() -> None:
         kw for n, kw in p._client.calls if n.endswith("us_app_to_person.create")
     )
     assert create["us_app_to_person_usecase"] == "MIXED"
-    assert create["privacy_policy_url"] == "https://acme.example/privacy"
-    assert create["terms_and_conditions_url"] == "https://acme.example/terms"
+    assert create["privacy_policy_url"] == "https://acme.org/privacy"
+    assert create["terms_and_conditions_url"] == "https://acme.org/terms"
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
@@ -282,6 +315,7 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
     )
     p = _provider(r)
     old = _campaign()
+    old.pop("schema_version")
     old.pop("privacy_policy_url")
     old.pop("terms_url")
     refs = {
@@ -290,12 +324,9 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
         "messaging_service_sid": "MG1",
         "campaign": old,
     }
-    assert (await p.status(refs)).state == "pending"
-    create = next(
-        kw for n, kw in p._client.calls if n.endswith("us_app_to_person.create")
-    )
-    assert "privacy_policy_url" not in create
-    assert create["brand_registration_sid"] == "BN1"
+    result = await p.status(refs)
+    assert result.state == "rejected" and "consent evidence" in result.reason
+    assert not _calls(p, "us_app_to_person.create")
 
 
 async def test_status_person_waits_for_otp_before_campaign() -> None:
@@ -358,7 +389,7 @@ async def test_status_rejected_carries_carrier_reason() -> None:
         }
     )
     assert st.state == "rejected"
-    assert st.reason == CAMPAIGN_REJECTED
+    assert "application links" in st.reason
     assert "sufficient business information" in st.raw_reason
 
 
@@ -383,6 +414,7 @@ async def _draft(p, subject="business", **extra):
     fields = {**FIELDS, **extra}
     if subject == "person":
         fields.update(
+            has_tax_id="NO",
             first_name="Ada",
             last_name="Lovelace",
             email="ada@example.com",
@@ -516,7 +548,7 @@ async def test_draft_cleans_up_on_non_twilio_error() -> None:
 async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     p = _provider()
     draft = await _draft(p, privacy_policy_url="acme.example/privacy")
-    assert [pr.field for pr in draft.problems] == ["privacy_policy_url"]
+    assert "privacy_policy_url" in [pr.field for pr in draft.problems]
     assert draft.refs == {} and p._client.calls == []
 
 
@@ -781,3 +813,83 @@ def test_step_follows_the_filing() -> None:
     assert p.step({"subject_type": "business", "campaign_sid": "QE1"}) == (
         "carrier_review"
     )
+
+
+async def test_lost_campaign_response_is_recovered_without_another_paid_create():
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.list"] = [
+        SimpleNamespace(sid="QEexisting", brand_registration_sid="BN1")
+    ]
+    provider = _provider(responses)
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": {}}
+    assert (await provider.status(refs)).state == "pending"
+    assert refs["campaign_sid"] == "QEexisting"
+    assert not _calls(provider, "us_app_to_person.create")
+
+
+async def test_business_can_file_canadian_registration_number():
+    provider = _provider()
+    result = await _draft(provider, registration_country="CA", ein="123456789")
+    assert not result.problems
+    business = next(
+        call["attributes"]
+        for call in _calls(provider, "end_users.create")
+        if call["type"] == "customer_profile_business_information"
+    )
+    assert business["business_registration_identifier"] == "CBN"
+    assert business["business_registration_number"] == "123456789"
+
+
+async def test_phone_attribute_and_all_samples_are_filed():
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = SimpleNamespace(sid="QE1")
+    provider = _provider(responses)
+    text = {
+        **_campaign("CUSTOMER_CARE"),
+        "has_phone": True,
+        "samples": [f"Acme support example {i}" for i in range(5)],
+    }
+    await provider.status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": text}
+    )
+    filed = _calls(provider, "us_app_to_person.create")[0]
+    assert filed["has_embedded_phone"] is True
+    assert filed["message_samples"] == text["samples"]
+    assert filed["us_app_to_person_usecase"] == "CUSTOMER_CARE"
+
+
+async def test_mobile_ownership_lookup_outage_does_not_submit():
+    from hailhq.core.providers.verification.base import VerificationProviderError
+    from twilio.base.exceptions import TwilioRestException
+
+    def fail():
+        raise TwilioRestException(503, "", msg="unavailable")
+
+    responses = _ok_responses()
+    responses["incoming_phone_numbers.list"] = fail
+    provider = _provider(responses)
+    with pytest.raises(VerificationProviderError):
+        await _draft(provider, "person")
+    assert not _calls(provider, "customer_profiles.create")
+
+
+async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
+    from twilio.base.exceptions import TwilioRestException
+
+    def refused():
+        raise TwilioRestException(
+            400, "", msg="Privacy policy absent for Ada Secret, EIN 12-3456789"
+        )
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = refused
+    provider = _provider(responses)
+    result = await provider.status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
+    )
+    assert result.state == "rejected" and "privacy policy" in result.reason
+    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert "Ada Secret" in result.raw_reason
