@@ -1,7 +1,6 @@
 """Local SMS preflight and fixed, customer-safe repair guidance."""
 
 import phonenumbers
-
 from hailhq.core.providers.verification.base import (
     CAMPAIGN_REJECTED,
     Address,

@@ -69,31 +69,30 @@ def _ok_responses():
 
 
 FIELDS = {
-    **{
-        "sender_country": "US",
-        "has_tax_id": "YES",
-        "program_name": "Acme",
-        "message_frequency": "once per appointment",
-        "disclosure_purposes_confirmed": "YES",
-        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-        "sample_1_type": "CUSTOMER_CARE",
-        "sample_2_type": "ACCOUNT_NOTIFICATION",
-        "consent_methods": "WEBSITE",
-        "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
-        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
-        "consent_optional": "YES",
-        "marketing_consent": "NO",
-        "evidence_redacted": "YES",
-        "website_url": "https://acme.org/book",
-        "website_evidence_url": "https://acme.org/evidence/booking.png",
-        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
-        "policies_confirmed": "YES",
-        "has_phone": "NO",
-        "age_gated": "NO",
-        "direct_lending": "NO",
-        "restricted_content": "NONE",
-        "registration_country": "US",
-    },
+    "sender_country": "US",
+    "has_tax_id": "YES",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
@@ -108,7 +107,6 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.org/privacy",
     "terms_url": "https://acme.org/terms",
 }
@@ -893,3 +891,28 @@ async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
     assert result.state == "rejected" and "privacy policy" in result.reason
     assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
     assert "Ada Secret" in result.raw_reason
+
+
+async def test_keyword_campaign_sends_actual_confirmation_and_content_flags():
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = SimpleNamespace(sid="QE1")
+    provider = _provider(responses)
+    fields = {
+        **FIELDS,
+        "consent_methods": "KEYWORD",
+        "keyword_keyword": "JOIN",
+        "age_gated": "YES",
+        "direct_lending": "YES",
+        "opt_in_message": "Acme: Enrolled for appointment updates. Reply HELP for help, STOP to stop.",
+    }
+    text = campaign_text(fields, "business").__dict__
+    await provider.status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": text}
+    )
+    posted = _calls(provider, "us_app_to_person.create")[0]
+    assert posted["opt_in_message"] == fields["opt_in_message"]
+    assert posted["opt_in_keywords"] == ["JOIN"]
+    assert posted["age_gated"] is True and posted["direct_lending"] is True

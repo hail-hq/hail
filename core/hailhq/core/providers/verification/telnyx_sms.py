@@ -15,10 +15,6 @@ from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 
 import httpx
-from hailhq.core.providers.verification.sms_review import (
-    LEGACY_APPLICATION,
-    campaign_repair_reason,
-)
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
@@ -37,6 +33,10 @@ from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     sms_requirements,
     sms_subject_name,
+)
+from hailhq.core.providers.verification.sms_review import (
+    LEGACY_APPLICATION,
+    campaign_repair_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -234,6 +234,9 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # subscriberOptin describes consent before sending, not keyword support.
+    # Every self-service program requires consent and an actual confirmation.
+    opt_in_message_required = True
     # Telnyx brand maximums. The person's first and last name are also
     # filed together as the brand name, under the same 100 (``_validate``).
     field_limits = MappingProxyType(
@@ -656,7 +659,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     await self._set_replies(refs)
                     return ProviderStatus(state="pending")
                 text = refs["campaign"]
-                if text.get("schema_version", 1) < 2:
+                if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
                     refs["campaign_needs_repair"] = True
                     return ProviderStatus(state="rejected", reason=LEGACY_APPLICATION)
                 replies = _campaign_replies(brand, refs)
@@ -683,6 +686,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "ageGated": text["age_gated"],
                         "directLending": text["direct_lending"],
                         "subscriberOptin": True,
+                        **(
+                            {"optinKeywords": ",".join(text["opt_in_keywords"])}
+                            if text.get("opt_in_keywords")
+                            else {}
+                        ),
                         "subscriberOptout": True,
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,

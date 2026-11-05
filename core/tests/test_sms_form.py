@@ -1,5 +1,4 @@
 import pytest
-
 from hailhq.core.providers.verification.forms import length_problems, text_length
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
@@ -26,6 +25,7 @@ GOOD = {
     "email": "ada@acme.org",
     "mobile_phone_number": "+15125550199",
     "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
     "campaign_description": "Acme sends appointment reminders and replies to customer support questions.",
     "message_frequency": "once per appointment",
     "disclosure_purposes_confirmed": "YES",
@@ -348,6 +348,7 @@ def test_description_samples_and_disclosure_are_not_fabricated():
         "campaign_description": "Short",
         "sample_1": "Hi",
         "consent_disclosure": "I agree",
+        "opt_in_message": "",
     }
     assert {"campaign_description", "sample_1", "consent_disclosure"} <= error_fields(
         data
@@ -513,3 +514,20 @@ def test_reserved_help_and_opt_out_keywords_cannot_enroll_recipients(keyword):
         "keyword_keyword": keyword,
     }
     assert "keyword_keyword" in error_fields(data)
+
+
+def test_keyword_enrollment_requires_actual_confirmation_before_submission():
+    fields = {
+        **GOOD,
+        "consent_methods": "KEYWORD",
+        **METHODS["KEYWORD"],
+        "opt_in_message": "",
+    }
+    assert "opt_in_message" in error_fields(fields, provider=TWILIO)
+    fields["opt_in_message"] = (
+        "Acme: Enrolled for appointment updates. Reply HELP for help, STOP to stop."
+    )
+    assert not errors(fields, provider=TWILIO)
+    assert campaign_text(fields, "person").opt_in_keywords == [
+        fields["keyword_keyword"]
+    ]

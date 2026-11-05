@@ -217,9 +217,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 attributes={
                     "business_name": fields["legal_name"],
                     "business_type": _business_type(fields["business_type"]),
-                    "business_registration_identifier": "CBN"
-                    if fields.get("registration_country") == "CA"
-                    else "EIN",
+                    "business_registration_identifier": (
+                        "CBN" if fields.get("registration_country") == "CA" else "EIN"
+                    ),
                     "business_registration_number": fields["ein"].replace("-", ""),
                     "business_industry": fields["industry"],
                     "business_identity": "direct_customer",
@@ -371,6 +371,19 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     us_app_to_person_usecase=text["use_case"],
                     has_embedded_links=text["has_links"],
                     has_embedded_phone=text["has_phone"],
+                    age_gated=text["age_gated"],
+                    direct_lending=text["direct_lending"],
+                    subscriber_opt_in=True,
+                    **(
+                        {"opt_in_message": text["opt_in_message"]}
+                        if text.get("opt_in_message")
+                        else {}
+                    ),
+                    **(
+                        {"opt_in_keywords": text["opt_in_keywords"]}
+                        if text.get("opt_in_keywords")
+                        else {}
+                    ),
                     **_policy_links(text),
                 )
             except TwilioRestException as exc:

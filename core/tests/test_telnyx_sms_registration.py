@@ -21,31 +21,30 @@ def _no_brand_wait(monkeypatch):
 
 
 FIELDS = {
-    **{
-        "sender_country": "US",
-        "has_tax_id": "YES",
-        "program_name": "Acme",
-        "message_frequency": "once per appointment",
-        "disclosure_purposes_confirmed": "YES",
-        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-        "sample_1_type": "CUSTOMER_CARE",
-        "sample_2_type": "ACCOUNT_NOTIFICATION",
-        "consent_methods": "WEBSITE",
-        "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
-        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
-        "consent_optional": "YES",
-        "marketing_consent": "NO",
-        "evidence_redacted": "YES",
-        "website_url": "https://acme.org/book",
-        "website_evidence_url": "https://acme.org/evidence/booking.png",
-        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
-        "policies_confirmed": "YES",
-        "has_phone": "NO",
-        "age_gated": "NO",
-        "direct_lending": "NO",
-        "restricted_content": "NONE",
-        "registration_country": "US",
-    },
+    "sender_country": "US",
+    "has_tax_id": "YES",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
@@ -60,7 +59,6 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://acme.org/privacy",
     "terms_url": "https://acme.org/terms",
 }
@@ -206,6 +204,7 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
             "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
             "has_phone": False,
             "age_gated": False,
             "direct_lending": False,
@@ -506,31 +505,30 @@ async def test_campaign_status_mapping(campaign_status, state) -> None:
 
 
 PERSON_FIELDS = {
-    **{
-        "sender_country": "US",
-        "has_tax_id": "NO",
-        "program_name": "Ada",
-        "message_frequency": "once per appointment",
-        "disclosure_purposes_confirmed": "YES",
-        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-        "sample_1_type": "CUSTOMER_CARE",
-        "sample_2_type": "ACCOUNT_NOTIFICATION",
-        "consent_methods": "WEBSITE",
-        "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
-        "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
-        "consent_optional": "YES",
-        "marketing_consent": "NO",
-        "evidence_redacted": "YES",
-        "website_url": "https://acme.org/book",
-        "website_evidence_url": "https://acme.org/evidence/booking.png",
-        "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
-        "policies_confirmed": "YES",
-        "has_phone": "NO",
-        "age_gated": "NO",
-        "direct_lending": "NO",
-        "restricted_content": "NONE",
-        "registration_country": "US",
-    },
+    "sender_country": "US",
+    "has_tax_id": "NO",
+    "program_name": "Ada",
+    "opt_in_message": "Ada: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "first_name": "Ada",
     "last_name": "Lovelace",
     "email": "ada@example.com",
@@ -540,7 +538,6 @@ PERSON_FIELDS = {
     "sample_2": "Ada: thanks for booking. Reply STOP to opt out.",
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
     "privacy_policy_url": "https://ada.org/privacy",
     "terms_url": "https://ada.org/terms",
 }
@@ -900,6 +897,7 @@ def _person_refs(**extra) -> dict:
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
             "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
             "has_phone": False,
             "age_gated": False,
             "direct_lending": False,
@@ -1217,6 +1215,7 @@ async def test_status_files_the_picked_text_types() -> None:
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
         "schema_version": 2,
+        "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
         "has_phone": False,
         "age_gated": False,
         "direct_lending": False,
@@ -1278,6 +1277,7 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
         "schema_version": 2,
+        "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
         "has_phone": False,
         "age_gated": False,
         "direct_lending": False,
@@ -1594,6 +1594,7 @@ def _filing_refs():
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
             "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
             "has_phone": False,
             "age_gated": False,
             "direct_lending": False,
@@ -1629,9 +1630,8 @@ async def test_status_sets_the_profile_auto_replies_to_the_filed_texts() -> None
     ]
     assert sent["info"]["keywords"] == ["HELP", "INFO"]
     assert {b["country_code"] for b in sent.values()} == {"US"}
-    assert (
-        refs["replies_set"] is True
-        and refs["replies"]["optoutMessage"] == (filed["optoutMessage"])
+    assert refs["replies_set"] is True and refs["replies"]["optoutMessage"] == (
+        filed["optoutMessage"]
     )
     # Set once: the next poll leaves the profile alone.
     calls.clear()
@@ -2057,6 +2057,7 @@ async def test_single_purpose_payload_uses_all_real_attributes_and_samples():
         "privacy_policy_url": "https://acme.org/privacy",
         "terms_url": "https://acme.org/terms",
         "opt_in_message": "Acme: your actual subscription confirmation.",
+        "opt_in_keywords": ["JOIN"],
     }
     await _provider(handler).status(
         {"brand_id": "B1", "subject_type": "business", "campaign": text}
@@ -2069,6 +2070,7 @@ async def test_single_purpose_payload_uses_all_real_attributes_and_samples():
     assert body["privacyPolicyLink"] == text["privacy_policy_url"]
     assert body["termsAndConditionsLink"] == text["terms_url"]
     assert body["optinMessage"] == text["opt_in_message"]
+    assert body["optinKeywords"] == "JOIN"
 
 
 def test_new_application_does_not_invent_subscription_confirmation():
@@ -2150,3 +2152,14 @@ async def test_legacy_confirmed_person_keeps_paid_brand_for_evidence_repair():
     assert provider.keeps_brand(refs)
     assert await provider.discard_rejected(refs) == {"kept_brand_id": "B1"}
     assert not any(method in {"DELETE", "POST"} for method, _ in calls)
+
+
+async def test_telnyx_requires_actual_confirmation_before_paid_brand():
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    fields = {**FIELDS, "opt_in_message": ""}
+    result = await _draft(provider, fields=fields)
+    assert any(problem.field == "opt_in_message" for problem in result.problems)
+    assert calls == []
+    req = await provider.requirements("US", "local", "business")
+    assert next(spec for spec in req.fields if spec.name == "opt_in_message").required

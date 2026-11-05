@@ -4,9 +4,9 @@ Carrier words stay out of labels and help."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ipaddress
 import re
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from hailhq.core.providers.verification.base import (
@@ -328,10 +328,10 @@ _CAMPAIGN_FIELDS = (
     ),
     FieldSpec(
         name="opt_in_message",
-        label="Actual subscription confirmation, if sent",
+        label="Actual subscription confirmation",
         required=False,
         max_length=320,
-        help="Enter only the response your system really sends. Registration does not configure an automatic subscription confirmation.",
+        help="Enter the confirmation your existing system actually sends, including sender, enrollment, frequency, rates, HELP and STOP. Required for keyword enrollment and when this form marks it required. Registration declares this response; it does not configure or send it.",
     ),
     FieldSpec(
         name="has_links", label="Do any messages contain links?", options=_YES_NO
@@ -393,10 +393,15 @@ def _fields_for(
         + _CAMPAIGN_FIELDS
     )
     limits = provider.field_limits
-    return tuple(
-        f.model_copy(update={"max_length": limits[f.name]}) if f.name in limits else f
-        for f in fields
-    )
+    result = []
+    for spec in fields:
+        updates = {}
+        if spec.name in limits:
+            updates["max_length"] = limits[spec.name]
+        if spec.name == "opt_in_message" and provider.opt_in_message_required:
+            updates["required"] = True
+        result.append(spec.model_copy(update=updates) if updates else spec)
+    return tuple(result)
 
 
 def sms_requirements(
@@ -603,6 +608,16 @@ def _application_problems(
             "keyword_keyword",
             "Enter the single advertised keyword, using letters and digits.",
         )
+    if "KEYWORD" in methods and not val("opt_in_message"):
+        issue(
+            "opt_in_message",
+            "Keyword enrollment requires the actual confirmation your existing system sends. Set up that response before filing; registration does not configure it.",
+        )
+    if val("opt_in_message") and text_length(val("opt_in_message")) < 20:
+        issue(
+            "opt_in_message",
+            "Use at least 20 characters with the actual subscription confirmation.",
+        )
     if "KEYWORD" in methods and val("keyword_keyword").upper() in {
         "STOP",
         "STOPALL",
@@ -648,14 +663,14 @@ def _application_problems(
                     name,
                     "Include the public sender or program name so recipients can identify you.",
                 )
-            if not re.search(r"\bSTOP\b", sample, re.I):
+            if not re.search(r"\bSTOP\b", sample, re.IGNORECASE):
                 issue(
                     name, "Include the actual STOP opt-out instruction in this sample."
                 )
             if val("has_links") == "NO" and re.search(
                 r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co)(?:/|\b)",
                 sample,
-                re.I,
+                re.IGNORECASE,
             ):
                 issue(
                     "has_links",
@@ -694,7 +709,7 @@ def _application_problems(
         ) or not re.search(
             r"\b(?:messages?|msgs?|messaging)\.?\s*(?:and|&|/|\+)\s*data\s+(?:rates?|charges?)\b",
             disclosure,
-            re.I,
+            re.IGNORECASE,
         ):
             issue(
                 "consent_disclosure",
@@ -752,6 +767,7 @@ class CampaignText:
     age_gated: bool = False
     direct_lending: bool = False
     opt_in_message: str = ""
+    opt_in_keywords: list[str] = field(default_factory=list)
     schema_version: int = 1
 
 
@@ -764,13 +780,17 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     purposes = picked(fields.get("text_types"))
     structured = bool(fields.get("consent_methods"))
     return CampaignText(
-        use_case="SOLE_PROPRIETOR"
-        if subject_type == "person"
-        else (purposes[0] if len(purposes) == 1 else "MIXED"),
+        use_case=(
+            "SOLE_PROPRIETOR"
+            if subject_type == "person"
+            else (purposes[0] if len(purposes) == 1 else "MIXED")
+        ),
         description=fields["campaign_description"].strip(),
-        message_flow=_structured_flow(fields)
-        if structured
-        else fields["opt_in_description"].strip(),
+        message_flow=(
+            _structured_flow(fields)
+            if structured
+            else fields["opt_in_description"].strip()
+        ),
         samples=[
             fields[f"sample_{i}"].strip()
             for i in range(1, 6)
@@ -787,5 +807,11 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
         age_gated=fields.get("age_gated", "").upper() == "YES",
         direct_lending=fields.get("direct_lending", "").upper() == "YES",
         opt_in_message=fields.get("opt_in_message", "").strip(),
+        opt_in_keywords=(
+            [fields["keyword_keyword"].strip()]
+            if "KEYWORD" in picked(fields.get("consent_methods"))
+            and fields.get("keyword_keyword", "").strip()
+            else []
+        ),
         schema_version=2 if structured else 1,
     )

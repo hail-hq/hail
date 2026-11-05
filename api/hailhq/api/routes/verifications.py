@@ -29,7 +29,6 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import phonenumbers
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
@@ -791,9 +790,9 @@ def _out(
             "identity_confirmed": identity_confirmed,
             "campaign_accepted": bool(refs.get("campaign_accepted"))
             or (row.purpose == "sms" and row.state == "approved"),
-            "runtime_ready": refs.get("runtime_ready")
-            if row.purpose == "sms"
-            else None,
+            "runtime_ready": (
+                refs.get("runtime_ready") if row.purpose == "sms" else None
+            ),
         }
     )
 
@@ -1038,6 +1037,7 @@ async def preview_sms_application(
     carrier acceptance, identity ownership or runtime messaging readiness.
     """
     from dataclasses import asdict
+
     from hailhq.core.providers.verification.sms_form import campaign_text
 
     provider_name = await _sms_provider_name(
@@ -1388,10 +1388,10 @@ async def create_verification(
             # The floor above assumes the brand is reused. Only the carrier
             # can tell, so the plug-in stops if it needs a new one.
             draft_kwargs["new_brand_funded"] = new_brand_funded
-        draft_kwargs[
-            "messaging_service_sid"
-        ] = await sms_setup.org_messaging_service_sid(
-            db, principal.organization_id, provider_name
+        draft_kwargs["messaging_service_sid"] = (
+            await sms_setup.org_messaging_service_sid(
+                db, principal.organization_id, provider_name
+            )
         )
 
     try:

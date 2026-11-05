@@ -460,6 +460,8 @@ class SmsRegistrationProvider(VerificationProvider):
     # Carrier maximums, in characters, for fields of the shared US form
     # (``sms_form``), by field name.
     field_limits: Mapping[str, int] = MappingProxyType({})
+    # Some carriers require the actual subscription confirmation on every filing.
+    opt_in_message_required: bool = False
 
     def validate_application(
         self, fields: dict[str, str], address: Address | None, subject_type: SubjectType
