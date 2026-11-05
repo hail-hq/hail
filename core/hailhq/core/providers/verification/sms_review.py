@@ -86,11 +86,15 @@ def campaign_repair_reason(raw: object) -> str:
     return CAMPAIGN_REJECTED
 
 
-def application_validation_error(status: int | None, raw: object) -> bool:
+def application_validation_error(
+    status: int | None, raw: object, *, known_field: bool = False
+) -> bool:
     """Only definite field/content validation is a terminal application refusal.
 
     Auth, account configuration, billing and unknown provider errors must keep
     the filing retryable; HTTP 4xx by itself does not identify customer error.
+    A provider may identify an allowlisted application field structurally, but
+    that evidence must not override authentication or operational failures.
     """
     if status not in (400, 422):
         return False
@@ -112,7 +116,7 @@ def application_validation_error(status: int | None, raw: object) -> bool:
         )
     ):
         return False
-    return any(
+    return known_field or any(
         re.search(rf"\b{re.escape(word)}\b", text)
         for word in (
             "privacy policy",

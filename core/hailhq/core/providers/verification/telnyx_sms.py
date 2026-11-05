@@ -1023,13 +1023,24 @@ def _same_person(brand: dict, fields: dict) -> bool:
 
 
 def _refused(exc: Exception) -> bool:
-    """Telnyx refused a value (a 4xx). Not 429 (slow down), and not 404:
-    for about 2 seconds after a new brand, its PIN and vetting calls answer
-    404, so the brand is kept and the background pass asks again."""
+    """Recognize definite input refusals; auth/configuration stays retryable."""
     if not isinstance(exc, httpx.HTTPStatusError):
         return False
     errors = _errors(exc.response)
-    return application_validation_error(exc.response.status_code, errors)
+    # Brand payload fields are top-level. Do not treat arbitrary provider
+    # paths (e.g. account configuration) as customer application fields.
+    known_field = any(
+        _pointer(error) == f"/{field}"
+        for error in errors
+        for fields in _FORM_FIELDS.values()
+        for field in fields
+    )
+    prose = " ".join(
+        f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
+    )
+    return application_validation_error(
+        exc.response.status_code, prose, known_field=known_field
+    )
 
 
 def _failure(exc: Exception) -> str:

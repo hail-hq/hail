@@ -1192,6 +1192,64 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
     ]
 
 
+@pytest.mark.parametrize("status", [400, 422])
+@pytest.mark.parametrize(
+    ("pointer", "field"),
+    [("/firstName", "first_name"), ("/postalCode", "address.postal_code")],
+)
+async def test_generic_structured_validation_returns_field_without_further_writes(
+    status, pointer, field
+):
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(
+            status,
+            json={
+                "errors": [{"detail": "Invalid value", "source": {"pointer": pointer}}]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [(p.field, p.message) for p in draft.problems] == [
+        (field, "The 10DLC registry did not accept this value.")
+    ]
+    assert draft.refs == {} and not draft.billed_refs
+    assert calls == [("POST", "/v2/10dlc/brand")]
+
+
+@pytest.mark.parametrize(
+    ("status", "pointer", "detail"),
+    [
+        (400, "/unknown", "Invalid value"),
+        (422, "/messagingProfileId", "Invalid value"),
+        (400, "/apiKey", "Invalid value"),
+        (422, "/account/email", "Invalid value"),
+        (422, "/brandId", "Invalid value"),
+        (401, "/firstName", "Invalid value"),
+        (403, "/postalCode", "Invalid value"),
+        (400, "/firstName", "Account configuration is invalid"),
+        (422, "/postalCode", "Invalid API key"),
+    ],
+)
+async def test_operational_or_unknown_pointer_draft_failures_stay_retryable(
+    status, pointer, detail
+):
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(
+            status,
+            json={"errors": [{"detail": detail, "source": {"pointer": pointer}}]},
+        )
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert calls == [("POST", "/v2/10dlc/brand")]
+
+
 async def test_status_files_the_picked_text_types() -> None:
     posted = []
 
