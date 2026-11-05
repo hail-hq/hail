@@ -73,6 +73,6 @@ export const SOCIAL_ACCOUNTS = {
 } as const satisfies Record<string, SocialAccount>;
 
 /** Confirmed public profiles only. Personal posting accounts never appear on the website. */
-export const PUBLIC_SOCIAL_ACCOUNTS = Object.values(SOCIAL_ACCOUNTS).flatMap(
-  ({ label, href, publishing, showOnWebsite }) => href && showOnWebsite ? [{ label, href, publishing }] : [],
+export const PUBLIC_SOCIAL_ACCOUNTS = Object.entries(SOCIAL_ACCOUNTS).flatMap(
+  ([id, { label, href, publishing, showOnWebsite }]) => href && showOnWebsite ? [{ id, label, href, publishing }] : [],
 );

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Mascot } from "./Mascot";
 import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
-import { PUBLIC_SOCIAL_ACCOUNTS } from "./social-accounts";
+import { SocialLinks } from "./SocialLinks";
 import "./footer.css";
 
 export type FooterGroup = {
@@ -43,11 +43,7 @@ export function Footer({
             <p>
               {PRODUCT_SHORT_DESCRIPTION} {PRODUCT_COPY.availability}
             </p>
-            <nav className="hail-footer-social" aria-label="Hail profiles">
-              {PUBLIC_SOCIAL_ACCOUNTS.map(({ label, href }) => (
-                <a key={href} href={href}>{label} ↗</a>
-              ))}
-            </nav>
+            <SocialLinks />
           </div>
           {groups.map((group) => (
             <nav
