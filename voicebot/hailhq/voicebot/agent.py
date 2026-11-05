@@ -42,6 +42,12 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
+from hailhq.core.call_limits import (
+    HANDOVER_RING_SECONDS,
+    HANDOVER_SETTLE_SECONDS,
+    HANDOVER_SILENCE_SECONDS,
+    handover_call_backstop,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
@@ -464,17 +470,6 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
     return _send_dtmf
 
 
-# How long the handover contact's phone rings before the dial gives up.
-HANDOVER_RING_SECONDS = 30
-# A contact leg that hangs up this soon after its first sound was a carrier
-# message or a phone menu, not a person: the agent takes the caller back.
-# The handover counts as answered only after it.
-HANDOVER_SETTLE_SECONDS = 10.0
-# How long nobody on the contact's side may stay silent after pickup before
-# the agent takes the caller back. A person speaks well within it (the
-# slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
-HANDOVER_SILENCE_SECONDS = 15.0
-
 # SIP final responses that mean the person is there but declined / busy, and
 # the ones that mean nobody picked up. Anything else is a failed dial.
 _SIP_BUSY = frozenset({486, 600, 603})
@@ -630,6 +625,7 @@ def make_agent_bridge(
                 outcome = "cancelled"
             return BridgeOutcome(outcome, code, _ring_ms())  # type: ignore[arg-type]
 
+        native_limit = handover_call_backstop(handover_seconds)
         dial = asyncio.ensure_future(
             ctx.api.sip.create_sip_participant(
                 CreateSIPParticipantRequest(
@@ -642,6 +638,11 @@ def make_agent_bridge(
                     headers=route.headers or {},
                     wait_until_answered=True,
                     ringing_timeout=Duration(seconds=HANDOVER_RING_SECONDS),
+                    max_call_duration=(
+                        Duration(seconds=native_limit)
+                        if native_limit is not None
+                        else None
+                    ),
                     play_dialtone=True,
                 )
             )

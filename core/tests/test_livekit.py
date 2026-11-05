@@ -176,6 +176,23 @@ async def test_delete_dispatch_delegates_to_underlying_api(
     )
 
 
+@pytest.mark.parametrize("seconds", [None, 410, 2235])
+async def test_sip_participant_carries_native_duration_limit(client, seconds):
+    await client.create_sip_participant(
+        room_name="test",
+        to_e164="+14155559999",
+        from_e164="+14155551234",
+        sip_trunk_id="ST_test",
+        participant_identity="caller",
+        max_call_duration_seconds=seconds,
+    )
+    req = client._lkapi.sip.create_sip_participant.await_args.args[0]
+    assert req.HasField("max_call_duration") is (seconds is not None)
+    if seconds is not None:
+        assert req.max_call_duration.seconds == seconds
+        assert req.max_call_duration.nanos == 0
+
+
 async def test_delete_room_wraps_delete_room_request(client: LiveKitClient) -> None:
     await client.delete_room(f"hail-{CALL_ID}")
     client._lkapi.room.delete_room.assert_awaited_once()

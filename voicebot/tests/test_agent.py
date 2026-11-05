@@ -2038,6 +2038,23 @@ async def test_bridge_answer_arms_handover_limit_without_initial_cap() -> None:
     assert ctx.shutdown_calls == [SOFT_CAP_END_REASON]
 
 
+@pytest.mark.parametrize("seconds,expected", [(0, None), (60, 145), (1800, 1885)])
+async def test_handover_dial_has_native_duration_backstop(seconds, expected):
+    ctx = FakeJobContext()
+    state: dict = {"human": None, "connected": False}
+    await make_agent_bridge(
+        ctx, FakeBridgeSession(), CALL_ID, state, handover_seconds=seconds
+    )(BridgeRoute("+1", "+1", "ST", None, "Sam"))
+    cap = state.get("soft_cap_task")
+    if cap is not None:
+        cap.cancel()
+        await asyncio.gather(cap, return_exceptions=True)
+    req = ctx.api.sip.create_sip_participant.await_args.args[0]
+    assert req.HasField("max_call_duration") is (expected is not None)
+    if expected is not None:
+        assert req.max_call_duration.seconds == expected
+
+
 async def test_soft_cap_while_ringing_ends_both_legs() -> None:
     """Before the answer the limit still applies: a cap firing while the
     contact rings deletes the room (both legs) and ends the job."""
