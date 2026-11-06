@@ -16,6 +16,10 @@
   --muted: #686868;
   --hairline: #dedbd3;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* One scale for the bar: every control is --nav-control tall and the bar insets by --nav-inset.
+     The bar radius minus the inset equals half a control, so the corners stay concentric. */
+  --nav-control: 40px;
+  --nav-inset: 8px;
   /* The header stays in view on scroll, under the promotion bar (PromoBanner sets --promo-h). */
   position: sticky;
   top: var(--promo-h, 0px);
@@ -83,8 +87,8 @@
   margin-inline: auto;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 8px 8px 8px 16px;
+  gap: 8px;
+  padding: var(--nav-inset);
   border: 1px solid var(--hairline);
   border-radius: 9999px;
   background: var(--pill);
@@ -96,6 +100,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: var(--nav-control);
+  padding-inline: 12px;
   font-weight: 700;
   font-size: 18px;
   line-height: 28px;
@@ -105,7 +111,7 @@
 .nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 0;
 }
 .navLink {
   color: var(--body);
@@ -113,20 +119,26 @@
   background: none;
   font: inherit;
   cursor: pointer;
-  padding: 8px 4px;
+  min-height: var(--nav-control);
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   white-space: nowrap;
-  border-radius: 8px;
-  transition: color 200ms var(--ease);
+  border-radius: 9999px;
+  transition:
+    color 200ms var(--ease),
+    background-color 200ms var(--ease);
 }
 .navLink:hover,
 .navLink.active {
   color: var(--fg);
 }
+.navLink:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
 .navLink.active {
-  font-weight: 600;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
 .dropdown {
@@ -170,11 +182,15 @@
 .navActions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 .account {
   color: var(--muted);
-  padding: 8px 4px;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--nav-control);
+  padding: 0 12px;
+  border-radius: 9999px;
   white-space: nowrap;
   transition: color 200ms var(--ease);
 }
@@ -184,8 +200,8 @@
 .themeButton {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: var(--nav-control);
+  height: var(--nav-control);
   padding: 0;
   border: 0;
   border-radius: 9999px;
@@ -204,13 +220,17 @@
   composes: primary from "./BrandButton.module.css";
 }
 .primary.primary {
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: var(--nav-control);
+  padding: 0 14px 0 16px;
   border-radius: 9999px;
   font-size: 14px;
   line-height: 20px;
   white-space: nowrap;
   box-shadow: none;
+}
+/* The shared arrow leaves empty room left of its chevron. Pull it toward the label. */
+.primary.primary::after {
+  margin-left: -0.55em;
 }
 .header :is(a, button):focus-visible {
   outline: 2px solid var(--a-text);
@@ -260,7 +280,7 @@
     width: 100%;
     justify-content: space-between;
     gap: 8px;
-    padding: 4px 4px 4px 16px;
+    padding: 4px 4px 4px 12px;
     background: var(--bg);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -281,6 +301,9 @@
   .navActions {
     position: relative;
     z-index: 2;
+  }
+  .logo {
+    padding-inline: 0;
   }
   .themeButton {
     width: 44px;
@@ -337,6 +360,20 @@
   .navOpen > :nth-child(5) {
     transition-delay: 300ms;
   }
+  .navOpen > :nth-child(6) {
+    transition-delay: 350ms;
+  }
+  .navLink,
+  .navLink:hover,
+  .navLink.active {
+    background: none;
+    border-radius: 0;
+  }
+  .navLink.active {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 8px;
+  }
   .navLink {
     display: flex;
     width: 100%;
@@ -369,21 +406,31 @@
 .menuCta {
   display: none;
 }
+.menuSignIn {
+  display: none;
+}
 @media (max-width: 900px) {
+  /* The bar keeps the main action in view, even when the menu is open. */
   .menuCta.menuCta {
-    display: inline-flex;
-    margin-top: 24px;
-    align-self: flex-start;
+    display: none;
   }
 }
 @media (max-width: 480px) {
-  /* The page and the menu carry the main action; the bar keeps Sign in and the menu. */
-  .navActions .primary {
+  /* On a phone the bar shows Get started. Sign in moves into the menu. */
+  .navActions .account {
     display: none;
   }
-  /* Signed in, there is no Sign in link, so the Console button keeps its place in the bar. */
-  .navActions .signedIn {
-    display: inline-flex;
+  .menuSignIn.menuSignIn {
+    display: flex;
+  }
+  .navActions .primary.primary {
+    padding: 0 12px 0 14px;
+  }
+}
+@media (max-width: 359px) {
+  /* Keep the bar on one line on the narrowest phones. The theme switch stays in the footer. */
+  .themeButton {
+    display: none;
   }
 }
 @media (max-width: 360px) {
