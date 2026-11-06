@@ -109,6 +109,12 @@ def test_build_instructions_uses_the_selected_spoken_language() -> None:
     assert "Speak in" not in build_instructions("Welcome the user", language="invalid")
 
 
+def test_build_instructions_keeps_privacy_reminder_last_with_language() -> None:
+    out = build_instructions("Welcome the user", language="fr", other_party="Bob")
+    assert out.endswith(PRIVACY_REMINDER)
+    assert out.index("Bob") < out.index("Speak in French for this call.")
+
+
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
     """The fixed voice preamble always leads; the caller prompt follows it."""
     caller = "You are calling Dr. Lee's office to book a teeth cleaning."

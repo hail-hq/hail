@@ -305,14 +305,14 @@ def build_instructions(
     other_party: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    instructions = build_voice_instructions(
-        system_prompt, direction, other_party=other_party
+    # The language line goes before the privacy reminder, which stays last.
+    spoken = (
+        f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
+        if language in SUPPORTED_LANGUAGES
+        else None
     )
-    if language in SUPPORTED_LANGUAGES:
-        instructions += (
-            f"\n\nSpeak in {SUPPORTED_LANGUAGES[language].name} for this call."
-        )
-    return instructions
+    tail = "\n\n".join(part for part in (other_party, spoken) if part) or None
+    return build_voice_instructions(system_prompt, direction, other_party=tail)
 
 
 # The other-party lookup runs before the session starts, so a slow DB must

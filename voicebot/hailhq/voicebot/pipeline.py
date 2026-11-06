@@ -287,7 +287,7 @@ def house_anthropic_ready() -> bool:
 def house_anthropic(model: str) -> agents_llm.LLM:
     # caching="ephemeral" caches the system prompt, tools and history, so turns
     # after the first in a call read them from the cache. Probed on Bedrock
-    # eu-central-1 with the Sonnet model: second request read all prompt tokens.
+    # with the Sonnet model: second request read all prompt tokens.
     if not settings.anthropic_bedrock_region:
         return _FastAnthropicLLM(model=model, caching="ephemeral")
     # The plugin insists on a key even when handed a client; Bedrock signs
