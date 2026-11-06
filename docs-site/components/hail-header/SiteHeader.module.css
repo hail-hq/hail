@@ -406,21 +406,31 @@
 .menuCta {
   display: none;
 }
+.menuSignIn {
+  display: none;
+}
 @media (max-width: 900px) {
+  /* The bar keeps the main action in view, even when the menu is open. */
   .menuCta.menuCta {
-    display: inline-flex;
-    margin-top: 24px;
-    align-self: flex-start;
+    display: none;
   }
 }
 @media (max-width: 480px) {
-  /* The page and the menu carry the main action; the bar keeps Sign in and the menu. */
-  .navActions .primary {
+  /* On a phone the bar shows Get started. Sign in moves into the menu. */
+  .navActions .account {
     display: none;
   }
-  /* Signed in, there is no Sign in link, so the Console button keeps its place in the bar. */
-  .navActions .signedIn {
-    display: inline-flex;
+  .menuSignIn.menuSignIn {
+    display: flex;
+  }
+  .navActions .primary.primary {
+    padding: 0 12px 0 14px;
+  }
+}
+@media (max-width: 359px) {
+  /* Keep the bar on one line on the narrowest phones. The theme switch stays in the footer. */
+  .themeButton {
+    display: none;
   }
 }
 @media (max-width: 360px) {

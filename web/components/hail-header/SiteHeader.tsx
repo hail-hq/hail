@@ -255,6 +255,12 @@ export function SiteHeader({
             Pricing
           </a>
           <a
+            className={`${styles.navLink} ${styles.menuSignIn}`}
+            href={siteHref("/signin")}
+          >
+            Sign in
+          </a>
+          <a
             className={`${styles.primary} ${styles.menuCta}`}
             href={siteHref("/signup")}
           >
