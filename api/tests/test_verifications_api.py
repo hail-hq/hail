@@ -4567,8 +4567,7 @@ async def test_background_repairs_existing_territory_campaign_links(
     await async_session.commit()
     sms_carrier.attached.clear()
 
-    def registry(name, purpose="number"):
-        return sms_carrier if purpose == "sms" else None
+    registry = _sms_registry(sms_carrier)
 
     await verifications_routes.sweep_verifications(async_session, registry)
     await async_session.refresh(territory)
@@ -4602,8 +4601,7 @@ async def test_background_retries_a_refused_territory_campaign_link(
             raise RuntimeError("carrier unavailable")
         await attach(refs, provider_resource_id=provider_resource_id, e164=e164)
 
-    def registry(name, purpose="number"):
-        return sms_carrier if purpose == "sms" else None
+    registry = _sms_registry(sms_carrier)
 
     monkeypatch.setattr(sms_carrier, "attach_number", flaky)
     await verifications_routes.sweep_verifications(async_session, registry)
@@ -4628,23 +4626,41 @@ async def test_background_audits_only_numbers_that_attached(
     territory.country_code = "VI"
     await async_session.commit()
 
+    attach = sms_carrier.attach_number
+    attempts = 0
+
     async def refused(refs, *, provider_resource_id, e164):
+        nonlocal attempts
+        attempts += 1
         raise RuntimeError("carrier refused")
 
-    def registry(name, purpose="number"):
-        return sms_carrier if purpose == "sms" else None
+    registry = _sms_registry(sms_carrier)
 
-    async def audit_rows() -> int:
+    async def audit_rows() -> list[AuditLog]:
         result = await async_session.execute(
-            select(AuditLog).where(AuditLog.action == "verification.sms_attached")
+            select(AuditLog)
+            .where(AuditLog.action == "verification.sms_attached")
+            .order_by(AuditLog.occurred_at)
         )
-        return len(result.scalars().all())
+        return list(result.scalars().all())
 
-    before = await audit_rows()
+    before = len(await audit_rows())
     monkeypatch.setattr(sms_carrier, "attach_number", refused)
     await verifications_routes.sweep_verifications(async_session, registry)
     await verifications_routes.sweep_verifications(async_session, registry)
-    assert await audit_rows() == before
+    assert attempts == 2
+    assert len(await audit_rows()) == before
+
+    monkeypatch.setattr(sms_carrier, "attach_number", attach)
+    await verifications_routes.sweep_verifications(async_session, registry)
+    await async_session.refresh(territory)
+    assert territory.sms_registration_id is not None
+    rows = await audit_rows()
+    assert len(rows) == before + 1
+    assert rows[-1].payload == {"numbers": 1, "failed": 0}
+
+    await verifications_routes.sweep_verifications(async_session, registry)
+    assert len(await audit_rows()) == before + 1
 
 
 async def test_a_superadmin_reject_whose_discard_fails_answers_502(

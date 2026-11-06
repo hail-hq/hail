@@ -32,9 +32,23 @@ const columns: ColumnDef<NumberRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => Number(row.usd_per_month),
+    accessorFn: (row) => Number(row.total_usd_per_month),
     header: "$/mo (at cost)",
-    cell: ({ row }) => usd(row.original.usd_per_month, 2),
+    cell: ({ row }) => (
+      <div>
+        <div>{usd(row.original.total_usd_per_month, 2)}</div>
+        {row.original.monthly_fees.length > 0 && (
+          // Two short lines: one long line pushes the total off a phone screen.
+          <div style={{ fontSize: 13, fontWeight: 400, marginTop: 2 }}>
+            <div>
+              {usd(row.original.usd_per_month, 2)}
+              {row.original.monthly_fees.map((fee) => ` + ${usd(fee.usd_per_month, 2)}`)}
+            </div>
+            <div>{row.original.monthly_fees.map((fee) => fee.label).join(", ")} fee</div>
+          </div>
+        )}
+      </div>
+    ),
     sortingFn: "basic",
     meta: { num: true, killer: true },
   },
@@ -85,7 +99,7 @@ export function TelephonySection({ data }: { data: NumberRow[] }) {
       count={data.length}
       rangeLabel={priceRange(
         // Only numbers a customer can buy set the range.
-        data.filter((r) => !r.receive_only && !r.by_request).map((r) => r.usd_per_month),
+        data.filter((r) => !r.receive_only && !r.by_request).map((r) => r.total_usd_per_month),
         2,
         2,
         "mo",
