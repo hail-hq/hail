@@ -475,9 +475,6 @@ HANDOVER_SETTLE_SECONDS = 10.0
 # the agent takes the caller back. A person speaks well within it (the
 # slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
 HANDOVER_SILENCE_SECONDS = 15.0
-# How long the bridge waits, past the settle window, for a mailbox check
-# still running. A person is already talking with the caller meanwhile.
-HANDOVER_CHECK_GRACE_SECONDS = 3.0
 # The call event with the handover machine check's verdict. Not
 # ``amd_result``: readers take that row as the verdict on the call's own
 # pickup (``hail tail`` labels the speech after a machine verdict
@@ -595,13 +592,13 @@ def make_agent_bridge(
     pickup (None: no check, the line connects). When nobody there speaks
     within ``HANDOVER_SILENCE_SECONDS`` (a mailbox that answers in
     silence), the leg is removed, the agent is unmuted and the outcome is
-    ``no_answer``. After speech, the line's machine check runs during the
-    settle window: a voicemail or unavailable mailbox verdict (outbound
-    AMD's hang-up verdicts) also removes the leg with ``no_answer``, so the
-    agent offers to take a message. A person, a phone menu (the caller can
-    press keys), an unsure verdict or a failed check connects, as before
-    the check. Only after the settle window does the handover
-    count as answered. The verdict is written as a ``handover_amd_result``
+    ``no_answer``. After speech, the line's greeting is checked during the
+    settle window: a clear voicemail greeting (an invitation to leave a
+    message, or a tone) also removes the leg with ``no_answer``, so the
+    agent offers to take a message. Anything else (a person, "not
+    available", "please hold", a phone menu, unsure, a failed check)
+    connects, as before the check. The settle window and the answered time
+    are as before the check. The verdict is written as a ``handover_amd_result``
     call event in the background.
 
     ``bridge_state["human"]`` is set before dialing so
@@ -778,7 +775,7 @@ def make_agent_bridge(
             machine = False
             if line is not None:
                 line.stop()
-                machine = line.is_mailbox
+                machine = line.is_voicemail
             if identity not in ctx.room.remote_participants:
                 logger.info("call_id=%s handover leg hung up at once", call_id)
                 if line is not None:
@@ -787,9 +784,9 @@ def make_agent_bridge(
                 _unmute()
                 return _gone("no_answer")
             if machine:
-                # Voicemail or an unavailable mailbox: the same as no
-                # answer. The agent offers to take a message.
-                logger.info("call_id=%s handover answered by a mailbox", call_id)
+                # A clear voicemail greeting: the same as no answer. The
+                # agent offers to take a message.
+                logger.info("call_id=%s handover answered by voicemail", call_id)
                 line.decide("dropped")  # type: ignore[union-attr]
                 bridge_state["connected"] = False
                 return await _give_back("no_answer")
@@ -839,14 +836,11 @@ def make_agent_bridge(
             return BridgeOutcome("answered", None, ring_ms)
 
         async def _settle(line: ContactLine | None) -> None:
-            """Wait out HANDOVER_SETTLE_SECONDS, or until the leg leaves, the
-            check says voicemail or an unavailable mailbox, or job shutdown
-            ends the line (``ContactLine.end``).
-            A person's verdict does not end the wait: the settle window,
-            and so the answered time, stays as before the check. A check
-            still running at its end gets up to
-            HANDOVER_CHECK_GRACE_SECONDS more; then it is cancelled
-            (recorded as ``timeout``)."""
+            """Wait out HANDOVER_SETTLE_SECONDS, as before the check, or
+            until the leg leaves, the check hears a clear voicemail
+            greeting, or job shutdown begins. A check still running at the
+            end of the window is cancelled (recorded as ``timeout``) and
+            ignored, so the answered time stays as before the check."""
             left = asyncio.Event()
 
             def _on_leave(participant: rtc.RemoteParticipant) -> None:
@@ -862,7 +856,6 @@ def make_agent_bridge(
             ending = asyncio.ensure_future(handover_stopping(bridge_state).wait())
             waits = {t for t in (leaving, checking, ending) if t is not None}
             deadline = time.monotonic() + HANDOVER_SETTLE_SECONDS
-            grace = False
             try:
                 while identity in ctx.room.remote_participants:
                     done, waits = await asyncio.wait(
@@ -870,16 +863,10 @@ def make_agent_bridge(
                         timeout=max(0.0, deadline - time.monotonic()),
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if leaving in done or ending in done:
+                    if not done or leaving in done or ending in done:
                         break
                     if checking in done and checking.result():
                         break
-                    if not done:
-                        if grace or checking not in waits:
-                            break
-                        # A check still runs: give it a little longer.
-                        grace = True
-                        deadline = time.monotonic() + HANDOVER_CHECK_GRACE_SECONDS
             finally:
                 ctx.room.off("participant_disconnected", _on_leave)
                 tasks = [t for t in (leaving, checking, ending) if t is not None]
@@ -987,7 +974,7 @@ def _contact_line(
     identity: str,
     models: Callable[[], AMDModels | None],
 ) -> ContactLine | None:
-    """The bridge's line check: silence, then mailbox. None (connect at
+    """The bridge's line check: silence, then voicemail. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
     the silence check runs. ``models`` returns the call's check clients,
     built on the first pickup and reused by later dials, or None once job
@@ -1000,7 +987,7 @@ def _contact_line(
         identity,
         session.vad,
         check=greeting_check(current) if current is not None else None,
-        window_seconds=HANDOVER_SETTLE_SECONDS + HANDOVER_CHECK_GRACE_SECONDS,
+        window_seconds=HANDOVER_SETTLE_SECONDS,
     )
 
 
@@ -2684,9 +2671,8 @@ async def _run_call(
             # Job shutdown began: no new clients, none that may be closed.
             return None
         if handover_models is None:
-            handover_models = build_check_models(
-                session, org_cfgs=org_cfgs, llm_override=llm_cfg is not None
-            )
+            # Hail's own keys and house classifiers only.
+            handover_models = build_check_models(session)
         return handover_models
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)

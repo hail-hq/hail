@@ -79,12 +79,15 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact (a team member's login email); without one, no email.
 - A plain forward: when the phone picks up, the two people are connected
   and the agent stops listening and speaking. It says nothing to the
-  contact. The agent listens to the contact's line for 10 seconds after
-  its first sound, and up to 3 seconds more while a check finishes. If voicemail or a full or unset mailbox answers, the
-  agent hangs up that line, comes back and offers to take a message. The
-  caller can hear the first seconds of the greeting before that. A phone
-  menu stays connected, so the caller can press keys. If the check is
-  unsure or fails, the two people stay connected. If nobody on the contact's side makes a
+  contact. For up to 10 seconds after the first sound, the agent checks
+  the greeting on the contact's line. It stops at the first pause.
+  If it is a voicemail greeting that asks for a message or a tone (for
+  example "leave a message after the tone"), the agent hangs up that line,
+  comes back and offers to take a message. The caller can hear the first
+  seconds of the greeting before that. Anything else stays connected: a
+  person, "not available" without a request for a message, "please hold"
+  or hold music, a phone menu (the caller can press keys), a full mailbox,
+  or a check that is unsure or fails. If nobody on the contact's side makes a
   sound for 15 seconds (some mailboxes answer in silence), or the line
   hangs up within 10 seconds of its first sound (a carrier message), the
   agent also hangs up that line and comes back. The verdict is a
@@ -98,9 +101,8 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
-  contact's side has spoken and stayed on the line for 10 seconds (up to
-  13 while a check finishes), and
-  the check did not find voicemail or a mailbox.
+  contact's side has spoken and stayed on the line for 10 seconds, and
+  the check did not find a voicemail greeting.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call

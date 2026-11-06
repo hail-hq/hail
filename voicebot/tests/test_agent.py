@@ -74,7 +74,6 @@ def _short_handover_settle(monkeypatch):
     from hailhq.voicebot import agent as agent_mod
 
     monkeypatch.setattr(agent_mod, "HANDOVER_SETTLE_SECONDS", 0.05)
-    monkeypatch.setattr(agent_mod, "HANDOVER_CHECK_GRACE_SECONDS", 0.05)
 
 
 def test_metadata_parser_handles_missing_optional_fields() -> None:
@@ -2234,8 +2233,8 @@ class _FakeLine:
         return bool(self._machine)
 
     @property
-    def is_mailbox(self) -> bool:
-        return self.category in ("machine-vm", "machine-unavailable")
+    def is_voicemail(self) -> bool:
+        return self.category == "machine-vm"
 
     def stop(self) -> None:
         self.stopped = True
@@ -2405,11 +2404,12 @@ async def test_bridge_machine_answer_gives_the_caller_back(
         (False, "human", "window_ended"),
         (False, "uncertain", "window_ended"),
         (False, "machine-ivr", "window_ended"),
+        (False, "machine-unavailable", "window_ended"),
         (False, None, "window_ended"),
         # Still running when the grace ends: cancelled, last verdict kept.
         (None, "uncertain", "timeout"),
     ],
-    ids=["person", "unsure", "menu", "no_verdict", "still_running"],
+    ids=["person", "unsure", "menu", "unavailable", "no_verdict", "still_running"],
 )
 async def test_bridge_person_or_unsure_check_connects(
     handover_events, machine, category, reason
@@ -2474,41 +2474,51 @@ async def test_bridge_silent_line_records_no_verdict(handover_events) -> None:
     assert handover_events == [] and not state.get("event_tasks")
 
 
-@pytest.mark.parametrize("grace,expected", [(1.0, "no_answer"), (0.05, "answered")])
-async def test_bridge_waits_briefly_for_a_check_still_running(
-    monkeypatch, handover_events, grace, expected
+async def test_late_verdict_and_a_hangup_at_11_s_behave_like_main(
+    handover_events,
 ) -> None:
-    """The settle window ends while a check runs: the bridge waits up to
-    HANDOVER_CHECK_GRACE_SECONDS for it. A voicemail verdict in that time
-    still gives the caller back. After it, the check is cancelled, never
-    lands, and the row says timeout."""
-    from hailhq.voicebot import agent as agent_mod
-
-    monkeypatch.setattr(agent_mod, "HANDOVER_CHECK_GRACE_SECONDS", grace)
+    """A voicemail verdict that is not in by the end of the settle window is
+    ignored: the handover is answered at the window's end, as on main, and
+    the row says timeout. A contact hangup after that (the 10 to 13 s on a
+    real call) ends the call, as on main."""
     ctx = FakeJobContext()
     session = FakeBridgeSession()
     state: dict = {"human": None, "connected": False}
-    # Settle is 0.05 s in these tests; the check ends at 0.3 s.
+    answered: list[int] = []
+
+    async def _post(ring_ms: int) -> None:
+        answered.append(ring_ms)
+
+    # Settle is 0.05 s in these tests; the check would end at 0.3 s.
     listen, _ = _watch(True, True, after=0.3)
     out = await asyncio.wait_for(
         make_agent_bridge(
             ctx, session, CALL_ID, state, listen=listen  # type: ignore[arg-type]
-        )(BridgeRoute("+1", "+1", "ST", None, "Sam")),
-        timeout=5,
+        )(BridgeRoute("+1", "+1", "ST", None, "Sam", on_answered=_post)),
+        timeout=0.25,
     )
-    assert out.outcome == expected
+    assert out.outcome == "answered" and state["connected"] is True
+    assert "settling" not in state
+    await state["answer_task"]
+    assert len(answered) == 1
     await asyncio.gather(*state["event_tasks"])
-    ((_, _, row),) = handover_events
-    if expected == "no_answer":
-        assert row == {
-            "category": "machine-vm",
-            "reason": "greeting_check",
-            "action": "dropped",
-        }
-    else:
-        assert row == {"category": None, "reason": "timeout", "action": "kept"}
-        await asyncio.sleep(0.4)  # the cancelled check never lands
-        assert row["category"] is None
+    assert handover_events[0][2] == {
+        "category": None,
+        "reason": "timeout",
+        "action": "kept",
+    }
+    await asyncio.sleep(0.3)  # the cancelled check never lands
+    assert handover_events[0][2]["category"] is None
+    identity = f"human-{CALL_ID}-1"
+    ctx.room.remote_participants.pop(identity, None)
+    handle_sip_disconnect(
+        ctx,  # type: ignore[arg-type]
+        FakeParticipant(identity, rtc.DisconnectReason.CLIENT_INITIATED),
+        {"status": None, "end_reason": None},
+        state,
+        CALL_ID,
+    )
+    assert ctx.shutdown_calls == ["handover_ended"]
 
 
 async def test_bridge_records_a_leg_that_hangs_up(handover_events) -> None:
@@ -2686,9 +2696,7 @@ async def test_contact_line_uses_the_call_check(monkeypatch) -> None:
         ctx, session, "human-1", lambda: models  # type: ignore[arg-type]
     )
     assert line is not None and line._check is check
-    assert line._window == (
-        agent_mod.HANDOVER_SETTLE_SECONDS + agent_mod.HANDOVER_CHECK_GRACE_SECONDS
-    )
+    assert line._window == agent_mod.HANDOVER_SETTLE_SECONDS
     late = agent_mod._contact_line(
         ctx, session, "human-2", lambda: None  # type: ignore[arg-type]
     )
