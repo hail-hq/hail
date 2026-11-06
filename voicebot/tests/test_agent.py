@@ -2681,24 +2681,36 @@ async def test_shutdown_verdict_writes_are_bounded(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "org_cfgs,llm_cfg,own",
+    "org_cfgs,llm_cfg,language,skip",
     [
-        ({}, None, False),
-        (None, None, False),
-        ({"tts": object()}, None, False),
-        ({"stt": object()}, None, True),
-        ({"llm": object()}, None, True),
-        ({}, {"base_url": "https://llm.example.com"}, True),
+        ({}, None, None, False),
+        (None, None, "en", False),
+        ({"tts": object()}, None, "fr", False),
+        ({"stt": object()}, None, "en", True),
+        ({"llm": object()}, None, "en", True),
+        ({}, {"base_url": "https://llm.example.com"}, "en", True),
+        # Swedish calls transcribe with Speechmatics, not Deepgram.
+        ({}, None, "sv", True),
+        ({}, None, "xx", True),
     ],
-    ids=["house", "no_org", "own_tts_only", "own_stt", "own_llm", "per_call_llm"],
+    ids=[
+        "house",
+        "house_en",
+        "own_tts_only",
+        "own_stt",
+        "own_llm",
+        "per_call_llm",
+        "speechmatics_language",
+        "unknown_language",
+    ],
 )
-def test_own_provider_skips_the_voicemail_check(org_cfgs, llm_cfg, own) -> None:
-    """An org on its own STT or LLM (standing or per call) gets no check:
-    its contact's audio and words never go to Hail's providers. A house
-    setup (an own voice alone included) runs it."""
+def test_voicemail_check_skips(org_cfgs, llm_cfg, language, skip) -> None:
+    """An org on its own STT or LLM (standing or per call), or a language
+    whose STT is not Deepgram, gets no check. A house setup in a Deepgram
+    language (an own voice alone included) runs it."""
     from hailhq.voicebot import agent as agent_mod
 
-    assert agent_mod.uses_own_provider(org_cfgs, llm_cfg) is own
+    assert agent_mod.skip_voicemail_check(org_cfgs, llm_cfg, language) is skip
     ctx = FakeJobContext()
     session = SimpleNamespace(vad=object())
     line = agent_mod._contact_line(

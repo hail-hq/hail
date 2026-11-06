@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.voicebot import handover_watch
+from hailhq.voicebot.amd import GREETING_CLASSIFICATION_PROMPT
 from livekit import rtc
 from livekit.agents.vad import VADEventType
 from livekit.agents.voice.amd import AMDCategory
@@ -187,10 +188,20 @@ async def test_clear_voicemail_greeting_drops(leg) -> None:
         ("Sam is not available right now, can I take a message?", "human"),
         ("Please hold. Your call is important to us.", "machine-ivr"),
         ("For sales, press 1. For support, press 2.", "machine-ivr"),
+        ("Press 1 for sales, or press 9 to leave a message.", "machine-ivr"),
+        ("You've reached Acme, this is Sam, how can I help?", "human"),
         ("The mailbox is full. Goodbye.", "machine-unavailable"),
         ("Hi, this is Sam", "uncertain"),
     ],
-    ids=["not_available_person", "please_hold", "phone_menu", "full", "unsure"],
+    ids=[
+        "not_available_person",
+        "please_hold",
+        "phone_menu",
+        "menu_with_message_option",
+        "acme_person",
+        "full",
+        "unsure",
+    ],
 )
 async def test_anything_but_clear_voicemail_connects(leg, text, category) -> None:
     """Only machine-vm acts. A person, "please hold" and music, a phone menu
@@ -333,8 +344,9 @@ class _BrokenStream(_AudioStream):
 
 
 @pytest.mark.parametrize("where", ["iterator", "push_frame"])
-async def test_feed_error_connects(monkeypatch, where) -> None:
-    """An error inside the frame feed is logged and connects, as before."""
+async def test_feed_error_before_speech_is_silence(monkeypatch, where) -> None:
+    """An error inside the frame feed before any speech counts as silence,
+    as before this check: the bridge drops the leg (no_answer)."""
     audio = _BrokenStream() if where == "iterator" else _AudioStream()
     monkeypatch.setattr(
         handover_watch,
@@ -350,7 +362,7 @@ async def test_feed_error_connects(monkeypatch, where) -> None:
 
         stream.push_frame = _push
     line = handover_watch.ContactLine(object(), "human-x", vad)
-    assert await asyncio.wait_for(line.speaks(5.0), timeout=1) is True
+    assert await asyncio.wait_for(line.speaks(5.0), timeout=1) is False
     await line.aclose()
 
 
@@ -646,9 +658,7 @@ async def test_no_classifier_means_no_check(monkeypatch, deepgram) -> None:
     models.recheck_stt.aclose.assert_awaited_once()
 
 
-async def test_check_uses_the_amd_prompt_with_the_handover_note(
-    monkeypatch, deepgram
-) -> None:
+async def test_check_uses_the_handover_prompt(monkeypatch, deepgram) -> None:
     llm = FakeLLM()
     monkeypatch.setattr(handover_watch, "build_classifier", lambda *a, **k: (llm, []))
     seen: dict = {}
@@ -663,8 +673,16 @@ async def test_check_uses_the_amd_prompt_with_the_handover_note(
     assert check is not None
     assert await check(_frame()) == ("Leave a message", AMDCategory.MACHINE_VM)
     assert seen["llm"] is llm and seen["stt"] is models.recheck_stt
-    assert seen["prompt"] == handover_watch.GREETING_CLASSIFICATION_PROMPT
-    note = seen["note"]
-    assert note == handover_watch.HANDOVER_NOTE
-    for rule in ("leave a message", "tone", "please hold", "can I take a message"):
-        assert rule in note
+    # Its own prompt, not the outbound one (whose "you've reached" and
+    # "not available" cues mean voicemail there), and no extra note.
+    prompt = seen["prompt"]
+    assert prompt == handover_watch.HANDOVER_PROMPT and seen["note"] == ""
+    assert prompt != GREETING_CLASSIFICATION_PROMPT
+    for rule in (
+        "invites the caller to leave a message",
+        "press 9 to",
+        "A menu is always\nmachine-ivr, never machine-vm.",
+        "You've reached Acme, this is Sam, how can I help?\" is\nhuman.",
+        "can I take a message?",
+    ):
+        assert rule in prompt
