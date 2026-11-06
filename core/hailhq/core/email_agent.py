@@ -183,18 +183,18 @@ def with_skip_reason(reason: str) -> ColumnElement[Any]:
     return current.op("||")(func.jsonb_build_object("agent_skip_reason", reason))
 
 
-def _sender_blocked(sender: str, recipients: Sequence[str], base_domain: str) -> bool:
+def _sender_blocked(sender: str, base_domain: str) -> bool:
     """True for an address that must never get a reply: a daemon, a noreply
-    box, Hail itself, or this message's own recipient (a loop). A custom
-    domain's host is not checked: the team's members send from it."""
+    box, or Hail itself. These two checks stop every loop: a hail-mail reply
+    comes from the base domain and a custom-domain reply from ``noreply@``.
+    A custom domain's host is not checked: the team's members send from it,
+    and a member who Cc's themselves still gets a reply."""
     local, _, host = sender.rpartition("@")
     if not local or not host:
         return True
     if _NO_REPLY_LOCAL.match(local):
         return True
-    if base_domain and host == base_domain.lower():
-        return True
-    return sender in {normalize_address(r) for r in recipients}
+    return bool(base_domain) and host == base_domain.lower()
 
 
 async def sender_refusal(
@@ -342,7 +342,6 @@ async def queue_decision(
     *,
     parsed: ParsedMime,
     envelope_from: str,
-    recipients: Sequence[str],
     dmarc_verdict: str | None,
     suppress: str | None,
     over_cap: bool,
@@ -369,7 +368,7 @@ async def queue_decision(
     if parsed.auto_generated or not envelope_from:
         return skip("auto_generated")
     sender = normalize_address(parsed.from_address or "")
-    if _sender_blocked(sender, recipients, base_domain):
+    if _sender_blocked(sender, base_domain):
         return skip("sender_blocked")
     refusal = await sender_refusal(
         db, domain, sender=sender, verified=proves_sender(parsed, dmarc_verdict)

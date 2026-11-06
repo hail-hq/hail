@@ -218,9 +218,21 @@ async def test_senders_that_never_get_a_reply(async_session, sender):
 
 def test_a_member_on_a_custom_domain_is_not_blocked():
     """The agent's address shares this host, so the host says nothing."""
-    assert not email_agent._sender_blocked(
-        "ann@acme.co", ["support@acme.co"], "mail.hail.so"
+    assert not email_agent._sender_blocked("ann@acme.co", "mail.hail.so")
+
+
+@pytest.mark.asyncio
+async def test_a_member_who_ccs_themselves_gets_a_reply(async_session):
+    """Being one of the message's own recipients is not a loop."""
+    await _seed(async_session, scope="anyone")
+    sender = "ann@example.com"
+    row = await _ingest(
+        async_session,
+        _raw(sender=sender),
+        envelope_from=sender,
+        envelope_recipients=[ADDRESS, sender],
     )
+    assert row.agent_reply_state == "pending"
 
 
 @pytest.mark.parametrize("verdict", ["GRAY", "FAIL", "PROCESSING_FAILED", None])
