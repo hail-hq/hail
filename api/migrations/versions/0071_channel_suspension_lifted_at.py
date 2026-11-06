@@ -31,6 +31,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # The concurrent build runs first, outside the transaction. If it fails
+    # it can leave an INVALID index; the DROP IF EXISTS lets a re-run of
+    # this migration start clean. The steps after it are one transaction.
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS emails_outbound_sent_at_idx")
+        op.create_index(
+            "emails_outbound_sent_at_idx",
+            "emails",
+            ["sent_at"],
+            postgresql_where=sa.text("direction = 'outbound'"),
+            postgresql_concurrently=True,
+        )
     op.add_column(
         "channel_suspensions",
         sa.Column("lifted_at", sa.DateTime(timezone=True), nullable=True),
@@ -45,14 +57,6 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("lifted_at IS NULL"),
     )
-    with op.get_context().autocommit_block():
-        op.create_index(
-            "emails_outbound_sent_at_idx",
-            "emails",
-            ["sent_at"],
-            postgresql_where=sa.text("direction = 'outbound'"),
-            postgresql_concurrently=True,
-        )
 
 
 def downgrade() -> None:

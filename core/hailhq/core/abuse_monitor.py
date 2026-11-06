@@ -318,6 +318,11 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             func.sum(email_recipients.c.recipients).label("sends"),
         )
         .group_by(email_recipients.c.organization_id)
+        # Orgs under the floor are never flagged; skip their event work.
+        .having(
+            func.sum(email_recipients.c.recipients)
+            >= settings.hail_email_abuse_min_sends
+        )
         .subquery()
     )
     events = (
@@ -350,19 +355,20 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             continue
         bounce_rate = bounces / sends
         complaint_rate = complaints / sends
+        reasons = []
         if bounce_rate > max_bounce:
-            reason = (
+            reasons.append(
                 f"hard bounce rate {bounce_rate:.1%} over {window}h window "
                 f"({bounces}/{sends}) exceeds {max_bounce:.1%} threshold"
             )
-        elif complaint_rate > max_complaint:
-            reason = (
+        if complaint_rate > max_complaint:
+            reasons.append(
                 f"complaint rate {complaint_rate:.2%} over {window}h window "
                 f"({complaints}/{sends}) exceeds {max_complaint:.2%} threshold"
             )
-        else:
+        if not reasons:
             continue
-        if await _suspend(db, org_id, "email", reason):
+        if await _suspend(db, org_id, "email", "; ".join(reasons)):
             suspended += 1
     return suspended
 

@@ -575,3 +575,20 @@ async def test_email_cap_uses_distinct_recipients(async_session, monkeypatch) ->
 
     assert await check_and_suspend_email_orgs(async_session) == 1
     assert "(1/100)" in (await _email_suspension(async_session, org_id)).reason
+
+
+async def test_email_reason_names_both_rates_when_both_are_over(
+    async_session, monkeypatch
+) -> None:
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    emails = await _seed_emails(async_session, org_id, 20)
+    await _seed_email_events(async_session, emails[:2], "bounced", hard=True)
+    await _seed_email_events(async_session, emails[2:3], "complained")
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 1
+    reason = (await _email_suspension(async_session, org_id)).reason
+    assert "hard bounce rate" in reason and "complaint rate" in reason
