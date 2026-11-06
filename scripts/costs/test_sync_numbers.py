@@ -558,9 +558,68 @@ def test_hidden_and_hand_verified_rows_keep_their_own_paper_flag(tmp_path, monke
     sync.run_provider(
         "didww", {"DIDWW_API_KEY": "k"}, tmp_path, "2026-11-04", [], not_synced=[]
     )
-    # CH (hand-verified) needs no papers and FR (hidden) keeps its own flag:
-    # FR's block is refreshed as before. DE takes the empty areas' flag.
-    assert sorted(c[0] for c in calls) == ["DE", "FR"]
+    # CH (hand-verified) keeps its own flag, which needs no papers. FR is
+    # hidden and stays as it vanished, so it is not fetched. DE takes the
+    # empty areas' flag.
+    assert sorted(c[0] for c in calls) == ["DE"]
+    out = {
+        n["country_code"]: n
+        for n in json.loads((tmp_path / "didww.json").read_text())["numbers"]
+    }
+    assert out["DE"]["verification_required"] is True
+    assert out["DE"]["requirements"] == {"person": {"accepted": True, "items": []}}
+
+
+def test_merge_leaves_a_row_whose_new_papers_could_not_be_read():
+    prev = _no_stock_prev(verification_required=False)
+    numbers, report = _merge_no_stock(
+        [prev], {"usd_per_month": "5.00", "verification_required": True}
+    )
+    assert numbers == [prev]
+    assert report["unobserved"] == ["SG:national (needs papers; none read)"]
+    assert report["no_stock"] == []
+
+
+def test_didww_passes_over_broken_prices():
+    countries = [
+        {"id": "c1", "attributes": {"iso": "CO", "name": "Colombia", "prefix": "57"}}
+    ]
+    types = {"t-mobile": "Mobile"}
+
+    def group(gid):
+        return {
+            "id": gid,
+            "attributes": {"features": ["voice_in", "voice_out"]},
+            "meta": {"is_available": False, "needs_registration": False},
+            "relationships": {
+                "did_group_type": {
+                    "data": {"type": "did_group_types", "id": "t-mobile"}
+                },
+                "stock_keeping_units": {
+                    "data": [{"type": "stock_keeping_units", "id": f"sku-{gid}"}]
+                },
+            },
+        }
+
+    def sku(gid, monthly, setup):
+        return {
+            "type": "stock_keeping_units",
+            "id": f"sku-{gid}",
+            "attributes": {
+                "monthly_price": monthly,
+                "setup_price": setup,
+                "channels_included_count": 0,
+            },
+        }
+
+    payload = {
+        "data": [group("a"), group("b"), group("c")],
+        "included": [sku("a", "NaN", "0"), sku("b", "", "0"), sku("c", "9.0", "x")],
+    }
+    _, skipped, no_stock = sync.map_didww(countries, types, {"CO": payload})
+    assert skipped == ["CO:mobile: listed, no numbers in stock"]
+    assert no_stock["CO:mobile"]["usd_per_month"] == "9.00"
+    assert no_stock["CO:mobile"]["setup_usd"] == "0.00"
 
 
 def test_merge_drops_papers_when_empty_areas_need_none():

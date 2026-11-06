@@ -524,10 +524,12 @@ DIDWW_TYPE = {
 
 
 def _decimal(value: Any) -> Decimal | None:
+    """A finite price, or None for a missing, empty or broken one."""
     try:
-        return Decimal(str(value)) if value not in (None, "") else None
+        d = Decimal(str(value)) if value not in (None, "") else None
     except InvalidOperation:
         return None
+    return d if d is not None and d.is_finite() else None
 
 
 def _didww_type_fields(all_groups: list[dict]) -> tuple[dict, list[Decimal]]:
@@ -615,7 +617,7 @@ def map_didww(
             (by_type if available else unstocked)[number_type].append(
                 {
                     "monthly": Decimal(cheapest["monthly_price"]),
-                    "setup": Decimal(cheapest.get("setup_price") or 0),
+                    "setup": _decimal(cheapest.get("setup_price")) or Decimal(0),
                     "features": set(features),
                     "needs_registration": bool(
                         g.get("meta", {}).get("needs_registration")
@@ -883,26 +885,36 @@ def merge(
         if key in seen:
             continue
         if key in unobserved:
-            row = refreshed(key, prev)
             prices = (out_of_stock or {}).get(key)
             if prices is None or prev.get("verification_method") == "manual-confirmed":
                 report["unobserved"].append(key)
-                numbers.append(row)
+                numbers.append(refreshed(key, prev))
                 continue
             if not prev.get("available", True):
                 # Vanished, now listed with nothing to buy: still not on sale.
                 # It stays exactly as it vanished, so held numbers keep their
                 # price; only the check date moves, as on the vanished path.
                 report["no_stock"].append(f"{key}: hidden, kept as it vanished")
-                numbers.append({**row, "last_verified": today})
+                numbers.append({**prev, "last_verified": today})
                 continue
-            new = _drop_unset({**row, **prices})
-            # Papers follow the flag, as attach_requirements does for fetched
-            # rows: run_provider fetched a block for a row that needs one.
-            if not new.get("verification_required") and new.get("requirements"):
+            new = _drop_unset({**prev, **prices})
+            fresh = fresh_by_key.get(key)
+            if fresh is not None:
+                new["requirements"] = fresh.get("requirements")
+            if new.get("verification_required") and not new.get("requirements"):
+                if not prev.get("verification_required"):
+                    # Papers are now needed but none could be read (no
+                    # verification plug-in, or a carrier error): selling it
+                    # without papers is worse than leaving the row stale.
+                    report["unobserved"].append(f"{key} (needs papers; none read)")
+                    numbers.append(prev)
+                    continue
+            elif not new.get("verification_required") and new.get("requirements"):
+                # Papers follow the flag, as attach_requirements does for
+                # fetched rows.
                 new["requirements"] = None
-            changed = [k for k in watched if row.get(k) != new.get(k)]
-            new["notes"] = "; ".join([*_own_notes(row.get("notes")), _NO_STOCK_NOTE])
+            changed = [k for k in watched if prev.get(k) != new.get(k)]
+            new["notes"] = "; ".join([*_own_notes(prev.get("notes")), _NO_STOCK_NOTE])
             new.update(
                 last_verified=today,
                 verification_method="carrier-sync",
@@ -913,7 +925,7 @@ def merge(
                 new["last_changed_at"] = today
             report["no_stock"].append(
                 f"{key}: "
-                + ", ".join(_change(k, row.get(k), new.get(k)) for k in changed)
+                + ", ".join(_change(k, prev.get(k), new.get(k)) for k in changed)
                 if changed
                 else key
             )
@@ -1384,17 +1396,16 @@ def run_provider(
     fetched_keys = {f"{r['country_code']}:{r['number_type']}" for r in rows}
     sold_unseen = skipped_keys(skipped) - fetched_keys
     # A DIDWW row out of stock and on sale takes its verification flag from
-    # the empty areas, so its papers follow that flag. merge() leaves a
-    # hidden or hand-verified one as it is, so its own flag decides.
+    # the empty areas, so its papers follow that flag. A hidden one stays
+    # exactly as it vanished, so it is not fetched. A hand-verified one
+    # keeps its own flag (rule 1).
     kept_rows = []
     for n in existing:
         key = f"{n['country_code']}:{n['number_type']}"
         needs = n.get("verification_required")
-        if (
-            key in no_stock
-            and n.get("available", True)
-            and n.get("verification_method") != "manual-confirmed"
-        ):
+        if key in no_stock and n.get("verification_method") != "manual-confirmed":
+            if not n.get("available", True):
+                continue
             needs = no_stock[key]["verification_required"]
         if key in sold_unseen and needs:
             kept_rows.append({**n, "verification_required": True})
