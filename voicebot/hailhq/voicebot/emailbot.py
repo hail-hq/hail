@@ -127,7 +127,12 @@ async def _prepare(
         refusal = await run_refusal(db, claimed.domain, email)
         if refusal is not None:
             return refusal
-        trust = await sender_trust(db, email)
+        # Under "members" the refusal check above already proved membership.
+        trust = (
+            "member"
+            if claimed.domain.email_agent_scope == "members"
+            else await sender_trust(db, email)
+        )
         thread = await email_thread(db, email)
         # A send from an earlier attempt: no tools, so a reworded message cannot
         # go out twice. The model still writes the reply.

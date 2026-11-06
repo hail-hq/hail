@@ -295,6 +295,236 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
+async def _member_email(
+    db: AsyncSession, org: UUID, name: str
+) -> str | AgentSendResponse:
+    """The one member named ``name``, or the answer when there is none or
+    more than one."""
+    matches = await resolve_member_emails(db, org, name)
+    if not matches:
+        return AgentSendResponse(
+            ok=False, spoken=f"I couldn't find {name} in the directory."
+        )
+    if len(matches) > 1:
+        return _ambiguous_recipient(name)
+    return matches[0]
+
+
+async def _send_sms_to(
+    db: AsyncSession,
+    org: UUID,
+    *,
+    recipient: str,
+    body: str,
+    meta: dict[str, str],
+    agent_id: UUID | None,
+    dialed: PhoneNumber | None,
+    consent_source: str,
+    route_source: str,
+    route_ref: dict[str, str],
+    sent: str,
+) -> AgentSendResponse:
+    """Gate, cap, pick a number, write the row, audit, and deliver one text.
+    The caller chose ``recipient``: the person on the line, or a member."""
+    gate = await check_sms_allowed(db, org, recipient)
+    if not gate.allowed:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": gate.reason, "checks": gate.checks},
+        )
+
+    # Platform agent-caps gate (velocity + kill switch): voicebot sends must
+    # count toward the same per-recipient caps the public routes enforce —
+    # no-op for human-origin orgs. Same recipient set as the gate above.
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [recipient])
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
+        )
+
+    # Text from the number the caller dialed when it can text; else a text
+    # number of this agent (see resolve_sms_number).
+    from_number = await resolve_sms_number(db, org, agent_id, dialed, recipient)
+    if from_number is None:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+
+    block = await us_registration_block(db, org, from_number, recipient)
+    if block is not None:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": block},
+        )
+
+    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+
+    sms = Sms(
+        organization_id=org,
+        provider=from_number.provider,
+        from_number_id=from_number.id,
+        from_e164=from_number.e164,
+        to_e164=recipient,
+        agent_id=agent_id,
+        direction="outbound",
+        status="queued",
+        body=body,
+        metadata_=meta,
+    )
+    db.add(sms)
+    await db.commit()
+
+    if auto_bound:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="number.route",
+            resource_type="phone_number",
+            resource_id=from_number.id,
+            payload={
+                "e164": from_number.e164,
+                "sms_agent_id": str(agent_id),
+                "automatic": True,
+                "source": route_source,
+                **route_ref,
+            },
+            actor_kind="system",
+        )
+
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.sms.send",
+        resource_type="sms",
+        resource_id=sms.id,
+        payload={
+            **meta,
+            "to": sms.to_e164,
+            "consent_source": consent_source,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+
+    err = await deliver_sms(db, sms)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.sms.send_failed",
+            resource_type="sms",
+            resource_id=sms.id,
+            payload={**meta, "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
+    return AgentSendResponse(ok=True, spoken=sent)
+
+
+async def _send_email_to(
+    db: AsyncSession,
+    email_provider: EmailProvider,
+    org: UUID,
+    *,
+    recipient: str,
+    subject: str,
+    body_text: str,
+    meta: dict[str, str],
+    agent_id: UUID | None,
+    consent_source: str,
+) -> AgentSendResponse:
+    """Gate, cap, pick the sender, write the row, audit, and deliver one
+    email to a member the caller resolved from the directory."""
+    gate = await check_email_allowed(db, org, [recipient])
+    if not gate.allowed:
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": gate.reason, "checks": gate.checks},
+        )
+
+    # Same agent-caps gate as the public /emails route — one normalized
+    # recipient for voicebot sends (no cc/bcc fan-out on this path).
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(recipient)]
+    )
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
+        )
+
+    try:
+        # An agent cannot name a sending domain. With several verified custom
+        # domains this path takes the oldest, where POST /emails returns 422
+        # and the caller chooses. A verified custom domain still wins over the
+        # hail-mail address, as it does on POST /emails.
+        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+    except HTTPException:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
+
+    email = Email(
+        organization_id=org,
+        email_domain_id=sd.id,
+        agent_id=agent_id,
+        from_address=from_address_for(sd, None),
+        to_addresses=[recipient],
+        subject=subject,
+        body_text=body_text,
+        status="queued",
+        provider="ses",
+        metadata_=meta,
+    )
+    db.add(email)
+    await db.commit()
+    await db.refresh(email)
+
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.email.send",
+        resource_type="email",
+        resource_id=email.id,
+        payload={
+            **meta,
+            "to": email.to_addresses,
+            "subject": email.subject,
+            "consent_source": consent_source,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+
+    err = await deliver_email(db, email_provider, email)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.email.send_failed",
+            resource_type="email",
+            resource_id=email.id,
+            payload={**meta, "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
+    return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
+
+
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
     """The funds check shared by the send routes. Sends are not capped per
     call: each is billed like any text or email.
@@ -370,33 +600,6 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": reason},
         )
 
-    gate = await check_sms_allowed(db, org, counterpart)
-    if not gate.allowed:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
-        )
-
-    # Platform agent-caps gate (velocity + kill switch): voicebot sends must
-    # count toward the same per-recipient caps the public routes enforce —
-    # no-op for human-origin orgs. Same recipient set as the gate above.
-    cap_denial = await check_agent_send_allowed(db, org, "sms", [counterpart])
-    if cap_denial is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={
-                **_meta(body),
-                "reason": "agent_caps",
-                "detail": cap_denial.reason,
-            },
-        )
-
     # Text from the number the caller dialed when it can text; else a text
     # number of this agent (see resolve_sms_number).
     dialed = (
@@ -404,11 +607,22 @@ async def agent_send_sms(
         if call.direction == "inbound" and call.to_number_id is not None
         else None
     )
-    from_number = (
-        await sms_sender(db, org, counterpart, call=call)
-        if call.transport == "browser"
-        else await resolve_sms_number(db, org, call.agent_id, dialed, counterpart)
-    )
+    if call.transport != "browser":
+        return await _send_sms_to(
+            db,
+            org,
+            recipient=counterpart,  # the person on the line — never a parameter
+            body=body.body,
+            meta=_meta(body),
+            agent_id=call.agent_id,
+            dialed=dialed,
+            consent_source="voice_call",
+            route_source="in-call send_sms",
+            route_ref={"call_id": str(call.id)},
+            sent=_SPOKEN_SMS_SENT,
+        )
+
+    from_number = await sms_sender(db, org, counterpart, call=call)
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
@@ -966,89 +1180,24 @@ async def agent_email_run_send_email(
         return run
     inbound, agent = run
     org = inbound.organization_id
-    meta = _email_run_meta(body, agent, inbound)
 
-    matches = await resolve_member_emails(db, org, body.recipient_name)
-    if not matches:
-        return AgentSendResponse(
-            ok=False,
-            spoken=f"I couldn't find {body.recipient_name} in the directory.",
-        )
-    if len(matches) > 1:
-        return _ambiguous_recipient(body.recipient_name)
-    recipient = matches[0]
+    recipient = await _member_email(db, org, body.recipient_name)
+    if isinstance(recipient, AgentSendResponse):
+        return recipient
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
-    gate = await check_email_allowed(db, org, [recipient])
-    if not gate.allowed:
-        return await _deny(
-            org,
-            action="agent.email.blocked",
-            resource_type="email",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": gate.reason, "checks": gate.checks},
-        )
-    cap_denial = await check_agent_send_allowed(
-        db, org, "email", [normalize_recipient(recipient)]
-    )
-    if cap_denial is not None:
-        return await _deny(
-            org,
-            action="agent.email.blocked",
-            resource_type="email",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
-        )
-    try:
-        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
-    except HTTPException:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
-
-    email = Email(
-        organization_id=org,
-        email_domain_id=sd.id,
-        agent_id=agent.id,
-        from_address=from_address_for(sd, None),
-        to_addresses=[recipient],
+    return await _send_email_to(
+        db,
+        email_provider,
+        org,
+        recipient=recipient,
         subject=body.subject,
         body_text=body.body_text,
-        status="queued",
-        provider="ses",
-        metadata_=meta,
+        meta=_email_run_meta(body, agent, inbound),
+        agent_id=agent.id,
+        consent_source="inbound_email",
     )
-    db.add(email)
-    await db.commit()
-    await db.refresh(email)
-    await write_audit_log(
-        organization_id=org,
-        api_key_id=None,
-        action="agent.email.send",
-        resource_type="email",
-        resource_id=email.id,
-        payload={
-            **meta,
-            "to": email.to_addresses,
-            "subject": email.subject,
-            "consent_source": "inbound_email",
-            "message_type": "transactional",
-            "compliance": gate.checks,
-        },
-        actor_kind="system",
-    )
-    err = await deliver_email(db, email_provider, email)
-    if err is not None:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
-            action="agent.email.send_failed",
-            resource_type="email",
-            resource_id=email.id,
-            payload={**meta, "end_reason": err},
-            actor_kind="system",
-        )
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
-    return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
 @router.post("/email-run/send-sms", response_model=AgentSendResponse)
@@ -1064,7 +1213,6 @@ async def agent_email_run_send_sms(
         return run
     inbound, agent = run
     org = inbound.organization_id
-    meta = _email_run_meta(body, agent, inbound)
 
     matches = await resolve_member_phones(db, org, body.recipient_name)
     if not any(matches):
@@ -1079,96 +1227,19 @@ async def agent_email_run_send_sms(
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
-    gate = await check_sms_allowed(db, org, recipient)
-    if not gate.allowed:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": gate.reason, "checks": gate.checks},
-        )
-    cap_denial = await check_agent_send_allowed(db, org, "sms", [recipient])
-    if cap_denial is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
-        )
-    from_number = await resolve_sms_number(db, org, agent.id, None, recipient)
-    if from_number is None:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
-    block = await us_registration_block(db, org, from_number, recipient)
-    if block is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": block},
-        )
-    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
-
-    sms = Sms(
-        organization_id=org,
-        provider=from_number.provider,
-        from_number_id=from_number.id,
-        from_e164=from_number.e164,
-        to_e164=recipient,
-        agent_id=agent.id,
-        direction="outbound",
-        status="queued",
+    return await _send_sms_to(
+        db,
+        org,
+        recipient=recipient,
         body=body.body,
-        metadata_=meta,
+        meta=_email_run_meta(body, agent, inbound),
+        agent_id=agent.id,
+        dialed=None,
+        consent_source="inbound_email",
+        route_source="email reply send_sms",
+        route_ref={"email_id": str(inbound.id)},
+        sent=_SPOKEN_SMS_SENT_MEMBER,
     )
-    db.add(sms)
-    await db.commit()
-    if auto_bound:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
-            action="number.route",
-            resource_type="phone_number",
-            resource_id=from_number.id,
-            payload={
-                "e164": from_number.e164,
-                "sms_agent_id": str(agent.id),
-                "automatic": True,
-                "source": "email reply send_sms",
-                "email_id": str(inbound.id),
-            },
-            actor_kind="system",
-        )
-    await write_audit_log(
-        organization_id=org,
-        api_key_id=None,
-        action="agent.sms.send",
-        resource_type="sms",
-        resource_id=sms.id,
-        payload={
-            **meta,
-            "to": sms.to_e164,
-            "consent_source": "inbound_email",
-            "message_type": "transactional",
-            "compliance": gate.checks,
-        },
-        actor_kind="system",
-    )
-    err = await deliver_sms(db, sms)
-    if err is not None:
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=None,
-            action="agent.sms.send_failed",
-            resource_type="sms",
-            resource_id=sms.id,
-            payload={**meta, "end_reason": err},
-            actor_kind="system",
-        )
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
-    return AgentSendResponse(ok=True, spoken=_SPOKEN_SMS_SENT_MEMBER)
 
 
 @router.post("/send-email", response_model=AgentSendResponse)
@@ -1223,6 +1294,22 @@ async def agent_send_email(
             payload={**_meta(body), "reason": reason},
         )
 
+    if call.transport != "browser":
+        recipient = await _member_email(db, org, body.recipient_name)
+        if isinstance(recipient, AgentSendResponse):
+            return recipient
+        return await _send_email_to(
+            db,
+            email_provider,
+            org,
+            recipient=recipient,
+            subject=body.subject,
+            body_text=body.body_text,
+            meta=_meta(body),
+            agent_id=None,
+            consent_source="voice_call",
+        )
+
     if call.transport == "browser":
         if not await email_provider_ready():
             return AgentSendResponse(
@@ -1235,19 +1322,6 @@ async def agent_send_email(
             return AgentSendResponse(
                 ok=False, spoken="Verify your account email before testing email."
             )
-    else:
-        matches = await resolve_member_emails(db, org, body.recipient_name)
-        if not matches:
-            return AgentSendResponse(
-                ok=False,
-                spoken=f"I couldn't find {body.recipient_name} in the directory.",
-            )
-        if len(matches) > 1:
-            return AgentSendResponse(
-                ok=False,
-                spoken=f"More than one person is named {body.recipient_name}, so I can't pick a recipient.",
-            )
-        recipient = matches[0]
 
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
