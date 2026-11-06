@@ -124,6 +124,19 @@ def test_by_request_after_buy_at_same_status(catalog):
     assert o.how == "buy" and o.monthly_cents == 300 and o.more_options == 1
 
 
+def test_buy_after_check_beats_by_request_without_papers(catalog):
+    # UK, company: support orders a DIDWW number with no papers, Twilio sells
+    # one online after a check. The online one is shown.
+    catalog(
+        twilio=[row(cc="GB", nt="mobile", usd="2.50", sms=True, **need())],
+        didww=[row(cc="GB", nt="mobile", usd="2.50", by_request=True)],
+    )
+    r = number_options("GB", {})
+    o = r.types[0].for_["business"]
+    assert o.how == "buy" and o.status == "needs_check"
+    assert "sms" in o.capabilities and o.more_options == 1
+
+
 def test_fewer_items_then_price(catalog):
     few = need(person={"accepted": True, "items": ["id_document"]})
     catalog(
@@ -320,7 +333,11 @@ def test_by_request_ready_with_any_approval(catalog):
 
 
 def test_option_key_order():
-    assert option_key("ready", "by_request", 0, 9, 900, 0) < option_key(
+    # Buy online beats a support order, even one that needs no papers.
+    assert option_key("needs_check", "buy", 0, 9, 900, 0) < option_key(
+        "ready", "by_request", 0, 0, 1, 0
+    )
+    assert option_key("ready", "buy", 0, 9, 900, 0) < option_key(
         "in_review", "buy", 0, 0, 1, 0
     )
     assert option_key("ready", "buy", 0, 3, 1, 0) < option_key(
