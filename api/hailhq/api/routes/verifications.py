@@ -25,6 +25,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -77,6 +78,7 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
+from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
@@ -989,6 +991,26 @@ async def get_requirements(
     )
 
 
+def _application_record(
+    subject_type: SubjectType,
+    requirements: Requirements,
+    fields: dict[str, str],
+    address: Address | None,
+) -> dict:
+    """The private saved SMS answers (``provider_refs.application``): only
+    the form's own fields and the address, never files or extra parts."""
+    return {
+        "schema_version": 1,
+        "subject_type": subject_type,
+        "fields": {
+            spec.name: fields[spec.name]
+            for spec in requirements.fields
+            if spec.name in fields
+        },
+        "address": address.model_dump() if address else None,
+    }
+
+
 async def _sms_mobile_problems(
     db: AsyncSession, subject_type: SubjectType, fields: dict[str, str]
 ) -> list[Problem]:
@@ -1051,10 +1073,6 @@ async def preview_sms_application(
     Checks answers locally. This does not establish policy accessibility,
     carrier acceptance, identity ownership or runtime messaging readiness.
     """
-    from dataclasses import asdict
-
-    from hailhq.core.providers.verification.sms_form import campaign_text
-
     provider_name = await _sms_provider_name(
         db, principal.organization_id, body.number_id, "body"
     )
@@ -1441,16 +1459,9 @@ async def create_verification(
     if sub.purpose == "sms":
         # Stored privately for rejected-application repair; no files, provider
         # feedback, or arbitrary extra multipart fields belong in this record.
-        draft.refs["application"] = {
-            "schema_version": 1,
-            "subject_type": sub.subject_type,
-            "fields": {
-                field.name: sub.fields[field.name]
-                for field in requirements.fields
-                if field.name in sub.fields
-            },
-            "address": sub.address.model_dump() if sub.address else None,
-        }
+        draft.refs["application"] = _application_record(
+            sub.subject_type, requirements, sub.fields, sub.address
+        )
 
     _stamp_campaign_filed(provider, draft.refs)
     if draft.billed_refs:
@@ -2031,21 +2042,10 @@ async def amend_sms_application(
             )
     except VerificationProviderError as exc:
         raise _carrier_unavailable() from exc
-    from dataclasses import asdict
-
-    from hailhq.core.providers.verification.sms_form import campaign_text
-
     refs["campaign"] = asdict(campaign_text(body.fields, row.subject_type))
-    refs["application"] = {
-        "schema_version": 1,
-        "subject_type": row.subject_type,
-        "fields": {
-            field.name: body.fields[field.name]
-            for field in requirements.fields
-            if field.name in body.fields
-        },
-        "address": body.address.model_dump(),
-    }
+    refs["application"] = _application_record(
+        row.subject_type, requirements, body.fields, body.address
+    )
     refs["application_amendment_hash"] = digest
     refs.pop("needs_information", None)
     refs.pop("campaign_needs_repair", None)

@@ -85,24 +85,21 @@ Maximum 100 fields and 64 KiB of fields/address; no documents are accepted.`,
 			if len(detail) > 64*1024 {
 				return fmt.Errorf("fields and address must fit within 64 KiB")
 			}
-			body := client.SmsApplicationAmendRequest{Fields: answers}
-			if len(addr) != 0 {
-				allowed := map[string]bool{"customer_name": true, "street": true, "city": true, "region": true, "postal_code": true, "country_code": true}
-				for key := range addr {
-					if !allowed[key] {
-						return fmt.Errorf("unsupported address key; use customer_name, street, city, region, postal_code or country_code")
-					}
+			allowed := map[string]bool{"customer_name": true, "street": true, "city": true, "region": true, "postal_code": true, "country_code": true}
+			for key := range addr {
+				if !allowed[key] {
+					return fmt.Errorf("unsupported address key; use customer_name, street, city, region, postal_code or country_code")
 				}
-				raw, err := json.Marshal(addr)
-				if err != nil {
-					return fmt.Errorf("encode address: %w", err)
-				}
-				var parsed client.Address
-				if err := json.Unmarshal(raw, &parsed); err != nil {
-					return fmt.Errorf("invalid address")
-				}
-				body.Address = &parsed
 			}
+			raw, err := json.Marshal(addr)
+			if err != nil {
+				return fmt.Errorf("encode address: %w", err)
+			}
+			var parsed client.Address
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				return fmt.Errorf("invalid address")
+			}
+			body := client.SmsApplicationAmendRequest{Fields: answers, Address: &parsed}
 			apiClient, err := opts.newClient()
 			if err != nil {
 				return err

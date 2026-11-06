@@ -590,6 +590,26 @@ async def test_draft_noncompliant_evaluation_is_problem() -> None:
     assert [pr.message for pr in draft.problems] == ["Check the website address."]
 
 
+@pytest.mark.parametrize(
+    "results",
+    [
+        [{"fields": [{"passed": False, "failure_reason": "Name does not match"}]}],
+        [],
+    ],
+)
+async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
+    results,
+) -> None:
+    """A failed evaluation is a refusal of the form, not an outage (503)."""
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant", results=results
+    )
+    draft = await _draft(_provider(r))
+    assert [pr.field for pr in draft.problems] == [""]
+    assert draft.refs == {}
+
+
 @pytest.mark.parametrize("brand_status", ["FAILED", "SUSPENDED"])
 async def test_status_brand_failed_or_suspended_is_rejected(brand_status) -> None:
     r = _ok_responses()

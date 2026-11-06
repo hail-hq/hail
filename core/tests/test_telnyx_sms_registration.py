@@ -2398,3 +2398,68 @@ async def test_invalid_confirmation_content_never_creates_a_paid_brand():
     )
     assert any(problem.field == "opt_in_message" for problem in draft.problems)
     assert calls == []
+
+
+def test_body_pointer_names_an_application_field() -> None:
+    """Telnyx points at campaign fields as "/body/<field>" too."""
+    from hailhq.core.providers.verification.telnyx_sms import _refused
+
+    request = httpx.Request("POST", "https://api.telnyx.com/v2/10dlc/campaignBuilder")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={
+            "errors": [
+                {
+                    "code": "10015",
+                    "detail": "optoutMessage is required if subscriberOptout is true.",
+                    "source": {"pointer": "/body/optoutMessage"},
+                }
+            ]
+        },
+    )
+    exc = httpx.HTTPStatusError("400", request=request, response=response)
+    assert _refused(exc)
+
+
+def test_repair_reason_matches_whole_word_starts_only() -> None:
+    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    assert campaign_repair_reason("for example, it determines nothing") == (
+        CAMPAIGN_REJECTED
+    )
+    assert "message examples" in campaign_repair_reason("Samples are generic")
+
+
+def test_same_sender_ignores_website_scheme_and_trailing_slash() -> None:
+    from hailhq.core.providers.verification.base import Address
+    from hailhq.core.providers.verification.sms_review import same_sender
+
+    location = {
+        "street": "1 Main St",
+        "city": "Austin",
+        "region": "TX",
+        "postal_code": "78701",
+        "country_code": "US",
+    }
+    original = {
+        "fields": {
+            "legal_name": "Acme Inc",
+            "ein": "123456789",
+            "registration_country": "US",
+            "website": "http://acme.com/",
+        },
+        "address": location,
+    }
+    fields = {
+        "legal_name": "Acme Inc",
+        "ein": "12-3456789",
+        "registration_country": "US",
+        "website": "https://acme.com",
+    }
+    address = Address(customer_name="Acme Inc", **location)
+    assert same_sender(original, fields, address, "business")
+    assert not same_sender(
+        original, {**fields, "website": "https://other.com"}, address, "business"
+    )

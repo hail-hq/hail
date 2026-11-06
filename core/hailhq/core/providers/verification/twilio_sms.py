@@ -48,6 +48,11 @@ _SOLE_PROP_TRUST_POLICY = "RN670d5d2e282a6130ae063b234b6019c8"
 _OTP_RESEND_AFTER = timedelta(hours=24)
 
 
+class _NotCompliant(TwilioRestException):
+    """A Trust Hub evaluation found a detail of the form not compliant: a
+    definite refusal of the customer's answers, whatever its wording."""
+
+
 def _policy_links(text: dict) -> dict:
     """File dedicated policy fields exactly as saved, without invented links."""
     links = {}
@@ -166,7 +171,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC draft failed: status=%s code=%s", exc.status, exc.code
                 )
-                if application_validation_error(exc.status, exc.msg):
+                if isinstance(exc, _NotCompliant) or application_validation_error(
+                    exc.status, exc.msg
+                ):
                     return DraftResult(
                         refs={},
                         problems=[Problem(field="", message=_safe_message(exc.msg))],
@@ -270,7 +277,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             policy_sid=profile_policy
         )
         if ev.status != "compliant":
-            raise TwilioRestException(400, "", msg=_evaluation_message(ev))
+            raise _NotCompliant(400, "", msg=_evaluation_message(ev))
         th.customer_profiles(profile.sid).update(status="pending-review")
 
         trust = th.trust_products.create(
@@ -305,7 +312,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             policy_sid=_SOLE_PROP_TRUST_POLICY if person else _A2P_TRUST_POLICY
         )
         if ev.status != "compliant":
-            raise TwilioRestException(400, "", msg=_evaluation_message(ev))
+            raise _NotCompliant(400, "", msg=_evaluation_message(ev))
         th.trust_products(trust.sid).update(status="pending-review")
 
         brand_kwargs = {
@@ -430,7 +437,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def recover_campaign(self, refs) -> bool:
         try:
             return await asyncio.to_thread(self._recover_campaign, refs)
-        except TwilioException as exc:
+        except Exception as exc:
+            # Twilio errors and transport errors (the SDK lets requests'
+            # own exceptions through) are both a retryable outage.
             raise VerificationProviderError("Campaign discovery unavailable") from exc
 
     async def application_identity(self, refs, subject_type) -> dict | None:
@@ -525,6 +534,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             ) from exc
         except (KeyError, AttributeError, TypeError):
             return None
+        except Exception as exc:
+            # A transport error (the SDK lets requests' exceptions through).
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
 
     def confirmation(self, refs) -> str | None:
         # The person answers the carrier's text; there is no code to enter.

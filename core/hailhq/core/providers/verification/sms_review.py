@@ -8,6 +8,7 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
+from hailhq.core.urls import canonical_url
 
 LEGACY_APPLICATION = (
     "This application needs the current consent evidence and message examples. "
@@ -90,7 +91,9 @@ def campaign_repair_reason(raw: object) -> str:
         ),
     )
     for words, message in rules:
-        if any(word in text for word in words):
+        # Match at a word start: "sample" must not hit "for example", nor
+        # "terms" "determines", nor "url" "curl".
+        if any(re.search(rf"\b{re.escape(word)}", text) for word in words):
             return message
     return CAMPAIGN_REJECTED
 
@@ -134,6 +137,8 @@ def application_validation_error(
             "messageflow",
             "sample message",
             "message sample",
+            "message samples",
+            "messagesamples",
             "opt-in",
             "optin",
             "use case",
@@ -200,6 +205,10 @@ def same_sender(
         text = " ".join(str(value or "").split()).casefold()
         if key in {"mobile_phone_number", "rep_phone", "ein"}:
             return re.sub(r"\D", "", text)
+        if key == "website":
+            # The carrier may hold an http:// or slash-ended form of the
+            # site; the form now asks for https://.
+            return re.sub(r"^https?://", "", canonical_url(text))
         return text
 
     return all(

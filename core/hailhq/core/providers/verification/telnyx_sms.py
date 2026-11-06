@@ -1062,7 +1062,11 @@ def _refused(exc: Exception) -> bool:
     errors = _errors(exc.response)
     # Application payload fields are top-level. Keep both brand and campaign
     # validation evidence without interpreting arbitrary operational paths.
-    known_field = any(_pointer(error) in _APPLICATION_POINTERS for error in errors)
+    # Telnyx points at campaign fields as "/body/<field>" too (10015).
+    known_field = any(
+        (_pointer(error) or "").removeprefix("/body") in _APPLICATION_POINTERS
+        for error in errors
+    )
     prose = " ".join(
         f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
     )
