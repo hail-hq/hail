@@ -693,6 +693,17 @@ def skipped_keys(skipped: list[str]) -> set[str]:
     return keys
 
 
+def out_of_stock_keys(skipped: list[str]) -> set[str]:
+    """The skipped keys whose reason is that the carrier lists the type but
+    has no numbers for sale right now."""
+    return {
+        line.split(": ", 1)[0] for line in skipped if line.endswith(_NO_STOCK_REASONS)
+    } & skipped_keys(skipped)
+
+
+_NO_STOCK_REASONS = ("no numbers in stock", "no numbers offered to this account")
+
+
 def merge(
     existing: list[dict],
     fetched: list[dict],
@@ -701,11 +712,18 @@ def merge(
     verified_by: str,
     unobserved: set[str] | frozenset[str] = frozenset(),
     kept_rows: list[dict] | None = None,
+    out_of_stock: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[dict], dict]:
     """Overlay fetched rows on the current catalog. Returns (numbers, report).
 
     ``unobserved`` names the keys the sync skipped this run; their rows are
     kept as they are instead of being marked vanished.
+
+    ``out_of_stock`` names the unobserved keys the carrier still lists but has
+    no numbers for. The carrier was asked today and still sells the type, so
+    the row's check date moves and it gets a note. Its price stays: without a
+    number on sale the carrier shows none. The next sync that sees stock
+    rebuilds the row without the note.
 
     ``kept_rows`` holds copies of unobserved rows whose ``requirements`` were
     refreshed by attach_requirements; only that field is taken from them."""
@@ -815,7 +833,24 @@ def merge(
             continue
         if key in unobserved:
             report["unobserved"].append(key)
-            numbers.append(refreshed(key, prev))
+            row = refreshed(key, prev)
+            if (
+                key in out_of_stock
+                and prev.get("verification_method") != "manual-confirmed"
+                and prev.get("available", True)
+            ):
+                row = {
+                    **row,
+                    "last_verified": today,
+                    "verification_method": "carrier-sync",
+                    "verified_by": verified_by,
+                    "source_url": source_url,
+                }
+                if _NO_STOCK_NOTE not in (row.get("notes") or ""):
+                    row["notes"] = "; ".join(
+                        filter(None, [row.get("notes"), _NO_STOCK_NOTE])
+                    )
+            numbers.append(row)
             continue
         if prev.get("verification_method") == "manual-confirmed":
             # A person vouched for this row; only a person takes it off sale.
@@ -833,7 +868,17 @@ def merge(
             # Appended, not written over: a hand-verified row's notes say why
             # a human confirmed it and must outlive the carrier's feed.
             kept["notes"] = "; ".join(
-                filter(None, [kept.get("notes"), _VANISHED_NOTE.format(today=today)])
+                filter(
+                    None,
+                    [
+                        *(
+                            part
+                            for part in (kept.get("notes") or "").split("; ")
+                            if part != _NO_STOCK_NOTE
+                        ),
+                        _VANISHED_NOTE.format(today=today),
+                    ],
+                )
             )
         report["vanished"].append(key)
         numbers.append(kept)
@@ -843,6 +888,10 @@ def merge(
 
 _VANISHED_NOTE = (
     "not offered by the carrier as of {today}; kept so held numbers stay billable"
+)
+_NO_STOCK_NOTE = (
+    "carrier lists this type but had no numbers in stock at the last check,"
+    " so the price is from the last time numbers were on sale"
 )
 
 
@@ -1266,6 +1315,7 @@ def run_provider(
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
+        out_of_stock=out_of_stock_keys(skipped) - fetched_keys,
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")

@@ -2577,7 +2577,7 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "20.00",
-      "last_verified": "2026-10-05",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2599,7 +2599,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check, so the price is from the last time numbers were on sale"
     },
     {
       "country_code": "IL",
@@ -4684,7 +4685,7 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "5.00",
-      "last_verified": "2026-09-28",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4704,7 +4705,8 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check, so the price is from the last time numbers were on sale"
     },
     {
       "country_code": "SI",

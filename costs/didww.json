@@ -4364,11 +4364,12 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-10-07",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-05",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
-      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
+      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html",
+      "notes": "carrier lists this type but had no numbers in stock at the last check, so the price is from the last time numbers were on sale"
     },
     {
       "country_code": "RO",

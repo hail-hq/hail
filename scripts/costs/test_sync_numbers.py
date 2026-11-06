@@ -403,6 +403,101 @@ def test_merge_leaves_unobserved_rows_alone():
     assert report["unobserved"] == ["PT:mobile"] and report["vanished"] == []
 
 
+def test_merge_marks_an_out_of_stock_row_checked():
+    """Telnyx Singapore national, 2026-11: coverage lists the type, the
+    search finds no numbers. The carrier still sells it, so the row's check
+    date moves and it gets a note; the price stays as last seen. Stock coming
+    back rebuilds the row without the note."""
+    prev = {
+        "country_code": "SG",
+        "number_type": "national",
+        "display_name": "Singapore national",
+        "dial_code": "65",
+        "usd_per_month": "5.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "available": True,
+        "last_verified": "2026-09-28",
+        "last_changed_at": "2026-09-28",
+        "verification_method": "carrier-sync",
+        "verified_by": "telnyx-api-sync",
+        "source_url": "https://old",
+    }
+    skipped = ["SG:national: no numbers in stock", "SG:local: no dial code known"]
+    assert sync.out_of_stock_keys(skipped) == {"SG:national"}
+    numbers, report = sync.merge(
+        [prev],
+        [],
+        "2026-11-06",
+        "https://src",
+        "telnyx-api-sync",
+        unobserved=sync.skipped_keys(skipped),
+        out_of_stock=sync.out_of_stock_keys(skipped),
+    )
+    row = numbers[0]
+    assert row["last_verified"] == "2026-11-06" and row["source_url"] == "https://src"
+    assert row["last_changed_at"] == "2026-09-28" and row["usd_per_month"] == "5.00"
+    assert row["available"] is True and row["notes"] == sync._NO_STOCK_NOTE
+    assert report["unobserved"] == ["SG:national"]
+
+    again, _ = sync.merge(
+        numbers,
+        [],
+        "2026-11-13",
+        "https://src",
+        "telnyx-api-sync",
+        unobserved={"SG:national"},
+        out_of_stock={"SG:national"},
+    )
+    assert again[0]["notes"] == sync._NO_STOCK_NOTE
+    assert again[0]["last_verified"] == "2026-11-13"
+
+    gone, _ = sync.merge(again, [], "2026-11-20", "https://src", "telnyx-api-sync")
+    assert gone[0]["available"] is False
+    assert sync._NO_STOCK_NOTE not in gone[0]["notes"]
+
+    restocked = {
+        k: v
+        for k, v in prev.items()
+        if k
+        not in (
+            "last_verified",
+            "last_changed_at",
+            "verification_method",
+            "verified_by",
+            "source_url",
+        )
+    }
+    back, _ = sync.merge(
+        again, [restocked], "2026-11-20", "https://src", "telnyx-api-sync"
+    )
+    assert "notes" not in back[0] and back[0]["last_verified"] == "2026-11-20"
+
+
+def test_merge_does_not_touch_a_hand_verified_out_of_stock_row():
+    prev = {
+        "country_code": "PY",
+        "number_type": "local",
+        "usd_per_month": "49.50",
+        "available": True,
+        "last_verified": "2026-10-07",
+        "verification_method": "manual-confirmed",
+        "verified_by": "owner",
+    }
+    numbers, _ = sync.merge(
+        [prev],
+        [],
+        "2026-11-06",
+        "https://src",
+        "didww-api-sync",
+        unobserved={"PY:local"},
+        out_of_stock={"PY:local"},
+    )
+    assert numbers == [prev]
+
+
 def test_regulatory_block_is_derived_from_rows(tmp_path):
     path = tmp_path / "twilio.json"
     path.write_text(
@@ -1440,6 +1535,15 @@ def _run_twilio(tmp_path, monkeypatch, existing, rows, skipped, observed):
     return {f"{n['country_code']}:{n['number_type']}": n for n in out}, summary
 
 
+def _checked_no_stock():
+    """What an out-of-stock row gains from a run on 2026-11-04."""
+    return {
+        "last_verified": "2026-11-04",
+        "source_url": sync.SOURCE_URLS["twilio"],
+        "notes": sync._NO_STOCK_NOTE,
+    }
+
+
 def _fetched(cc="DE"):
     return {**_kept_prev(cc, verify=False), "usd_per_month": "1.00"}
 
@@ -1458,7 +1562,7 @@ def test_unobserved_row_needing_verification_gets_a_block(tmp_path, monkeypatch)
     )
     assert {c[0] for c in calls} == {"CH"}
     got = {k: v for k, v in rows["CH:local"].items() if k != "requirements"}
-    assert got == {**prev, "last_changed_at": "2026-11-04"}
+    assert got == {**prev, **_checked_no_stock(), "last_changed_at": "2026-11-04"}
     assert rows["CH:local"]["requirements"]["person"]["items"] == ["id_document"]
     text = "\n".join(summary)
     assert "CH:local (not observed, only requirements refreshed): none ->" in text
@@ -1497,7 +1601,7 @@ def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypa
         {"DE:local"},
     )
     assert rows["DE:local"]["usd_per_month"] == "2.00"  # prices still synced
-    assert rows["CH:local"] == prev
+    assert rows["CH:local"] == {**prev, **_checked_no_stock()}
     assert (
         "twilio: 1 rows not observed this run kept their papers: "
         "verification is not configured"
