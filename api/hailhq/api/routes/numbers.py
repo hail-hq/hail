@@ -586,7 +586,7 @@ async def get_number_options(
             description=(
                 "Optional. Keep only options that do all these jobs. Without "
                 "it, each number type shows its best option in this order: "
-                "ready now, then buy now before order by hand, then options "
+                "buy now before order by hand, then ready now, then options "
                 "that do every job the type offers (even when a number that "
                 "does fewer jobs costs less), then fewer papers, then lower "
                 "price."
