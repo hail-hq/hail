@@ -17,7 +17,7 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import transfer_call
+from hailhq.core.agent_tools import hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
@@ -172,6 +172,10 @@ async def build_agent_tools(
             # Its dial runs in the background: cancel_transfer stops the ring.
             # It comes with transfer_call, so a `tools` list never names it.
             specs.append(transfer_call.CANCEL_SPEC)
+    if metadata.get("direction") == "inbound":
+        # The settings guide is loaded by tool, not carried in the prompt. No
+        # `tools` list names it, so it is added here, as cancel_transfer is.
+        specs.append(hail_help.SPEC)
     if not specs:
         return [], None
 

@@ -22,6 +22,7 @@ from cryptography.fernet import InvalidToken
 from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
+from hailhq.core.prompts import PRIVACY_REMINDER
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
@@ -125,8 +126,9 @@ def test_build_instructions_present_without_caller_prompt() -> None:
     This is the exact condition behind the bug: no caller framing → the model
     defaulted to a generic chat-assistant self-concept.
     """
-    assert build_instructions(None) == VOICE_PREAMBLE
-    assert build_instructions("") == VOICE_PREAMBLE
+    expected = f"{VOICE_PREAMBLE}\n\n{PRIVACY_REMINDER}"
+    assert build_instructions(None) == expected
+    assert build_instructions("") == expected
     assert VOICE_PREAMBLE.strip(), "preamble must be non-empty"
 
 
@@ -190,9 +192,12 @@ def test_voice_preamble_requires_confirmation_before_sending() -> None:
     Regression for an agent tool (send_sms/send_email) firing without the
     other party ever agreeing to what would be sent.
     """
-    lowered = VOICE_PREAMBLE.lower()
-    assert "before sending" in lowered
-    assert "confirmation" in lowered
+    from hailhq.core.agent_tools import send_email, send_sms
+
+    for spec in (send_sms.SPEC, send_email.SPEC):
+        lowered = spec.description.lower()
+        assert "before sending" in lowered
+        assert "confirmation" in lowered
 
 
 class _FakeSession:
