@@ -36,6 +36,7 @@ __all__ = [
     "FieldSpec",
     "Problem",
     "ProviderStatus",
+    "RegistrationHoldsAnotherNumber",
     "Requirements",
     "SmsRegistrationProvider",
     "SubjectType",
@@ -53,6 +54,18 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+class RegistrationHoldsAnotherNumber(VerificationProviderError):
+    """A person's registration holds one number, and the carrier already has
+    another one linked to it, the link done: ``e164``. The caller may record
+    that number as the registration's own when it is one of the
+    organization's. A number the carrier is still linking or unlinking is a
+    plain ``VerificationProviderError``."""
+
+    def __init__(self, message: str, e164: str) -> None:
+        super().__init__(message)
+        self.e164 = e164
 
 
 class SubmitRefused(VerificationProviderError):
