@@ -253,6 +253,7 @@ async def test_generate_reply_failing_three_times_is_given_up(async_session):
     delivered: set[uuid.UUID] = set()
     task = _start(fake, call, since, delivered=delivered)
     await wait_for(lambda: len(fake.inputs) == 1)
+    await wait_for(lambda: Picky.attempts == 3)
     await asyncio.sleep(POLL * 10)
     await _stop(task)
     assert Picky.attempts == 3

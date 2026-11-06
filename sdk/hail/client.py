@@ -586,15 +586,26 @@ class _EmailDomainsResource:
         forward_to: list[str] | None = None,
         webhook_url: str | None = None,
         forward_rate_per_hour: int | None = None,
+        email_agent_id: str | UUID | None = None,
+        email_agent_scope: str | None = None,
+        clear_email_agent: bool = False,
     ) -> EmailDomainResponse:
-        """Edit hail-mail prefixes and/or inbound action settings.
+        """Edit hail-mail prefixes, inbound action settings, and the agent route.
 
         Prefix edits (``local_prefix_user``/``local_prefix_org``) only
         apply to hail_mail rows. Inbound action fields (``inbound_enabled``,
         ``forward_to``, ``webhook_url``, ``forward_rate_per_hour``) apply
         to any kind. Setting ``webhook_url`` mints a fresh secret and
         returns it once in the response's ``webhook_secret``.
+
+        ``email_agent_id`` makes an agent answer mail to this address;
+        ``clear_email_agent=True`` stops that, and passing both raises
+        ``ValueError``. ``email_agent_scope`` is ``"members"`` (verified org
+        members) or ``"anyone"``. A new agent starts at ``"members"`` unless
+        the same call names a scope.
         """
+        if clear_email_agent and email_agent_id is not None:
+            raise ValueError("use email_agent_id or clear_email_agent, not both")
         body: dict[str, Any] = {}
         if local_prefix_user is not None:
             body["local_prefix_user"] = local_prefix_user
@@ -608,6 +619,12 @@ class _EmailDomainsResource:
             body["webhook_url"] = webhook_url
         if forward_rate_per_hour is not None:
             body["forward_rate_per_hour"] = forward_rate_per_hour
+        if clear_email_agent:
+            body["email_agent_id"] = None
+        elif email_agent_id is not None:
+            body["email_agent_id"] = str(email_agent_id)
+        if email_agent_scope is not None:
+            body["email_agent_scope"] = email_agent_scope
         did = str(domain_id)
         data = await self._http.request("PATCH", f"/email-domains/{did}", json=body)
         return EmailDomainResponse.model_validate(data)
@@ -844,6 +861,7 @@ class _AgentsResource:
         max_duration_seconds: int | None = None,
         voice_enabled: bool = True,
         sms_enabled: bool = True,
+        email_enabled: bool = True,
         status: str = "live",
     ) -> AgentResponse:
         """Save an agent. Route a number to it with ``client.numbers.route``
@@ -857,6 +875,7 @@ class _AgentsResource:
             "recording_enabled": recording_enabled,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
+            "email_enabled": email_enabled,
             "status": status,
         }
         if first_message is not None:

@@ -127,10 +127,15 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def xact_lock(db: AsyncSession, key: str) -> None:
+    """Hold the advisory lock named ``key`` until the transaction ends."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": key},
+    )
+
+
 async def org_lock(db: AsyncSession, org: UUID) -> None:
     """Hold this organization's lock until the transaction ends. Billing
     and number writes of one organization take it, so they run in order."""
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(org)},
-    )
+    await xact_lock(db, str(org))

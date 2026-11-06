@@ -2511,3 +2511,15 @@ async def test_delete_agent_maps_delete_409(client: HailClient) -> None:
         client=client, agent_id=aid, confirm_name="Front desk"
     )
     assert result == {"error": "agent in use"}
+
+
+async def test_route_email_domain_refuses_an_agent_with_a_clear(
+    client: HailClient,
+) -> None:
+    result = await tools.route_email_domain(
+        client=client,
+        domain_id="11111111-1111-1111-1111-111111111111",
+        email_agent_id="22222222-2222-2222-2222-222222222222",
+        clear_agent=True,
+    )
+    assert result == {"error": "use email_agent_id or clear_agent, not both"}

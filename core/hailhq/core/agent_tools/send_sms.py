@@ -1,10 +1,10 @@
 """send_sms — text the person on this call. outbound_send tier.
 
-The only possible recipient is the call counterpart: org members carry
-no phone numbers (the better-auth users table has none), and raw numbers
-are never accepted as parameters. Recipient resolution, the compliance
-gate, the per-call cap, and billing all run server-side in
-``/internal/agent/send-sms``.
+On a call, the only possible recipient is the call counterpart. In an email
+run, it is a directory member named by the model. Raw numbers are never
+accepted as parameters. Recipient resolution, the compliance gate, the per-call
+cap, and billing all run server-side in ``/internal/agent/send-sms`` and
+``/internal/agent/email-run/send-sms``.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from hailhq.core.agent_tools.send_email import MAX_RECIPIENT_NAME_CHARS
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
@@ -61,6 +62,37 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     return str(resp.get("spoken", SPOKEN_FALLBACK))
 
 
+async def _execute_for_email(ctx: ToolContext, args: dict[str, Any]) -> str:
+    """An email run has no one on a call: the recipient is a directory name,
+    and the route resolves the number. The model never sees or supplies one."""
+    if ctx.inbound_email_id is None or ctx.api is None:
+        return _UNAVAILABLE
+    recipient_name = str(args.get("recipient_name", "")).strip()[
+        :MAX_RECIPIENT_NAME_CHARS
+    ]
+    body_text = str(args.get("body", ""))[:MAX_BODY_CHARS]
+    if not recipient_name:
+        return "I need the recipient's name before I can send the text."
+    if not body_text.strip():
+        return "I need the message text before I can send it."
+    resp = await ctx.api.post(
+        "/internal/agent/email-run/send-sms",
+        {
+            "inbound_email_id": str(ctx.inbound_email_id),
+            # Same message, same id: a retried run cannot send it twice.
+            "tool_invocation_id": str(
+                uuid.uuid5(
+                    ctx.inbound_email_id,
+                    f"send_sms\x00{recipient_name}\x00{body_text}",
+                )
+            ),
+            "recipient_name": recipient_name,
+            "body": body_text,
+        },
+    )
+    return str(resp.get("spoken", SPOKEN_FALLBACK))
+
+
 SPEC = ToolSpec(
     name="send_sms",
     description=(
@@ -82,4 +114,32 @@ SPEC = ToolSpec(
     risk_tier="outbound_send",
     is_available=_is_available,
     execute=_execute,
+)
+
+# In an email run the recipient is a member named in the directory.
+EMAIL_RUN_SPEC = ToolSpec(
+    name="send_sms",
+    description=(
+        "Send a text message to a member of the organization's team directory "
+        "(use list_contacts to see who). You cannot text arbitrary numbers, "
+        "only directory names."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "recipient_name": {
+                "type": "string",
+                "description": "The directory name of the recipient.",
+            },
+            "body": {
+                "type": "string",
+                "description": "The text message to send. Keep it short.",
+                "maxLength": MAX_BODY_CHARS,
+            },
+        },
+        "required": ["recipient_name", "body"],
+    },
+    risk_tier="outbound_send",
+    is_available=_is_available,
+    execute=_execute_for_email,
 )

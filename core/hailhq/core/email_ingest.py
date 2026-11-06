@@ -16,6 +16,7 @@ service only persists. The caller (the API endpoint) layers on top.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
+from hailhq.core.email_agent import proves_sender, queue_decision, with_skip_reason
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -47,6 +49,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["FanoutFn", "ForwardEnqueue", "FundsCheck", "IngestResult", "ingest_inbound"]
+
+logger = logging.getLogger("hailhq.core.email_ingest")
 
 
 ForwardEnqueue = Callable[..., Awaitable[None]]
@@ -264,6 +268,7 @@ async def _persist_one(
         spf_verdict=message.spf_verdict,
         dkim_verdict=message.dkim_verdict,
         dmarc_verdict=message.dmarc_verdict,
+        from_verified=proves_sender(parsed, message.dmarc_verdict),
         provider_received_at=message.received_at,
         metadata_=metadata,
     )
@@ -535,6 +540,45 @@ async def ingest_inbound(
                 # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
                 row_reasons.append("insufficient_funds")
+
+        if created:
+            # Queuing an agent reply is secondary to storing the mail. A failure
+            # here rolls back to the savepoint and the mail is kept without a reply.
+            decision = None
+            try:
+                async with db.begin_nested():
+                    decision = await queue_decision(
+                        db,
+                        domain,
+                        parsed=parsed,
+                        envelope_from=message.envelope_from,
+                        dmarc_verdict=message.dmarc_verdict,
+                        suppress=suppress,
+                        over_cap=over_cap,
+                        funded=funded,
+                        base_domain=hail_mail_base_domain,
+                    )
+                    if decision is not None:
+                        values: dict[str, Any] = {
+                            "agent_id": decision.agent.id,
+                            "agent_reply_state": decision.state,
+                        }
+                        if decision.reason is not None:
+                            values["metadata_"] = with_skip_reason(decision.reason)
+                        await db.execute(
+                            update(Email).where(Email.id == email_id).values(**values)
+                        )
+            except Exception:
+                logger.warning(
+                    "email_id=%s agent reply was not queued", email_id, exc_info=True
+                )
+                decision = None
+            if (
+                decision is not None
+                and decision.reason == "insufficient_funds"
+                and decision.reason not in row_reasons
+            ):
+                row_reasons.append(decision.reason)
 
         for reason in row_reasons:
             if reason not in result.suppressed_reasons:

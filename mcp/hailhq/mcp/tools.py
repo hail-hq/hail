@@ -30,6 +30,7 @@ Exposes the following tools to the calling agent:
 * ``update_agent`` — change an agent; ``clear_fields`` sends explicit nulls
 * ``delete_agent`` — delete an agent (destructive; needs ``confirm_name``)
 * ``route_number`` — choose which agent answers a number
+* ``route_email_domain`` — choose which agent answers an email address
 * ``quote_numbers`` — compare live carrier offers for a new number
 * ``acquire_number`` — buy a quoted number (spends money; needs ``confirm_total_cents``)
 * ``list_numbers`` — page through the workspace's numbers
@@ -613,6 +614,32 @@ async def route_number(
                 clear_voice=clear_voice,
                 clear_sms=clear_sms,
             )
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+
+
+async def route_email_domain(
+    *,
+    client: HailClient,
+    domain_id: str,
+    email_agent_id: str | None = None,
+    email_agent_scope: str | None = None,
+    clear_agent: bool = False,
+) -> dict[str, Any]:
+    domain_id_ = _as_uuid(domain_id)
+    if domain_id_ is None:
+        return _not_uuid("domain_id")
+    if clear_agent and email_agent_id is not None:
+        return {"error": "use email_agent_id or clear_agent, not both"}
+    try:
+        return await client.route_email_domain(
+            domain_id_,
+            email_agent_id=email_agent_id,
+            email_agent_scope=email_agent_scope,
+            clear_agent=clear_agent,
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -2126,13 +2153,13 @@ def register_tools(
     )
     async def list_agents_tool(ctx: Context) -> dict[str, Any]:
         """List the workspace's saved agents: the brains that answer calls
-        and texts on its numbers, and that ``place_call`` can use via
-        ``agent_id``.
+        and texts on its numbers and mail to its addresses, and that
+        ``place_call`` can use via ``agent_id``.
 
         Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
         "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
         "max_duration_seconds", "handover_max_duration_seconds", "voice_enabled",
-        "sms_enabled", "status", "handover_contacts"}, ...]}``.
+        "sms_enabled", "email_enabled", "status", "handover_contacts"}, ...]}``.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -2166,10 +2193,12 @@ def register_tools(
         handover_max_duration_seconds: int | None = None,
         voice_enabled: bool = True,
         sms_enabled: bool = True,
+        email_enabled: bool = True,
         handover_contacts: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Save an agent. Then call ``route_number`` so a number answers
-        with it, or pass its id as ``agent_id`` to ``place_call``.
+        with it, ``route_email_domain`` so an email address does, or pass
+        its id as ``agent_id`` to ``place_call``.
 
         ``system_prompt`` is what the agent follows. ``first_message`` is
         spoken after the AI line; omit it to let the caller speak first.
@@ -2193,6 +2222,7 @@ def register_tools(
             "ai_disclosure": ai_disclosure,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
+            "email_enabled": email_enabled,
         }
         if recording_enabled is not None:
             fields["recording_enabled"] = recording_enabled
@@ -2259,6 +2289,52 @@ def register_tools(
                     sms_agent_id=sms_agent_id,
                     clear_voice=clear_voice,
                     clear_sms=clear_sms,
+                )
+        except HailAPIError as exc:
+            return _format_api_error(exc)
+
+    @mcp_app.tool(
+        name="route_email_domain",
+        title="Route an email address to an agent",
+        annotations=ToolAnnotations(
+            title="Route an email address to an agent",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    async def route_email_domain_tool(
+        ctx: Context,
+        domain_id: str,
+        email_agent_id: str | None = None,
+        email_agent_scope: str | None = None,
+        clear_agent: bool = False,
+    ) -> dict[str, Any]:
+        """Choose which agent answers mail to an address, and who it answers.
+
+        ``email_agent_id`` makes the agent reply to inbound mail;
+        ``clear_agent=True`` stops that, and sending both is an error.
+        ``email_agent_scope`` is ``"members"`` (the default: verified members of the workspace whose
+        mail passes DMARC) or ``"anyone"`` (every sender whose mail passes
+        DMARC and the spam checks). With ``"anyone"``, a stranger can make the
+        agent use its tools, so ask your user before you set it. Mail without
+        a DMARC pass gets no reply. A custom domain must be verified with
+        inbound on. A field left out keeps its value, except that a new agent
+        starts at ``"members"``. ``domain_id`` comes from
+        ``list_email_domains``.
+
+        Returns the updated ``EmailDomainResponse`` as a dict, or
+        ``{"error": "<message>"}``.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await route_email_domain(
+                    client=client,
+                    domain_id=domain_id,
+                    email_agent_id=email_agent_id,
+                    email_agent_scope=email_agent_scope,
+                    clear_agent=clear_agent,
                 )
         except HailAPIError as exc:
             return _format_api_error(exc)
@@ -2878,7 +2954,7 @@ def register_tools(
 
         Returns the ``AgentResponse`` as a dict (``name``, ``system_prompt``,
         ``first_message``, ``ai_disclosure``, ``voice_config``, ``tools``,
-        ``voice_enabled``, ``sms_enabled``, ``status``, ...), or
+        ``voice_enabled``, ``sms_enabled``, ``email_enabled``, ``status``, ...), or
         ``{"error": "<message>"}``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -2913,6 +2989,7 @@ def register_tools(
         handover_max_duration_seconds: int | None = None,
         voice_enabled: bool | None = None,
         sms_enabled: bool | None = None,
+        email_enabled: bool | None = None,
         status: str | None = None,
         handover_contacts: list[dict] | None = None,
         clear_fields: list[str] | None = None,
@@ -2962,6 +3039,7 @@ def register_tools(
                             "handover_max_duration_seconds": handover_max_duration_seconds,
                             "voice_enabled": voice_enabled,
                             "sms_enabled": sms_enabled,
+                            "email_enabled": email_enabled,
                             "status": status,
                             "handover_contacts": handover_contacts,
                         }.items()

@@ -36,7 +36,7 @@ from hailhq.core.handover import (
     validate_handover,
 )
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import Agent, PhoneNumber
+from hailhq.core.models import Agent, EmailDomain, PhoneNumber
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -45,7 +45,7 @@ from hailhq.core.schemas import (
     AgentUpdate,
     HandoverContactOut,
 )
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -181,6 +181,7 @@ async def create_agent(
         handover_max_duration_seconds=body.handover_max_duration_seconds,
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
+        email_enabled=body.email_enabled,
         status=body.status,
     )
     db.add(agent)
@@ -238,6 +239,7 @@ async def get_prompt_templates(
         calls_in=prompts.prompt_template("calls_in"),
         calls_out=prompts.prompt_template("calls_out"),
         texts=prompts.prompt_template("texts"),
+        emails=prompts.prompt_template("emails"),
     )
 
 
@@ -276,6 +278,7 @@ async def update_agent(
         "voice_config",
         "voice_enabled",
         "sms_enabled",
+        "email_enabled",
         "status",
     ):
         if field in changes and changes[field] is None:
@@ -360,7 +363,7 @@ async def delete_agent(
 ) -> Response:
     """Delete an agent. Numbers that routed calls to it are unregistered
     for inbound and ring out again; numbers that routed texts to it go back
-    to webhooks only."""
+    to webhooks only. Addresses it answered stop getting replies."""
     agent = await _load_owned(db, agent_id, principal.organization_id)
     detached = 0
     while True:
@@ -412,6 +415,10 @@ async def delete_agent(
         # Commit per number: the carrier and LiveKit work is already done.
         await db.commit()
         detached += 1
+    # The foreign key clears the route. The audit row keeps the record.
+    email_routes = await db.scalar(
+        select(func.count(EmailDomain.id)).where(EmailDomain.email_agent_id == agent.id)
+    )
     await db.delete(agent)
     await db.commit()
     actor_user_id, actor_kind = actor_of(principal)
@@ -421,7 +428,7 @@ async def delete_agent(
         action="agent.delete",
         resource_type="agent",
         resource_id=agent_id,
-        payload={"numbers_detached": detached},
+        payload={"numbers_detached": detached, "email_routes_detached": email_routes},
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
