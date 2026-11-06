@@ -664,6 +664,14 @@ async def test_tools_follow_the_agent_list(async_session) -> None:
     assert await email_run_tools(agent, async_session) == []
 
 
+async def test_outside_sender_gets_no_contact_list(async_session) -> None:
+    agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="x", tools=None)
+    names = {
+        s.name for s in await email_run_tools(agent, async_session, trust="outside")
+    }
+    assert "list_contacts" not in names
+
+
 async def test_call_only_tools_are_not_offered(async_session) -> None:
     agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="x", tools=None)
     names = {s.name for s in await email_run_tools(agent, async_session)}

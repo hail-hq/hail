@@ -222,7 +222,9 @@ class SesEmailProvider(EmailProvider):
             client if client is not None else _build_default_client(max_attempts=1)
         )
 
-    async def _send(self, **kwargs: Any) -> dict[str, Any]:
+    async def _send(self, *, at_most_once: bool, **kwargs: Any) -> dict[str, Any]:
+        if not at_most_once:
+            return await asyncio.to_thread(self._client.send_email, **kwargs)
         for attempt in range(SES_MAX_ATTEMPTS - 1):
             try:
                 return await asyncio.to_thread(self._send_client.send_email, **kwargs)
@@ -247,6 +249,7 @@ class SesEmailProvider(EmailProvider):
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
         organization_id: UUID,
+        at_most_once: bool = False,
     ) -> ProviderSendResult:
         if not to_addresses:
             raise ValueError("send_email requires at least one recipient")
@@ -295,6 +298,7 @@ class SesEmailProvider(EmailProvider):
                 attachments=attachments,
             )
             response = await self._send(
+                at_most_once=at_most_once,
                 **shared,
                 FromEmailAddress=from_address,
                 Content={"Raw": {"Data": raw}},
@@ -316,7 +320,7 @@ class SesEmailProvider(EmailProvider):
         if reply_to:
             kwargs["ReplyToAddresses"] = [reply_to]
 
-        response = await self._send(**kwargs)
+        response = await self._send(at_most_once=at_most_once, **kwargs)
         return ProviderSendResult(provider_message_id=response["MessageId"])
 
     async def create_identity(self, domain: str) -> ProviderIdentity:

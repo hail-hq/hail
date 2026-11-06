@@ -822,8 +822,9 @@ class FailingClient:
         return {"MessageId": "msg-1"}
 
 
-async def _send(client) -> ProviderSendResult:
+async def _send(client, *, at_most_once: bool = True) -> ProviderSendResult:
     return await SesEmailProvider(client=client).send_email(
+        at_most_once=at_most_once,
         from_address="a@example.com",
         to_addresses=["b@example.com"],
         subject="Hi",
@@ -831,6 +832,13 @@ async def _send(client) -> ProviderSendResult:
         body_html=None,
         organization_id=ORG_ID,
     )
+
+
+async def test_a_plain_send_is_left_to_the_client_retries(no_wait) -> None:
+    client = FailingClient(ReadTimeoutError(endpoint_url="x"))
+    with pytest.raises(ReadTimeoutError):
+        await _send(client, at_most_once=False)
+    assert client.calls == 1
 
 
 @pytest.fixture()
