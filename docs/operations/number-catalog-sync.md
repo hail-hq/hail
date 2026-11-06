@@ -67,7 +67,7 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
       - These rows do not count toward the 40-country floor (rule 5).
       - A row that had vanished stays exactly as it vanished. Only `last_verified` moves, and its papers are not fetched.
       - The next run that sees stock rebuilds the row without the note.
-      - A type with no price on any group (`listed, no price on any group`), or with an area on sale that has no price (`listed, an area on sale has no price`), stays **unobserved**.
+      - A type with no price on any group (`listed, no price on any group`), or with areas on sale that all lack a price (`listed, an area on sale has no price`), stays **unobserved**.
    4b. Telnyx out of stock (`no numbers in stock`) stays **unobserved**: Telnyx shows a price only on a number for sale. The row goes stale after 30 days. To check it by hand:
       1. Read its monthly and one-time price on https://telnyx.com/pricing.md.
       2. Set `last_verified` to that day, `source_url` to `https://telnyx.com/pricing.md`, `verification_method` to `community-pr` and `verified_by` to `telnyx-pricing-page`.

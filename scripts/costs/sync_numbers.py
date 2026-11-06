@@ -42,7 +42,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import sys
 import time
 from collections import defaultdict
@@ -151,26 +150,15 @@ def _row(
         "verification_required": verification_required,
         "available": True,
     }
-    if setup_usd is not None:
+    if setup_usd is not None and setup_usd != "0.00":
         row["setup_usd"] = setup_usd
     if notes:
         row["notes"] = notes
-    row["receive_only"] = receive_only
-    row["by_request"] = by_request
-    return _drop_unset(row)
-
-
-def _drop_unset(row: dict) -> dict:
-    """Remove the optional fields a row writes only when set: a zero setup
-    fee, and the receive_only and by_request flags (a row without them is
-    sold as usual)."""
-    for k, unset in (
-        ("setup_usd", "0.00"),
-        ("receive_only", False),
-        ("by_request", False),
-    ):
-        if k in row and row[k] in (unset, None):
-            del row[k]
+    # Written only when true: a row without them is sold as usual.
+    if receive_only:
+        row["receive_only"] = True
+    if by_request:
+        row["by_request"] = True
     return row
 
 
@@ -869,7 +857,7 @@ def merge(
             # until the carrier has a number for sale.
             report["no_stock"].append(f"{key}: new, not added until in stock")
             continue
-        if no_stock and not prev.get("available", True):
+        if no_stock and _no_stock_unused(prev):
             # Vanished, now listed with nothing to buy: still not on sale.
             # It stays exactly as it vanished, so held numbers keep their
             # price; only the check date moves, as on the vanished path.
@@ -924,7 +912,12 @@ def merge(
             # a human confirmed it and must outlive the carrier's feed.
             kept["notes"] = "; ".join(
                 [
-                    *_own_notes(kept.get("notes")),
+                    # A no-stock note no longer holds once the type is gone.
+                    *(
+                        part
+                        for part in (kept.get("notes") or "").split("; ")
+                        if part and part != _NO_STOCK_NOTE
+                    ),
                     _VANISHED_NOTE.format(today=today),
                 ]
             )
@@ -940,15 +933,15 @@ _VANISHED_NOTE = (
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
 
 
-def _own_notes(notes: str | None) -> list[str]:
-    """A row's notes without the vanished and no-stock notes, which the sync
-    writes again on each run. Every other note stays (rule 2)."""
-    rest = _VANISHED_NOTE_RE.sub("", notes or "")
-    return [
-        part
-        for part in rest.split("; ")
-        if part.strip() and not part.startswith(_NO_STOCK_NOTE)
-    ]
+def _no_stock_unused(prev: dict | None) -> bool:
+    """merge() does not write a row read with no stock over ``prev``: a type
+    new to the catalog is not added, and a vanished row (not hand-verified)
+    stays as it vanished. Its papers need no fetch."""
+    if prev is None:
+        return True
+    return not prev.get("available", True) and (
+        prev.get("verification_method") != "manual-confirmed"
+    )
 
 
 def _change_line(key: str, prev: dict | None, new: dict, changed: list[str]) -> str:
@@ -958,11 +951,6 @@ def _change_line(key: str, prev: dict | None, new: dict, changed: list[str]) -> 
     return f"{key}: " + ", ".join(
         _change(k, (prev or {}).get(k), new.get(k)) for k in changed
     )
-
-
-_VANISHED_NOTE_RE = re.compile(
-    re.escape(_VANISHED_NOTE).replace(re.escape("{today}"), r"\d{4}-\d{2}-\d{2}")
-)
 
 
 def regulatory_block(existing: dict, numbers: list[dict], provider: str) -> dict:
@@ -1362,10 +1350,11 @@ def run_provider(
     rows = [r for r in rows if r["dial_code"]]
     # Rows read with no stock do not count: a stock fault at the carrier
     # must not pass the shrink guard.
-    countries = {r["country_code"] for r in rows if not r.get(NO_STOCK)}
-    if len(countries) < COUNTRY_FLOOR and existing:
+    countries = {r["country_code"] for r in rows}
+    stocked = {r["country_code"] for r in rows if not r.get(NO_STOCK)}
+    if len(stocked) < COUNTRY_FLOOR and existing:
         raise CatalogShrunk(
-            f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
+            f"only {len(stocked)} countries with stock fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
     requirement_errors: list[str] = []
     # Rows still sold but not seen this run (a skip with a reason). Rows the
@@ -1379,21 +1368,17 @@ def run_provider(
         if f"{n['country_code']}:{n['number_type']}" in sold_unseen
         and n.get("verification_required")
     ]
-    # A vanished row read with no stock stays as it vanished (merge), so its
-    # papers are not fetched.
-    hidden = {
-        f"{n['country_code']}:{n['number_type']}"
-        for n in existing
-        if not n.get("available", True)
-        and n.get("verification_method") != "manual-confirmed"
-    }
+    by_key = {f"{n['country_code']}:{n['number_type']}": n for n in existing}
     attach_requirements(
         provider,
         [
             r
             for r in rows
             if not (
-                r.get(NO_STOCK) and f"{r['country_code']}:{r['number_type']}" in hidden
+                r.get(NO_STOCK)
+                and _no_stock_unused(
+                    by_key.get(f"{r['country_code']}:{r['number_type']}")
+                )
             )
         ],
         existing,
