@@ -314,6 +314,7 @@ async def deliver_email(
     attachment_rows: list[EmailAttachmentUpload] | None = None,
     *,
     claimed_at: datetime | None = None,
+    at_most_once: bool = False,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
@@ -392,8 +393,7 @@ async def deliver_email(
             headers=_send_headers(email, unsubscribe_headers),
             attachments=provider_attachments or None,
             organization_id=email.organization_id,
-            # claimed_at is set only by agent replies, which must never go twice.
-            at_most_once=claimed_at is not None,
+            at_most_once=at_most_once,
         )
     except Exception as exc:
         logger.warning(
