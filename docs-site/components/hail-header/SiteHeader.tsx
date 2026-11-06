@@ -175,17 +175,10 @@ export function SiteHeader({
               </div>
             )}
           </div>
-          <div className={`${styles.dropdown} ${styles.split}`} ref={setupRef}>
-            <a
-              href={siteHref("/create-ai-agent")}
-              className={navLinkClass(false)}
-            >
-              Setup guide
-            </a>
+          <div className={styles.dropdown} ref={setupRef}>
             <button
               type="button"
-              className={styles.caret}
-              aria-label="Setup guide menu"
+              className={navLinkClass(false)}
               aria-haspopup="true"
               aria-expanded={setupOpen}
               onClick={() => {
@@ -193,7 +186,9 @@ export function SiteHeader({
                 setOpen(false);
               }}
             >
+              Setup guide
               <svg
+                className={styles.chev}
                 width="10"
                 height="10"
                 viewBox="0 0 10 10"

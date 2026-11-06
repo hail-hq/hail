@@ -132,46 +132,6 @@
 .dropdown {
   position: relative;
 }
-.split {
-  display: inline-flex;
-  align-items: center;
-}
-.caret {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  min-height: 32px;
-  padding: 0 4px;
-  margin-left: -4px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-  transition: color 200ms var(--ease);
-}
-.chev {
-  transition: transform 200ms var(--ease);
-}
-.navLink[aria-expanded="true"] .chev {
-  transform: rotate(180deg);
-}
-.caret svg {
-  transition: transform 200ms var(--ease);
-}
-.caret[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-.caret:hover,
-.caret[aria-expanded="true"] {
-  color: var(--fg);
-}
-.caret:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: 2px;
-}
 .panel {
   position: absolute;
   top: calc(100% + 16px);
@@ -379,26 +339,6 @@
   }
   .navOpen > :nth-child(6) {
     transition-delay: 350ms;
-  }
-  .split {
-    display: flex;
-    flex-wrap: wrap;
-  }
-  .split > .navLink {
-    flex: 1;
-    width: auto;
-  }
-  .caret {
-    min-width: 48px;
-    min-height: 48px;
-    margin-left: 0;
-  }
-  .caret svg {
-    width: 14px;
-    height: 14px;
-  }
-  .split .panel {
-    flex-basis: 100%;
   }
   .navLink {
     display: flex;
