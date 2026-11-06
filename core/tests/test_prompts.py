@@ -1,3 +1,5 @@
+import hashlib
+
 from hailhq.core import prompts
 
 
@@ -127,3 +129,35 @@ async def test_settings_help_tool_returns_the_guide() -> None:
     from hailhq.core.agent_tools import hail_help
 
     assert await hail_help._execute(None, {}) == prompts.VOICE_CONFIGURATION_HELP  # type: ignore[arg-type]
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+# Any change here changes what every agent is told: update on purpose only.
+_VOICE = {
+    (None, None): "9fcbd664e553f4d8c7b077febc6d37b91d35aa4b5c8dbdbe0706052ee73d8b9d",
+    (None, "inbound"): (
+        "83f36704c02ecd83bb4482188525da452a81377a4f58baf2011fae1cd0ce9ddf"
+    ),
+    ("Be kind.", None): (
+        "bf646a75f1ff795ea74df3c7de0d7225d444d2bde0e87ccf22a3c3cdcaa63c09"
+    ),
+    ("Be kind.", "inbound"): (
+        "334c571b41c9e0cebb3cfa4745d7e8072a31bc3483a33ee51064cbccd0a3e6f4"
+    ),
+}
+
+
+def test_prompt_text_is_pinned() -> None:
+    for (system_prompt, direction), digest in _VOICE.items():
+        assert _sha(prompts.build_voice_instructions(system_prompt, direction)) == (
+            digest
+        )
+    assert _sha(prompts.build_text_instructions("Be kind.")) == (
+        "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
+    )
+    assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
+        "73718de1be26ec6e01b73d9c5b61a68d8faf0caec751b1f5b4e5c427e9efe8c4"
+    )
