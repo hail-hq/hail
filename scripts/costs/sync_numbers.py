@@ -564,14 +564,13 @@ def map_didww(
     countries: list[dict],
     group_types: dict[str, str],
     groups_by_country: dict[str, dict],
-) -> tuple[list[dict], list[str], dict[str, dict]]:
+) -> tuple[list[dict], list[str]]:
     """groups_by_country[iso] = {"data": [...did_groups...], "included": [...]}
 
-    The third value maps each "ISO:type" that DIDWW lists with no numbers in
-    stock to the row fields read from its empty areas: DIDWW shows the price
-    and features of an area even when it has no numbers."""
+    A type DIDWW lists with no numbers in stock is still a row, read from
+    its empty areas (DIDWW shows their price and features) and marked with
+    ``NO_STOCK``. merge() decides what the mark does."""
     rows, skipped = [], []
-    no_stock: dict[str, dict] = {}
     for c in countries:
         iso, name, prefix = (
             c["attributes"]["iso"],
@@ -603,20 +602,24 @@ def map_didww(
             ]
             # A SKU without a valid price is passed over: it must not stop the
             # run.
-            priced = [s for s in skus if _decimal(s.get("monthly_price")) is not None]
+            priced = [
+                (s, d)
+                for s in skus
+                if (d := _decimal(s.get("monthly_price"))) is not None
+            ]
             base = [
-                s for s in priced if s.get("channels_included_count") == 0
+                (s, d) for s, d in priced if s.get("channels_included_count") == 0
             ] or priced
             available = g.get("meta", {}).get("is_available", True)
             if not base:
                 if available:
                     stocked_unpriced.add(number_type)
                 continue
-            cheapest = min(base, key=lambda s: Decimal(s["monthly_price"]))
+            cheapest, monthly = min(base, key=lambda sd: sd[1])
             features = g["attributes"].get("features", [])
             (by_type if available else unstocked)[number_type].append(
                 {
-                    "monthly": Decimal(cheapest["monthly_price"]),
+                    "monthly": monthly,
                     "setup": _decimal(cheapest.get("setup_price")) or Decimal(0),
                     "features": set(features),
                     "needs_registration": bool(
@@ -636,42 +639,45 @@ def map_didww(
                 }
             )
         # DIDWW still lists the type but has nothing to sell right now. Out
-        # of stock is not dropped: merge() updates the row from the empty
-        # areas, read the same way as areas with stock. A type with no
-        # price on any group, or with an area on sale that has no price, is
-        # kept exactly as it was.
+        # of stock is not dropped: the row is read from the empty areas, the
+        # same way as areas with stock, and marked. A type with no price on
+        # any group, or with an area on sale that has no price, is skipped
+        # and kept exactly as it was.
         for number_type in sorted(listed - set(by_type)):
             if number_type in stocked_unpriced:
                 skipped.append(
                     f"{iso}:{number_type}: listed, an area on sale has no price"
                 )
-                continue
-            if not unstocked[number_type]:
+            elif not unstocked[number_type]:
                 skipped.append(f"{iso}:{number_type}: listed, no price on any group")
-                continue
-            skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
-            no_stock[f"{iso}:{number_type}"], _ = _didww_type_fields(
-                unstocked[number_type]
-            )
-        for number_type, all_groups in by_type.items():
+        groups_by_type = [(t, g, False) for t, g in by_type.items()] + [
+            (t, g, True)
+            for t, g in unstocked.items()
+            if g and t not in by_type and t not in stocked_unpriced
+        ]
+        for number_type, all_groups, empty in groups_by_type:
             fields, prices = _didww_type_fields(all_groups)
-            fields["notes"] = _didww_range_note(prices)
-            rows.append(
-                _row(
-                    country_code=iso,
-                    number_type=number_type,
-                    country_name=name,
-                    dial_code=prefix,
-                    mms=False,
-                    **fields,
-                )
+            row = _row(
+                country_code=iso,
+                number_type=number_type,
+                country_name=name,
+                dial_code=prefix,
+                mms=False,
+                notes=_didww_range_note(prices),
+                **fields,
             )
-    return rows, skipped, no_stock
+            if empty:
+                row[NO_STOCK] = True
+            rows.append(row)
+    return rows, skipped
 
 
-def fetch_didww(
-    http: Http,
-) -> tuple[list[dict], list[str], dict[str, str], dict[str, dict]]:
+# Set by a mapper on a row read while the carrier had no numbers in stock.
+# merge() removes it before the row is written.
+NO_STOCK = "_no_stock"
+
+
+def fetch_didww(http: Http) -> tuple[list[dict], list[str], dict[str, str]]:
     """One request per (country, number type, page). The address requirement
     is not included: `meta.needs_registration` carries the verification flag
     and the extra include made pages slow enough to time out."""
@@ -720,8 +726,8 @@ def fetch_didww(
         if data:
             groups_by_country[iso] = {"data": data, "included": included}
     dial_codes = {c["attributes"]["iso"]: c["attributes"]["prefix"] for c in countries}
-    rows, skipped, no_stock = map_didww(countries, group_types, groups_by_country)
-    return rows, skipped, dial_codes, no_stock
+    rows, skipped = map_didww(countries, group_types, groups_by_country)
+    return rows, skipped, dial_codes
 
 
 # -- merge + write -------------------------------------------------------------
@@ -763,19 +769,17 @@ def merge(
     verified_by: str,
     unobserved: set[str] | frozenset[str] = frozenset(),
     kept_rows: list[dict] | None = None,
-    out_of_stock: dict[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Overlay fetched rows on the current catalog. Returns (numbers, report).
 
     ``unobserved`` names the keys the sync skipped this run; their rows are
     kept as they are instead of being marked vanished.
 
-    ``out_of_stock`` maps the unobserved keys DIDWW still lists but has no
-    numbers for to the price and flags DIDWW shows for those areas. The
-    price was read today, so the row takes it, its check date moves and it
-    gets a note. ``available`` does not move: a row on sale stays on sale, a
-    vanished row stays hidden. The next sync that sees stock rebuilds the
-    row without the note.
+    A fetched row marked ``NO_STOCK`` was read while the carrier had no
+    numbers for sale. It is merged like any fetched row and gets a note,
+    with one difference: a row that had vanished stays exactly as it
+    vanished, and only its check date moves. The next sync that sees stock
+    rebuilds the row without the note.
 
     ``kept_rows`` holds copies of unobserved rows whose ``requirements`` were
     refreshed by attach_requirements; only that field is taken from them."""
@@ -824,6 +828,7 @@ def merge(
         key = f"{n['country_code']}:{n['number_type']}"
         seen.add(key)
         prev = prev_by_key.get(key)
+        no_stock = n.pop(NO_STOCK, False)
         n.setdefault("available", True)
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
@@ -859,8 +864,25 @@ def merge(
                 kept["last_changed_at"] = today
             numbers.append(kept)
             continue
+        if no_stock and prev and not prev.get("available", True):
+            # Vanished, now listed with nothing to buy: still not on sale.
+            # It stays exactly as it vanished, so held numbers keep their
+            # price; only the check date moves, as on the vanished path.
+            report["no_stock"].append(f"{key}: hidden, kept as it vanished")
+            numbers.append({**prev, "last_verified": today})
+            continue
+        if no_stock:
+            own = _own_notes(prev.get("notes")) if prev else []
+            n["notes"] = "; ".join(filter(None, [*own, n.get("notes"), _NO_STOCK_NOTE]))
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
-        if prev is None:
+        if no_stock:
+            report["no_stock"].append(
+                f"{key}: "
+                + ", ".join(_change(k, (prev or {}).get(k), n.get(k)) for k in changed)
+                if changed
+                else key
+            )
+        elif prev is None:
             report["added"].append(
                 f"{key}: {n['usd_per_month']} voice={n['voice']} sms={n['sms']} verify={n['verification_required']}"
             )
@@ -885,51 +907,8 @@ def merge(
         if key in seen:
             continue
         if key in unobserved:
-            prices = (out_of_stock or {}).get(key)
-            if prices is None or prev.get("verification_method") == "manual-confirmed":
-                report["unobserved"].append(key)
-                numbers.append(refreshed(key, prev))
-                continue
-            if not prev.get("available", True):
-                # Vanished, now listed with nothing to buy: still not on sale.
-                # It stays exactly as it vanished, so held numbers keep their
-                # price; only the check date moves, as on the vanished path.
-                report["no_stock"].append(f"{key}: hidden, kept as it vanished")
-                numbers.append({**prev, "last_verified": today})
-                continue
-            new = _drop_unset({**prev, **prices})
-            fresh = fresh_by_key.get(key)
-            if fresh is not None:
-                new["requirements"] = fresh.get("requirements")
-            if new.get("verification_required") and not new.get("requirements"):
-                if not prev.get("verification_required"):
-                    # Papers are now needed but none could be read (no
-                    # verification plug-in, or a carrier error): selling it
-                    # without papers is worse than leaving the row stale.
-                    report["unobserved"].append(f"{key} (needs papers; none read)")
-                    numbers.append(prev)
-                    continue
-            elif not new.get("verification_required") and new.get("requirements"):
-                # Papers follow the flag, as attach_requirements does for
-                # fetched rows.
-                new["requirements"] = None
-            changed = [k for k in watched if prev.get(k) != new.get(k)]
-            new["notes"] = "; ".join([*_own_notes(prev.get("notes")), _NO_STOCK_NOTE])
-            new.update(
-                last_verified=today,
-                verification_method="carrier-sync",
-                verified_by=verified_by,
-                source_url=source_url,
-            )
-            if changed:
-                new["last_changed_at"] = today
-            report["no_stock"].append(
-                f"{key}: "
-                + ", ".join(_change(k, prev.get(k), new.get(k)) for k in changed)
-                if changed
-                else key
-            )
-            numbers.append(new)
+            report["unobserved"].append(key)
+            numbers.append(refreshed(key, prev))
             continue
         if prev.get("verification_method") == "manual-confirmed":
             # A person vouched for this row; only a person takes it off sale.
@@ -1348,7 +1327,6 @@ def run_provider(
         dial_codes.setdefault(iso, prefix)
     session = requests.Session()
     observed: set[str] | None = None
-    no_stock: dict[str, dict] = {}
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
@@ -1376,7 +1354,7 @@ def run_provider(
             not_synced.append("didww: skipped, DIDWW_API_KEY not set")
             return False
         session.headers.update({"Api-Key": key, "Accept": "application/vnd.api+json"})
-        rows, skipped, didww_dial_codes, no_stock = fetch_didww(http_factory(session))
+        rows, skipped, didww_dial_codes = fetch_didww(http_factory(session))
         shared_dial_codes.update(didww_dial_codes)
     missing_dial = [r for r in rows if not r["dial_code"]]
     for r in missing_dial:
@@ -1395,21 +1373,32 @@ def run_provider(
     # refreshed: their papers say nothing about a number anyone can buy.
     fetched_keys = {f"{r['country_code']}:{r['number_type']}" for r in rows}
     sold_unseen = skipped_keys(skipped) - fetched_keys
-    # A DIDWW row out of stock and on sale takes its verification flag from
-    # the empty areas, so its papers follow that flag. A hidden one stays
-    # exactly as it vanished, so it is not fetched. A hand-verified one
-    # keeps its own flag (rule 1).
-    kept_rows = []
-    for n in existing:
-        key = f"{n['country_code']}:{n['number_type']}"
-        needs = n.get("verification_required")
-        if key in no_stock and n.get("verification_method") != "manual-confirmed":
-            if not n.get("available", True):
-                continue
-            needs = no_stock[key]["verification_required"]
-        if key in sold_unseen and needs:
-            kept_rows.append({**n, "verification_required": True})
-    attach_requirements(provider, rows, existing, requirement_errors, kept_rows)
+    kept_rows = [
+        dict(n)
+        for n in existing
+        if f"{n['country_code']}:{n['number_type']}" in sold_unseen
+        and n.get("verification_required")
+    ]
+    # A vanished row read with no stock stays as it vanished (merge), so its
+    # papers are not fetched.
+    hidden = {
+        f"{n['country_code']}:{n['number_type']}"
+        for n in existing
+        if not n.get("available", True)
+    }
+    attach_requirements(
+        provider,
+        [
+            r
+            for r in rows
+            if not (
+                r.get(NO_STOCK) and f"{r['country_code']}:{r['number_type']}" in hidden
+            )
+        ],
+        existing,
+        requirement_errors,
+        kept_rows,
+    )
     numbers, report = merge(
         existing,
         rows,
@@ -1418,7 +1407,6 @@ def run_provider(
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
-        out_of_stock=no_stock,
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")

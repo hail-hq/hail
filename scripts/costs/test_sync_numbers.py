@@ -149,9 +149,7 @@ def test_didww_gb_rows():
         t["id"]: t["attributes"]["name"]
         for t in load("didww_did_group_types.json")["data"]
     }
-    rows, _, _ = sync.map_didww(
-        countries, types, {"GB": load("didww_did_groups_GB.json")}
-    )
+    rows, _ = sync.map_didww(countries, types, {"GB": load("didww_did_groups_GB.json")})
     by = {r["number_type"]: r for r in rows}
     assert (
         by["mobile"]["usd_per_month"] == "2.50"
@@ -219,7 +217,7 @@ def test_didww_marks_numbers_hail_cannot_sell():
             sku("l2", "2.0"),
         ],
     }
-    rows, skipped, _ = sync.map_didww(countries, types, {"PT": payload})
+    rows, skipped = sync.map_didww(countries, types, {"PT": payload})
     by = {r["number_type"]: r for r in rows}
     assert not skipped
     assert "by_request" not in by["mobile"] and "receive_only" not in by["mobile"]
@@ -405,36 +403,52 @@ def test_merge_leaves_unobserved_rows_alone():
     assert report["unobserved"] == ["PT:mobile"] and report["vanished"] == []
 
 
+_META = (
+    "last_verified",
+    "last_changed_at",
+    "verification_method",
+    "verified_by",
+    "source_url",
+    "notes",
+)
+
+
 def _no_stock_prev(**extra):
     return {
-        "country_code": "SG",
-        "number_type": "national",
-        "display_name": "Singapore national",
-        "dial_code": "65",
-        "usd_per_month": "5.00",
+        "country_code": "PY",
+        "number_type": "local",
+        "display_name": "Paraguay local",
+        "dial_code": "595",
+        "usd_per_month": "49.50",
         "voice": True,
         "sms": False,
         "mms": False,
-        "verification_required": True,
+        "verification_required": False,
         "available": True,
-        "last_verified": "2026-09-28",
-        "last_changed_at": "2026-09-28",
+        "last_verified": "2026-10-07",
+        "last_changed_at": "2026-10-05",
         "verification_method": "carrier-sync",
-        "verified_by": "telnyx-api-sync",
+        "verified_by": "didww-api-sync",
         "source_url": "https://old",
         **extra,
     }
 
 
-def _merge_no_stock(existing, prices, today="2026-11-06", key="SG:national"):
+def _empty_row(prev, **fields):
+    """The row map_didww reads from empty areas, as attach_requirements
+    leaves it."""
+    row = {k: v for k, v in prev.items() if k not in _META}
+    row.setdefault("requirements", prev.get("requirements"))
+    return {**row, "available": True, **fields, sync.NO_STOCK: True}
+
+
+def _merge_no_stock(existing, today="2026-11-06", **fields):
     return sync.merge(
         existing,
-        [],
+        [_empty_row(existing[0], **fields)],
         today,
         "https://src",
-        "telnyx-api-sync",
-        unobserved={key},
-        out_of_stock={key: prices},
+        "didww-api-sync",
     )
 
 
@@ -442,16 +456,17 @@ def test_merge_marks_an_out_of_stock_row_checked():
     """DIDWW Paraguay local, 2026-11: the Asuncion area is listed at 49.50
     with no numbers. The price was read, so the check date moves and the row
     gets a note. Stock coming back rebuilds the row without the note."""
-    prev = _no_stock_prev(country_code="PY", number_type="local", usd_per_month="49.50")
-    prices = {"usd_per_month": "49.50", "setup_usd": "0.00"}
-    numbers, report = _merge_no_stock([prev], prices, key="PY:local")
+    prev = _no_stock_prev()
+    numbers, report = _merge_no_stock([prev])
     row = numbers[0]
+    assert sync.NO_STOCK not in row
     assert row["last_verified"] == "2026-11-06" and row["source_url"] == "https://src"
-    assert row["last_changed_at"] == "2026-09-28" and row["usd_per_month"] == "49.50"
+    assert row["last_changed_at"] == "2026-10-05" and row["usd_per_month"] == "49.50"
     assert row["available"] is True and row["notes"] == sync._NO_STOCK_NOTE
-    assert report["no_stock"] == ["PY:local"] and report["unobserved"] == []
+    assert report["no_stock"] == ["PY:local"]
+    assert report["changed"] == report["added"] == []
 
-    again, _ = _merge_no_stock(numbers, prices, today="2026-11-13", key="PY:local")
+    again, _ = _merge_no_stock(numbers, today="2026-11-13")
     assert again[0]["notes"] == sync._NO_STOCK_NOTE
     assert again[0]["last_verified"] == "2026-11-13"
 
@@ -459,51 +474,31 @@ def test_merge_marks_an_out_of_stock_row_checked():
     assert gone[0]["available"] is False
     assert gone[0]["notes"].startswith("not offered by the carrier")
 
-    restocked = {
-        k: v
-        for k, v in prev.items()
-        if k
-        not in (
-            "last_verified",
-            "last_changed_at",
-            "verification_method",
-            "verified_by",
-            "source_url",
-        )
-    }
+    restocked = {k: v for k, v in prev.items() if k not in _META}
     back, _ = sync.merge(
         again, [restocked], "2026-11-20", "https://src", "didww-api-sync"
     )
     assert "notes" not in back[0] and back[0]["last_verified"] == "2026-11-20"
 
 
-def test_merge_writes_the_flags_didww_shows_for_empty_areas():
-    prev = _no_stock_prev(country_code="PY", number_type="local")
+def test_merge_takes_what_didww_shows_for_empty_areas():
+    prev = _no_stock_prev()
     numbers, report = _merge_no_stock(
         [prev],
-        {
-            "usd_per_month": "5.00",
-            "setup_usd": "0.00",
-            "receive_only": True,
-            "by_request": False,
-        },
-        key="PY:local",
-    )
-    assert numbers[0]["receive_only"] is True and "by_request" not in numbers[0]
-    assert report["no_stock"] == ["PY:local: receive_only None -> True"]
-
-
-def test_merge_takes_the_price_didww_shows_for_an_empty_area():
-    prev = _no_stock_prev(country_code="PY", number_type="local", usd_per_month="49.50")
-    numbers, report = _merge_no_stock(
-        [prev], {"usd_per_month": "60.00", "setup_usd": "0.00"}, key="PY:local"
+        usd_per_month="60.00",
+        receive_only=True,
+        notes="monthly price varies by area: 60.00 to 80.00 USD across 2 areas",
     )
     row = numbers[0]
-    assert row["usd_per_month"] == "60.00" and "setup_usd" not in row
-    assert row["source_url"] == "https://src"
+    assert row["usd_per_month"] == "60.00" and row["receive_only"] is True
     assert row["last_changed_at"] == "2026-11-06"
-    assert row["notes"] == sync._NO_STOCK_NOTE
-    assert report["no_stock"] == ["PY:local: usd_per_month 49.50 -> 60.00"]
+    assert row["notes"] == (
+        "monthly price varies by area: 60.00 to 80.00 USD across 2 areas; "
+        + sync._NO_STOCK_NOTE
+    )
+    assert report["no_stock"] == [
+        "PY:local: usd_per_month 49.50 -> 60.00, receive_only None -> True"
+    ]
 
 
 def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
@@ -512,72 +507,43 @@ def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
         notes="monthly price varies by area: 3.50 to 6.00 USD across 86 areas; "
         + sync._VANISHED_NOTE.format(today="2026-10-01"),
     )
-    numbers, report = _merge_no_stock(
-        [prev], {"usd_per_month": "60.00", "verification_required": False}
-    )
+    numbers, report = _merge_no_stock([prev], usd_per_month="60.00")
     # Only the check date moves: price, flags and notes stay as they vanished.
     assert numbers[0] == {**prev, "last_verified": "2026-11-06"}
-    assert report["no_stock"] == ["SG:national: hidden, kept as it vanished"]
+    assert report["no_stock"] == ["PY:local: hidden, kept as it vanished"]
 
 
-def test_hidden_and_hand_verified_rows_keep_their_own_paper_flag(tmp_path, monkeypatch):
+def test_hidden_out_of_stock_rows_are_not_sent_for_papers(tmp_path, monkeypatch):
     calls: list = []
     _use(monkeypatch, object())
     monkeypatch.setattr(
         sync,
         "fetch_requirements",
         lambda provider, cc, nt: (
-            calls.append((cc, nt)) or {"person": {"accepted": True, "items": []}}
+            calls.append(cc) or {"person": {"accepted": True, "items": []}}
         ),
     )
-    (tmp_path / "didww.json").write_text(
-        json.dumps(
-            {
-                "numbers": [
-                    _kept_prev(
-                        "CH", verify=False, verification_method="manual-confirmed"
-                    ),
-                    _kept_prev("FR", verify=True, available=False),
-                    _kept_prev("DE", verify=False),
-                ]
-            }
-        )
-    )
+    fr = _kept_prev("FR", verify=True, available=False)
+    de = _kept_prev("DE", verify=False)
+    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [fr, de]}))
     monkeypatch.setattr(sync, "COUNTRY_FLOOR", 0)
-    empty = {"usd_per_month": "1.00", "verification_required": True}
-    monkeypatch.setattr(
-        sync,
-        "fetch_didww",
-        lambda *a, **k: (
-            [],
-            [f"{c}:local: listed, no numbers in stock" for c in ("CH", "FR", "DE")],
-            {},
-            {f"{c}:local": dict(empty) for c in ("CH", "FR", "DE")},
-        ),
-    )
+    rows = [
+        _empty_row(fr, verification_required=True),
+        _empty_row(de, verification_required=True),
+    ]
+    monkeypatch.setattr(sync, "fetch_didww", lambda *a, **k: (rows, [], {}))
     sync.run_provider(
         "didww", {"DIDWW_API_KEY": "k"}, tmp_path, "2026-11-04", [], not_synced=[]
     )
-    # CH (hand-verified) keeps its own flag, which needs no papers. FR is
-    # hidden and stays as it vanished, so it is not fetched. DE takes the
-    # empty areas' flag.
-    assert sorted(c[0] for c in calls) == ["DE"]
+    assert calls == ["DE"]
     out = {
         n["country_code"]: n
         for n in json.loads((tmp_path / "didww.json").read_text())["numbers"]
     }
+    assert out["FR"] == {**fr, "last_verified": "2026-11-04"}
     assert out["DE"]["verification_required"] is True
     assert out["DE"]["requirements"] == {"person": {"accepted": True, "items": []}}
-
-
-def test_merge_leaves_a_row_whose_new_papers_could_not_be_read():
-    prev = _no_stock_prev(verification_required=False)
-    numbers, report = _merge_no_stock(
-        [prev], {"usd_per_month": "5.00", "verification_required": True}
-    )
-    assert numbers == [prev]
-    assert report["unobserved"] == ["SG:national (needs papers; none read)"]
-    assert report["no_stock"] == []
+    assert sync.NO_STOCK not in out["DE"]
 
 
 def test_didww_passes_over_broken_prices():
@@ -614,23 +580,12 @@ def test_didww_passes_over_broken_prices():
 
     payload = {
         "data": [group("a"), group("b"), group("c")],
-        "included": [sku("a", "NaN", "0"), sku("b", "", "0"), sku("c", "9.0", "x")],
+        "included": [sku("a", "NaN", "0"), sku("b", "", "0"), sku("c", 9.1, "x")],
     }
-    _, skipped, no_stock = sync.map_didww(countries, types, {"CO": payload})
-    assert skipped == ["CO:mobile: listed, no numbers in stock"]
-    assert no_stock["CO:mobile"]["usd_per_month"] == "9.00"
-    assert no_stock["CO:mobile"]["setup_usd"] == "0.00"
-
-
-def test_merge_drops_papers_when_empty_areas_need_none():
-    block = {"person": {"accepted": True, "items": ["id_document"]}}
-    prev = _no_stock_prev(requirements=block)
-    numbers, report = _merge_no_stock(
-        [prev], {"usd_per_month": "5.00", "verification_required": False}
-    )
-    assert numbers[0]["verification_required"] is False
-    assert numbers[0]["requirements"] is None
-    assert "verification_required" in report["no_stock"][0]
+    rows, skipped = sync.map_didww(countries, types, {"CO": payload})
+    assert skipped == []
+    assert rows[0][sync.NO_STOCK] is True
+    assert rows[0]["usd_per_month"] == "9.10" and "setup_usd" not in rows[0]
 
 
 def test_vanish_keeps_a_price_range_note():
@@ -643,32 +598,25 @@ def test_vanish_keeps_a_price_range_note():
 
 def test_merge_keeps_a_hand_note_that_starts_like_a_sync_note():
     prev = _no_stock_prev(notes="monthly price varies by city; ask support")
-    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
+    numbers, _ = _merge_no_stock([prev])
     assert numbers[0]["notes"] == (
         f"monthly price varies by city; ask support; {sync._NO_STOCK_NOTE}"
     )
 
 
-def test_merge_drops_a_price_range_note_when_nothing_is_on_sale():
+def test_merge_drops_an_old_price_range_note_when_nothing_is_on_sale():
     prev = _no_stock_prev(
         notes="monthly price varies by area: 3.50 to 6.00 USD across 86 areas"
     )
-    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
+    numbers, _ = _merge_no_stock([prev])
     assert numbers[0]["notes"] == sync._NO_STOCK_NOTE
 
 
 def test_merge_does_not_touch_a_hand_verified_out_of_stock_row():
-    prev = {
-        "country_code": "PY",
-        "number_type": "local",
-        "usd_per_month": "49.50",
-        "available": True,
-        "last_verified": "2026-10-07",
-        "verification_method": "manual-confirmed",
-        "verified_by": "owner",
-    }
-    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "60.00"}, key="PY:local")
-    assert numbers == [prev]
+    prev = _no_stock_prev(verification_method="manual-confirmed", verified_by="owner")
+    numbers, report = _merge_no_stock([prev], usd_per_month="60.00")
+    assert {k: v for k, v in numbers[0].items() if k != "requirements"} == prev
+    assert report["kept"] and report["no_stock"] == []
 
 
 def test_regulatory_block_is_derived_from_rows(tmp_path):
@@ -903,22 +851,14 @@ def test_didww_out_of_stock_is_not_gone():
         "data": [group("g1", "t-mobile", False), group("g2", "t-local", True)],
         "included": [sku("g1", "15.0"), sku("g2", "15.0")],
     }
-    rows, skipped, no_stock = sync.map_didww(countries, types, {"CO": payload})
-    assert [r["number_type"] for r in rows] == ["local"]
-    assert skipped == ["CO:mobile: listed, no numbers in stock"]
-    assert sync.skipped_keys(skipped) == {"CO:mobile"}
-    # DIDWW shows the price of an empty area, so the check reads it.
-    assert no_stock == {
-        "CO:mobile": {
-            "usd_per_month": "15.00",
-            "setup_usd": "0.00",
-            "voice": True,
-            "sms": False,
-            "verification_required": False,
-            "receive_only": False,
-            "by_request": False,
-        }
-    }
+    rows, skipped = sync.map_didww(countries, types, {"CO": payload})
+    by_type = {r["number_type"]: r for r in rows}
+    assert skipped == []
+    # DIDWW shows the price and features of an empty area, so the row is
+    # read from it and marked.
+    assert by_type["mobile"][sync.NO_STOCK] is True
+    assert by_type["mobile"]["usd_per_month"] == "15.00"
+    assert sync.NO_STOCK not in by_type["local"]
     previous = {
         "country_code": "CO",
         "number_type": "mobile",
@@ -933,17 +873,16 @@ def test_didww_out_of_stock_is_not_gone():
         "verification_method": "carrier-sync",
         "verified_by": "didww-api-sync",
     }
+    for r in rows:
+        r["requirements"] = None
     numbers, report = sync.merge(
-        [previous],
-        rows,
-        "2026-09-28",
-        "https://src",
-        "didww-api-sync",
-        unobserved=sync.skipped_keys(skipped),
+        [previous], rows, "2026-09-28", "https://src", "didww-api-sync"
     )
     by = {n["number_type"]: n for n in numbers}
-    assert by["mobile"] == previous and report["vanished"] == []
-    assert report["unobserved"] == ["CO:mobile"]
+    assert by["mobile"]["available"] is True and report["vanished"] == []
+    assert by["mobile"]["usd_per_month"] == "15.00"
+    assert by["mobile"]["notes"] == sync._NO_STOCK_NOTE
+    assert report["no_stock"] == ["CO:mobile"]
 
     # Empty areas are priced with the in-stock preference: a cheaper
     # receive-only area does not set the price, and a SKU without a price is
@@ -959,9 +898,8 @@ def test_didww_out_of_stock_is_not_gone():
             {**sku("g4", None)},
         ],
     }
-    _, _, no_stock = sync.map_didww(countries, types, {"CO": mixed})
-    assert no_stock["CO:mobile"]["usd_per_month"] == "40.00"
-    assert no_stock["CO:mobile"]["receive_only"] is False
+    (row,), _ = sync.map_didww(countries, types, {"CO": mixed})
+    assert row["usd_per_month"] == "40.00" and "receive_only" not in row
 
     # An area on sale without a price: not "out of stock", nothing is known.
     unpriced_live = group("g5", "t-mobile", True)
@@ -969,9 +907,9 @@ def test_didww_out_of_stock_is_not_gone():
         "data": [unpriced_live, group("g1", "t-mobile", False)],
         "included": [sku("g1", "40.0")],
     }
-    _, skipped, no_stock = sync.map_didww(countries, types, {"CO": live})
+    rows, skipped = sync.map_didww(countries, types, {"CO": live})
     assert skipped == ["CO:mobile: listed, an area on sale has no price"]
-    assert no_stock == {}
+    assert rows == []
 
     # Base SKUs without a price fall back to a priced bundled SKU.
     bundled = group("g6", "t-mobile", False)
@@ -993,14 +931,14 @@ def test_didww_out_of_stock_is_not_gone():
             },
         ],
     }
-    _, _, no_stock = sync.map_didww(countries, types, {"CO": with_bundle})
-    assert no_stock["CO:mobile"]["usd_per_month"] == "30.00"
+    (row,), _ = sync.map_didww(countries, types, {"CO": with_bundle})
+    assert row["usd_per_month"] == "30.00"
 
     # A group with no price at all is not "out of stock": nothing is known.
     unpriced = {"data": [group("g1", "t-mobile", False)], "included": []}
-    _, skipped, no_stock = sync.map_didww(countries, types, {"CO": unpriced})
+    rows, skipped = sync.map_didww(countries, types, {"CO": unpriced})
     assert skipped == ["CO:mobile: listed, no price on any group"]
-    assert no_stock == {}
+    assert rows == []
 
 
 def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():
