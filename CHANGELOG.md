@@ -11,6 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Handover: when a voicemail greeting answers the person's phone, the agent comes back and offers to take a message.
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
 

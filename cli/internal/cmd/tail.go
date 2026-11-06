@@ -135,6 +135,49 @@ var amdSentences = map[string]string{
 	"uncertain":           "unclear who answered, treating as human",
 }
 
+// handoverAMDSentences maps the handover check's verdict
+// (handover_amd_result, voicebot/hailhq/voicebot/handover_watch.py) to the
+// first half of an [amd] line.
+var handoverAMDSentences = map[string]string{
+	"human":               "a person answered",
+	"machine-ivr":         "a phone menu answered",
+	"machine-vm":          "voicemail answered",
+	"machine-unavailable": "mailbox unavailable",
+	"uncertain":           "unclear who answered",
+}
+
+// handoverAMDActions maps the row's "action" (what the voicebot did) to the
+// second half.
+var handoverAMDActions = map[string]string{
+	"dropped":     "caller taken back",
+	"kept":        "kept connected",
+	"leg_ended":   "line hung up",
+	"call_ending": "call ending",
+}
+
+// handoverAMDLine renders a handover_amd_result row as "handover:
+// <category>, <action>". Never the payload: it holds the contact's greeting
+// transcript.
+func handoverAMDLine(payload map[string]interface{}) string {
+	category, _ := payload["category"].(string)
+	action, _ := payload["action"].(string)
+	sentence, ok := handoverAMDSentences[category]
+	if !ok {
+		sentence = category
+		if sentence == "" {
+			sentence = "no verdict"
+		}
+	}
+	did, ok := handoverAMDActions[action]
+	if !ok {
+		did = action
+		if did == "" {
+			did = "no action recorded"
+		}
+	}
+	return "handover: " + sentence + ", " + did
+}
+
 // perCallPalette is the small set of stable colors assigned to short call
 // ids in org-wide tail mode. Hashed lookup lives in shortIDColor.
 var perCallPalette = []string{
@@ -578,6 +621,8 @@ func renderEventBody(ev client.EventResponse) (label, body string) {
 			return "[amd]", category
 		}
 		return "[amd]", payloadJSON(ev.Payload)
+	case "handover_amd_result":
+		return "[amd]", handoverAMDLine(ev.Payload)
 	case "person_detected":
 		// Written by the voicebot when a person comes on the line after a
 		// machine answered (post-IVR handoff).
@@ -687,7 +732,7 @@ func colorFor(kind string) string {
 		return colorCyan
 	case "user_turn":
 		return colorYellow
-	case "state_change", "amd_result", "person_detected", "voice_metrics":
+	case "state_change", "amd_result", "handover_amd_result", "person_detected", "voice_metrics":
 		return colorDim
 	case "error":
 		return colorRed

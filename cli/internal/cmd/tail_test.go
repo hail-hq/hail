@@ -670,6 +670,50 @@ func TestTail_HumanPickupFlushesAsHuman(t *testing.T) {
 	}
 }
 
+// TestTail_HandoverVerdictSentence: a handover_amd_result row renders as a
+// short [amd] sentence that says what the voicebot did, never the payload
+// JSON with the transcript.
+func TestTail_HandoverVerdictSentence(t *testing.T) {
+	tFuture := time.Now().Add(time.Hour)
+	srv := newSequenceServer(t, []sequenceResponse{
+		{http.StatusOK, client.EventStreamResponse{
+			Items: []client.EventResponse{
+				sampleEventInCall("11111111-1111-1111-1111-111111111112", callA, "handover_amd_result",
+					map[string]interface{}{"category": "machine-vm", "transcript": "leave a message", "reason": "greeting_check", "action": "dropped"}, tFuture),
+				sampleEventInCall("22222222-2222-2222-2222-222222222222", callA, "handover_amd_result",
+					map[string]interface{}{"category": "uncertain", "transcript": "hi this is sam", "reason": "timeout", "action": "kept"}, tFuture.Add(time.Second)),
+				sampleEventInCall("33333333-3333-3333-3333-333333333332", callA, "handover_amd_result",
+					map[string]interface{}{"category": nil, "transcript": nil, "reason": "detection_failed", "action": "leg_ended"}, tFuture.Add(2*time.Second)),
+				sampleEventInCall("44444444-4444-4444-4444-444444444442", callA, "handover_amd_result",
+					map[string]interface{}{"category": "machine-vm", "transcript": "hello", "reason": "greeting_check", "action": "call_ending"}, tFuture.Add(3*time.Second)),
+			},
+			CallStatus: completedStatus(),
+		}},
+	})
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL, "NO_COLOR": "1"},
+		"tail", "--id", "call:"+uuid.UUID(callA).String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"handover: voicemail answered, caller taken back",
+		"handover: unclear who answered, kept connected",
+		"handover: no verdict, line hung up",
+		"handover: voicemail answered, call ending",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "leave a message") || strings.Contains(stdout, "hi this is sam") ||
+		strings.Contains(stdout, "transcript") {
+		t.Errorf("handover_amd_result should not print the payload:\n%s", stdout)
+	}
+}
+
 // TestTail_TurnMetricsKeepMachineBuffer: the voice_metrics row written right
 // after a pickup user_turn must not flush that turn as [human] before the
 // machine verdict arrives.

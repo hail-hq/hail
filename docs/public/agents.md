@@ -79,11 +79,24 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact (a team member's login email); without one, no email.
 - A plain forward: when the phone picks up, the two people are connected
   and the agent stops listening and speaking. It says nothing to the
-  contact. If voicemail answers, the caller hears it and can leave a
-  message. If nobody on the contact's side makes a sound for 15 seconds
-  (some mailboxes answer in silence), or the line hangs up within 10
-  seconds of its first sound (a carrier message), the agent hangs up that
-  line and comes back to the caller. Code: [`handover_watch.py`](../../voicebot/hailhq/voicebot/handover_watch.py).
+  contact. For up to 10 seconds after the first sound, the agent checks
+  the greeting on the contact's line. It stops at the first pause.
+  If it is a voicemail greeting that asks for a message or a tone (for
+  example "leave a message after the tone"), the agent hangs up that line,
+  comes back and offers to take a message. The caller can hear the first
+  seconds of the greeting before that. Anything else stays connected: a
+  person, "not available" without a request for a message, "please hold"
+  or hold music, a phone menu (the caller can press keys), even one that
+  offers a key to leave a message, a full mailbox, or a check that is
+  unsure or fails. The check runs on Hail's own speech and language
+  providers only. An organization that brings its own STT or LLM (a
+  standing setting or a per-call `llm`) gets no check, and the line stays
+  connected. So does a call whose language Hail transcribes with
+  Speechmatics. If nobody on the contact's side makes a
+  sound for 15 seconds (some mailboxes answer in silence), or the line
+  hangs up within 10 seconds of its first sound (a carrier message), the
+  agent also hangs up that line and comes back. The verdict is a
+  `handover_amd_result` call event. Code: [`handover_watch.py`](../../voicebot/hailhq/voicebot/handover_watch.py).
   Once connected, if either side hangs up, the call ends.
 - `max_duration_seconds` stops applying once the contact answers.
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
@@ -93,7 +106,10 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
-  contact's side has spoken and stayed on the line for 10 seconds.
+  contact's side has spoken and stayed on the line for 10 seconds. A clear
+  "leave a message" greeting heard in the first seconds gives the caller
+  back instead, with no webhook. Other greetings, voicemail ones included,
+  can still connect and send it, as before.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call
