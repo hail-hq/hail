@@ -577,7 +577,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -858,7 +858,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -1199,7 +1199,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -1373,7 +1373,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -2184,7 +2184,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -2221,7 +2221,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -2587,7 +2587,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -2966,7 +2966,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -3247,7 +3247,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -3489,7 +3489,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -3508,7 +3508,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
       "requirements": {
@@ -3545,7 +3545,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -3794,7 +3794,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
       "requirements": {
@@ -4015,7 +4015,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
       "requirements": {
@@ -4086,7 +4086,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -4342,7 +4342,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -4677,7 +4677,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "notes": "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row."
     },
@@ -4772,7 +4772,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
@@ -4982,7 +4982,7 @@
       "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {

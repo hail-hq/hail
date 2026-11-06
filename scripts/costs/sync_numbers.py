@@ -512,6 +512,32 @@ DIDWW_TYPE = {
 }
 
 
+def _didww_type_fields(all_groups: list[dict]) -> dict:
+    """The row fields for one number type, from its areas. Hail sells a
+    number it can show (listed) and that can place calls: the price comes
+    from the areas Hail can sell, and the row is marked when there are
+    none."""
+    features = set().union(*(g["features"] for g in all_groups))
+    outbound = [g for g in all_groups if g["outbound"]]
+    sellable = [g for g in outbound if g["listed"]]
+    groups = sellable or outbound or all_groups
+    prices = sorted(g["monthly"] for g in groups)
+    cheapest = min(groups, key=lambda g: g["monthly"])
+    notes = None
+    if prices[0] != prices[-1]:
+        notes = f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(groups)} areas"
+    return {
+        "usd_per_month": money(prices[0]),
+        "setup_usd": money(cheapest["setup"]),
+        "voice": any(f.startswith("voice") for f in features),
+        "sms": any(f.startswith("sms") for f in features),
+        "verification_required": cheapest["needs_registration"] or cheapest["address"],
+        "notes": notes,
+        "receive_only": not outbound,
+        "by_request": bool(outbound) and not sellable,
+    }
+
+
 def map_didww(
     countries: list[dict],
     group_types: dict[str, str],
@@ -520,8 +546,8 @@ def map_didww(
     """groups_by_country[iso] = {"data": [...did_groups...], "included": [...]}
 
     The third value maps each "ISO:type" that DIDWW lists with no numbers in
-    stock to the price of its cheapest area: DIDWW shows the price of an
-    area even when it has no numbers."""
+    stock to the row fields read from its empty areas: DIDWW shows the price
+    and features of an area even when it has no numbers."""
     rows, skipped = [], []
     no_stock: dict[str, dict] = {}
     for c in countries:
@@ -553,34 +579,23 @@ def map_didww(
                 .get("data", [])
                 if ("stock_keeping_units", s["id"]) in included
             ]
-            base = [s for s in skus if s.get("channels_included_count") == 0] or skus
+            # A SKU without a price is passed over: it must not stop the run.
+            priced = [s for s in skus if s.get("monthly_price") is not None]
+            base = [
+                s for s in priced if s.get("channels_included_count") == 0
+            ] or priced
             available = g.get("meta", {}).get("is_available", True)
-            if not available:
-                # An empty area is read for its price only; a SKU without
-                # one must not stop the run.
-                base = [s for s in base if s.get("monthly_price") is not None]
             if not base:
                 if available:
                     stocked_unpriced.add(number_type)
                 continue
             cheapest = min(base, key=lambda s: Decimal(s["monthly_price"]))
-            if not available:
-                features = g["attributes"].get("features", [])
-                unstocked[number_type].append(
-                    {
-                        "sku": cheapest,
-                        "outbound": "voice_out" in features,
-                        "listed": bool(
-                            g.get("meta", {}).get("available_dids_enabled", True)
-                        ),
-                    }
-                )
-                continue
-            by_type[number_type].append(
+            features = g["attributes"].get("features", [])
+            (by_type if available else unstocked)[number_type].append(
                 {
                     "monthly": Decimal(cheapest["monthly_price"]),
                     "setup": Decimal(cheapest.get("setup_price") or 0),
-                    "features": set(g["attributes"].get("features", [])),
+                    "features": set(features),
                     "needs_registration": bool(
                         g.get("meta", {}).get("needs_registration")
                     ),
@@ -588,7 +603,7 @@ def map_didww(
                     .get("address_requirement", {})
                     .get("data")
                     is not None,
-                    "outbound": "voice_out" in g["attributes"].get("features", []),
+                    "outbound": "voice_out" in features,
                     # DIDWW lists each number of this area for sale, so a
                     # customer can be shown one and buy it. When false,
                     # DIDWW picks the number at order time.
@@ -598,59 +613,33 @@ def map_didww(
                 }
             )
         # DIDWW still lists the type but has nothing to sell right now. Out
-        # of stock is not dropped: merge() keeps the row, priced from the
-        # empty areas with the same preference and flags as below (listed
-        # and outbound first). A type with an area on sale but no price, or
-        # no price on any group, is kept exactly as it was.
+        # of stock is not dropped: merge() updates the row from the empty
+        # areas, read the same way as areas with stock. A type with no
+        # price on any group, or with an area on sale that has no price, is
+        # kept exactly as it was.
         for number_type in sorted(listed - set(by_type)):
-            empty = unstocked[number_type]
-            if not empty or number_type in stocked_unpriced:
+            if number_type in stocked_unpriced:
+                skipped.append(
+                    f"{iso}:{number_type}: listed, an area on sale has no price"
+                )
+                continue
+            if not unstocked[number_type]:
                 skipped.append(f"{iso}:{number_type}: listed, no price on any group")
                 continue
             skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
-            outbound = [g for g in empty if g["outbound"]]
-            sellable = [g for g in outbound if g["listed"]]
-            groups = sellable or outbound or empty
-            cheapest = min(
-                (g["sku"] for g in groups), key=lambda s: Decimal(s["monthly_price"])
-            )
-            no_stock[f"{iso}:{number_type}"] = {
-                "usd_per_month": money(cheapest["monthly_price"]),
-                "setup_usd": money(cheapest.get("setup_price") or 0),
-                "receive_only": not outbound,
-                "by_request": bool(outbound) and not sellable,
-            }
+            fields = _didww_type_fields(unstocked[number_type])
+            fields.pop("notes")
+            no_stock[f"{iso}:{number_type}"] = fields
         for number_type, all_groups in by_type.items():
-            features = set().union(*(g["features"] for g in all_groups))
-            # Hail sells a number it can show (listed) and that can place
-            # calls. Price the row from the areas Hail can sell; mark the row
-            # when there are none.
-            outbound = [g for g in all_groups if g["outbound"]]
-            sellable = [g for g in outbound if g["listed"]]
-            groups = sellable or outbound or all_groups
-            receive_only = not outbound
-            by_request = bool(outbound) and not sellable
-            prices = sorted(g["monthly"] for g in groups)
-            cheapest = min(groups, key=lambda g: g["monthly"])
-            notes = None
-            if prices[0] != prices[-1]:
-                notes = f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(groups)} areas"
+            fields = _didww_type_fields(all_groups)
             rows.append(
                 _row(
                     country_code=iso,
                     number_type=number_type,
                     country_name=name,
                     dial_code=prefix,
-                    usd_per_month=money(prices[0]),
-                    setup_usd=money(cheapest["setup"]),
-                    voice=any(f.startswith("voice") for f in features),
-                    sms=any(f.startswith("sms") for f in features),
                     mms=False,
-                    verification_required=cheapest["needs_registration"]
-                    or cheapest["address"],
-                    notes=notes,
-                    receive_only=receive_only,
-                    by_request=by_request,
+                    **fields,
                 )
             )
     return rows, skipped, no_stock
@@ -889,12 +878,13 @@ def merge(
             ):
                 if new.get(k) == unset:
                     new.pop(k)
-            changed = [
-                k
-                for k in ("usd_per_month", "setup_usd", "receive_only", "by_request")
-                if row.get(k) != new.get(k)
-            ]
-            new["notes"] = "; ".join([*_own_notes(row.get("notes")), _NO_STOCK_NOTE])
+            changed = [k for k in watched if row.get(k) != new.get(k)]
+            # A hidden row keeps its vanished note: the day it went off sale
+            # still holds for numbers already held.
+            kept_notes = _own_notes(
+                row.get("notes"), keep_vanished=not new.get("available", True)
+            )
+            new["notes"] = "; ".join([*kept_notes, _NO_STOCK_NOTE])
             new.update(
                 last_verified=today,
                 verification_method="carrier-sync",
@@ -931,10 +921,11 @@ def merge(
             )
         elif _NO_STOCK_NOTE in (kept.get("notes") or ""):
             # Hidden, then listed without stock, now dropped: the no-stock
-            # note is no longer true.
-            kept["notes"] = "; ".join(
-                [*_own_notes(kept.get("notes")), _VANISHED_NOTE.format(today=today)]
-            )
+            # note is no longer true. The first vanished date stays.
+            parts = _own_notes(kept.get("notes"), keep_vanished=True)
+            if not any(_VANISHED_NOTE_RE.fullmatch(p) for p in parts):
+                parts.append(_VANISHED_NOTE.format(today=today))
+            kept["notes"] = "; ".join(parts)
         report["vanished"].append(key)
         numbers.append(kept)
     numbers.sort(key=lambda r: (r["country_code"], r["number_type"]))
@@ -945,22 +936,33 @@ _VANISHED_NOTE = (
     "not offered by the carrier as of {today}; kept so held numbers stay billable"
 )
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
-# Notes map_didww writes from the numbers on sale. They no longer hold when
-# nothing is on sale.
-_SYNC_NOTE_PREFIXES = (_NO_STOCK_NOTE, "monthly price varies by ")
 
 
-def _own_notes(notes: str | None) -> list[str]:
-    """The parts of a row's notes that the sync did not write. The vanished
-    and no-stock notes are written again on each run; other notes stay."""
-    rest = _VANISHED_NOTE_RE.sub("", notes or "")
+def _own_notes(notes: str | None, keep_vanished: bool = False) -> list[str]:
+    """The parts of a row's notes that the sync did not write. The vanished,
+    no-stock and price-range notes are written again on each run; other
+    notes stay. ``keep_vanished`` keeps the dated vanished note as one part."""
+    parts, rest = [], notes or ""
+    for m in _VANISHED_NOTE_RE.finditer(rest):
+        if keep_vanished:
+            parts.append(m.group(0))
+    rest = _VANISHED_NOTE_RE.sub("", rest)
     return [
-        part
-        for part in rest.split("; ")
-        if part.strip() and not part.startswith(_SYNC_NOTE_PREFIXES)
+        *(
+            part
+            for part in rest.split("; ")
+            if part.strip()
+            and not part.startswith(_NO_STOCK_NOTE)
+            and not _PRICE_RANGE_NOTE_RE.fullmatch(part)
+        ),
+        *parts,
     ]
 
 
+_PRICE_RANGE_NOTE_RE = re.compile(
+    r"monthly price varies by (area|number): [\d.]+ to [\d.]+ USD"
+    r" (across \d+ areas|in a sample of \d+)"
+)
 _VANISHED_NOTE_RE = re.compile(
     re.escape(_VANISHED_NOTE).replace(re.escape("{today}"), r"\d{4}-\d{2}-\d{2}")
 )
@@ -1388,9 +1390,7 @@ def run_provider(
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
-        out_of_stock={
-            key: prices for key, prices in no_stock.items() if key not in fetched_keys
-        },
+        out_of_stock=no_stock,
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")

@@ -515,10 +515,21 @@ def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
     row = numbers[0]
     assert row["available"] is False and row["last_changed_at"] == "2026-09-28"
     assert row["last_verified"] == "2026-11-06"
-    assert row["notes"] == sync._NO_STOCK_NOTE
-    # Dropped again later: the no-stock note gives way to the vanished note.
-    gone, _ = sync.merge(numbers, [], "2026-11-20", "https://src", "didww-api-sync")
-    assert gone[0]["notes"] == sync._VANISHED_NOTE.format(today="2026-11-20")
+    vanished = sync._VANISHED_NOTE.format(today="2026-10-01")
+    assert row["notes"] == f"{vanished}; {sync._NO_STOCK_NOTE}"
+    again, _ = _merge_no_stock(numbers, {"usd_per_month": "5.00"}, today="2026-11-13")
+    assert again[0]["notes"] == row["notes"]
+    # Dropped again later: the no-stock note goes, the first date stays.
+    gone, _ = sync.merge(again, [], "2026-11-20", "https://src", "didww-api-sync")
+    assert gone[0]["notes"] == vanished
+
+
+def test_merge_keeps_a_hand_note_that_starts_like_a_sync_note():
+    prev = _no_stock_prev(notes="monthly price varies by city; ask support")
+    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
+    assert numbers[0]["notes"] == (
+        f"monthly price varies by city; ask support; {sync._NO_STOCK_NOTE}"
+    )
 
 
 def test_merge_drops_a_price_range_note_when_nothing_is_on_sale():
@@ -784,6 +795,9 @@ def test_didww_out_of_stock_is_not_gone():
         "CO:mobile": {
             "usd_per_month": "15.00",
             "setup_usd": "0.00",
+            "voice": True,
+            "sms": False,
+            "verification_required": False,
             "receive_only": False,
             "by_request": False,
         }
@@ -839,10 +853,34 @@ def test_didww_out_of_stock_is_not_gone():
         "included": [sku("g1", "40.0")],
     }
     _, skipped, no_stock = sync.map_didww(countries, types, {"CO": live})
-    assert skipped == ["CO:mobile: listed, no price on any group"] and no_stock == {}
+    assert skipped == ["CO:mobile: listed, an area on sale has no price"]
+    assert no_stock == {}
+
+    # Base SKUs without a price fall back to a priced bundled SKU.
+    bundled = group("g6", "t-mobile", False)
+    bundled["relationships"]["stock_keeping_units"]["data"].append(
+        {"type": "stock_keeping_units", "id": "sku-g6b"}
+    )
+    with_bundle = {
+        "data": [bundled],
+        "included": [
+            sku("g6", None),
+            {
+                "type": "stock_keeping_units",
+                "id": "sku-g6b",
+                "attributes": {
+                    "monthly_price": "30.0",
+                    "setup_price": "0.0",
+                    "channels_included_count": 2,
+                },
+            },
+        ],
+    }
+    _, _, no_stock = sync.map_didww(countries, types, {"CO": with_bundle})
+    assert no_stock["CO:mobile"]["usd_per_month"] == "30.00"
 
     # A group with no price at all is not "out of stock": nothing is known.
-    unpriced = {"data": [group("g1", "t-mobile", True)], "included": []}
+    unpriced = {"data": [group("g1", "t-mobile", False)], "included": []}
     _, skipped, no_stock = sync.map_didww(countries, types, {"CO": unpriced})
     assert skipped == ["CO:mobile: listed, no price on any group"]
     assert no_stock == {}
