@@ -17,6 +17,7 @@ from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     DETAILS_REJECTED,
     NOT_ACCEPTED,
+    SAME_DOCUMENT,
     VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
@@ -201,18 +202,14 @@ def _map_requirements(
     return tuple(subject_fields), tuple(slots), address_required
 
 
-SAME_DOCUMENT = (
-    "This needs the same document as another item. Use one document for both."
-)
-
-
 def _one_document_per_type(
     requirements: Requirements, documents: dict[str, DocumentInput]
 ) -> list[Problem]:
     """Twilio takes one document of each type per check, so slots that pick
     the same type must carry the same file and agree on every value. A slot
     that differs gets a problem, before anything is sent."""
-    first: dict[str, DocumentInput] = {}
+    files: dict[str, bytes] = {}
+    values: dict[str, dict[str, str]] = {}
     problems: list[Problem] = []
     for slot in requirements.documents:
         doc = documents.get(slot.name)
@@ -221,20 +218,17 @@ def _one_document_per_type(
         option = pick_option(slot, doc)
         if option is None:
             continue
-        seen = first.setdefault(option.key, doc)
-        if seen is doc:
-            continue
-        files_differ = (
-            seen.file is not None
-            and doc.file is not None
-            and seen.file.data != doc.file.data
+        # Compare with every earlier slot of this type, not just the first.
+        seen = values.setdefault(option.key, {})
+        new = {k: v.strip() for k, v in doc.fields.items() if v.strip()}
+        files_differ = doc.file is not None and (
+            files.setdefault(option.key, doc.file.data) != doc.file.data
         )
-        values_differ = any(
-            v.strip() and seen.fields.get(k, "").strip() not in ("", v.strip())
-            for k, v in doc.fields.items()
-        )
+        values_differ = any(seen.get(k, v) != v for k, v in new.items())
         if files_differ or values_differ:
             problems.append(Problem(field=slot.name, message=SAME_DOCUMENT))
+            continue
+        seen.update(new)
     return problems
 
 
