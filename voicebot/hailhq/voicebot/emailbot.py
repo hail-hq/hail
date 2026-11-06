@@ -137,7 +137,7 @@ async def _prepare(
         # A send from an earlier attempt: no tools, so a reworded message cannot
         # go out twice. The model still writes the reply.
         sent = await tool_sends_for_reply(db, email)
-        specs = [] if sent else await email_run_tools(claimed.agent, db)
+        specs = [] if sent else await email_run_tools(claimed.agent, db, trust=trust)
     messages = build_chat_messages(
         claimed.agent, thread, trust=trust, sends_tried=sent > 0
     )
