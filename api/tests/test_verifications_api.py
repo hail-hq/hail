@@ -4735,7 +4735,7 @@ async def _end_the_wait(async_session, number: PhoneNumber) -> None:
 
 
 def _reason_hash(reason: str) -> str:
-    key = "".join(c for c in reason if not c.isdigit())
+    key = sms_registration._reason_key(reason)
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 

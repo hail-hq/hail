@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -154,9 +155,12 @@ async def _record_refusal(
 
 
 def _reason_key(reason: str) -> str:
-    """The part of a carrier reason that names the failure: the text with
-    digits removed, so ids, times and counts do not change it."""
-    return "".join(c for c in reason if not c.isdigit())
+    """What names the failure: the HTTP status and the carrier error codes,
+    plus the text with other digits removed, so ids, times and counts do not
+    change it."""
+    codes = re.findall(r"status (\d+)|'code': '?(\d+)", reason)
+    text = "".join(c for c in reason if not c.isdigit())
+    return f"{codes}|{text}"
 
 
 def _audit_after_commit(
@@ -196,7 +200,7 @@ def _start_audits(session) -> None:
 
 
 async def drain_audits() -> None:
-    """Wait for the refusal audit writes started so far (tests, shutdown)."""
+    """Wait for the refusal audit writes started so far (tests)."""
     if _audit_tasks:
         await asyncio.gather(*_audit_tasks, return_exceptions=True)
 
