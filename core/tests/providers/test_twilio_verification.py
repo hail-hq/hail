@@ -733,18 +733,16 @@ async def test_create_draft_refuses_two_different_documents_of_one_type(
     assert len(responses.calls) == 0
 
 
+@responses.activate
 async def test_requirements_ask_once_for_slots_of_one_document_type(provider) -> None:
-    with responses.RequestsMock() as rsps:
-        rsps.add(
-            responses.GET,
-            f"{NUMBERS}/Regulations",
-            json=_regs("ZA-mobile-individual"),
-            status=200,
-        )
-        req = await provider.requirements("ZA", "mobile", "person")
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
     assert [s.name for s in req.documents] == ["address_proof_info", "name_info"]
     gov = req.documents[1]
     assert gov.label == "Government-issued photo ID"
+    assert gov.help == (
+        "Used for: Proof of Authorized Representative Name, Proof of Identity Number."
+    )
     (option,) = gov.options
     assert [f.name for f in option.fields] == ["document_number"]
     assert option.copies == ("first_name", "last_name")

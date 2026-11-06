@@ -219,11 +219,15 @@ def _one_slot_per_type(slots: list[DocumentSlot]) -> tuple[DocumentSlot, ...]:
             continue
         first = out[at[key]]
         a, b = first.options[0], slot.options[0]
-        names = {f.name for f in a.fields}
+        # A value both slots ask for is required when either requires it.
+        fields = {f.name: f for f in a.fields}
+        for f in b.fields:
+            if f.name not in fields or (f.required and not fields[f.name].required):
+                fields[f.name] = f
         option = a.model_copy(
             update={
                 "file_required": a.file_required or b.file_required,
-                "fields": a.fields + tuple(f for f in b.fields if f.name not in names),
+                "fields": tuple(fields.values()),
                 "copies": tuple(sorted(set(a.copies) | set(b.copies))),
                 "needs_address": a.needs_address or b.needs_address,
             }
@@ -231,14 +235,31 @@ def _one_slot_per_type(slots: list[DocumentSlot]) -> tuple[DocumentSlot, ...]:
         out[at[key]] = first.model_copy(
             update={
                 "label": a.label,
-                "help": " ".join(h for h in (first.help, slot.help) if h),
+                # The same carrier text twice is shown once.
+                "help": (
+                    first.help
+                    if slot.help in first.help
+                    else " ".join(h for h in (first.help, slot.help) if h)
+                ),
                 "options": (option,),
                 # Every requirement the slot stands for, itself first.
                 "also": (first.also or ((first.name, first.label),))
                 + ((slot.name, slot.label),),
             }
         )
-    return tuple(out)
+    # Say what one merged document proves when the carrier gave no help text.
+    return tuple(
+        (
+            s.model_copy(
+                update={
+                    "help": "Used for: " + ", ".join(lbl for _, lbl in s.also) + "."
+                }
+            )
+            if s.also and not s.help
+            else s
+        )
+        for s in out
+    )
 
 
 def _one_document_per_type(
