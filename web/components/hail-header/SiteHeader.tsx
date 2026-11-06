@@ -21,12 +21,30 @@ const RESOURCES = [
   {
     label: "Guides",
     items: [
-      { label: "Engineering blog", href: "/blog" },
       { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
       { label: "Domain warmup guide", href: "/email#domain-warmup" },
       { label: "Compare platforms", href: "/compare" },
       { label: "Free tools", href: "/tools" },
       { label: "AI model pricing", href: "/costs" },
+    ],
+  },
+];
+
+const SETUP_GUIDES = [
+  {
+    label: "Start here",
+    items: [{ label: "Create an AI agent", href: "/create-ai-agent" }],
+  },
+  {
+    label: "Agent templates",
+    items: [
+      { label: "Front desk", href: "/agent-templates/front-desk" },
+      { label: "Appointments", href: "/agent-templates/appointments" },
+      { label: "Customer support", href: "/agent-templates/customer-support" },
+      { label: "Sales inquiries", href: "/agent-templates/sales-inquiries" },
+      { label: "Delivery updates", href: "/agent-templates/delivery-updates" },
+      { label: "After hours", href: "/agent-templates/after-hours" },
+      { label: "Inbox", href: "/agent-templates/inbox" },
     ],
   },
 ];
@@ -51,6 +69,11 @@ export function SiteHeader({
   const siteHref = (path: string) => new URL(path, origin).href;
   const { open, setOpen, ref } = useDropdown();
   const {
+    open: setupOpen,
+    setOpen: setSetupOpen,
+    ref: setupRef,
+  } = useDropdown();
+  const {
     open: mobileOpen,
     setOpen: setMobileOpen,
     ref: mobileRef,
@@ -67,6 +90,7 @@ export function SiteHeader({
           if (event.key === "Escape" && mobileOpen) {
             setMobileOpen(false);
             setOpen(false);
+            setSetupOpen(false);
             menuButton.current?.focus();
           }
           // The open phone menu covers the page: Tab cycles between the toggle and the menu links.
@@ -101,6 +125,7 @@ export function SiteHeader({
             if ((event.target as HTMLElement).closest("a")) {
               setMobileOpen(false);
               setOpen(false);
+              setSetupOpen(false);
             }
           }}
         >
@@ -110,9 +135,26 @@ export function SiteHeader({
               className={navLinkClass(false)}
               aria-haspopup="true"
               aria-expanded={open}
-              onClick={() => setOpen(!open)}
+              onClick={() => {
+                setOpen(!open);
+                setSetupOpen(false);
+              }}
             >
-              Product <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+              Product
+              <svg
+                className={styles.chev}
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 3.5 5 6.5 8 3.5" />
+              </svg>
             </button>
             {open && (
               <div className={styles.panel}>
@@ -133,6 +175,57 @@ export function SiteHeader({
               </div>
             )}
           </div>
+          <div className={`${styles.dropdown} ${styles.split}`} ref={setupRef}>
+            <a
+              href={siteHref("/create-ai-agent")}
+              className={navLinkClass(false)}
+            >
+              Setup guide
+            </a>
+            <button
+              type="button"
+              className={styles.caret}
+              aria-label="Setup guide menu"
+              aria-haspopup="true"
+              aria-expanded={setupOpen}
+              onClick={() => {
+                setSetupOpen(!setupOpen);
+                setOpen(false);
+              }}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
+            {setupOpen && (
+              <div className={styles.panel}>
+                {SETUP_GUIDES.map((group) => (
+                  <div key={group.label}>
+                    <div className={styles.panelGroup}>{group.label}</div>
+                    {group.items.map((item) => (
+                      <a
+                        key={item.href}
+                        href={siteHref(item.href)}
+                        onClick={() => setSetupOpen(false)}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <a href={siteHref("/pricing")} className={navLinkClass(false)}>
             Pricing
           </a>
@@ -144,7 +237,7 @@ export function SiteHeader({
             Docs
           </a>
           <a href={siteHref("/blog")} className={navLinkClass(false)}>
-            Resources
+            Blog
           </a>
           <a
             className={`${styles.primary} ${styles.menuCta}`}
@@ -171,6 +264,7 @@ export function SiteHeader({
             onClick={() => {
               setMobileOpen(!mobileOpen);
               setOpen(false);
+              setSetupOpen(false);
             }}
           >
             <span aria-hidden="true" />
