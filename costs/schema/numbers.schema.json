@@ -99,6 +99,46 @@
     }
   },
   "$defs": {
+    "subject_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "items"],
+      "properties": {
+        "accepted": {
+          "type": "boolean",
+          "description": "false when this kind of buyer may not buy this number."
+        },
+        "items": {
+          "type": "array",
+          "description": "Paper categories in a fixed order. An {other} item keeps the carrier's own label.",
+          "items": {
+            "oneOf": [
+              {
+                "enum": [
+                  "id_document",
+                  "birth_date",
+                  "personal_details",
+                  "contact_details",
+                  "proof_of_address",
+                  "address_in_country",
+                  "address_in_area",
+                  "company_registration",
+                  "company_id",
+                  "company_name",
+                  "local_usage"
+                ]
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["other"],
+                "properties": { "other": { "type": "string", "minLength": 1 } }
+              }
+            ]
+          }
+        }
+      }
+    },
     "decimal": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
@@ -171,6 +211,21 @@
         "verification_required": {
           "type": "boolean",
           "description": "The buyer must be verified (ID, address or regulatory bundle) before this number can be bought."
+        },
+        "requirements": {
+          "description": "Who may buy this number and what each kind of buyer must bring, as category keys. null when the buyer needs no verification or the sync has not read it yet. The sync fills it; keep it as it is.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["person", "business"],
+              "properties": {
+                "person": { "$ref": "#/$defs/subject_requirements" },
+                "business": { "$ref": "#/$defs/subject_requirements" }
+              }
+            }
+          ]
         },
         "available": {
           "type": "boolean",

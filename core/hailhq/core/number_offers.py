@@ -103,6 +103,14 @@ async def discover_offers(
     return rank_offers(offers), unavailable
 
 
+def by_request_quotable(has: list[str], capabilities: list[str]) -> bool:
+    """True when a by-request row, with these effective capabilities (see
+    ``telephony_catalog.effective_capabilities``), can be quoted for these
+    capabilities. Support orders only numbers that take calls. /quotes and
+    /numbers/options share this."""
+    return "voice" in has and all(c in has for c in capabilities)
+
+
 def by_request_offers(
     country: str,
     kind: NumberType,
@@ -122,9 +130,8 @@ def by_request_offers(
         row = telephony_catalog.by_request_row(country, kind, name)
         if row is None:
             continue
-        sms = bool(row.get("sms")) and CARRIERS[name].sms_route is not None
-        has = {"voice": bool(row.get("voice")), "sms": sms}
-        if not has["voice"] or not all(has.get(c, False) for c in capabilities):
+        has = telephony_catalog.effective_capabilities(row, name)
+        if not by_request_quotable(has, capabilities):
             continue
         needs = bool(row.get("verification_required"))
         out.append(
@@ -133,7 +140,7 @@ def by_request_offers(
                 e164=None,
                 country_code=country,
                 number_type=kind,
-                capabilities=[c for c in capabilities if has[c]],
+                capabilities=[c for c in capabilities if c in has],
                 **telephony_catalog.monthly_price(
                     name, cents(row["usd_per_month"]), capabilities
                 ),

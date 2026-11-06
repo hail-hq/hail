@@ -1,0 +1,96 @@
+{
+  "data": [
+    {
+      "country_code": "ES",
+      "phone_number_type": "local",
+      "regulatory_requirements": [
+        {
+          "field_type": "textual",
+          "description": "Contact information for the business or end user, including: (1) the name of the contact person (full given name and family name), (2) the business name when the end user is a business (registered   legal name where applicable; may be omitted or stated as 'N/A' for individual end users), and (3) one or more contact phone numbers where the business or end user can be reached. Contact person name and at least one phone number are mandatory; business name is required only when the end user is a business entity. Phone numbers should be in international E.164 format where possible.",
+          "id": "2708e569-696a-4fc7-9305-5fdb3eb9c7dd",
+          "name": "Contact Information (Name, Business Name, Phone Number)",
+          "example": "Contact: Maria Garc\u00eda L\u00f3pez | Business: Bloom & Petal Florist Ltd. | Phone: +34 612 345 678. For individual end users: Contact: John Smith | Business: N/A | Phone: +1 (555) 123-4567.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "field_type": "document",
+          "description": "Either (a) a clear color copy of a valid, unexpired government-issued ID or passport for the individual end user (issued by the same country as the phone number); OR (b) a copy of the company registration or incorporation certificate issued by the local government registry of that same country. The choice depends on whether the end user is an individual (option a) or a business (option b). Documents from countries other than the phone number's country are not acceptable. ID/passports must show full name, photograph, date of birth, document number, and expiration date and must not be expired. Business certificates must show legal name, registration number, registration date, and registered address.",
+          "id": "6f9a47f5-da93-4e7b-91ab-02e38b596d70",
+          "name": "Local Government-Issued ID/Passport Copy or Local Company Registration Certificate",
+          "example": "For an individual end user with a Spanish phone number: a color scan of both sides of a Spanish DNI. For a business end user with a Spanish phone number: a copy of the company's registration certificate from the Spanish Registro Mercantil.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "field_type": "textual",
+          "description": "Spanish tax identification number, with the type depending on end user. For BUSINESS end users: the CIF (Certificado de Identificaci\u00f3n Fiscal), the Spanish company tax ID, consisting of a letter (indicating company type, e.g., 'A' for S.A., 'B' for S.L.) followed by 8 digits (or 7 digits and a final check letter). The CIF also serves as the Spanish VAT number. For PERSONAL end users who are SPANISH CITIZENS: the DNI (Documento Nacional de Identidad), 8 digits followed by a check letter. For PERSONAL end users who are FOREIGN RESIDENTS in Spain: the NIE (N\u00famero de Identidad de Extranjero), the letter X, Y, or Z followed by 7 digits and a check letter.",
+          "id": "74976c35-a8fc-41a9-930e-d89e872be196",
+          "name": "Spanish Tax ID: CIF (Business), DNI (Spanish Citizen), or NIE (Foreigner)",
+          "example": "Business CIF: B12345674 or A87654321. Spanish citizen DNI: 12345678Z. Foreign resident NIE: X1234567L or Y7654321A. Validate against the appropriate format for the declared end user type.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "field_type": "address",
+          "description": "A physical address that matches the geographic area covered by the phone number's area code. The address must include street name and number, postal/ZIP code, city, and country, and the city/region of the address must fall within the geographic area assigned to the DID's area code. Addresses outside the area code's geographic region are not acceptable for this requirement; a different (broader, national-level) address requirement must be selected if the customer cannot provide a matching local address.",
+          "id": "a7d9a3a3-70ed-4cb4-821b-b94e8ea6dc9b",
+          "name": "Address Matching the DID Area Code (Geographic Match)",
+          "example": "311 W Superior St, Chicago, IL 60654 (matches Chicago area code 312). For a +44 20 (Greater London) DID: an address within Greater London such as '60 Holborn Viaduct, London EC1A 2FD'. The address must lie within the area code's geographic boundaries.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        },
+        {
+          "field_type": "document",
+          "description": "A document evidencing the customer's physical address. Acceptable documents include government-issued identification, official government documents, utility bills, telecommunications provider invoices, bank statements, insurance documents, and other recognized proof-of-address documents. Government-issued documents are not subject to the 3-month issue-date restriction. Acceptable government documents include national identity cards (ID cards), passports, driver's licenses, residence permits, government-issued residency cards, government-issued address certificates, tax notices, official government correspondence, and other government-issued documents confirming the customer's residential or registered business address. Government-issued identification documents with an expiration date must be valid and unexpired at the time of submission. Government correspondence and other official government documents without an expiration date may be accepted regardless of their issue date. Non-government documents must have been issued within the past 3 months (90 days) relative to submission. Acceptable non-government documents include utility bills (electricity, water, gas, internet, landline telephone), invoices from the customer's current telecommunications provider, bank statements, insurance policy documents, invoices from recognized service providers, and other official statements confirming the customer's physical address. All submitted documents must clearly display the full name of the individual or registered business name matching the order, the complete physical address (street, postal code, city, country), and the issuing authority or organization. Non-government documents must also display a verifiable issue date. Government-issued identification documents must display an expiration date where applicable. Documents that do not display a complete physical address cannot be accepted as proof of address, even if they are valid government-issued identification. Handwritten documents, expired government-issued identification, and non-government documents older than 3 months are not acceptable.",
+          "id": "b0197fa1-c2fd-4500-9875-2c658b2396eb",
+          "name": "Proof of Address (Recent Bill or Invoice)",
+          "example": "A clear color scan or PDF of a valid national ID card, driver's license, passport, or residence permit showing the customer's full name and complete physical address. Government-issued identification does not need to have been issued within the past 3 months, provided it remains valid and unexpired.  Alternatively, a PDF of the latest invoice from the customer's current telecommunications provider, addressed to the end user at their registered physical address, with an issue date within the past 90 days.  An electricity, water, gas, internet, or landline telephone bill, bank statement, or insurance policy document displaying the customer's full name, complete physical address, and an issue date within the past 90 days is also acceptable.",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          }
+        }
+      ],
+      "action": "ordering"
+    }
+  ]
+}

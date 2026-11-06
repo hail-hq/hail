@@ -41,8 +41,11 @@ export type LLMRow = CommonFields & {
   knowledge_cutoff?: string;
   context_window: number;
   max_output_tokens: number;
-  input_per_mtok_usd: string;
-  output_per_mtok_usd: string;
+  // A vendor with no USD price uses the matching *_eur fields instead.
+  input_per_mtok_usd?: string;
+  output_per_mtok_usd?: string;
+  input_per_mtok_eur?: string;
+  output_per_mtok_eur?: string;
   audio_input_per_mtok_usd?: string;
   cache_read_per_mtok_usd?: string;
   cache_write_per_mtok_usd?: string;
@@ -79,6 +82,8 @@ export type STTRow = CommonFields & {
   price_per_minute_usd?: string;
   price_per_second_usd?: string;
   price_per_minute_batch_usd?: string;
+  price_per_minute_eur?: string;
+  price_per_minute_batch_eur?: string;
   diarization_per_minute_usd?: string;
   pii_redaction_per_minute_usd?: string;
   languages: string[] | string;
@@ -103,6 +108,7 @@ export type STTRow = CommonFields & {
 
 export type TTSRow = CommonFields & {
   price_per_1m_chars_usd?: string;
+  price_per_1m_chars_eur?: string;
   price_per_second_usd?: string;
   voice_quality: 'standard' | 'neural' | 'cloned';
   voice_count?: number;
@@ -174,7 +180,8 @@ export interface SmsRateRow extends TelephonyProvenance {
   provider: string;
   country_code: string;
   direction: 'outbound';
-  usd_per_segment: string;
+  usd_per_segment?: string;
+  eur_per_segment?: string;
 }
 
 export interface SmsFile {

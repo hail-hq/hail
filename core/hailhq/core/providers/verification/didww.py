@@ -31,6 +31,7 @@ from hailhq.core.providers.verification.base import (
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
+    VerificationRequirements,
 )
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.voice.base import CarrierNotConfigured
@@ -138,25 +139,62 @@ class DidwwVerificationProvider(VerificationProvider):
             self._requirements_sync, country_code, number_type, subject_type
         )
 
-    def _requirement_row(
+    def _requirement_rows(
         self, country_code: str, number_type: str
-    ) -> tuple[dict | None, dict, str | None]:
-        """(requirement row, included resources by (type, id), DIDWW country
-        id). The row is None when DIDWW has no requirement for this kind."""
+    ) -> tuple[list[dict], dict, str | None]:
+        """(requirement rows, included resources by (type, id), DIDWW country
+        id). DIDWW may list one requirement per DID group; the list is empty
+        when it has none for this kind."""
         country_id, types = lookup_ids(country_code)
         type_id = types.get(number_type)
         if not country_id or not type_id:
-            return None, {}, country_id
+            return [], {}, country_id
         body = self._client.get(
             "address_requirements",
             params={
                 "filter[country.id]": country_id,
                 "filter[did_group_type.id]": type_id,
                 "include": "personal_proof_types,business_proof_types,address_proof_types",
+                "page[size]": 100,
             },
         )
-        rows = body.get("data", [])
-        return (rows[0] if rows else None), _by_id(body.get("included", [])), country_id
+        return body.get("data", []), _by_id(body.get("included", [])), country_id
+
+    def _requirement_row(
+        self, country_code: str, number_type: str
+    ) -> tuple[dict | None, dict, str | None]:
+        """(first requirement row, included resources, DIDWW country id).
+        The row is None when DIDWW has no requirement for this kind."""
+        rows, index, country_id = self._requirement_rows(country_code, number_type)
+        return (rows[0] if rows else None), index, country_id
+
+    async def requirements_per_group(
+        self, country_code: str, number_type: str, subject_type: SubjectType
+    ) -> list[VerificationRequirements]:
+        """One requirement set per DID group requirement of this country and
+        type, mapped like :meth:`requirements`. A group that does not accept
+        ``subject_type`` is left out; ``UnsupportedSubjectType`` when none
+        accepts it. The catalog sync stores the union."""
+        return await asyncio.to_thread(
+            self._per_group_sync, country_code, number_type, subject_type
+        )
+
+    def _per_group_sync(
+        self, country_code: str, number_type: str, subject_type: SubjectType
+    ) -> list[VerificationRequirements]:
+        rows, index, _ = self._requirement_rows(country_code, number_type)
+        found: list[VerificationRequirements] = []
+        refused: UnsupportedSubjectType | None = None
+        for row in rows:
+            try:
+                found.append(
+                    self._map(row, index, country_code, number_type, subject_type)
+                )
+            except UnsupportedSubjectType as exc:
+                refused = exc
+        if refused is not None and not found:
+            raise refused
+        return found
 
     def _requirements_sync(
         self, country_code: str, number_type: str, subject_type: SubjectType
@@ -170,6 +208,16 @@ class DidwwVerificationProvider(VerificationProvider):
                 subject_type=subject_type,
                 required=False,
             )
+        return self._map(row, index, country_code, number_type, subject_type)
+
+    def _map(
+        self,
+        row: dict,
+        index: dict,
+        country_code: str,
+        number_type: str,
+        subject_type: SubjectType,
+    ) -> Requirements:
         attrs = row["attributes"]
         identity_type = attrs.get("identity_type", "any")
         offered: tuple[SubjectType, ...] = (
@@ -184,7 +232,7 @@ class DidwwVerificationProvider(VerificationProvider):
             )
         side = _SUBJECT_TO_DIDWW[subject_type]
         names = list(_BASE_FIELDS[subject_type])
-        for name in attrs.get(f"{side}_mandatory_fields", []):
+        for name in attrs.get(f"{side}_mandatory_fields") or []:
             if name not in names:
                 names.append(name)
         if attrs.get("service_description_required"):

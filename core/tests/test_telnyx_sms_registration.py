@@ -213,7 +213,8 @@ def test_campaign_replies_open_with_the_brand_name() -> None:
             "Acme Dental: Reply STOP to opt out. For help contact help@acme.example."
         ),
         "optinMessage": (
-            "Acme Dental: You are opted in. Reply STOP to opt out, HELP for help."
+            "Acme Dental: You are opted in. Msg frequency varies. "
+            "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
         ),
         "optoutMessage": (
             "Acme Dental: You are unsubscribed and will get no more messages "
@@ -1659,7 +1660,10 @@ def _approved_handler(calls, *, replies_fail=False, record=None, profiles=None):
 
 _FILED = {
     "helpMessage": "Acme: Reply STOP to opt out. For help contact help@acme.example.",
-    "optinMessage": "Acme: You are opted in. Reply STOP to opt out, HELP for help.",
+    "optinMessage": (
+        "Acme: You are opted in. Msg frequency varies. "
+        "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
+    ),
     "optoutMessage": (
         "Acme: You are unsubscribed and will get no more messages from this number."
     ),
@@ -1923,7 +1927,8 @@ def test_every_reply_caps_the_name() -> None:
         ": You are unsubscribed and will get no more messages from this number."
     )
     assert replies["optinMessage"].endswith(
-        ": You are opted in. Reply STOP to opt out, HELP for help."
+        ": You are opted in. Msg frequency varies. "
+        "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
     )
 
 
