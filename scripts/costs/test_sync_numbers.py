@@ -509,19 +509,58 @@ def test_merge_takes_the_price_didww_shows_for_an_empty_area():
 def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
     prev = _no_stock_prev(
         available=False,
-        notes=sync._VANISHED_NOTE.format(today="2026-10-01"),
+        notes="monthly price varies by area: 3.50 to 6.00 USD across 86 areas; "
+        + sync._VANISHED_NOTE.format(today="2026-10-01"),
     )
-    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
-    row = numbers[0]
-    assert row["available"] is False and row["last_changed_at"] == "2026-09-28"
-    assert row["last_verified"] == "2026-11-06"
-    vanished = sync._VANISHED_NOTE.format(today="2026-10-01")
-    assert row["notes"] == f"{vanished}; {sync._NO_STOCK_NOTE}"
-    again, _ = _merge_no_stock(numbers, {"usd_per_month": "5.00"}, today="2026-11-13")
-    assert again[0]["notes"] == row["notes"]
-    # Dropped again later: the no-stock note goes, the first date stays.
-    gone, _ = sync.merge(again, [], "2026-11-20", "https://src", "didww-api-sync")
-    assert gone[0]["notes"] == vanished
+    numbers, report = _merge_no_stock(
+        [prev], {"usd_per_month": "60.00", "verification_required": False}
+    )
+    # Only the check date moves: price, flags and notes stay as they vanished.
+    assert numbers[0] == {**prev, "last_verified": "2026-11-06"}
+    assert report["no_stock"] == ["SG:national: hidden, kept as it vanished"]
+
+
+def test_hidden_and_hand_verified_rows_keep_their_own_paper_flag(tmp_path, monkeypatch):
+    calls: list = []
+    _use(monkeypatch, object())
+    monkeypatch.setattr(
+        sync,
+        "fetch_requirements",
+        lambda provider, cc, nt: (
+            calls.append((cc, nt)) or {"person": {"accepted": True, "items": []}}
+        ),
+    )
+    (tmp_path / "didww.json").write_text(
+        json.dumps(
+            {
+                "numbers": [
+                    _kept_prev(
+                        "CH", verify=False, verification_method="manual-confirmed"
+                    ),
+                    _kept_prev("FR", verify=True, available=False),
+                    _kept_prev("DE", verify=False),
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 0)
+    empty = {"usd_per_month": "1.00", "verification_required": True}
+    monkeypatch.setattr(
+        sync,
+        "fetch_didww",
+        lambda *a, **k: (
+            [],
+            [f"{c}:local: listed, no numbers in stock" for c in ("CH", "FR", "DE")],
+            {},
+            {f"{c}:local": dict(empty) for c in ("CH", "FR", "DE")},
+        ),
+    )
+    sync.run_provider(
+        "didww", {"DIDWW_API_KEY": "k"}, tmp_path, "2026-11-04", [], not_synced=[]
+    )
+    # CH (hand-verified) needs no papers and FR (hidden) keeps its own flag:
+    # FR's block is refreshed as before. DE takes the empty areas' flag.
+    assert sorted(c[0] for c in calls) == ["DE", "FR"]
 
 
 def test_merge_drops_papers_when_empty_areas_need_none():
