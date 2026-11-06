@@ -446,7 +446,7 @@ def test_merge_marks_an_out_of_stock_row_checked():
     the note."""
     prev = _no_stock_prev(notes="hand note")
     skipped = ["SG:national: no numbers in stock", "SG:local: no dial code known"]
-    assert sync.out_of_stock_keys(skipped) == {"SG:national"}
+    assert sync.telnyx_out_of_stock(skipped) == {"SG:national"}
     numbers, report = _merge_no_stock([prev], {})
     row = numbers[0]
     # Telnyx showed no price: source_url still names where the price came from.
@@ -497,15 +497,24 @@ def test_merge_takes_the_price_didww_shows_for_an_empty_area():
     assert report["no_stock"] == ["PY:local: usd_per_month 49.50 -> 60.00"]
 
 
-def test_merge_puts_a_vanished_row_listed_again_without_stock_back_on_sale():
+def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
     prev = _no_stock_prev(
         available=False,
         notes=sync._VANISHED_NOTE.format(today="2026-10-01"),
     )
     numbers, _ = _merge_no_stock([prev], {})
     row = numbers[0]
-    assert row["available"] is True and row["last_changed_at"] == "2026-11-06"
+    assert row["available"] is False and row["last_changed_at"] == "2026-09-28"
+    assert row["last_verified"] == "2026-11-06"
     assert row["notes"] == sync._NO_STOCK_NOTE + sync._OLD_PRICE_NOTE
+
+
+def test_merge_drops_a_price_range_note_when_nothing_is_on_sale():
+    prev = _no_stock_prev(
+        notes="monthly price varies by area: 3.50 to 6.00 USD across 86 areas"
+    )
+    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
+    assert numbers[0]["notes"] == sync._NO_STOCK_NOTE
 
 
 def test_merge_does_not_touch_a_hand_verified_out_of_stock_row():
@@ -522,11 +531,13 @@ def test_merge_does_not_touch_a_hand_verified_out_of_stock_row():
     assert numbers == [prev]
 
 
-def test_twilio_stock_the_account_cannot_see_is_not_out_of_stock():
-    assert (
-        sync.out_of_stock_keys(["CH:local: no numbers offered to this account"])
-        == set()
-    )
+def test_only_the_exact_telnyx_reason_counts_as_out_of_stock():
+    skipped = [
+        "CH:local: no numbers offered to this account",
+        "AT:mobile: no dial code known; no numbers in stock",
+        "SG:national: no numbers in stock",
+    ]
+    assert sync.telnyx_out_of_stock(skipped) == {"SG:national"}
 
 
 def test_regulatory_block_is_derived_from_rows(tmp_path):
@@ -793,11 +804,28 @@ def test_didww_out_of_stock_is_not_gone():
     assert by["mobile"] == previous and report["vanished"] == []
     assert report["unobserved"] == ["CO:mobile"]
 
+    # Empty areas are priced with the in-stock preference: a cheaper
+    # receive-only area does not set the price, and a SKU without a price is
+    # passed over instead of stopping the run.
+    receive_only = group("g3", "t-mobile", False)
+    receive_only["attributes"]["features"] = ["voice_in"]
+    no_price = group("g4", "t-mobile", False)
+    mixed = {
+        "data": [group("g1", "t-mobile", False), receive_only, no_price],
+        "included": [
+            sku("g1", "40.0"),
+            sku("g3", "5.0"),
+            {**sku("g4", None)},
+        ],
+    }
+    _, _, no_stock = sync.map_didww(countries, types, {"CO": mixed})
+    assert no_stock == {"CO:mobile": {"usd_per_month": "40.00", "setup_usd": "0.00"}}
+
     # A group with no price at all is not "out of stock": nothing is known.
     unpriced = {"data": [group("g1", "t-mobile", True)], "included": []}
     _, skipped, no_stock = sync.map_didww(countries, types, {"CO": unpriced})
     assert skipped == ["CO:mobile: listed, no price on any group"]
-    assert no_stock == {} and sync.out_of_stock_keys(skipped) == set()
+    assert no_stock == {}
 
 
 def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():

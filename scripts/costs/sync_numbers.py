@@ -553,11 +553,25 @@ def map_didww(
                 if ("stock_keeping_units", s["id"]) in included
             ]
             base = [s for s in skus if s.get("channels_included_count") == 0] or skus
+            available = g.get("meta", {}).get("is_available", True)
+            if not available:
+                # An empty area is read for its price only; a SKU without
+                # one must not stop the run.
+                base = [s for s in base if s.get("monthly_price") is not None]
             if not base:
                 continue
             cheapest = min(base, key=lambda s: Decimal(s["monthly_price"]))
-            if not g.get("meta", {}).get("is_available", True):
-                unstocked[number_type].append(cheapest)
+            if not available:
+                features = g["attributes"].get("features", [])
+                unstocked[number_type].append(
+                    {
+                        "sku": cheapest,
+                        "outbound": "voice_out" in features,
+                        "listed": bool(
+                            g.get("meta", {}).get("available_dids_enabled", True)
+                        ),
+                    }
+                )
                 continue
             by_type[number_type].append(
                 {
@@ -581,16 +595,20 @@ def map_didww(
                 }
             )
         # DIDWW still lists the type but has nothing to sell right now. Out
-        # of stock is not dropped: merge() keeps the row for sale, with the
-        # price of the cheapest empty area. A type with no price on any
-        # group is kept exactly as it was.
+        # of stock is not dropped: merge() keeps the row, priced from the
+        # empty areas with the same preference as below (listed and
+        # outbound first). A type with no price on any group is kept
+        # exactly as it was.
         for number_type in sorted(listed - set(by_type)):
-            if not unstocked[number_type]:
+            empty = unstocked[number_type]
+            if not empty:
                 skipped.append(f"{iso}:{number_type}: listed, no price on any group")
                 continue
             skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
+            outbound = [g for g in empty if g["outbound"]]
+            groups = [g for g in outbound if g["listed"]] or outbound or empty
             cheapest = min(
-                unstocked[number_type], key=lambda s: Decimal(s["monthly_price"])
+                (g["sku"] for g in groups), key=lambda s: Decimal(s["monthly_price"])
             )
             no_stock[f"{iso}:{number_type}"] = {
                 "usd_per_month": money(cheapest["monthly_price"]),
@@ -718,16 +736,14 @@ def skipped_keys(skipped: list[str]) -> set[str]:
     return keys
 
 
-# Telnyx and DIDWW skip lines for a type the carrier lists with no numbers.
-# Twilio's "no numbers offered to this account" is not one: its listing is
-# scoped to the account, so an empty page says nothing about the carrier.
-_NO_STOCK_REASON = "no numbers in stock"
-
-
-def out_of_stock_keys(skipped: list[str]) -> set[str]:
-    """The skipped keys whose reason is that the carrier lists the type but
-    has no numbers for sale right now."""
-    return skipped_keys([line for line in skipped if line.endswith(_NO_STOCK_REASON)])
+def telnyx_out_of_stock(skipped: list[str]) -> set[str]:
+    """The keys map_telnyx skipped because its coverage list names the type
+    but the search found no numbers. Only Telnyx: DIDWW returns its own map
+    with prices, and Twilio's listing is scoped to the account, so an empty
+    page there says nothing about the carrier."""
+    return {
+        key for key in skipped_keys(skipped) if f"{key}: no numbers in stock" in skipped
+    }
 
 
 def merge(
@@ -748,7 +764,8 @@ def merge(
     ``out_of_stock`` maps the unobserved keys the carrier still lists but has
     no numbers for to the price it shows for them ({} when it shows none,
     as Telnyx). The carrier was asked today and still sells the type, so the
-    row is for sale, its check date moves and it gets a note. Without a
+    row's check date moves and it gets a note. ``available`` does not move:
+    a row on sale stays on sale, a vanished row stays hidden. Without a
     price from the carrier the old one stays and the note says so. The next
     sync that sees stock rebuilds the row without the note.
 
@@ -866,14 +883,13 @@ def merge(
                 report["unobserved"].append(key)
                 numbers.append(row)
                 continue
-            # Listed again after it vanished counts as rule 3: back on sale.
-            new = {**row, **prices, "available": True}
+            # A row that vanished stays hidden: listed again with nothing to
+            # buy is not back on sale. Stock coming back puts it on sale.
+            new = {**row, **prices}
             if new.get("setup_usd") == "0.00":
                 new.pop("setup_usd")
             changed = [
-                k
-                for k in ("usd_per_month", "setup_usd", "available")
-                if row.get(k, True if k == "available" else None) != new.get(k)
+                k for k in ("usd_per_month", "setup_usd") if row.get(k) != new.get(k)
             ]
             note = _NO_STOCK_NOTE if prices else _NO_STOCK_NOTE + _OLD_PRICE_NOTE
             new["notes"] = "; ".join([*_own_notes(row.get("notes")), note])
@@ -924,6 +940,9 @@ _VANISHED_NOTE = (
 )
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
 _OLD_PRICE_NOTE = ", so the price is from the last time numbers were on sale"
+# Notes map_telnyx and map_didww write from the numbers on sale. They no
+# longer hold when nothing is on sale.
+_SYNC_NOTE_PREFIXES = (_NO_STOCK_NOTE, "monthly price varies by ")
 
 
 def _own_notes(notes: str | None) -> list[str]:
@@ -933,7 +952,7 @@ def _own_notes(notes: str | None) -> list[str]:
     return [
         part
         for part in rest.split("; ")
-        if part.strip() and not part.startswith(_NO_STOCK_NOTE)
+        if part.strip() and not part.startswith(_SYNC_NOTE_PREFIXES)
     ]
 
 
@@ -1324,6 +1343,7 @@ def run_provider(
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
+        no_stock = {key: {} for key in telnyx_out_of_stock(skipped)}
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
@@ -1365,8 +1385,7 @@ def run_provider(
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
         out_of_stock={
-            key: no_stock.get(key, {})
-            for key in out_of_stock_keys(skipped) - fetched_keys
+            key: prices for key, prices in no_stock.items() if key not in fetched_keys
         },
     )
     write_catalog(path, provider, numbers)
