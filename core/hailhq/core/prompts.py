@@ -48,8 +48,9 @@ PLATFORM_PRIVACY = (
     "or claim that Hail built the underlying voice technology."
 )
 
-# Always in an inbound prompt. The full guide below is returned by the
-# hail_settings_help tool, so calls that never ask about settings do not carry it.
+# In every call's prompt, inbound and outbound. The full guide below is returned
+# by the hail_settings_help tool, so calls that never ask about settings do not
+# carry it.
 SETTINGS_HELP_STUB = (
     "# Helping with Hail settings\n\n"
     "Only discuss Hail settings when asked about the voice, greeting, behavior, "
@@ -278,7 +279,8 @@ def build_voice_instructions(
     instructions after. The preamble is non-overridable framing
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
-    same for the fallback chain and a BYO endpoint. ``other_party`` (see :func:`other_party_section`) goes last."""
+    same for the fallback chain and a BYO endpoint. ``other_party`` (see
+    :func:`other_party_section`) goes last."""
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
