@@ -17,7 +17,9 @@ Rules the merge follows, in this order:
   it was: not seeing stock is not the same as the carrier dropping the type.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
-  API, and its rows vanish.
+  API, and its rows vanish. Per type, too: a type that is neither in the
+  listing nor in the country's Pricing API answer is not sold, and its row
+  vanishes.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Calls, texts and MMS flags: a feature a sampled number has is a yes. For a
@@ -204,12 +206,7 @@ def map_twilio(
     rows, skipped = [], []
     for c in countries:
         iso, name = c["country_code"], c["country"]
-        prices = {
-            TWILIO_PRICING_TYPE.get(p["number_type"], p["number_type"]): p[
-                "current_price"
-            ]
-            for p in pricing_by_country.get(iso, {}).get("phone_number_prices", [])
-        }
+        prices = twilio_prices(pricing_by_country.get(iso))
         for number_type in types_by_country.get(iso, []):
             if number_type not in NUMBER_TYPES:
                 skipped.append(f"{iso}:{number_type}: unknown number type")
@@ -247,20 +244,34 @@ def map_twilio(
     return rows, skipped
 
 
+def twilio_prices(answer: dict | None) -> dict[str, str]:
+    """Number type to price, from one Pricing API country answer."""
+    return {
+        TWILIO_PRICING_TYPE.get(p["number_type"], p["number_type"]): p["current_price"]
+        for p in (answer or {}).get("phone_number_prices") or []
+    }
+
+
 def twilio_observed_keys(
     countries: list[dict],
     types_by_country: dict[str, list[str]],
     unsold: Iterable[str] = (),
+    pricing: dict[str, dict] | None = None,
 ) -> set[str]:
-    """The "ISO:type" pairs the account's listing enumerated. Twilio's
-    AvailablePhoneNumbers list is scoped to the account's geographic
-    permissions: a country it is not enabled for is simply absent, which
-    says nothing about what Twilio sells. Only these keys were observed.
+    """The "ISO:type" pairs this run settled. A key is observed when the
+    account's listing enumerates it. Twilio's AvailablePhoneNumbers list is
+    scoped to the account's geographic permissions: a country or type it
+    leaves out says nothing about what Twilio sells on its own.
 
-    ``unsold`` names catalog countries outside the listing for which the
-    Pricing API has no prices at all. Twilio sells nothing there through the
-    API (Hail's only way to buy), so every key of theirs counts as observed:
-    absent from the rows, they vanish."""
+    The Pricing API settles the rest. ``unsold`` names catalog countries
+    outside the listing for which it has no prices at all: Twilio sells
+    nothing there through the API (Hail's only way to buy), so every key of
+    theirs counts as observed and, absent from the rows, vanishes.
+    ``pricing`` holds the Pricing API answer for each country that has one,
+    listed or not. A type that the listing leaves out and the answer does not
+    price is not sold either (Brazil national, 2026-11), so it is observed
+    gone too. A type the answer still prices stays unobserved: the account
+    may only lack it."""
     keys = {
         f"{c['country_code']}:{t}"
         for c in countries
@@ -268,6 +279,16 @@ def twilio_observed_keys(
         if t in NUMBER_TYPES
     }
     keys |= {f"{iso}:{t}" for iso in unsold for t in NUMBER_TYPES}
+    for iso, answer in (pricing or {}).items():
+        priced = set(twilio_prices(answer))
+        if not priced:
+            continue
+        listed_types = set(types_by_country.get(iso, []))
+        keys |= {
+            f"{iso}:{t}"
+            for t in NUMBER_TYPES
+            if t not in listed_types and t not in priced
+        }
     return keys
 
 
@@ -277,7 +298,8 @@ def fetch_twilio(
     dial_codes: dict[str, str],
     catalog_countries: Iterable[str] = (),
 ) -> tuple[list[dict], list[str], set[str]]:
-    """Rows, skipped lines, and the keys the account could see at all.
+    """Rows, skipped lines, and the keys this run settled (see
+    ``twilio_observed_keys``).
 
     ``catalog_countries`` are the countries the catalog on disk has. One
     outside the account listing is asked the Pricing API: no prices at all
@@ -288,6 +310,7 @@ def fetch_twilio(
     countries = http.get(f"{base}.json")["countries"]
     listed = {c["country_code"] for c in countries}
     unsold: set[str] = set()
+    pricing: dict[str, dict] = {}
     for iso in sorted(set(catalog_countries) - listed):
         progress(f"twilio {iso} (not in the account listing)")
         try:
@@ -300,10 +323,11 @@ def fetch_twilio(
             continue
         if not prices.get("phone_number_prices"):
             unsold.add(iso)
+        else:
+            pricing[iso] = prices
     types_by_country: dict[str, list[str]] = {}
     samples: dict[tuple[str, str], list[dict]] = {}
     capabilities: dict[tuple[str, str], dict[str, bool]] = {}
-    pricing: dict[str, dict] = {}
     for c in countries:
         iso = c["country_code"]
         progress(f"twilio {iso}")
@@ -355,7 +379,11 @@ def fetch_twilio(
         dial_codes,
         capabilities,
     )
-    return rows, skipped, twilio_observed_keys(countries, types_by_country, unsold)
+    return (
+        rows,
+        skipped,
+        twilio_observed_keys(countries, types_by_country, unsold, pricing),
+    )
 
 
 # -- Telnyx -------------------------------------------------------------------
