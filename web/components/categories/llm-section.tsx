@@ -5,7 +5,7 @@ import type { LLMRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { num, numOpt, priceRange, usd } from "@/lib/format";
+import { priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<LLMRow>[] = [
   {
@@ -24,26 +24,29 @@ const columns: ColumnDef<LLMRow>[] = [
   },
   {
     id: "output",
-    accessorFn: (row) => num(row.output_per_mtok_usd),
-    header: "Output $/MTok",
-    cell: ({ row }) => usd(row.original.output_per_mtok_usd, 2),
+    accessorFn: (row) => usdSort(row, "output_per_mtok_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "Output $/MTok", "Output /MTok"),
+    cell: ({ row }) => rowPrice(row.original, "output_per_mtok_usd", 2),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
     id: "input",
-    accessorFn: (row) => num(row.input_per_mtok_usd),
-    header: "Input $/MTok",
-    cell: ({ row }) => usd(row.original.input_per_mtok_usd, 2),
+    accessorFn: (row) => usdSort(row, "input_per_mtok_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "Input $/MTok", "Input /MTok"),
+    cell: ({ row }) => rowPrice(row.original, "input_per_mtok_usd", 2),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true },
   },
   {
     id: "cached",
-    accessorFn: (row) => numOpt(row.cache_read_per_mtok_usd),
-    header: "Cached $/MTok",
-    cell: ({ row }) => usd(row.original.cache_read_per_mtok_usd, 4),
+    accessorFn: (row) => usdSort(row, "cache_read_per_mtok_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "Cached $/MTok", "Cached /MTok"),
+    cell: ({ row }) => rowPrice(row.original, "cache_read_per_mtok_usd", 4),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true },
   },
   {
@@ -79,8 +82,9 @@ export function LLMSection({ data }: { data: LLMRow[] }) {
       num="01"
       title="Large language models"
       count={data.length}
-      rangeLabel={priceRange(
-        data.map((r) => r.output_per_mtok_usd),
+      rangeLabel={rowRange(
+        data,
+        "output_per_mtok_usd",
         2,
         2,
         "Mtok output",
