@@ -1569,6 +1569,12 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The hourly email abuse check reads outbound mail by send time.
+        Index(
+            "emails_outbound_sent_at_idx",
+            "sent_at",
+            postgresql_where=text("direction = 'outbound'"),
+        ),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.

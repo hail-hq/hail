@@ -508,3 +508,70 @@ async def test_email_redacted_complaints_count_per_report_up_to_recipients(
 
     assert await check_and_suspend_email_orgs(async_session) == 1
     assert "(3/100)" in (await _email_suspension(async_session, org_id)).reason
+
+
+async def test_sms_late_stops_on_pre_lift_numbers_do_not_count(
+    async_session, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from hailhq.core import config
+    from hailhq.core.models import Sms
+
+    monkeypatch.setattr(config.settings, "hail_sms_abuse_min_sends", 10)
+    monkeypatch.setattr(config.settings, "hail_sms_abuse_max_opt_out_rate", 0.05)
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id,
+            channel="sms",
+            reason="flagged",
+            lifted_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+    )
+    await _seed_sends(async_session, org_id, 20)  # 20 sends after the lift
+    # One number texted after the lift opts out: counts (1/20 = 5%, not over).
+    async_session.add(
+        Sms(
+            organization_id=org_id,
+            from_e164="+14155550000",
+            to_e164="+14155551000",
+            direction="outbound",
+            body="hi",
+        )
+    )
+    # 5 STOPs arrive after the lift; only +14155551000 got a post-lift text.
+    await _seed_opt_outs(async_session, org_id, 5)
+    await async_session.commit()
+
+    assert await check_and_suspend_abusive_orgs(async_session) == 0
+
+
+async def test_email_cap_uses_distinct_recipients(async_session, monkeypatch) -> None:
+    from datetime import timedelta
+
+    from hailhq.core.abuse_monitor import check_and_suspend_email_orgs
+    from hailhq.core.models import EmailEvent
+
+    _email_thresholds(monkeypatch)
+    org_id = uuid.uuid4()
+    emails = await _seed_emails(async_session, org_id, 100)
+    address = emails[0].to_addresses[0]
+    emails[0].to_addresses = [address, f"Bob <{address.upper()}>"]
+    now = datetime.now(timezone.utc)
+    # Two redacted complaints on an email with one distinct recipient: one.
+    for i in range(2):
+        async_session.add(
+            EmailEvent(
+                email_id=emails[0].id,
+                organization_id=org_id,
+                kind="complained",
+                payload={"recipients": []},
+                occurred_at=now - timedelta(minutes=i),
+            )
+        )
+    await async_session.commit()
+
+    assert await check_and_suspend_email_orgs(async_session) == 1
+    assert "(1/100)" in (await _email_suspension(async_session, org_id)).reason

@@ -34,11 +34,11 @@ from hailhq.core.models import (
     ChannelSuspension,
     Email,
     EmailEvent,
+    Sms,
     Suppression,
     UsageEvent,
 )
-from sqlalchemy import and_, case, cast, func, literal, or_, select, true, tuple_
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +90,20 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
             Suppression.source == "stop_keyword",
             Suppression.created_at >= _counted_from(window_start, last_lift),
             Suppression.organization_id.is_not(None),
+            # After a lift, a STOP counts only if the org texted that number
+            # after the lift: late replies to the old blast must not suspend
+            # it again against its few new sends.
+            or_(
+                last_lift.c.lifted_at.is_(None),
+                select(Sms.id)
+                .where(
+                    Sms.organization_id == Suppression.organization_id,
+                    Sms.direction == "outbound",
+                    Sms.to_e164 == Suppression.recipient,
+                    Sms.created_at >= last_lift.c.lifted_at,
+                )
+                .exists(),
+            ),
         )
         .group_by(Suppression.organization_id)
     )
@@ -224,33 +238,31 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         .render_derived(name="recipients")
         .lateral()
     )
-    send_stmt = (
+    email_recipients = (
         select(
-            Email.organization_id,
-            func.count(func.distinct(tuple_(Email.id, _bare_address(addr.c.addr)))),
+            Email.id.label("email_id"),
+            Email.organization_id.label("organization_id"),
+            func.count(func.distinct(_bare_address(addr.c.addr))).label("recipients"),
         )
         .select_from(Email)
         .join(addr, true())
         .outerjoin(last_lift, last_lift.c.organization_id == Email.organization_id)
         .where(in_window)
-        .group_by(Email.organization_id)
+        .group_by(Email.id)
+        .subquery()
     )
-    send_counts = dict((await db.execute(send_stmt)).all())
+    send_stmt = select(
+        email_recipients.c.organization_id, func.sum(email_recipients.c.recipients)
+    ).group_by(email_recipients.c.organization_id)
+    send_counts = {
+        org_id: int(sends) for org_id, sends in (await db.execute(send_stmt)).all()
+    }
 
     # One SES event can name several recipients; each (email, recipient)
     # counts once per kind, so a repeated feedback report for the same
-    # recipient does not count twice.
-    payload_recipients = EmailEvent.payload["recipients"]
+    # recipient does not count twice. The parser always stores a list.
     event_addr = (
-        func.jsonb_array_elements_text(
-            case(
-                (
-                    func.jsonb_typeof(payload_recipients) == "array",
-                    payload_recipients,
-                ),
-                else_=cast(literal("[]"), JSONB),
-            )
-        )
+        func.jsonb_array_elements_text(EmailEvent.payload["recipients"])
         .table_valued("addr")
         .render_derived(name="event_recipients")
         .lateral()
@@ -269,36 +281,34 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     def _per_email(kind_filter):
         # Named recipients count once each; an event with no recipients
         # (redacted by the mailbox provider) counts once per event. The sum
-        # is capped at the email's recipient count, so repeated reports
-        # cannot count more people than the email went to.
+        # is capped at the email's distinct recipients (the same count as
+        # the denominator), so repeated reports cannot count more people
+        # than the email went to.
         return func.least(
             func.count(func.distinct(named)).filter(kind_filter, named.is_not(None))
             + func.count(func.distinct(EmailEvent.id)).filter(
                 kind_filter, event_addr.c.addr.is_(None)
             ),
-            func.cardinality(Email.to_addresses)
-            + func.coalesce(func.cardinality(Email.cc_addresses), 0)
-            + func.coalesce(func.cardinality(Email.bcc_addresses), 0),
+            email_recipients.c.recipients,
         )
 
+    # Joined to the denominator's emails: a late complaint on mail sent
+    # before the window must not count against a smaller recent send.
     per_email = (
         select(
-            Email.organization_id.label("organization_id"),
+            email_recipients.c.organization_id,
             _per_email(hard_bounce).label("bounces"),
             _per_email(complained).label("complaints"),
         )
         .select_from(EmailEvent)
-        .join(Email, Email.id == EmailEvent.email_id)
-        .outerjoin(last_lift, last_lift.c.organization_id == Email.organization_id)
+        .join(email_recipients, email_recipients.c.email_id == EmailEvent.email_id)
         .outerjoin(event_addr, true())
-        .where(
-            # Same emails as the denominator: a late complaint on mail sent
-            # before the window must not count against a smaller recent send.
-            in_window,
-            EmailEvent.occurred_at >= window_start,
-            or_(hard_bounce, complained),
+        .where(or_(hard_bounce, complained))
+        .group_by(
+            email_recipients.c.email_id,
+            email_recipients.c.organization_id,
+            email_recipients.c.recipients,
         )
-        .group_by(Email.id)
         .subquery()
     )
     event_stmt = select(
@@ -376,8 +386,9 @@ class AbuseMonitorWorker:
         for check in (check_and_suspend_abusive_orgs, check_and_suspend_email_orgs):
             try:
                 async with self._session_factory() as session:
-                    count += await check(session)
+                    suspended = await check(session)
                     await session.commit()
+                count += suspended
             except Exception:
                 logger.exception("abuse monitor %s failed", check.__name__)
         if count:

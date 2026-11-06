@@ -9,12 +9,14 @@ sent after the org's last lift.
 * ``channel_suspensions.lifted_at``: new nullable column.
 * The unique (organization_id, channel) constraint becomes a partial unique
   index on active rows, so an org can be suspended again after a lift.
+* ``emails_outbound_sent_at_idx``: the hourly email abuse check reads
+  outbound mail by ``sent_at``; without it, each check scans ``emails``.
 
 Tables checked: this extends ``channel_suspensions`` itself, the table that
 holds these rows. No new table.
 
-Downgrade deletes lifted rows (they no longer block anything) and restores
-the old constraint.
+Downgrade deletes lifted rows (they no longer block anything), restores
+the old constraint, and drops the index.
 """
 
 import sqlalchemy as sa
@@ -41,9 +43,16 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("lifted_at IS NULL"),
     )
+    op.create_index(
+        "emails_outbound_sent_at_idx",
+        "emails",
+        ["sent_at"],
+        postgresql_where=sa.text("direction = 'outbound'"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("emails_outbound_sent_at_idx", table_name="emails")
     op.drop_index("channel_suspensions_active_uq", table_name="channel_suspensions")
     op.execute("DELETE FROM channel_suspensions WHERE lifted_at IS NOT NULL")
     op.create_unique_constraint(
