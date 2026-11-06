@@ -22,8 +22,8 @@ from cryptography.fernet import InvalidToken
 from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
-from hailhq.core.prompts import PRIVACY_REMINDER
 from hailhq.core.pool import CALL_META_FROM_POOL
+from hailhq.core.prompts import PRIVACY_REMINDER
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,

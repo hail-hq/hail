@@ -22,10 +22,10 @@ question or continues speaking during your goodbye, listen and answer \
 before ending the call."""
 
 __all__ = [
-    "TEXT_PREAMBLE",
-    "THREAD_TOOL_HINT_TEXT",
     "PRIVACY_REMINDER",
     "SETTINGS_HELP_STUB",
+    "TEXT_PREAMBLE",
+    "THREAD_TOOL_HINT_TEXT",
     "VOICE_CONFIGURATION_HELP",
     "VOICE_PREAMBLE",
     "VOICE_PREAMBLE_INBOUND",
