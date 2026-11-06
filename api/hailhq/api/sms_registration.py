@@ -11,6 +11,7 @@ on a person's registration, Hail records that number as attached instead."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,7 @@ from hailhq.core.providers.verification.base import (
     SmsRegistrationProvider,
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ _REFUSED = "sms_attach_refused"
 # The background pass waits this long after a refusal, doubling each time.
 _FIRST_WAIT_HOURS = 1
 _MAX_WAIT_HOURS = 24
+_PENDING_AUDITS = "sms_attach_refused_audits"
+_AUDIT_HOOKS = "sms_attach_refused_audit_hooks"
+# Audit writes started after a commit; kept so they are not collected early.
+_audit_tasks: set[asyncio.Task] = set()
 
 # What makes a number eligible for a US SMS registration.
 _ELIGIBLE_NUMBER = (
@@ -111,7 +116,7 @@ def _waiting(row: CarrierVerification, number: PhoneNumber) -> bool:
 
 
 async def _record_refusal(
-    row: CarrierVerification, number: PhoneNumber, reason: str
+    db: AsyncSession, row: CarrierVerification, number: PhoneNumber, reason: str
 ) -> None:
     """Push the number's next background try back. The first refusal, and
     each one whose carrier reason differs from the last audited one, also
@@ -120,8 +125,9 @@ async def _record_refusal(
     hours = _FIRST_WAIT_HOURS
     if refusal:
         hours = min(refusal["wait_hours"] * 2, _MAX_WAIT_HOURS)
-    # A hash, not the text: the audit row already holds the text.
-    reason_hash = hashlib.sha256(reason.encode()).hexdigest()[:16]
+    # A hash of the carrier's error code, not the text: the text can hold a
+    # request id or a time, so it would differ on every retry.
+    reason_hash = hashlib.sha256(_reason_key(reason).encode()).hexdigest()[:16]
     number.provisioning_metadata = {
         **number.provisioning_metadata,
         _REFUSED: {
@@ -135,19 +141,64 @@ async def _record_refusal(
     }
     # State written before reason_hash existed has no key: audit once more.
     if refusal is None or refusal.get("reason_hash") != reason_hash:
-        await write_audit_log(
+        _audit_after_commit(
+            db,
             row.organization_id,
-            None,
-            "verification.sms_attach_refused",
-            "phone_number",
             number.id,
             {
                 "e164": number.e164,
                 "verification_id": str(row.id),
                 "carrier_reason": reason,
             },
-            actor_kind="system",
         )
+
+
+def _reason_key(reason: str) -> str:
+    """The part of a carrier reason that names the failure: the text with
+    digits removed, so ids, times and counts do not change it."""
+    return "".join(c for c in reason if not c.isdigit())
+
+
+def _audit_after_commit(
+    db: AsyncSession, organization_id: UUID, number_id: UUID, payload: dict
+) -> None:
+    """Write the refusal audit row only once the retry state is committed.
+    A rollback drops it, so the row is never written without its state."""
+    session = db.sync_session
+    if _AUDIT_HOOKS not in session.info:
+        session.info[_AUDIT_HOOKS] = True
+        event.listen(session, "after_commit", _start_audits)
+        event.listen(session, "after_soft_rollback", _drop_audits)
+    session.info.setdefault(_PENDING_AUDITS, []).append(
+        (organization_id, number_id, payload)
+    )
+
+
+def _drop_audits(session, previous_transaction) -> None:
+    session.info.pop(_PENDING_AUDITS, None)
+
+
+def _start_audits(session) -> None:
+    for organization_id, number_id, payload in session.info.pop(_PENDING_AUDITS, []):
+        task = asyncio.get_running_loop().create_task(
+            write_audit_log(
+                organization_id,
+                None,
+                "verification.sms_attach_refused",
+                "phone_number",
+                number_id,
+                payload,
+                actor_kind="system",
+            )
+        )
+        _audit_tasks.add(task)
+        task.add_done_callback(_audit_tasks.discard)
+
+
+async def drain_audits() -> None:
+    """Wait for the refusal audit writes started so far (tests, shutdown)."""
+    if _audit_tasks:
+        await asyncio.gather(*_audit_tasks, return_exceptions=True)
 
 
 async def _attach(
@@ -184,24 +235,24 @@ async def _attach(
             if _refusal(row, number) is not None:
                 _clear_refusal(number)
             return held
-        await _refused(row, number, exc)
+        await _refused(db, row, number, exc)
         return None
     except Exception as exc:
-        await _refused(row, number, exc)
+        await _refused(db, row, number, exc)
         return None
     _record_attached(row, number)
     return number
 
 
 async def _refused(
-    row: CarrierVerification, number: PhoneNumber, exc: Exception
+    db: AsyncSession, row: CarrierVerification, number: PhoneNumber, exc: Exception
 ) -> None:
     logger.warning(
         "SMS registration attach failed for number %s", number.id, exc_info=exc
     )
     # A failed re-attach leaves a number on the registration: it still texts.
     if number.sms_registration_id != row.id:
-        await _record_refusal(row, number, str(exc)[:500] or repr(exc))
+        await _record_refusal(db, row, number, str(exc)[:500] or repr(exc))
 
 
 async def _has_number(db: AsyncSession, row: CarrierVerification) -> bool:

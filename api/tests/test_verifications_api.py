@@ -4735,10 +4735,12 @@ async def _end_the_wait(async_session, number: PhoneNumber) -> None:
 
 
 def _reason_hash(reason: str) -> str:
-    return hashlib.sha256(reason.encode()).hexdigest()[:16]
+    key = "".join(c for c in reason if not c.isdigit())
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 async def _audits(async_session, action: str) -> list[AuditLog]:
+    await sms_registration.drain_audits()
     result = await async_session.execute(
         select(AuditLog).where(AuditLog.action == action).order_by(AuditLog.occurred_at)
     )
@@ -5287,9 +5289,9 @@ async def test_a_number_the_carrier_holds_outside_the_org_still_refuses(
         for a in await _audits(async_session, "verification.sms_attach_refused")
         if a.resource_id == second.id
     ]
+    # The two reasons differ only by the number the carrier holds: one row.
     assert [r.payload["carrier_reason"] for r in rows] == [
         str(_holds("+15125550199")),
-        str(_holds("+15125550198")),
     ]
 
 
@@ -5640,3 +5642,15 @@ async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
     await async_session.refresh(row)
     assert row.provider_refs["campaign_id"] == "C1"
     assert row.provider_refs["campaign_filed_at"]
+
+
+async def test_refusal_audit_is_dropped_on_rollback(async_session):
+    """A rolled-back refusal leaves no audit row; a committed one writes it."""
+    db = async_session
+    number = SimpleNamespace(id=uuid.uuid4(), e164="+15550001111")
+    org = uuid.uuid4()
+    await db.execute(select(1))
+    sms_registration._audit_after_commit(db, org, number.id, {"e164": number.e164})
+    await db.rollback()
+    await sms_registration.drain_audits()
+    assert db.sync_session.info.get("sms_attach_refused_audits") is None
