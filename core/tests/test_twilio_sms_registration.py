@@ -610,6 +610,54 @@ async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
     assert draft.refs == {}
 
 
+async def test_draft_noncompliant_account_configuration_stays_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Primary profile configuration"}
+                ]
+            }
+        ],
+    )
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(r))
+
+
+def _connection_error():
+    import requests
+
+    raise requests.ConnectionError("reset")
+
+
+async def test_status_transport_error_is_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = _connection_error
+    with pytest.raises(VerificationProviderError):
+        await _provider(r).status({"brand_sid": "BN1"})
+
+
+async def test_recover_campaign_transport_error_is_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["us_app_to_person.list"] = _connection_error
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1"}
+    with pytest.raises(VerificationProviderError):
+        await _provider(r).recover_campaign(refs)
+
+
+async def test_recover_campaign_missing_ref_fails_loudly() -> None:
+    with pytest.raises(KeyError):
+        await _provider().recover_campaign({"brand_sid": "BN1"})
+
+
 @pytest.mark.parametrize("brand_status", ["FAILED", "SUSPENDED"])
 async def test_status_brand_failed_or_suspended_is_rejected(brand_status) -> None:
     r = _ok_responses()

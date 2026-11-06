@@ -2430,6 +2430,10 @@ def test_repair_reason_matches_whole_word_starts_only() -> None:
         CAMPAIGN_REJECTED
     )
     assert "message examples" in campaign_repair_reason("Samples are generic")
+    for raw in ("Invalid MessageSamples", "MESSAGE_SAMPLES", "/body/sample1"):
+        assert "message examples" in campaign_repair_reason(raw)
+    assert "selected purposes" in campaign_repair_reason("subUsecases is invalid")
+    assert "application links" in campaign_repair_reason("HasEmbeddedLinks")
 
 
 def test_same_sender_ignores_website_scheme_and_trailing_slash() -> None:

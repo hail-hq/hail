@@ -34,6 +34,7 @@ from hailhq.core.providers.verification.sms_review import (
     application_validation_error,
     campaign_repair_reason,
 )
+import requests
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -112,7 +113,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return bool(
                 self._client.incoming_phone_numbers.list(phone_number=e164, limit=1)
             )
-        except TwilioRestException as exc:
+        except (TwilioException, requests.RequestException) as exc:
+            # The SDK lets requests' own transport errors through.
             raise VerificationProviderError(
                 "Could not check the mobile number. Try again."
             ) from exc
@@ -171,8 +173,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC draft failed: status=%s code=%s", exc.status, exc.code
                 )
-                if isinstance(exc, _NotCompliant) or application_validation_error(
-                    exc.status, exc.msg
+                # A failed evaluation names a detail of the form, whatever its
+                # wording; an account or configuration problem stays an outage.
+                if application_validation_error(
+                    exc.status, exc.msg, known_field=isinstance(exc, _NotCompliant)
                 ):
                     return DraftResult(
                         refs={},
@@ -337,7 +341,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def status(self, refs) -> ProviderStatus:
         try:
             return await asyncio.to_thread(self._status, refs)
-        except TwilioRestException as exc:
+        except (TwilioException, requests.RequestException) as exc:
             raise VerificationProviderError("Twilio request failed") from exc
 
     def _status(self, refs) -> ProviderStatus:
@@ -437,7 +441,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def recover_campaign(self, refs) -> bool:
         try:
             return await asyncio.to_thread(self._recover_campaign, refs)
-        except Exception as exc:
+        except (TwilioException, requests.RequestException) as exc:
             # Twilio errors and transport errors (the SDK lets requests'
             # own exceptions through) are both a retryable outage.
             raise VerificationProviderError("Campaign discovery unavailable") from exc

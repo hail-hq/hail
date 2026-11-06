@@ -54,7 +54,10 @@ def campaign_repair_reason(raw: object) -> str:
     Codes and descriptions differ across carriers. Ambiguous feedback retains
     general guidance; raw feedback belongs only in the protected audit record.
     """
-    text = str(raw or "").lower()
+    # Split field names into words first ("MessageSamples", "MESSAGE_SAMPLES"
+    # and "subUsecases" hold "message samples" and "usecases"), so the word
+    # start match below still finds them.
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])|_", " ", str(raw or "")).lower()
     rules = (
         (
             ("privacy", "30908"),
@@ -91,8 +94,8 @@ def campaign_repair_reason(raw: object) -> str:
         ),
     )
     for words, message in rules:
-        # Match at a word start: "sample" must not hit "for example", nor
-        # "terms" "determines", nor "url" "curl".
+        # Match at a word start: "terms" must not hit "determines", nor
+        # "url" "curl", nor "link" "unlinked".
         if any(re.search(rf"\b{re.escape(word)}", text) for word in words):
             return message
     return CAMPAIGN_REJECTED
