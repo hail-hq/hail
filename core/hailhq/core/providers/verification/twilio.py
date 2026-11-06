@@ -54,6 +54,13 @@ _TWILIO_TO_SUBJECT: dict[str, SubjectType] = {
     "individual": "person",
     "business": "business",
 }
+# Bundle statuses that mean Twilio already has it for review.
+_SENT_STATUSES = (
+    "pending-review",
+    "in-review",
+    "provisionally-approved",
+    "twilio-approved",
+)
 # Document types that are just the address the customer gave; no file needed.
 _ADDRESS_ONLY_TYPES = {"individual_address", "business_address"}
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
@@ -426,16 +433,21 @@ class TwilioVerificationProvider(VerificationProvider):
     # -- check / submit / status ------------------------------------------
 
     def _evaluate(self, refs: dict) -> list[Problem]:
+        bundle = self._rc.bundles(refs["bundle_sid"])
         try:
-            ev = self._rc.bundles(refs["bundle_sid"]).evaluations.create()
+            ev = bundle.evaluations.create()
         except TwilioRestException as exc:
             if exc.status != 400:
                 raise
+            # A bundle already sent (a submit that timed out but went
+            # through) is not a refusal: let submit() settle it.
+            if bundle.fetch().status in _SENT_STATUSES:
+                return []
             # Twilio refused to check the bundle: a refusal of the
-            # details, not an outage. Say so, and keep its reason.
-            logger.warning(
-                "Twilio refused the bundle check (code %s): %s", exc.code, exc.msg
-            )
+            # details, not an outage. Say so, and keep its reason. The
+            # log carries the code only: Twilio's text can quote the
+            # customer's personal data.
+            logger.warning("Twilio refused the bundle check (code %s)", exc.code)
             return [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]
         if ev.status == "compliant":
             return []
@@ -478,7 +490,7 @@ class TwilioVerificationProvider(VerificationProvider):
             if exc.status != 400:
                 raise
             sent = await asyncio.to_thread(bundle.fetch)
-            if sent.status in ("pending-review", "in-review", "twilio-approved"):
+            if sent.status in _SENT_STATUSES:
                 return
             raise SubmitRefused(
                 [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]
