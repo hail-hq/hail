@@ -439,31 +439,25 @@ def _merge_no_stock(existing, prices, today="2026-11-06", key="SG:national"):
 
 
 def test_merge_marks_an_out_of_stock_row_checked():
-    """Telnyx Singapore national, 2026-11: coverage lists the type, the
-    search finds no numbers. The carrier still sells it, so the row's check
-    date moves and it gets a note. Telnyx shows no price, so the old one
-    stays and the note says so. Stock coming back rebuilds the row without
-    the note."""
-    prev = _no_stock_prev(notes="hand note")
-    skipped = ["SG:national: no numbers in stock", "SG:local: no dial code known"]
-    assert sync.telnyx_out_of_stock(skipped) == {"SG:national"}
-    numbers, report = _merge_no_stock([prev], {})
+    """DIDWW Paraguay local, 2026-11: the Asuncion area is listed at 49.50
+    with no numbers. The price was read, so the check date moves and the row
+    gets a note. Stock coming back rebuilds the row without the note."""
+    prev = _no_stock_prev(country_code="PY", number_type="local", usd_per_month="49.50")
+    prices = {"usd_per_month": "49.50", "setup_usd": "0.00"}
+    numbers, report = _merge_no_stock([prev], prices, key="PY:local")
     row = numbers[0]
-    # Telnyx showed no price: source_url still names where the price came from.
-    assert row["last_verified"] == "2026-11-06" and row["source_url"] == "https://old"
-    assert row["last_changed_at"] == "2026-09-28" and row["usd_per_month"] == "5.00"
-    note = sync._NO_STOCK_NOTE + sync._OLD_PRICE_NOTE
-    assert row["available"] is True and row["notes"] == f"hand note; {note}"
-    assert report["no_stock"] == ["SG:national"] and report["unobserved"] == []
+    assert row["last_verified"] == "2026-11-06" and row["source_url"] == "https://src"
+    assert row["last_changed_at"] == "2026-09-28" and row["usd_per_month"] == "49.50"
+    assert row["available"] is True and row["notes"] == sync._NO_STOCK_NOTE
+    assert report["no_stock"] == ["PY:local"] and report["unobserved"] == []
 
-    again, _ = _merge_no_stock(numbers, {}, today="2026-11-13")
-    assert again[0]["notes"] == f"hand note; {note}"
+    again, _ = _merge_no_stock(numbers, prices, today="2026-11-13", key="PY:local")
+    assert again[0]["notes"] == sync._NO_STOCK_NOTE
     assert again[0]["last_verified"] == "2026-11-13"
 
-    gone, _ = sync.merge(again, [], "2026-11-20", "https://src", "telnyx-api-sync")
+    gone, _ = sync.merge(again, [], "2026-11-20", "https://src", "didww-api-sync")
     assert gone[0]["available"] is False
-    assert gone[0]["notes"].startswith("hand note; not offered by the carrier")
-    assert sync._NO_STOCK_NOTE not in gone[0]["notes"]
+    assert gone[0]["notes"].startswith("not offered by the carrier")
 
     restocked = {
         k: v
@@ -475,13 +469,28 @@ def test_merge_marks_an_out_of_stock_row_checked():
             "verification_method",
             "verified_by",
             "source_url",
-            "notes",
         )
     }
     back, _ = sync.merge(
-        again, [restocked], "2026-11-20", "https://src", "telnyx-api-sync"
+        again, [restocked], "2026-11-20", "https://src", "didww-api-sync"
     )
     assert "notes" not in back[0] and back[0]["last_verified"] == "2026-11-20"
+
+
+def test_merge_writes_the_flags_didww_shows_for_empty_areas():
+    prev = _no_stock_prev(country_code="PY", number_type="local")
+    numbers, report = _merge_no_stock(
+        [prev],
+        {
+            "usd_per_month": "5.00",
+            "setup_usd": "0.00",
+            "receive_only": True,
+            "by_request": False,
+        },
+        key="PY:local",
+    )
+    assert numbers[0]["receive_only"] is True and "by_request" not in numbers[0]
+    assert report["no_stock"] == ["PY:local: receive_only None -> True"]
 
 
 def test_merge_takes_the_price_didww_shows_for_an_empty_area():
@@ -502,11 +511,14 @@ def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
         available=False,
         notes=sync._VANISHED_NOTE.format(today="2026-10-01"),
     )
-    numbers, _ = _merge_no_stock([prev], {})
+    numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
     row = numbers[0]
     assert row["available"] is False and row["last_changed_at"] == "2026-09-28"
     assert row["last_verified"] == "2026-11-06"
-    assert row["notes"] == sync._NO_STOCK_NOTE + sync._OLD_PRICE_NOTE
+    assert row["notes"] == sync._NO_STOCK_NOTE
+    # Dropped again later: the no-stock note gives way to the vanished note.
+    gone, _ = sync.merge(numbers, [], "2026-11-20", "https://src", "didww-api-sync")
+    assert gone[0]["notes"] == sync._VANISHED_NOTE.format(today="2026-11-20")
 
 
 def test_merge_drops_a_price_range_note_when_nothing_is_on_sale():
@@ -529,15 +541,6 @@ def test_merge_does_not_touch_a_hand_verified_out_of_stock_row():
     }
     numbers, _ = _merge_no_stock([prev], {"usd_per_month": "60.00"}, key="PY:local")
     assert numbers == [prev]
-
-
-def test_only_the_exact_telnyx_reason_counts_as_out_of_stock():
-    skipped = [
-        "CH:local: no numbers offered to this account",
-        "AT:mobile: no dial code known; no numbers in stock",
-        "SG:national: no numbers in stock",
-    ]
-    assert sync.telnyx_out_of_stock(skipped) == {"SG:national"}
 
 
 def test_regulatory_block_is_derived_from_rows(tmp_path):
@@ -777,7 +780,14 @@ def test_didww_out_of_stock_is_not_gone():
     assert skipped == ["CO:mobile: listed, no numbers in stock"]
     assert sync.skipped_keys(skipped) == {"CO:mobile"}
     # DIDWW shows the price of an empty area, so the check reads it.
-    assert no_stock == {"CO:mobile": {"usd_per_month": "15.00", "setup_usd": "0.00"}}
+    assert no_stock == {
+        "CO:mobile": {
+            "usd_per_month": "15.00",
+            "setup_usd": "0.00",
+            "receive_only": False,
+            "by_request": False,
+        }
+    }
     previous = {
         "country_code": "CO",
         "number_type": "mobile",
@@ -819,7 +829,17 @@ def test_didww_out_of_stock_is_not_gone():
         ],
     }
     _, _, no_stock = sync.map_didww(countries, types, {"CO": mixed})
-    assert no_stock == {"CO:mobile": {"usd_per_month": "40.00", "setup_usd": "0.00"}}
+    assert no_stock["CO:mobile"]["usd_per_month"] == "40.00"
+    assert no_stock["CO:mobile"]["receive_only"] is False
+
+    # An area on sale without a price: not "out of stock", nothing is known.
+    unpriced_live = group("g5", "t-mobile", True)
+    live = {
+        "data": [unpriced_live, group("g1", "t-mobile", False)],
+        "included": [sku("g1", "40.0")],
+    }
+    _, skipped, no_stock = sync.map_didww(countries, types, {"CO": live})
+    assert skipped == ["CO:mobile: listed, no price on any group"] and no_stock == {}
 
     # A group with no price at all is not "out of stock": nothing is known.
     unpriced = {"data": [group("g1", "t-mobile", True)], "included": []}
