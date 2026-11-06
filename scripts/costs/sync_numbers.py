@@ -251,6 +251,7 @@ def twilio_observed_keys(
     countries: list[dict],
     types_by_country: dict[str, list[str]],
     unsold: Iterable[str] = (),
+    pricing: dict[str, dict] | None = None,
 ) -> set[str]:
     """The "ISO:type" pairs the account's listing enumerated. Twilio's
     AvailablePhoneNumbers list is scoped to the account's geographic
@@ -268,6 +269,22 @@ def twilio_observed_keys(
         if t in NUMBER_TYPES
     }
     keys |= {f"{iso}:{t}" for iso in unsold for t in NUMBER_TYPES}
+    # A listed country whose Pricing API answer leaves out a type the listing
+    # also leaves out: Twilio neither shows stock nor prices it, so it sells
+    # none (Brazil national, 2026-11). That key is observed gone too. A type
+    # the Pricing API still prices stays unobserved: the account may lack it.
+    for c in countries:
+        iso = c["country_code"]
+        prices = (pricing or {}).get(iso, {}).get("phone_number_prices")
+        if not prices:
+            continue
+        priced = {TWILIO_PRICING_TYPE.get(p["number_type"]) for p in prices}
+        listed_types = set(types_by_country.get(iso, []))
+        keys |= {
+            f"{iso}:{t}"
+            for t in NUMBER_TYPES
+            if t not in listed_types and t not in priced
+        }
     return keys
 
 
@@ -355,7 +372,11 @@ def fetch_twilio(
         dial_codes,
         capabilities,
     )
-    return rows, skipped, twilio_observed_keys(countries, types_by_country, unsold)
+    return (
+        rows,
+        skipped,
+        twilio_observed_keys(countries, types_by_country, unsold, pricing),
+    )
 
 
 # -- Telnyx -------------------------------------------------------------------

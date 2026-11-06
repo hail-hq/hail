@@ -666,6 +666,33 @@ def test_didww_out_of_stock_is_not_gone():
     assert report["unobserved"] == ["CO:mobile"]
 
 
+def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():
+    """Brazil national sat in the catalog at $10.00 since July. The account
+    listing offers only local numbers, and the Pricing API prices only local.
+    A type with neither stock nor price is observed gone. A type the Pricing
+    API still prices (Ireland mobile here) stays unobserved."""
+    countries = [
+        {"country_code": "BR", "country": "Brazil"},
+        {"country_code": "IE", "country": "Ireland"},
+    ]
+    types = {"BR": ["local"], "IE": ["local"]}
+    pricing = {
+        "BR": {
+            "phone_number_prices": [{"number_type": "local", "current_price": "4.25"}]
+        },
+        "IE": {
+            "phone_number_prices": [
+                {"number_type": "local", "current_price": "1.80"},
+                {"number_type": "mobile", "current_price": "6.50"},
+            ]
+        },
+    }
+    keys = sync.twilio_observed_keys(countries, types, pricing=pricing)
+    assert {"BR:local", "BR:mobile", "BR:toll_free", "BR:national"} <= keys
+    assert "IE:mobile" not in keys
+    assert "IE:local" in keys
+
+
 def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
     """Bulgaria sat in the catalog at $3.00 since July while Twilio sold no
     Bulgarian number: absent from the account listing, and the Pricing API
@@ -719,8 +746,12 @@ def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
         FakeHttp(), "AC1", {"GB": "44"}, catalog_countries={"GB", "BG", "UG"}
     )
     assert rows == [] and skipped == ["GB:local: no numbers offered to this account"]
+    # GB lists and prices only local, so its other types are observed gone.
     assert observed == {
         "GB:local",
+        "GB:mobile",
+        "GB:toll_free",
+        "GB:national",
         "BG:local",
         "BG:mobile",
         "BG:toll_free",
