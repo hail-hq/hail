@@ -11,6 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
 
