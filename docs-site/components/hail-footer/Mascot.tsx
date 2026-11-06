@@ -3,7 +3,7 @@ import styles from "./Mascot.module.css";
 /** The Hail bird as inline SVG, so CSS can blink its eye and nod it when the
  * link around it is hovered. One component for the header, the footer, and
  * every page; the sync scripts copy it to the costs and docs apps. Mirrors
- * the `hail-messenger.svg` brand file; keep the two in step. Decorative:
+ * the `bird.svg` brand file; keep the two in step. Decorative:
  * hidden from assistive technology unless `title` is given. */
 export function Mascot({
   size = 32,
