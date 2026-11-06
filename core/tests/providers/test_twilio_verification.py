@@ -422,6 +422,22 @@ async def test_create_draft_evaluation_400_becomes_a_problem(provider) -> None:
 
 
 @responses.activate
+async def test_check_evaluation_400_becomes_a_problem(provider) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is missing items", "status": 400},
+        status=400,
+    )
+
+    problems = await provider.check({"bundle_sid": f"BU{'1' * 32}"})
+
+    assert [(p.field, p.message, p.raw) for p in problems] == [
+        ("", NOT_ACCEPTED, "Unable to create record: Bundle is missing items")
+    ]
+
+
+@responses.activate
 async def test_create_draft_carrier_400_becomes_a_problem(provider) -> None:
     req = await _person_requirements(provider)
     responses.add(responses.POST, ADDRESSES, json={"sid": "AD" + "1" * 32}, status=201)

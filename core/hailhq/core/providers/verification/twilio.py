@@ -394,18 +394,6 @@ class TwilioVerificationProvider(VerificationProvider):
             problems = self._evaluate(refs)
         except TwilioRestException as exc:
             self._discard_sync(refs)
-            if exc.status == 400:
-                # Twilio refused to check the bundle: a refusal of the
-                # details, not an outage. Say so, and keep its reason.
-                logger.warning(
-                    "Twilio refused the bundle check (code %s): %s",
-                    exc.code,
-                    exc.msg,
-                )
-                return DraftResult(
-                    refs={},
-                    problems=[Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)],
-                )
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
             self._discard_sync(refs)
@@ -438,7 +426,17 @@ class TwilioVerificationProvider(VerificationProvider):
     # -- check / submit / status ------------------------------------------
 
     def _evaluate(self, refs: dict) -> list[Problem]:
-        ev = self._rc.bundles(refs["bundle_sid"]).evaluations.create()
+        try:
+            ev = self._rc.bundles(refs["bundle_sid"]).evaluations.create()
+        except TwilioRestException as exc:
+            if exc.status != 400:
+                raise
+            # Twilio refused to check the bundle: a refusal of the
+            # details, not an outage. Say so, and keep its reason.
+            logger.warning(
+                "Twilio refused the bundle check (code %s): %s", exc.code, exc.msg
+            )
+            return [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]
         if ev.status == "compliant":
             return []
         slots: dict[str, str] = refs.get("slots", {})
