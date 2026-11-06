@@ -346,25 +346,38 @@ class TwilioVerificationProvider(VerificationProvider):
             )
             refs["end_user_sid"] = end_user.sid
 
+            # Twilio refuses to evaluate a bundle holding two documents of one
+            # type (South Africa: name and ID number both take a
+            # government-issued document). Slots that pick the same type
+            # become one document carrying every slot's values.
+            merged: dict[str, dict] = {}
             for slot in requirements.documents:
                 doc = documents.get(slot.name)
                 if doc is None and not slot.options:
                     continue
                 option = pick_option(slot, doc) if doc else slot.options[0]
                 assert option is not None  # validated in validate_input
-                attrs: dict = {k: clean[k] for k in option.copies if k in clean}
+                entry = merged.setdefault(
+                    option.key,
+                    {"slot": slot.name, "attrs": {}, "doc": None, "file": False},
+                )
+                attrs = entry["attrs"]
+                attrs.update({k: clean[k] for k in option.copies if k in clean})
                 if option.needs_address and refs.get("address_sid"):
                     attrs["address_sids"] = [refs["address_sid"]]
                 if doc:
                     attrs.update(
                         {k: v.strip() for k, v in doc.fields.items() if v.strip()}
                     )
-                name = f"hail-{organization_id}-{slot.name}"
-                if option.file_required and doc and doc.file:
-                    sid = self._upload(name, option.key, attrs, doc)
+                if option.file_required and doc and doc.file and not entry["file"]:
+                    entry["doc"], entry["file"] = doc, True
+            for key, entry in merged.items():
+                name = f"hail-{organization_id}-{entry['slot']}"
+                if entry["file"]:
+                    sid = self._upload(name, key, entry["attrs"], entry["doc"])
                 else:
                     sid = self._rc.supporting_documents.create(
-                        friendly_name=name, type=option.key, attributes=attrs
+                        friendly_name=name, type=key, attributes=entry["attrs"]
                     ).sid
                 refs["document_sids"].append(sid)
 
