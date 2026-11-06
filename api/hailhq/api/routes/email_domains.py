@@ -957,29 +957,20 @@ async def patch_email_domain(
 
     await db.refresh(sd)
     actor_user_id, actor_kind = actor_of(principal)
+    audit_payload: dict[str, Any] = {"domain": sd.domain}
+    if "email_agent_id" in updates:
+        audit_payload["email_agent_id"] = (
+            str(sd.email_agent_id) if sd.email_agent_id else None
+        )
+    if "email_agent_scope" in updates:
+        audit_payload["email_agent_scope"] = sd.email_agent_scope
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
         action="email_domain.patch",
         resource_type="email_domain",
         resource_id=sd.id,
-        payload={
-            "domain": sd.domain,
-            **(
-                {
-                    "email_agent_id": (
-                        str(sd.email_agent_id) if sd.email_agent_id else None
-                    )
-                }
-                if "email_agent_id" in updates
-                else {}
-            ),
-            **(
-                {"email_agent_scope": sd.email_agent_scope}
-                if "email_agent_scope" in updates
-                else {}
-            ),
-        },
+        payload=audit_payload,
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )

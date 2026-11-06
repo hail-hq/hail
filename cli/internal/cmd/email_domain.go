@@ -355,10 +355,6 @@ func runEmailDomainDelete(ctx context.Context, opts *Options, id uuid.UUID) erro
 }
 
 // --------------------------------------------------------------------------- //
-// printers
-// --------------------------------------------------------------------------- //
-
-// --------------------------------------------------------------------------- //
 // route
 // --------------------------------------------------------------------------- //
 
@@ -434,6 +430,10 @@ func runEmailDomainRoute(ctx context.Context, opts *Options, id uuid.UUID, body 
 	}
 	return printEmailDomain(opts, resp.JSON200)
 }
+
+// --------------------------------------------------------------------------- //
+// printers
+// --------------------------------------------------------------------------- //
 
 func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 	if opts.JSON {
