@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findStale, rowsForFile } from './check-stale.mjs';
+import { buildReport, findEndedPromos, findStale, rowsForFile } from './check-stale.mjs';
 
 const today = new Date('2026-05-05T00:00:00Z');
 
@@ -49,4 +49,40 @@ test('rowsForFile flattens telephony across both arrays', () => {
 
 test('rowsForFile throws on an unknown data file', () => {
   assert.throws(() => rowsForFile('mystery.json', { foo: [] }), /unknown costs file/);
+});
+
+test('lists a row the day after its promotion ends', () => {
+  const rows = [{ model_id: 'ended', promo_ends_at: '2026-05-04' }];
+  assert.equal(findEndedPromos(rows, today).length, 1);
+});
+
+test('keeps a row on the last day of its promotion', () => {
+  const rows = [{ model_id: 'last-day', promo_ends_at: '2026-05-05' }];
+  assert.deepEqual(findEndedPromos(rows, today), []);
+});
+
+test('ignores rows with no promotion', () => {
+  assert.deepEqual(findEndedPromos([{ model_id: 'list-price' }], today), []);
+});
+
+test('report is empty when nothing needs a person', () => {
+  const rows = [{ category: 'llm', model_id: 'a', last_verified: '2026-05-01' }];
+  assert.deepEqual(buildReport(rows, 30, today), []);
+});
+
+test('report lists an ended promotion on a fresh row', () => {
+  const rows = [{ category: 'llm', provider: 'X', model_id: 'a', last_verified: '2026-05-01', promo_ends_at: '2026-05-01' }];
+  const lines = buildReport(rows, 30, today);
+  assert.equal(lines[0], 'Found 1 row(s) with an ended promotion:');
+  assert.equal(lines[2], '- [llm] X / a — promotion ended 2026-05-01');
+});
+
+test('report lists stale rows and ended promotions in separate sections', () => {
+  const rows = [
+    { category: 'llm', provider: 'X', model_id: 'old', last_verified: '2026-03-01' },
+    { category: 'llm', provider: 'X', model_id: 'promo', last_verified: '2026-05-01', promo_ends_at: '2026-05-01' },
+  ];
+  const lines = buildReport(rows, 30, today);
+  assert.equal(lines[0], 'Found 1 stale row(s) (max age: 30 days):');
+  assert.ok(lines.includes('Found 1 row(s) with an ended promotion:'));
 });

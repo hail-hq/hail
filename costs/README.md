@@ -28,6 +28,8 @@ Schemas are served at their `$id` URLs:
 
 Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`; the weekly workflow, secrets, merge rules and PR review steps are in [docs/operations/number-catalog-sync.md](../docs/operations/number-catalog-sync.md). See the JSON Schemas above for the exact shape per category.
 
+Number catalog `usd_per_month` is the base rental. Optional provider-level `capability_monthly_fees` are additional monthly costs for selected capabilities. Each entry applies once when any listed capability is selected; SMS and MMS can share one fee. Keep source and verification fields with the fee. `effective_from` is Hail's prospective start for existing calendar billing periods, not a claimed carrier price-change date. New purchases include the fee immediately. The sync preserves this separately sourced block and never folds it into base rental.
+
 Canonical fetch pattern:
 
 ```bash
@@ -48,9 +50,9 @@ git log -p costs/llm.json | grep -A 5 '"model_id": "claude-opus-4-7"'
 
 ## Currency and units
 
-- All prices are in USD (`currency: "USD"` implicit).
+- Prices are in USD. A vendor that publishes no USD price uses the matching EUR fields instead: `_usd` becomes `_eur` (for example `price_per_minute_eur`), and `usd_per_segment` becomes `eur_per_segment`. A row uses one currency only, and prices are never converted.
 - LLM prices are per 1M tokens (`*_per_mtok_usd`).
-- STT prices are per minute of audio (`price_per_minute_usd`).
+- STT prices are per minute of audio (`price_per_minute_usd`, or `price_per_minute_eur`).
 - TTS prices are per 1M characters of input (`price_per_1m_chars_usd`).
 - Prices are stored as decimal strings — `"0.0048"`, not `0.0048` — to avoid float roundtrip errors. Parse with `Decimal` (Python), `decimal.js` or `big.js` (JS), or any fixed-point library — do not use native `Number` or `parseFloat`.
 
@@ -101,6 +103,7 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 2. Edit the relevant file in this directory (e.g. `llm.json`).
 3. Update `last_verified` to today's date (ISO `YYYY-MM-DD`) — when you last _checked_ the price.
 4. If the price actually changed, also update `last_changed_at` to today's date. Otherwise leave it alone.
+   If the price is promotional, set `promo_ends_at` to its last day. When the promotion ends, record the list price and remove the field.
 5. Set `verified_by` to your GitHub handle.
 6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source).
 7. Update `source_url` if it has changed.
@@ -109,7 +112,7 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 
 ## Refresh cadence
 
-A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
+A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old, and rows whose `promo_ends_at` has passed. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
 
 ## Adding a new provider or model
 

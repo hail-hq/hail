@@ -5,7 +5,7 @@ import type { TTSRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { formatCloning, langs, numOpt, priceRange, usd } from "@/lib/format";
+import { formatCloning, langs, priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<TTSRow>[] = [
   {
@@ -24,10 +24,11 @@ const columns: ColumnDef<TTSRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => numOpt(row.price_per_1m_chars_usd),
-    header: "$/1M chars",
-    cell: ({ row }) => usd(row.original.price_per_1m_chars_usd, 2),
+    accessorFn: (row) => usdSort(row, "price_per_1m_chars_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "$/1M chars", "Price/1M chars"),
+    cell: ({ row }) => rowPrice(row.original, "price_per_1m_chars_usd", 2),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
@@ -76,8 +77,9 @@ export function TTSSection({ data }: { data: TTSRow[] }) {
       num="03"
       title="Text to speech"
       count={data.length}
-      rangeLabel={priceRange(
-        data.map((r) => r.price_per_1m_chars_usd),
+      rangeLabel={rowRange(
+        data,
+        "price_per_1m_chars_usd",
         2,
         2,
         "1M chars",

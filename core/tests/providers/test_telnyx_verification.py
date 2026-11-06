@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -306,6 +308,8 @@ async def test_business_only_file_means_only_a_business_can_buy() -> None:
         ({"name": "Legal Rep Address (Legal Entity Only)"}, ("business",)),
         # A business can give its representative's ID.
         ({"name": "ID/Passport Copy (Personal Use Only)"}, ("person", "business")),
+        # An untagged company certificate is still company only.
+        ({"name": "Business Registration Certificate"}, ("business",)),
         (
             {"name": "VAT (For Legal Entities and Sole Proprietorships Only)"},
             ("person", "business"),
@@ -319,6 +323,45 @@ def test_subject_types_for_file_rules(rule, allowed) -> None:
         "person",
         "business",
     )
+
+
+def _live(name: str) -> list[dict]:
+    data = json.loads((FIXTURES / f"telnyx-regulatory-{name}.json").read_text())
+    return data["data"][0]["regulatory_requirements"]
+
+
+@pytest.mark.parametrize(
+    ("cc", "expected"),
+    [
+        ("CH", ("business",)),
+        ("PT", ("business",)),
+        ("ES", ("business", "person")),
+    ],
+)
+def test_subject_types_live_fixtures(cc, expected) -> None:
+    got = subject_types_for(_live(f"{cc}-local"))
+    assert tuple(sorted(got)) == tuple(sorted(expected))
+
+
+def test_se_local_company_only() -> None:
+    assert subject_types_for(_live("SE-local")) == ("business",)
+
+
+def test_se_mobile_unchanged() -> None:
+    got = subject_types_for(_live("SE-mobile"))
+    assert sorted(got) == ["business", "person"]
+
+
+def test_gb_mobile_unchanged() -> None:
+    got = subject_types_for(_live("GB-mobile"))
+    assert sorted(got) == ["business", "person"]
+
+
+async def test_person_form_for_company_only_raises() -> None:
+    payload = json.loads((FIXTURES / "telnyx-regulatory-CH-local.json").read_text())
+    fake = Telnyx(lambda request: httpx.Response(200, json=payload))
+    with pytest.raises(UnsupportedSubjectType):
+        await provider(fake).requirements("CH", "local", "person")
 
 
 async def test_requirements_needed_when_only_other_subject_rules_exist() -> None:
@@ -764,3 +807,49 @@ async def test_create_draft_refuses_a_value_over_the_carrier_limit() -> None:
         (email.name, "Use at most 150 characters.")
     ]
     assert len(fake.calls) == 1  # only the requirements lookup
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "hailhq.core.providers.telnyx",
+        "hailhq.core.requirement_categories",
+        "hailhq.core.providers.sms.telnyx",
+        "hailhq.api.routes.sms_webhooks.telnyx",
+    ],
+)
+def test_module_imports_in_a_fresh_interpreter(module) -> None:
+    done = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+
+
+async def test_requirements_from_rules_makes_no_request() -> None:
+    fake = Telnyx(rules_answer("mobile"))
+    p = provider(fake)
+    rules = await p.rules("SE", "mobile")
+    person = p.requirements_from_rules("SE", "mobile", "person", rules)
+    business = p.requirements_from_rules("SE", "mobile", "business", rules)
+    assert len(fake.calls) == 1
+    assert person == await p.requirements("SE", "mobile", "person")
+    assert business.subject_type == "business"
+
+
+async def test_rules_outage_is_a_provider_error() -> None:
+    def down(request):
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(VerificationProviderError):
+        await provider(Telnyx(down)).rules("SE", "mobile")
+
+
+async def test_not_for_outage_is_a_provider_error() -> None:
+    def down(request):
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(VerificationProviderError):
+        await provider(Telnyx(down))._not_for("SE", "mobile", "person")

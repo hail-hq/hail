@@ -16,6 +16,7 @@ from hailhq.core.providers.telnyx import (
 )
 from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
 from hailhq.core.schemas import NumberType
+from hailhq.core.telephony_catalog import monthly_price
 from pydantic import BaseModel, Field
 
 
@@ -271,7 +272,7 @@ async def telnyx_offers(
                 country_code=country,
                 number_type=kind,
                 capabilities=sorted(set(q.capabilities) & set(capabilities) & routable),
-                monthly_cents=monthly_cents,
+                **monthly_price("telnyx", monthly_cents, capabilities),
                 setup_cents=cents(q.upfront_cost),
                 readiness=(
                     "ready" if not requirements or group else "verification_required"

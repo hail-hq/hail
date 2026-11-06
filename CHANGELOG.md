@@ -7,9 +7,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Email agents: route an address to an agent, and it answers inbound mail in the thread.
+- New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
+- `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 
 ### Fixed
 
+- Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
 
 ## [0.32.0] (2026-10-30)

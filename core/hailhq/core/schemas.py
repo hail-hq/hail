@@ -363,6 +363,7 @@ TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
 
 
 NumberType = Literal["local", "mobile", "toll_free", "national"]
+Capability = Literal["voice", "sms"]
 
 
 class CallResponse(BaseModel):
@@ -671,7 +672,7 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         description="Restrict number type; omit to compare all supported types.",
     )
-    capabilities: list[Literal["voice", "sms"]] = Field(
+    capabilities: list[Capability] = Field(
         min_length=1,
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
@@ -696,6 +697,10 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         pattern=r"^[A-Za-z]{2}$",
         description="Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.",
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description="Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.",
     )
 
     @field_validator("country_code")

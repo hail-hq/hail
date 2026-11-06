@@ -33,6 +33,7 @@ TELNYX_API_KEY, DIDWW_API_KEY.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -671,11 +672,33 @@ def merge(
     source_url: str,
     verified_by: str,
     unobserved: set[str] | frozenset[str] = frozenset(),
+    kept_rows: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Overlay fetched rows on the current catalog. Returns (numbers, report).
 
     ``unobserved`` names the keys the sync skipped this run; their rows are
-    kept as they are instead of being marked vanished."""
+    kept as they are instead of being marked vanished.
+
+    ``kept_rows`` holds copies of unobserved rows whose ``requirements`` were
+    refreshed by attach_requirements; only that field is taken from them."""
+    fresh_by_key = {
+        f"{n['country_code']}:{n['number_type']}": n for n in kept_rows or []
+    }
+
+    def refreshed(key: str, row: dict) -> dict:
+        how = (
+            "hand-verified row"
+            if row.get("verification_method") == "manual-confirmed"
+            else "not observed"
+        )
+        fresh = fresh_by_key.get(key)
+        if fresh is None or fresh.get("requirements") == row.get("requirements"):
+            return row
+        report["changed"].append(
+            _refreshed_line(key, how, row.get("requirements"), fresh["requirements"])
+        )
+        return {**row, "requirements": fresh["requirements"], "last_changed_at": today}
+
     prev_by_key = {f"{n['country_code']}:{n['number_type']}": n for n in existing}
     report: dict[str, list[str]] = {
         "kept": [],
@@ -694,6 +717,7 @@ def merge(
         "available",
         "receive_only",
         "by_request",
+        "requirements",
     )
     seen = set()
     numbers = []
@@ -705,12 +729,36 @@ def merge(
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
         if prev and prev.get("verification_method") == "manual-confirmed":
-            diff = [f"{k}={n.get(k)}" for k in watched if prev.get(k) != n.get(k)]
+            diff = [
+                f"{k}={n.get(k)}"
+                for k in watched
+                if k != "requirements" and prev.get(k) != n.get(k)
+            ]
+            fresh = n.get("requirements")
+            old_block = prev.get("requirements")
+            # A failed fetch copied the previous block into ``n`` in
+            # attach_requirements, so None here means the carrier lists no
+            # verification for this row. The hand-verified block stays.
+            block = fresh if fresh is not None else old_block
+            dropped = (
+                fresh is None
+                and old_block is not None
+                and bool(prev.get("verification_required"))
+                and not n.get("verification_required")
+            )
             if diff:
-                report["kept"].append(
-                    f"{key}: carrier says {', '.join(diff)}; kept {prev['verified_by']} {prev['last_verified']}"
+                line = f"{key}: carrier says {', '.join(diff)}; "
+                line += f"kept {prev['verified_by']} {prev['last_verified']}"
+                if dropped:
+                    line += " (hand-verified requirements block kept)"
+                report["kept"].append(line)
+            kept = {**prev, "requirements": block}
+            if old_block != block:
+                report["changed"].append(
+                    _refreshed_line(key, "hand-verified row", old_block, block)
                 )
-            numbers.append(prev)
+                kept["last_changed_at"] = today
+            numbers.append(kept)
             continue
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if prev is None:
@@ -720,7 +768,7 @@ def merge(
         elif changed:
             report["changed"].append(
                 f"{key}: "
-                + ", ".join(f"{k} {prev.get(k)} -> {n.get(k)}" for k in changed)
+                + ", ".join(_change(k, prev.get(k), n.get(k)) for k in changed)
             )
         numbers.append(
             {
@@ -739,7 +787,7 @@ def merge(
             continue
         if key in unobserved:
             report["unobserved"].append(key)
-            numbers.append(prev)
+            numbers.append(refreshed(key, prev))
             continue
         if prev.get("verification_method") == "manual-confirmed":
             # A person vouched for this row; only a person takes it off sale.
@@ -797,6 +845,8 @@ def write_catalog(path: Path, provider: str, numbers: list[dict]) -> dict:
         "provider": provider,
         "numbers": numbers,
     }
+    if "capability_monthly_fees" in existing:
+        out["capability_monthly_fees"] = existing["capability_monthly_fees"]
     if existing.get("a2p_10dlc"):
         out["a2p_10dlc"] = existing["a2p_10dlc"]
     out["regulatory"] = regulatory_block(existing, numbers, provider)
@@ -817,6 +867,288 @@ SOURCE_URLS = {
 }
 
 
+# -- Requirements ---------------------------------------------------------------
+
+SUBJECTS = ("person", "business")
+_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+class VerificationUnavailable(RuntimeError):
+    """A carrier has rows that need verification but no verification plug-in
+    is configured. The run skips that carrier and leaves its catalog file
+    unchanged: empty blocks must never be written."""
+
+
+def _run(coro: Any) -> Any:
+    """Run a plug-in coroutine on one loop for the whole run. The plug-ins
+    keep HTTP clients that a second, new loop would break."""
+    global _LOOP
+    if _LOOP is None or _LOOP.is_closed():
+        _LOOP = asyncio.new_event_loop()
+    return _LOOP.run_until_complete(coro)
+
+
+def _verification_provider(provider: str) -> Any:
+    # Imported here: the rest of this script needs only `requests`.
+    from hailhq.core.providers import verification
+
+    plugin = verification.get_verification_provider(provider)
+    if plugin is None:
+        raise VerificationUnavailable(
+            f"no verification plug-in for {provider}: its credentials are missing "
+            "or the plug-in cannot start"
+        )
+    return plugin
+
+
+def _union(lists: list[list[Any]]) -> list[Any]:
+    """Every item of every list once: known categories in the fixed catalog
+    order, then ``{other}`` items in the order they appear."""
+    from hailhq.core.requirement_categories import LABELS
+
+    keys = {i for items in lists for i in items if isinstance(i, str)}
+    others: list[dict[str, str]] = []
+    for items in lists:
+        for i in items:
+            if isinstance(i, dict) and i not in others:
+                others.append(i)
+    return [k for k in LABELS if k in keys] + others
+
+
+def fetch_requirements(provider: str, country_code: str, number_type: str) -> dict:
+    """The requirements block for one (country, type) at one carrier: for each
+    kind of buyer, whether it may buy and which paper categories it needs.
+    A kind the carrier refuses gives ``{"accepted": False, "items": []}``.
+    DIDWW lists one requirement per DID group; the items are their union."""
+    from hailhq.core.requirement_categories import classify
+
+    plugin = _verification_provider(provider)
+    rules = None
+    if provider == "telnyx":
+        # The raw rules tell an address in the number's area from one in
+        # the country; `requirements` alone does not. Fetched once here and
+        # reused for both kinds of buyer.
+        rules = _run(plugin.rules(country_code, number_type))
+    return _requirements_block(
+        plugin, provider, country_code, number_type, rules, classify
+    )
+
+
+def _requirements_block(
+    plugin: Any,
+    provider: str,
+    country_code: str,
+    number_type: str,
+    rules: list[dict] | None,
+    classify: Any,
+) -> dict:
+    from hailhq.core.providers.verification import UnsupportedSubjectType
+
+    block: dict[str, dict] = {}
+    for subject in SUBJECTS:
+        try:
+            if provider == "didww":
+                found = _run(
+                    plugin.requirements_per_group(country_code, number_type, subject)
+                )
+                if not found:
+                    # The caller only asks for rows marked verification_required.
+                    # No group at all contradicts that: an error, so the sync
+                    # keeps the last good block.
+                    raise RequirementsUnavailable(
+                        f"DIDWW lists no requirement group for {country_code} "
+                        f"{number_type}"
+                    )
+            elif provider == "telnyx":
+                # Telnyx is the only carrier whose rules are a separate fetch.
+                found = [
+                    plugin.requirements_from_rules(
+                        country_code, number_type, subject, rules
+                    )
+                ]
+            else:
+                found = [_run(plugin.requirements(country_code, number_type, subject))]
+        except UnsupportedSubjectType:
+            block[subject] = {"accepted": False, "items": []}
+            continue
+        block[subject] = {
+            "accepted": True,
+            "items": _union([classify(r, provider, rules=rules) for r in found]),
+        }
+    return block
+
+
+class RequirementsUnavailable(Exception):
+    """A requirements fetch that failed for a reason this script states. Its
+    message is written here, so it is safe for the public PR body."""
+
+
+def _error_detail(exc: Exception) -> str:
+    """What a failed fetch shows in the public PR body. Never the carrier's
+    text: it can hold URLs, account ids and request bodies. Our own
+    ``RequirementsUnavailable`` message, or the class name plus the HTTP
+    status when the error carries one."""
+    if isinstance(exc, RequirementsUnavailable):
+        return str(exc)[:160]
+    import httpx  # the verification plug-ins need it; the rest of this file does not
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        status = None
+        if isinstance(cur, httpx.HTTPStatusError):
+            status = cur.response.status_code
+        elif cur.__class__.__name__ == "TwilioRestException":
+            status = getattr(cur, "status", None)
+        if isinstance(status, int):
+            return f"{exc.__class__.__name__} (HTTP {status})"
+        if cur.__cause__ is not None:
+            cur = cur.__cause__
+        elif not cur.__suppress_context__:
+            cur = cur.__context__
+        else:
+            cur = None
+    return exc.__class__.__name__
+
+
+def _change(key: str, old: Any, new: Any) -> str:
+    """One changed field of a carrier row, for the "Changed" section. A
+    requirements block is summarized, not printed whole."""
+    if key == "requirements":
+        return f"requirements {_block_summary(old)} -> {_block_summary(new)}"
+    return f"{key} {old} -> {new}"
+
+
+SUMMARY_LIMIT = 60_000  # GitHub allows 65,536 characters in a PR body
+SUMMARY_CUT = "… summary cut at 60,000 characters. See the file diff for every row.\n"
+
+
+def _cap_summary(text: str) -> str:
+    """Cut at the last full line under the limit, with a note."""
+    if len(text) <= SUMMARY_LIMIT:
+        return text
+    cut = text[:SUMMARY_LIMIT].rsplit("\n", 1)[0]
+    return cut + "\n" + SUMMARY_CUT
+
+
+def _block_summary(block: dict | None) -> str:
+    if not block:
+        return "none"
+    parts = []
+    for subject in SUBJECTS:
+        side = block.get(subject) or {}
+        if not side.get("accepted"):
+            parts.append(f"{subject} not allowed")
+            continue
+        keys = []
+        for i in side.get("items", []):
+            if isinstance(i, str):
+                keys.append(i)
+            elif isinstance(i, dict):
+                keys.append(f"other: {str(i.get('other', ''))[:40]}")
+            else:
+                keys.append("other")
+        parts.append(f"{subject} {'; '.join(keys) or 'no papers'}")
+    extra = [str(k) for k in block if k not in SUBJECTS]
+    if extra:
+        parts.append(f"also keys {', '.join(extra)}")
+    return " | ".join(parts)
+
+
+def _refreshed_line(key: str, how: str, old: dict | None, new: dict | None) -> str:
+    return (
+        f"{key} ({how}, only requirements refreshed): "
+        f"{_block_summary(old)} -> {_block_summary(new)}"
+    )
+
+
+def _fetch_block(
+    provider: str, row: dict, previous: dict | None, report: list[str]
+) -> dict | None:
+    """The carrier's block for one row. On any error the previous block is
+    returned and one line goes to ``report``."""
+    key = f"{row['country_code']}:{row['number_type']}"
+    try:
+        block = fetch_requirements(provider, row["country_code"], row["number_type"])
+        return block
+    except Exception as exc:  # one bad row must not stop the run
+        detail = _error_detail(exc)
+        # The logs are public: only what the PR summary shows.
+        print(f"requirements failed for {provider} {key}: {detail}", file=sys.stderr)
+        kept = "kept the last block" if previous else "no block stored"
+        report.append(f"{key}: requirements failed ({detail}), {kept}")
+        return previous
+
+
+def attach_requirements(
+    provider: str,
+    rows: list[dict],
+    existing: list[dict],
+    report: list[str],
+    kept_rows: list[dict] | None = None,
+) -> None:
+    """Set ``requirements`` on each fetched row. A row that needs verification
+    gets the carrier's block; on a carrier error it keeps the block of the
+    current catalog (None when there is none) and the error goes to
+    ``report``. Any other row gets None.
+
+    ``kept_rows`` are copies of catalog rows the fetch did not see but that
+    are still sold. Their block is refreshed in the same pass. They never
+    make the carrier fail: with no verification plug-in they stay as they are."""
+    needing = [r for r in rows if r["verification_required"]]
+    if needing:
+        _verification_provider(
+            provider
+        )  # raises VerificationUnavailable before any row is written; main() skips the carrier
+    kept_needing = list(kept_rows or [])
+    if kept_needing and not needing:
+        try:
+            _verification_provider(provider)
+        except VerificationUnavailable:
+            report.append(
+                f"{provider}: {len(kept_needing)} rows not observed this run kept "
+                "their papers: verification is not configured"
+            )
+            kept_needing = []
+    previous = {
+        f"{n['country_code']}:{n['number_type']}": n.get("requirements")
+        for n in existing
+    }
+    for row in rows:
+        row["requirements"] = None
+        if row["verification_required"]:
+            key = f"{row['country_code']}:{row['number_type']}"
+            row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
+    for row in kept_needing:
+        key = f"{row['country_code']}:{row['number_type']}"
+        row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
+
+
+def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:
+    """A PR-summary section: the first ``cap`` lines, then "… N more"."""
+    if not lines:
+        return
+    summary.append(f"### {label} ({len(lines)})")
+    summary.extend(f"- {line}" for line in lines[:cap])
+    if len(lines) > cap:
+        summary.append(f"- … {len(lines) - cap} more")
+
+
+def _row_sections(summary: list[str], report: dict[str, list[str]]) -> None:
+    """Every row change, uncapped: the reviewer must see them all."""
+    for label, key in (
+        ("Kept hand-verified rows", "kept"),
+        ("Changed", "changed"),
+        ("Added", "added"),
+        ("No longer offered (kept, noted)", "vanished"),
+        ("Not observed this run (kept as is)", "unobserved"),
+    ):
+        if report[key]:
+            summary.append(f"### {label} ({len(report[key])})")
+            summary.extend(f"- {line}" for line in report[key])
+
+
 def run_provider(
     provider: str,
     config: dict[str, str],
@@ -825,12 +1157,16 @@ def run_provider(
     summary: list[str],
     shared_dial_codes: dict[str, str] | None = None,
     http_factory: Callable[[requests.Session], Http] = Http,
+    *,
+    not_synced: list[str],
 ) -> bool:
     """``shared_dial_codes`` is one dict for the whole run: DIDWW's country
     list fills it (every country, not only the ones it sells), and the
     carriers after it borrow prefixes for rows no catalog has seen yet."""
     if shared_dial_codes is None:
         shared_dial_codes = {}
+    # A carrier skipped for missing credentials goes to ``not_synced`` with
+    # the failures. main() prints each entry as a bullet.
     path = costs_dir / f"{provider}.json"
     existing = load_existing(path)
     dial_codes = {n["country_code"]: n["dial_code"] for n in existing}
@@ -844,8 +1180,8 @@ def run_provider(
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
-            summary.append(
-                "- twilio: skipped, TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
+            not_synced.append(
+                "twilio: skipped, TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
             )
             return False
         session.auth = (sid, tok)
@@ -858,14 +1194,14 @@ def run_provider(
     elif provider == "telnyx":
         key = config.get("TELNYX_API_KEY")
         if not key:
-            summary.append("- telnyx: skipped, TELNYX_API_KEY not set")
+            not_synced.append("telnyx: skipped, TELNYX_API_KEY not set")
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
-            summary.append("- didww: skipped, DIDWW_API_KEY not set")
+            not_synced.append("didww: skipped, DIDWW_API_KEY not set")
             return False
         session.headers.update({"Api-Key": key, "Accept": "application/vnd.api+json"})
         rows, skipped, didww_dial_codes = fetch_didww(http_factory(session))
@@ -881,6 +1217,19 @@ def run_provider(
         raise CatalogShrunk(
             f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
+    requirement_errors: list[str] = []
+    # Rows still sold but not seen this run (a skip with a reason). Rows the
+    # carrier dropped, or a country the sync could not look at, are not
+    # refreshed: their papers say nothing about a number anyone can buy.
+    fetched_keys = {f"{r['country_code']}:{r['number_type']}" for r in rows}
+    sold_unseen = skipped_keys(skipped) - fetched_keys
+    kept_rows = [
+        dict(n)
+        for n in existing
+        if f"{n['country_code']}:{n['number_type']}" in sold_unseen
+        and n.get("verification_required")
+    ]
+    attach_requirements(provider, rows, existing, requirement_errors, kept_rows)
     numbers, report = merge(
         existing,
         rows,
@@ -888,24 +1237,13 @@ def run_provider(
         SOURCE_URLS[provider],
         f"{provider}-api-sync",
         unobserved=unobserved_keys(existing, skipped, observed),
+        kept_rows=kept_rows,
     )
     write_catalog(path, provider, numbers)
     summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
-    for label, key in (
-        ("Kept hand-verified rows", "kept"),
-        ("Changed", "changed"),
-        ("Added", "added"),
-        ("No longer offered (kept, noted)", "vanished"),
-        ("Not observed this run (kept as is)", "unobserved"),
-    ):
-        if report[key]:
-            summary.append(f"### {label} ({len(report[key])})")
-            summary.extend(f"- {line}" for line in report[key])
-    if skipped:
-        summary.append(f"### Skipped by the sync ({len(skipped)})")
-        summary.extend(f"- {line}" for line in skipped[:60])
-        if len(skipped) > 60:
-            summary.append(f"- … {len(skipped) - 60} more")
+    _row_sections(summary, report)
+    _section(summary, "Requirements not refreshed", requirement_errors)
+    _section(summary, "Skipped by the sync", skipped)
     return True
 
 
@@ -927,22 +1265,43 @@ def main(argv: list[str] | None = None) -> int:
         config.update({k: v for k, v in dotenv_values(args.env_file).items() if v})
     config.update({k: v for k, v in os.environ.items() if v})
     today = datetime.now(tz=timezone.utc).date().isoformat()
-    summary: list[str] = [f"# Number catalog sync {today}", ""]
+    header = [f"# Number catalog sync {today}", ""]
+    body: list[str] = []
     providers = PROVIDERS if args.provider == "all" else (args.provider,)
     ran = 0
     shared_dial_codes: dict[str, str] = {}
+    not_synced: list[str] = []
     for provider in providers:
         try:
             ran += run_provider(
-                provider, config, args.costs_dir, today, summary, shared_dial_codes
+                provider,
+                config,
+                args.costs_dir,
+                today,
+                body,
+                shared_dial_codes,
+                not_synced=not_synced,
             )
         except requests.RequestException as exc:
-            summary.append(
-                f"- {provider}: failed, {exc.__class__.__name__} {getattr(exc.response, 'status_code', '')} (catalog left unchanged)"
+            not_synced.append(
+                f"{provider}: failed, {exc.__class__.__name__} {getattr(exc.response, 'status_code', '')} (catalog left unchanged)"
             )
         except CatalogShrunk as exc:
-            summary.append(f"- {provider}: failed, {exc} (catalog left unchanged)")
-    text = "\n".join(summary) + "\n"
+            not_synced.append(f"{provider}: failed, {exc} (catalog left unchanged)")
+        except VerificationUnavailable:
+            # Raised before any write: the provider's file stays as it was.
+            not_synced.append(
+                f"{provider}: failed, verification is not configured "
+                "(check the carrier credentials) (catalog left unchanged)"
+            )
+    # Carriers not synced come first, so the reviewer sees them before the rest.
+    top = (
+        ["## Carriers not synced", *(f"- {line}" for line in not_synced), ""]
+        if not_synced
+        else []
+    )
+    summary = header + top + body
+    text = _cap_summary("\n".join(summary) + "\n")
     print(text)
     if args.summary_file:
         args.summary_file.write_text(text)
