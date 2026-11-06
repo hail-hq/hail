@@ -62,7 +62,9 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 3. A row the carrier lists again is rebuilt from the carrier: `available: true`, and its notes are only the ones the sync writes. Older notes, hand-written ones included, are dropped.
 4. A row is marked gone only when the carrier's list covered that country and number type and the row was missing from it. When the carrier lists the type but has no numbers for sale, rule 4a applies. In every other case the row is left exactly as it was and listed under **unobserved**: no price, no dial code, Twilio stock the account cannot see (`no numbers offered to this account`), or a country the sync account cannot see. Not seeing stock is not the same as the carrier dropping the type.
    4a. DIDWW out of stock. DIDWW still shows the price and features of its empty areas, so the type is read from them, as rule 7 reads areas with stock. The row is merged like any synced row (rule 6), with these differences. Listed under **Listed with no numbers in stock**.
-      - It gets the note `carrier lists this type but had no numbers in stock at the last check`. An older sync-written price-range note is replaced.
+      - Its notes are rebuilt as for any synced row (rule 3), plus the note `carrier lists this type but had no numbers in stock at the last check`.
+      - A type new to the catalog is not added until it is in stock.
+      - These rows do not count toward the 40-country floor (rule 5).
       - A row that had vanished stays exactly as it vanished. Only `last_verified` moves, and its papers are not fetched.
       - The next run that sees stock rebuilds the row without the note.
       - A type with no price on any group (`listed, no price on any group`), or with an area on sale that has no price (`listed, an area on sale has no price`), stays **unobserved**.

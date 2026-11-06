@@ -864,7 +864,12 @@ def merge(
                 kept["last_changed_at"] = today
             numbers.append(kept)
             continue
-        if no_stock and prev and not prev.get("available", True):
+        if no_stock and prev is None:
+            # A type the catalog never had, with nothing to buy: not added
+            # until the carrier has a number for sale.
+            report["no_stock"].append(f"{key}: new, not added until in stock")
+            continue
+        if no_stock and not prev.get("available", True):
             # Vanished, now listed with nothing to buy: still not on sale.
             # It stays exactly as it vanished, so held numbers keep their
             # price; only the check date moves, as on the vanished path.
@@ -872,25 +877,17 @@ def merge(
             numbers.append({**prev, "last_verified": today})
             continue
         if no_stock:
-            own = _own_notes(prev.get("notes")) if prev else []
-            n["notes"] = "; ".join(filter(None, [*own, n.get("notes"), _NO_STOCK_NOTE]))
+            # Notes are rebuilt like any synced row's (rule 3), plus this one.
+            n["notes"] = "; ".join(filter(None, [n.get("notes"), _NO_STOCK_NOTE]))
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
         if no_stock:
-            report["no_stock"].append(
-                f"{key}: "
-                + ", ".join(_change(k, (prev or {}).get(k), n.get(k)) for k in changed)
-                if changed
-                else key
-            )
+            report["no_stock"].append(_change_line(key, prev, n, changed))
         elif prev is None:
             report["added"].append(
                 f"{key}: {n['usd_per_month']} voice={n['voice']} sms={n['sms']} verify={n['verification_required']}"
             )
         elif changed:
-            report["changed"].append(
-                f"{key}: "
-                + ", ".join(_change(k, prev.get(k), n.get(k)) for k in changed)
-            )
+            report["changed"].append(_change_line(key, prev, n, changed))
         numbers.append(
             {
                 **n,
@@ -927,7 +924,7 @@ def merge(
             # a human confirmed it and must outlive the carrier's feed.
             kept["notes"] = "; ".join(
                 [
-                    *_own_notes(kept.get("notes"), keep_ranges=True),
+                    *_own_notes(kept.get("notes")),
                     _VANISHED_NOTE.format(today=today),
                 ]
             )
@@ -943,25 +940,26 @@ _VANISHED_NOTE = (
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
 
 
-def _own_notes(notes: str | None, keep_ranges: bool = False) -> list[str]:
-    """The parts of a row's notes that the sync did not write. The vanished,
-    no-stock and price-range notes are written again on each run; other
-    notes stay. ``keep_ranges`` keeps a price-range note: a vanished row
-    keeps the notes it had (rule 2)."""
+def _own_notes(notes: str | None) -> list[str]:
+    """A row's notes without the vanished and no-stock notes, which the sync
+    writes again on each run. Every other note stays (rule 2)."""
     rest = _VANISHED_NOTE_RE.sub("", notes or "")
     return [
         part
         for part in rest.split("; ")
-        if part.strip()
-        and not part.startswith(_NO_STOCK_NOTE)
-        and (keep_ranges or not _PRICE_RANGE_NOTE_RE.fullmatch(part))
+        if part.strip() and not part.startswith(_NO_STOCK_NOTE)
     ]
 
 
-_PRICE_RANGE_NOTE_RE = re.compile(
-    r"monthly price varies by (area|number): [\d.]+ to [\d.]+ USD"
-    r" (across \d+ areas|in a sample of \d+)"
-)
+def _change_line(key: str, prev: dict | None, new: dict, changed: list[str]) -> str:
+    """One summary line: the key, then each watched field that changed."""
+    if not changed:
+        return key
+    return f"{key}: " + ", ".join(
+        _change(k, (prev or {}).get(k), new.get(k)) for k in changed
+    )
+
+
 _VANISHED_NOTE_RE = re.compile(
     re.escape(_VANISHED_NOTE).replace(re.escape("{today}"), r"\d{4}-\d{2}-\d{2}")
 )
@@ -1362,7 +1360,9 @@ def run_provider(
             f"{r['country_code']}:{r['number_type']}: no dial code known; add one by hand"
         )
     rows = [r for r in rows if r["dial_code"]]
-    countries = {r["country_code"] for r in rows}
+    # Rows read with no stock do not count: a stock fault at the carrier
+    # must not pass the shrink guard.
+    countries = {r["country_code"] for r in rows if not r.get(NO_STOCK)}
     if len(countries) < COUNTRY_FLOOR and existing:
         raise CatalogShrunk(
             f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
@@ -1385,6 +1385,7 @@ def run_provider(
         f"{n['country_code']}:{n['number_type']}"
         for n in existing
         if not n.get("available", True)
+        and n.get("verification_method") != "manual-confirmed"
     }
     attach_requirements(
         provider,

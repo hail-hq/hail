@@ -596,12 +596,31 @@ def test_vanish_keeps_a_price_range_note():
     assert gone[0]["notes"].startswith(prev["notes"] + "; not offered")
 
 
-def test_merge_keeps_a_hand_note_that_starts_like_a_sync_note():
-    prev = _no_stock_prev(notes="monthly price varies by city; ask support")
+def test_merge_rebuilds_notes_on_an_out_of_stock_row_like_any_synced_row():
+    prev = _no_stock_prev(notes="ask support for Asuncion")
     numbers, _ = _merge_no_stock([prev])
-    assert numbers[0]["notes"] == (
-        f"monthly price varies by city; ask support; {sync._NO_STOCK_NOTE}"
+    assert numbers[0]["notes"] == sync._NO_STOCK_NOTE
+
+
+def test_merge_does_not_add_a_new_type_with_no_stock():
+    prev = _no_stock_prev()
+    numbers, report = sync.merge(
+        [], [_empty_row(prev)], "2026-11-06", "https://src", "didww-api-sync"
     )
+    assert numbers == [] and report["added"] == []
+    assert report["no_stock"] == ["PY:local: new, not added until in stock"]
+
+
+def test_rows_with_no_stock_do_not_pass_the_shrink_guard(tmp_path, monkeypatch):
+    existing = [_kept_prev("DE", verify=False)]
+    (tmp_path / "didww.json").write_text(json.dumps({"numbers": existing}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    rows = [_empty_row(existing[0])]
+    monkeypatch.setattr(sync, "fetch_didww", lambda *a, **k: (rows, [], {}))
+    with pytest.raises(sync.CatalogShrunk):
+        sync.run_provider(
+            "didww", {"DIDWW_API_KEY": "k"}, tmp_path, "2026-11-04", [], not_synced=[]
+        )
 
 
 def test_merge_drops_an_old_price_range_note_when_nothing_is_on_sale():
