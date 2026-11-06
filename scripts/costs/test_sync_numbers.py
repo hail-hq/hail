@@ -5,6 +5,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 spec = importlib.util.spec_from_file_location(
     "sync_numbers", Path(__file__).with_name("sync_numbers.py")
 )
@@ -664,12 +666,66 @@ def test_didww_out_of_stock_is_not_gone():
     assert report["unobserved"] == ["CO:mobile"]
 
 
+def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():
+    """Brazil national sat in the catalog at $10.00 since July. The account
+    listing offers only local numbers, and the Pricing API prices only local.
+    A type with neither stock nor price is observed gone. A type the Pricing
+    API still prices (mobile in the made-up country ZZ) stays unobserved."""
+    countries = [
+        {"country_code": "BR", "country": "Brazil"},
+        {"country_code": "ZZ", "country": "Testland"},
+    ]
+    types = {"BR": ["local"], "ZZ": ["local"]}
+    pricing = {
+        "BR": {
+            "phone_number_prices": [{"number_type": "local", "current_price": "4.25"}]
+        },
+        "ZZ": {
+            "phone_number_prices": [
+                {"number_type": "local", "current_price": "1.80"},
+                {"number_type": "mobile", "current_price": "6.50"},
+            ]
+        },
+    }
+    keys = sync.twilio_observed_keys(countries, types, pricing=pricing)
+    assert {"BR:local", "BR:mobile", "BR:toll_free", "BR:national"} <= keys
+    assert "ZZ:mobile" not in keys
+    assert "ZZ:local" in keys
+
+    # Through the merge: the gone row is kept, unavailable, with the note.
+    existing = [
+        {
+            "country_code": "BR",
+            "number_type": "national",
+            "usd_per_month": "10.00",
+            "available": True,
+            "last_verified": "2026-07-17",
+            "last_changed_at": "2026-07-17",
+            "verification_method": "carrier-sync",
+            "verified_by": "twilio-sync",
+            "source_url": "https://src",
+        }
+    ]
+    numbers, report = sync.merge(
+        existing,
+        [],
+        "2026-11-06",
+        "https://src",
+        "twilio-sync",
+        unobserved=sync.unobserved_keys(existing, [], keys),
+    )
+    assert report["vanished"] == ["BR:national"]
+    assert numbers[0]["available"] is False
+    assert numbers[0]["last_verified"] == "2026-11-06"
+    assert "not offered by the carrier as of 2026-11-06" in numbers[0]["notes"]
+
+
 def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
     """Bulgaria sat in the catalog at $3.00 since July while Twilio sold no
     Bulgarian number: absent from the account listing, and the Pricing API
     answers with no prices at all. That country is observed gone. A country
-    the Pricing API still prices (Uganda) stays unobserved: the account may
-    only lack it."""
+    the Pricing API still prices (Uganda) keeps its priced types unobserved:
+    the account may only lack them."""
     countries = [{"country_code": "GB", "country": "United Kingdom"}]
     types = {"GB": ["local"]}
     assert sync.twilio_observed_keys(countries, types, unsold={"BG"}) == {
@@ -717,8 +773,16 @@ def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
         FakeHttp(), "AC1", {"GB": "44"}, catalog_countries={"GB", "BG", "UG"}
     )
     assert rows == [] and skipped == ["GB:local: no numbers offered to this account"]
+    # GB lists and prices only local, and UG prices only local, so their
+    # other types are observed gone. UG local stays unobserved.
     assert observed == {
         "GB:local",
+        "GB:mobile",
+        "GB:toll_free",
+        "GB:national",
+        "UG:mobile",
+        "UG:toll_free",
+        "UG:national",
         "BG:local",
         "BG:mobile",
         "BG:toll_free",
@@ -773,3 +837,668 @@ def test_sync_preserves_capability_fees_as_separate_source(tmp_path):
     ]
     path.write_text(json.dumps({"capability_monthly_fees": fees}))
     assert sync.write_catalog(path, "telnyx", [])["capability_monthly_fees"] == fees
+
+
+# -- requirements block ---------------------------------------------------------
+
+
+def _req(subject, *, docs=(), fields=(), provider_rules=None, address=False):
+    from hailhq.core.providers.verification import (
+        DocumentOption,
+        DocumentSlot,
+        FieldSpec,
+        VerificationRequirements,
+    )
+
+    return VerificationRequirements(
+        country_code="DE",
+        number_type="local",
+        subject_type=subject,
+        required=True,
+        fields=tuple(FieldSpec(name=n, label=n) for n in fields),
+        documents=tuple(
+            DocumentSlot(name=n, label=n, options=(DocumentOption(key="a", label="a"),))
+            for n in docs
+        ),
+        address_required=address,
+    )
+
+
+class _FakeProvider:
+    """Twilio-style plug-in: ``requirements`` per subject."""
+
+    def __init__(self, by_subject, calls=None):
+        self.by_subject = by_subject
+        self.calls = calls if calls is not None else []
+
+    async def requirements(self, cc, nt, subject):
+        from hailhq.core.providers.verification import UnsupportedSubjectType
+
+        self.calls.append((cc, nt, subject))
+        value = self.by_subject[subject]
+        if value is None:
+            raise UnsupportedSubjectType("no", allowed=())
+        return value
+
+
+def _use(monkeypatch, provider):
+    from hailhq.core.providers import verification
+
+    monkeypatch.setattr(
+        verification,
+        "get_verification_provider",
+        lambda name, purpose="number": provider,
+    )
+
+
+def _row_needing(cc="DE", nt="local", verify=True):
+    return {
+        "country_code": cc,
+        "number_type": nt,
+        "usd_per_month": "1.00",
+        "verification_required": verify,
+    }
+
+
+def test_requirements_written_for_verified_rows(monkeypatch):
+    fake = _FakeProvider(
+        {
+            "person": _req("person", docs=("proof_of_identity",)),
+            "business": _req("business", docs=("business_address",)),
+        }
+    )
+    _use(monkeypatch, fake)
+    row = _row_needing()
+    sync.attach_requirements("twilio", [row], [], [])
+    assert row["requirements"] == {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": ["proof_of_address"]},
+    }
+
+
+def test_unsupported_subject_is_not_accepted(monkeypatch):
+    fake = _FakeProvider(
+        {"person": None, "business": _req("business", docs=("business_address",))}
+    )
+    _use(monkeypatch, fake)
+    block = sync.fetch_requirements("twilio", "DE", "local")
+    assert block["person"] == {"accepted": False, "items": []}
+    assert block["business"]["accepted"] is True
+
+
+def test_no_requirements_for_unverified_rows(monkeypatch):
+    fake = _FakeProvider({})
+    _use(monkeypatch, fake)
+    row = _row_needing(verify=False)
+    sync.attach_requirements("twilio", [row], [], [])
+    assert row["requirements"] is None
+    assert fake.calls == []
+
+
+def test_carrier_error_keeps_last_good_block(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("carrier down")
+
+    _use(monkeypatch, Boom())
+    good = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": False, "items": []},
+    }
+    existing = [{**_row_needing(), "requirements": good}]
+    row, row2 = _row_needing(), _row_needing("FR")
+    report: list[str] = []
+    sync.attach_requirements("twilio", [row, row2], existing, report)
+    assert row["requirements"] == good
+    assert row2["requirements"] is None  # nothing stored before
+    assert len(report) == 2 and "DE:local" in report[0]
+
+
+def test_missing_verification_provider_fails_loudly(monkeypatch):
+    _use(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="twilio"):
+        sync.attach_requirements("twilio", [_row_needing()], [], [])
+    # No row needs verification: nothing to fetch, no error.
+    sync.attach_requirements("twilio", [_row_needing(verify=False)], [], [])
+
+
+def test_didww_union_of_groups(monkeypatch):
+    class Didww:
+        async def requirements_per_group(self, cc, nt, subject):
+            if subject == "person":
+                return [
+                    _req("person", docs=("identity_proof_1",)),
+                    _req(
+                        "person",
+                        docs=("identity_proof_1", "address_proof_1"),
+                        fields=("birth_date",),
+                    ),
+                ]
+            return [_req("business")]
+
+    _use(monkeypatch, Didww())
+    block = sync.fetch_requirements("didww", "DE", "local")
+    assert block["person"] == {
+        "accepted": True,
+        "items": ["id_document", "birth_date", "proof_of_address"],
+    }
+    assert block["business"] == {"accepted": True, "items": []}
+
+
+def test_telnyx_passes_raw_rules_to_classify(monkeypatch):
+    class Telnyx:
+        async def rules(self, cc, nt):
+            return [{"id": "x", "field_type": "address", "name": "Local address"}]
+
+        def requirements_from_rules(self, cc, nt, subject, rules):
+            return _req(subject, address=True)
+
+    _use(monkeypatch, Telnyx())
+    block = sync.fetch_requirements("telnyx", "DE", "local")
+    assert block["person"]["items"] == ["address_in_country"]
+
+
+def test_schema_accepts_requirements():
+    import jsonschema
+
+    schema = json.loads(
+        (Path(__file__).parents[2] / "costs/schema/numbers.schema.json").read_text()
+    )
+    base = json.loads((Path(__file__).parents[2] / "costs/telnyx.json").read_text())
+    row = dict(base["numbers"][0])
+    block = {
+        "person": {"accepted": True, "items": ["id_document", {"other": "Odd paper"}]},
+        "business": {"accepted": False, "items": []},
+    }
+    for value in (block, None):
+        doc = {**base, "numbers": [{**row, "requirements": value}]}
+        jsonschema.validate(doc, schema)
+    bad = {**base, "numbers": [{**row, "requirements": {"person": {"accepted": True}}}]}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad, schema)
+
+
+def test_telnyx_rules_fetched_once_per_row(monkeypatch):
+    class Telnyx:
+        def __init__(self):
+            self.rule_calls = 0
+            self.from_rules_calls = []
+
+        async def rules(self, cc, nt):
+            self.rule_calls += 1
+            return [{"id": "x", "field_type": "address", "name": "Local address"}]
+
+        def requirements_from_rules(self, cc, nt, subject, rules):
+            self.from_rules_calls.append(subject)
+            return _req(subject, address=True)
+
+    fake = Telnyx()
+    _use(monkeypatch, fake)
+    block = sync.fetch_requirements("telnyx", "DE", "local")
+    assert block["business"]["items"] == ["address_in_country"]
+    assert fake.rule_calls == 1
+    assert fake.from_rules_calls == ["person", "business"]
+
+
+def _manual_prev(**extra):
+    return {
+        "country_code": "DE",
+        "number_type": "local",
+        "usd_per_month": "9.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "dial_code": "49",
+        "verification_method": "manual-confirmed",
+        "verified_by": "me",
+        "last_verified": "2026-01-01",
+        "last_changed_at": "2026-01-01",
+        **extra,
+    }
+
+
+def test_manual_confirmed_row_takes_fresh_requirements():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    new = {"person": {"accepted": True, "items": ["birth_date"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "usd_per_month": "5.00", "requirements": new}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    (out,) = numbers
+    assert out["requirements"] == new
+    assert out["usd_per_month"] == "9.00" and out["verified_by"] == "me"
+    assert not any("requirements" in line for line in report["kept"])
+    assert any("requirements" in line for line in report["changed"])
+    assert out["last_changed_at"] == "2026-11-03"
+
+
+def test_requirements_change_is_reported_and_bumps_last_changed():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    new = {"person": {"accepted": True, "items": ["birth_date"]}}
+    prev = {
+        **_manual_prev(requirements=old),
+        "verification_method": "carrier-sync",
+    }
+    fetched = {**prev, "requirements": new}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert numbers[0]["last_changed_at"] == "2026-11-03"
+    assert any("requirements" in line for line in report["changed"])
+
+
+def test_didww_no_groups_keeps_last_good_block(monkeypatch):
+    class Didww:
+        async def requirements_per_group(self, cc, nt, subject):
+            return []
+
+    _use(monkeypatch, Didww())
+    good = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": []},
+    }
+    existing = [{**_row_needing(), "requirements": good}]
+    row = _row_needing()
+    report: list[str] = []
+    sync.attach_requirements("didww", [row], existing, report)
+    assert row["requirements"] == good
+    assert len(report) == 1 and "DE:local" in report[0]
+
+
+def test_manual_confirmed_row_keeps_block_when_new_block_is_none():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "verification_required": False, "requirements": None}
+    numbers, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert numbers[0]["requirements"] == old
+    assert numbers[0]["last_changed_at"] == "2026-01-01"
+    assert not any("requirements" in line for line in report["changed"])
+
+
+def test_error_detail_hides_carrier_text():
+    class TwilioRestException(Exception):
+        status = 401
+
+    exc = TwilioRestException(
+        "HTTP 401 https://api.twilio.com/2010-04-01/Accounts/ACabc123/x.json?t=1"
+    )
+    detail = sync._error_detail(exc)
+    assert detail == "TwilioRestException (HTTP 401)"
+    assert "ACabc123" not in detail
+
+
+def test_error_detail_ignores_status_on_other_classes():
+    class Other(Exception):
+        status = 401
+
+    assert sync._error_detail(Other("x")) == "Other"
+
+
+def test_error_detail_httpx_status():
+    import httpx
+
+    req = httpx.Request("GET", "https://api.example.com/v2/x?key=SECRET")
+    exc = httpx.HTTPStatusError(
+        "boom SECRET", request=req, response=httpx.Response(503, request=req)
+    )
+    assert sync._error_detail(exc) == "HTTPStatusError (HTTP 503)"
+
+
+def test_error_detail_plain_exception_is_class_name_only():
+    assert sync._error_detail(RuntimeError("secret https://x?y=1")) == "RuntimeError"
+
+
+def test_error_detail_own_message_is_shown():
+    exc = sync.RequirementsUnavailable("DIDWW lists no requirement group for DE local")
+    assert sync._error_detail(exc) == "DIDWW lists no requirement group for DE local"
+
+
+def test_error_report_line_has_no_carrier_text(monkeypatch):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("secret https://x?y=1")
+
+    _use(monkeypatch, Boom())
+    report: list[str] = []
+    sync.attach_requirements("twilio", [_row_needing()], [], report)
+    assert report == ["DE:local: requirements failed (RuntimeError), no block stored"]
+
+
+def test_manual_row_without_new_block_is_marked_in_kept_line():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old)
+    fetched = {**prev, "verification_required": False, "requirements": None}
+    _, report = sync.merge([prev], [fetched], "2026-11-03", "u", "bot")
+    assert len(report["kept"]) == 1
+    assert report["kept"][0].endswith("(hand-verified requirements block kept)")
+    assert "requirements_kept" not in report
+
+
+def test_manual_row_requirements_change_line_is_short():
+    old = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": ["company_name"]},
+    }
+    new = {
+        "person": {"accepted": False, "items": []},
+        "business": {
+            "accepted": True,
+            "items": ["company_name", {"other": "Odd paper"}],
+        },
+    }
+    prev = _manual_prev(requirements=old)
+    _, report = sync.merge(
+        [prev], [{**prev, "requirements": new}], "2026-11-03", "u", "bot"
+    )
+    assert report["changed"] == [
+        (
+            "DE:local (hand-verified row, only requirements refreshed): "
+            "person id_document | business company_name -> "
+            "person not allowed | business company_name; other: Odd paper"
+        )
+    ]
+
+
+def _http_503():
+    import httpx
+
+    req = httpx.Request("GET", "https://x.example/a?k=SECRET")
+    return httpx.HTTPStatusError(
+        "m", request=req, response=httpx.Response(503, request=req)
+    )
+
+
+def test_error_detail_follows_cause_and_implicit_context():
+    try:
+        try:
+            raise _http_503()
+        except Exception as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError (HTTP 503)"
+    try:
+        try:
+            raise _http_503()
+        except Exception:
+            raise RuntimeError("wrapped")
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError (HTTP 503)"
+
+
+def test_error_detail_skips_suppressed_context_and_survives_cycles():
+    try:
+        try:
+            raise _http_503()
+        except Exception:
+            raise RuntimeError("wrapped") from None
+    except RuntimeError as outer:
+        assert sync._error_detail(outer) == "RuntimeError"
+    a, b = RuntimeError("a"), RuntimeError("b")
+    a.__cause__, b.__cause__ = b, a
+    assert sync._error_detail(a) == "RuntimeError"
+
+
+def test_block_summary_odd_items_and_extra_keys():
+    block = {
+        "person": {"accepted": True, "items": ["id_document", 7, {"other": "A, b"}]},
+        "business": {"accepted": False, "items": []},
+        "secret": "do not print",
+    }
+    out = sync._block_summary(block)
+    assert "person id_document; other; other: A, b" in out
+    assert "business not allowed" in out
+    assert "also keys secret" in out and "do not print" not in out
+
+
+def test_dropped_suffix_only_when_verification_flag_changed():
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _manual_prev(requirements=old, usd_per_month="9.00")
+    same = {**prev, "usd_per_month": "5.00", "requirements": None}
+    _, report = sync.merge([prev], [same], "2026-11-03", "u", "bot")
+    assert (
+        report["kept"]
+        and "hand-verified requirements block kept" not in report["kept"][0]
+    )
+
+
+def test_failure_is_logged_in_full_to_stderr(monkeypatch, capsys):
+    class Boom:
+        async def requirements(self, *a):
+            raise RuntimeError("secret detail")
+
+    _use(monkeypatch, Boom())
+    report: list[str] = []
+    sync.attach_requirements("twilio", [_row_needing()], [], report)
+    err = capsys.readouterr().err
+    assert "twilio DE:local" in err and "RuntimeError" in err
+    assert "secret detail" not in err and "secret detail" not in report[0]
+
+
+def test_section_caps_lines():
+    out: list[str] = []
+    sync._section(out, "X", [str(i) for i in range(62)])
+    assert out[0] == "### X (62)" and out[-1] == "- … 2 more" and len(out) == 62
+    sync._section(out, "Y", [])
+    assert len(out) == 62
+
+
+def test_row_sections_are_not_capped():
+    lines = [f"CC{i}:local: changed" for i in range(70)]
+    report = {
+        "kept": [],
+        "changed": lines,
+        "added": [],
+        "vanished": [],
+        "unobserved": [],
+    }
+    out: list[str] = []
+    sync._row_sections(out, report)
+    assert out[0] == "### Changed (70)" and len(out) == 71
+    assert not any("more" in line for line in out)
+
+
+def test_carrier_row_requirements_change_is_short():
+    new = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": False, "items": []},
+    }
+    prev = {
+        **_manual_prev(),
+        "verification_method": "carrier-sync",
+        "available": True,
+    }
+    _, report = sync.merge(
+        [prev], [{**prev, "requirements": new}], "2026-11-03", "u", "bot"
+    )
+    assert report["changed"] == [
+        "DE:local: requirements none -> person id_document | business not allowed"
+    ]
+
+
+def test_summary_is_cut_under_the_pr_body_limit():
+    block = {
+        "person": {"accepted": True, "items": ["id_document", "birth_date"]},
+        "business": {"accepted": True, "items": ["company_name"]},
+    }
+    prevs = [
+        {
+            **_manual_prev(),
+            "country_code": f"{a}{b}",
+            "verification_method": "carrier-sync",
+        }
+        for a in "ABCDEFGHIJ"
+        for b in "ABCDEFGHIJ"
+    ][:100]
+    fetched = [{**p, "requirements": block, "usd_per_month": "1.00"} for p in prevs]
+    _, report = sync.merge(prevs, fetched, "2026-11-03", "u", "bot")
+    out: list[str] = []
+    sync._row_sections(out, report)
+    full = "\n".join(out) + "\n"
+    assert len(full) < sync.SUMMARY_LIMIT  # 100 short lines fit
+    big = "\n".join(f"- line {i} " + "x" * 200 for i in range(500)) + "\n"
+    cut = sync._cap_summary(big)
+    assert len(cut) <= sync.SUMMARY_LIMIT + len(sync.SUMMARY_CUT) + 1
+    assert cut.endswith(sync.SUMMARY_CUT)
+    body = cut[: -len(sync.SUMMARY_CUT)].rstrip("\n")
+    assert body.splitlines()[-1].endswith("x" * 200)  # last line is whole
+    assert sync._cap_summary("short\n") == "short\n"
+
+
+def test_carrier_without_verification_does_not_stop_the_run(tmp_path, monkeypatch):
+    for p in sync.PROVIDERS:
+        (tmp_path / f"{p}.json").write_text("old")
+    summary_file = tmp_path / "summary.md"
+
+    def fake_run(provider, config, costs_dir, today, summary, *args, **kwargs):
+        if provider == "telnyx":
+            raise sync.VerificationUnavailable("no plug-in")
+        (costs_dir / f"{provider}.json").write_text("new")
+        summary.append(f"## {provider}: 1 rows, 1 countries")
+        return True
+
+    monkeypatch.setattr(sync, "run_provider", fake_run)
+    code = sync.main(
+        ["--costs-dir", str(tmp_path), "--summary-file", str(summary_file)]
+    )
+    assert code == 0
+    assert (tmp_path / "telnyx.json").read_text() == "old"
+    assert (tmp_path / "didww.json").read_text() == "new"
+    assert (tmp_path / "twilio.json").read_text() == "new"
+    text = summary_file.read_text()
+    assert (
+        "- telnyx: failed, verification is not configured "
+        "(check the carrier credentials) (catalog left unchanged)"
+    ) in text
+    assert "## Carriers not synced" in text
+    assert text.index("## Carriers not synced") < text.index("## didww")
+    assert "## telnyx" not in text
+
+
+def test_carrier_skipped_for_missing_credentials_is_listed_with_failures(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TELNYX_API_KEY", raising=False)
+    summary_file = tmp_path / "summary.md"
+    code = sync.main(
+        [
+            "--provider",
+            "telnyx",
+            "--costs-dir",
+            str(tmp_path),
+            "--summary-file",
+            str(summary_file),
+        ]
+    )
+    text = summary_file.read_text()
+    assert code == 1
+    assert "## Carriers not synced\n- telnyx: skipped, TELNYX_API_KEY not set" in text
+    assert text.count("telnyx: skipped, TELNYX_API_KEY not set") == 1
+
+
+def _kept_prev(cc="CH", verify=True, **extra):
+    return {
+        "country_code": cc,
+        "number_type": "local",
+        "display_name": f"{cc} local",
+        "usd_per_month": "5.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": verify,
+        "dial_code": {"DE": "49", "FR": "33", "CH": "41"}[cc],
+        "available": True,
+        "verification_method": "carrier-sync",
+        "verified_by": "twilio-api-sync",
+        "last_verified": "2026-10-01",
+        "last_changed_at": "2026-10-01",
+        **extra,
+    }
+
+
+def _kept_provider(calls=None):
+    return _FakeProvider(
+        {
+            "person": _req("person", docs=("proof_of_identity",)),
+            "business": _req("business", docs=("business_address",)),
+        },
+        calls,
+    )
+
+
+def _run_twilio(tmp_path, monkeypatch, existing, rows, skipped, observed):
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": existing}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    monkeypatch.setattr(sync, "fetch_twilio", lambda *a, **k: (rows, skipped, observed))
+    summary: list[str] = []
+    sync.run_provider(
+        "twilio",
+        {"TWILIO_ACCOUNT_SID": "s", "TWILIO_AUTH_TOKEN": "t"},
+        tmp_path,
+        "2026-11-04",
+        summary,
+        not_synced=[],
+    )
+    out = json.loads((tmp_path / "twilio.json").read_text())["numbers"]
+    return {f"{n['country_code']}:{n['number_type']}": n for n in out}, summary
+
+
+def _fetched(cc="DE"):
+    return {**_kept_prev(cc, verify=False), "usd_per_month": "1.00"}
+
+
+def test_unobserved_row_needing_verification_gets_a_block(tmp_path, monkeypatch):
+    calls: list = []
+    _use(monkeypatch, _kept_provider(calls))
+    prev = _kept_prev()
+    rows, summary = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [prev, _kept_prev("DE", verify=False)],
+        [_fetched()],
+        ["CH:local: no numbers offered to this account"],
+        {"DE:local"},
+    )
+    assert {c[0] for c in calls} == {"CH"}
+    got = {k: v for k, v in rows["CH:local"].items() if k != "requirements"}
+    assert got == {**prev, "last_changed_at": "2026-11-04"}
+    assert rows["CH:local"]["requirements"]["person"]["items"] == ["id_document"]
+    text = "\n".join(summary)
+    assert "CH:local (not observed, only requirements refreshed): none ->" in text
+
+
+def test_no_longer_offered_and_skipped_country_rows_are_not_fetched(
+    tmp_path, monkeypatch
+):
+    calls: list = []
+    _use(monkeypatch, _kept_provider(calls))
+    gone, outside = _kept_prev("CH"), _kept_prev("FR")
+    rows, _ = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [gone, outside, _kept_prev("DE", verify=False)],
+        [_fetched()],
+        [],
+        {"DE:local", "CH:local"},  # CH observed gone; FR outside the view
+    )
+    assert calls == []
+    assert rows["CH:local"]["available"] is False
+    assert "requirements" not in rows["CH:local"]
+    assert rows["FR:local"] == outside
+
+
+def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypatch):
+    _use(monkeypatch, None)
+    old = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _kept_prev(requirements=old)
+    rows, summary = _run_twilio(
+        tmp_path,
+        monkeypatch,
+        [prev, _kept_prev("DE", verify=False)],
+        [{**_fetched(), "usd_per_month": "2.00"}],
+        ["CH:local: no numbers offered to this account"],
+        {"DE:local"},
+    )
+    assert rows["DE:local"]["usd_per_month"] == "2.00"  # prices still synced
+    assert rows["CH:local"] == prev
+    assert (
+        "twilio: 1 rows not observed this run kept their papers: "
+        "verification is not configured"
+    ) in "\n".join(summary)

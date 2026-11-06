@@ -36,13 +36,14 @@ uv run python scripts/costs/sync_numbers.py --provider all --env-file .env
 - The agent reads untrusted web pages, so it runs with `--restricted --safe-mode --strict-mcp-config` and [`.github/prompts/costs-refresh-settings.json`](../../.github/prompts/costs-refresh-settings.json). It has no shell, it can edit only those four files, and it can fetch only the listed sites. A new vendor needs a line in that file. The `refresh` job has a read-only GitHub token.
 - The agent stops at a $30 budget and a 150-minute timeout. If validation fails, a short repair pass ($3, 15 minutes) reads the errors and fixes the rows.
 - If the finished rows pass validation, a PR opens. After an early stop it uses a dated `costs/partial-refresh-*` branch, so it cannot replace a complete PR, and the run stays red. Its report can be missing, so check the diff by hand.
+- Each run reports what its LLM use cost: a notice on the run page, a table of tokens and cost in the run summary, and the same table in the PR body. The figure is Claude Code's estimate at list price; the AWS bill for Bedrock can differ.
 - If validation still fails, no PR opens. The run's `costs-refresh` artifact holds the patch and the report for 7 days.
 - The PR body shows the agent's report in a code fence, so source links are plain text.
 - The agent never sets `featured`; it lists candidates. A person reviews and merges the PR.
 - The PR comes from `GITHUB_TOKEN`, so `costs-validate.yml` does not run on it. The `refresh` job runs the schema, reference, featured, script test, and site build checks first.
 - `sms-registration.json` and `recording.json` are not covered. Refresh those by hand.
 
-Setup, once:
+Setup, once. Set `AWS_PROFILE` to a profile that can manage IAM in the account. The account must already have GitHub's OIDC provider (`token.actions.githubusercontent.com`); the stack reads it and does not create it.
 
 ```bash
 cd infra/costs-refresh
@@ -50,7 +51,7 @@ terragrunt apply
 terragrunt output -raw role_arn | gh secret set AWS_ROLE_TO_ASSUME --repo hail-hq/hail
 ```
 
-The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/costs-refresh` limits the role to that model, for runs on `main` of this repo. It is a separate stack, so self-hosters never apply it. The credentials reach only the agent steps. Without the secret, the job fails before the agent starts.
+The agent runs on Amazon Bedrock with `eu.anthropic.claude-sonnet-5-5` in `eu-central-1`, never the Anthropic API. The workflow gets short-lived AWS credentials through OIDC. `infra/costs-refresh` limits the role to Bedrock models, for runs on `main` of this repo. It is a separate stack, so self-hosters never apply it. The credentials reach only the agent steps. Without the secret, the job fails before the agent starts.
 
 Bedrock has no WebSearch, so the agent starts from the catalog URLs and each row's `source_url`.
 
@@ -75,6 +76,7 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.
 6. **Field order convention** (refer to "Field order" below). Match it exactly.
 7. **No destructive git in the shared tree.** In the default model of this runbook, every provider-agent edits the **same** working tree. Thus a subagent must never run a git command that reverts or discards the tree — `git checkout`, `git restore`, `git stash`, `git reset` — and must never run `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the full file and silently erases the in-flight edits of every other provider — one such error caused the loss of a full LLM sweep. Repair broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never with git. Leave the files modified but unstaged. Produce a commit message. Let the operator commit. (A separate git worktree for each provider makes git safe for each agent. But then you must add a step to collate the single-file edit of each worktree back. Thus the default is one shared tree plus sequential dispatch.)
+8. **Currency.** Record each price in the currency the vendor publishes. If the vendor publishes no USD price, use the matching EUR fields instead: `_usd` becomes `_eur`, and `usd_per_segment` becomes `eur_per_segment`. A row uses one currency only. Never convert between currencies: rates change, and a converted price looks verified when it is not. EUR fields exist in `llm.json`, `stt.json`, `tts.json`, and `sms.json`. The number catalogs stay USD.
 
 **Promotions.** When a structured price field holds a promotional or introductory rate, set `promo_ends_at` to the last day that rate applies. When the promotion ends, record the list price and remove the field. The weekly `costs-stale.yml` run lists a row after its `promo_ends_at`, so a pass can fix it before the row goes stale. For the design, refer to [`docs/superpowers/specs/2026-11-02-costs-promo-end-date-design.md`](../superpowers/specs/2026-11-02-costs-promo-end-date-design.md).
 
@@ -147,7 +149,7 @@ Authoritative source: [`costs/schema/llm.schema.json`](../../costs/schema/llm.sc
 
 ## Field order (all categories)
 
-Keep this order the same across all rows. The order makes diffs easy to review and agrees with the existing committed data.
+Keep this order the same across all rows. An `_eur` field sits where its `_usd` twin would. The order makes diffs easy to review and agrees with the existing committed data.
 
 **LLM:**
 

@@ -16,7 +16,7 @@ name: costs-refresh
 #     shell, and file tools only inside the repo. It can edit only the four
 #     data files, and WebFetch reaches only the sites listed in
 #     .github/prompts/costs-refresh-settings.json. Bedrock has no WebSearch.
-#   - The AWS role can only call one model on Bedrock and read inference
+#   - The AWS role can only call Bedrock models and read inference
 #     profiles, and only the agent steps get its credentials. The job has a
 #     read-only GitHub token, and the checkout keeps no credentials.
 #   - Only the diff of the four data files and the report leave the job. The
@@ -139,6 +139,26 @@ jobs:
           is_error=$(field '.is_error // false' true)
           [ "$AGENT_EXIT" = "0" ] && [ "$is_error" = "false" ] && agent_ok=true || agent_ok=false
           [ "$FIRST_CHECK" = "success" ] || [ "$SECOND_CHECK" = "success" ] && valid=true || valid=false
+          # What the LLM cost, per pass, from Claude Code's usage report.
+          cost_row() {
+            jq -r --arg pass "$2" '"| \($pass) | \(.usage.input_tokens // 0) | \(.usage.cache_read_input_tokens // 0) | \(.usage.cache_creation_input_tokens // 0) | \(.usage.output_tokens // 0) | $\((.total_cost_usd // 0) * 10000 | round / 10000) |"' "$1" 2>/dev/null || true
+          }
+          # Each file on its own, so one unreadable report does not zero the total.
+          total_cost=$(for f in /tmp/claude.json /tmp/repair.json; do
+            jq -r '.total_cost_usd // 0' "$f" 2>/dev/null || echo 0
+          done | awk '{ s += $1 } END { printf "%.4f", s }')
+          {
+            echo "## LLM cost"
+            echo
+            echo "| Pass | Input tokens | Cache read | Cache write | Output tokens | Cost |"
+            echo "| --- | ---: | ---: | ---: | ---: | ---: |"
+            cost_row /tmp/claude.json Refresh
+            cost_row /tmp/repair.json Repair
+            echo "| **Total** | | | | | **\$${total_cost}** |"
+            echo
+            echo "Claude Code's estimate at list price. The AWS bill for Bedrock can differ."
+          } > /tmp/out/cost.md
+          echo "::notice title=LLM cost::\$${total_cost} for this run (Claude Code's estimate)"
           {
             echo "> An agent wrote the report below after reading untrusted web pages. Check the diff before you merge."
             echo
@@ -151,8 +171,10 @@ jobs:
               echo
             fi
             echo "Rows with a new check date: $(grep -c '^+ *\"last_verified\"' /tmp/out/refresh.patch)."
-            echo "Estimated cost: \$$(field '.total_cost_usd // 0' 0) for the refresh, \$$(field '.total_cost_usd // 0' 0 /tmp/repair.json) for the repair. Validation passed: ${valid}."
+            echo "Validation passed: ${valid}."
             echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            cat /tmp/out/cost.md
             echo
             # The fence keeps mentions, links, and closing keywords inert.
             echo '~~~~~~~~ text'
@@ -189,6 +211,7 @@ jobs:
           path: |
             /tmp/out/refresh.patch
             /tmp/out/summary.md
+            /tmp/out/cost.md
           if-no-files-found: warn
           retention-days: 7
       - name: Fail the run if the agent or the checks failed

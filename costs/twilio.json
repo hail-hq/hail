@@ -14,8 +14,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -31,8 +49,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -48,8 +84,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Academic Degree"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -65,8 +126,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Academic Degree"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -82,8 +168,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -99,8 +205,38 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Australian ID Document Number"
+            },
+            {
+              "other": "Purpose for Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name",
+            {
+              "other": "Proof of Authorization"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -116,8 +252,27 @@
       "mms": true,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -133,8 +288,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -150,7 +323,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -169,11 +342,33 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "BE",
@@ -186,8 +381,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -203,8 +418,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -220,7 +455,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -238,7 +473,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -256,8 +491,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -273,8 +524,23 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -289,12 +555,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/BR",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "BR",
@@ -306,12 +573,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/BR",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "BW",
@@ -324,7 +592,7 @@
       "mms": false,
       "verification_required": false,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -342,7 +610,8 @@
       "mms": true,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -359,7 +628,8 @@
       "mms": true,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -376,8 +646,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -393,8 +683,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -410,8 +720,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -445,8 +773,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -462,8 +808,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -478,12 +842,34 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/CZ",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Business ID"
+            }
+          ]
+        }
+      },
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "CZ",
@@ -496,8 +882,35 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            },
+            {
+              "other": "Authorization of Authorized Representative"
+            },
+            {
+              "other": "Business ID"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -531,8 +944,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "company_name",
+            {
+              "other": "Business ID"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -548,8 +980,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -565,8 +1013,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -582,8 +1046,22 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -598,12 +1076,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/DK",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "DZ",
@@ -617,11 +1096,21 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": []
+        }
+      }
     },
     {
       "country_code": "EC",
@@ -634,8 +1123,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -651,8 +1158,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -668,8 +1191,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -685,8 +1224,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -702,7 +1257,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-26",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -720,8 +1275,31 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "ID Document Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -737,8 +1315,31 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "ID Document Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -754,8 +1355,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-12",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -772,11 +1393,30 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-24",
+      "last_changed_at": "2026-11-04",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "GB",
@@ -790,11 +1430,30 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-24",
+      "last_changed_at": "2026-11-04",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "GB",
@@ -808,11 +1467,30 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-24",
+      "last_changed_at": "2026-11-04",
       "verification_method": "manual-confirmed",
       "verified_by": "twilio-api",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "GD",
@@ -826,11 +1504,33 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_name",
+            {
+              "other": "Letter of Authorization (LOA)"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "GH",
@@ -843,7 +1543,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -880,11 +1580,34 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "ID or Passport Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      }
     },
     {
       "country_code": "HK",
@@ -914,8 +1637,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -930,12 +1672,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/HR",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "HR",
@@ -948,8 +1691,29 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Proof of Business Name"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -964,12 +1728,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/HU",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "HU",
@@ -982,8 +1747,31 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name",
+            {
+              "other": "Registered Seat of Business"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1017,8 +1805,31 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1034,8 +1845,27 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1050,12 +1880,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/IE",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "IL",
@@ -1068,7 +1899,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1085,7 +1917,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1102,8 +1935,18 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": []
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1119,8 +1962,34 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1137,10 +2006,30 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-05",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
-      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
+      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "JM",
@@ -1153,7 +2042,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1171,8 +2060,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Japan Regulatory Bundle Application & TNUP (Telecommunications Numbering Use Plan), for Resellers"
+            },
+            {
+              "other": "Authorization of Representative"
+            },
+            {
+              "other": "Business Purpose"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1206,8 +2120,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Japan Regulatory Bundle Application & TNUP (Telecommunications Numbering Use Plan), for Resellers"
+            },
+            {
+              "other": "Authorization of Representative"
+            },
+            {
+              "other": "Business Purpose"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1223,7 +2162,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1241,8 +2180,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1258,8 +2213,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1275,8 +2250,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1292,7 +2287,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1310,7 +2305,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1328,7 +2323,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1346,8 +2341,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1363,8 +2376,35 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Identity Document Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name",
+            {
+              "other": "Proof of Authorization"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1380,8 +2420,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1397,8 +2455,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1414,8 +2490,23 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-26",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1449,8 +2540,22 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1466,8 +2571,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1483,8 +2606,22 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1500,8 +2637,35 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Letter of Declaration"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of authorized representative or legal representative"
+            },
+            {
+              "other": "Letter of Declaration"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1517,8 +2681,18 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-25",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": []
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1534,8 +2708,31 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "Identification Document Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1551,7 +2748,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-19",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1568,8 +2766,26 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1584,12 +2800,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-07-17",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv"
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/PL",
+      "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
       "country_code": "PL",
@@ -1602,8 +2819,24 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "company_registration",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1619,7 +2852,8 @@
       "mms": true,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-28",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1636,7 +2870,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1654,7 +2888,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1690,8 +2924,39 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            },
+            {
+              "other": "Trade Registry Number or Fiscal Number"
+            },
+            {
+              "other": "Authorization of Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1725,8 +2990,39 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            },
+            {
+              "other": "Trade Registry Number or Fiscal Number"
+            },
+            {
+              "other": "Authorization of Representative"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1742,7 +3038,7 @@
       "mms": false,
       "verification_required": false,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1760,8 +3056,28 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_id",
+            "company_name"
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1777,7 +3093,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1795,8 +3111,39 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-10-26",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "birth_date",
+            "personal_details",
+            "contact_details",
+            {
+              "other": "Title"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Authorized Representative"
+            },
+            {
+              "other": "Authorization of Authorized Representative"
+            },
+            {
+              "other": "Registered Seat"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1812,7 +3159,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1830,8 +3177,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-09-28",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Name of Legal Representative"
+            },
+            {
+              "other": "Business Type"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1847,8 +3219,40 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            {
+              "other": "ID Number"
+            }
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address",
+            "company_id",
+            "company_name",
+            {
+              "other": "Proof of business name"
+            },
+            {
+              "other": "Proof of Corporate Registration Number"
+            },
+            {
+              "other": "Type of Business"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1864,8 +3268,29 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-10-19",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Type of business"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -1881,7 +3306,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1934,7 +3360,8 @@
       "mms": true,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-07-15",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1951,7 +3378,8 @@
       "mms": true,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-07-15",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1968,7 +3396,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-04",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2005,11 +3433,36 @@
       "verification_required": true,
       "available": true,
       "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://www.twilio.com/en-us/voice/pricing/za",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Proof of Authorized Representative Name"
+            }
+          ]
+        }
+      }
     },
     {
       "country_code": "ZA",
@@ -2022,8 +3475,33 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "personal_details",
+            "contact_details",
+            "proof_of_address",
+            "company_registration",
+            "company_name",
+            {
+              "other": "Proof of Authorized Representative Name"
+            }
+          ]
+        }
+      },
+      "last_verified": "2026-11-04",
+      "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
       "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
@@ -2068,12 +3546,13 @@
       "carrier": "Verizon",
       "fee_kind": "carrier_passthrough",
       "direction": "inbound",
-      "usd_per_message": "0.007",
-      "last_verified": "2026-07-15",
-      "last_changed_at": "2026-07-15",
+      "usd_per_message": "0",
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-06",
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://www.twilio.com/en-us/sms/pricing/us"
+      "source_url": "https://www.twilio.com/en-us/sms/pricing/us",
+      "notes": "Price changed 2026-11-06: Twilio's US SMS pricing page shows no inbound SMS carrier fee for Verizon (a dash). The 0.007 stored before was Verizon's outbound MMS fee from the same table."
     },
     {
       "carrier": "TCR",

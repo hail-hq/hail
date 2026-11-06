@@ -66,6 +66,6 @@ jobs:
       - name: Costs script unit tests
         run: node --test "scripts/costs/*.test.mjs"
       - name: Number sync unit tests
-        run: pip install pytest requests && pytest -q scripts/costs/test_sync_numbers.py
+        run: pip install pytest requests jsonschema ./core && pytest -q scripts/costs/test_sync_numbers.py
       - name: Featured set guard
         run: node scripts/costs/check-featured.mjs

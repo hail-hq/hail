@@ -1,6 +1,6 @@
 # The workflow gets short-lived credentials through GitHub OIDC, so the repo
 # holds no AWS key. Only runs on main of hail-hq/hail can assume the role, and
-# the role can only call the one model the workflow uses.
+# the role can only call Bedrock models.
 
 terraform {
   required_version = ">= 1.6"
@@ -30,9 +30,10 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
+# The account already has GitHub's OIDC provider, and AWS allows one per URL,
+# so this stack reads it instead of creating it.
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 data "aws_iam_policy_document" "trust" {
@@ -41,7 +42,7 @@ data "aws_iam_policy_document" "trust" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {
@@ -66,14 +67,16 @@ resource "aws_iam_role" "costs_refresh" {
 }
 
 data "aws_iam_policy_document" "bedrock" {
-  # The "eu." profile routes each request to a region in its geography, so
-  # every region is allowed.
+  # Any model and any of the account's inference profiles, like the voicebot
+  # policy in infra/terraform/iam.tf, so changing the workflow's model needs
+  # no apply. A profile like "eu." routes each request to a region in its
+  # geography, so every region is allowed.
   statement {
-    sid     = "InvokeSonnet"
+    sid     = "InvokeModels"
     actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
     resources = [
-      "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5-5*",
-      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/eu.anthropic.claude-sonnet-5-5",
+      "arn:aws:bedrock:*::foundation-model/*",
+      "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
     ]
   }
 

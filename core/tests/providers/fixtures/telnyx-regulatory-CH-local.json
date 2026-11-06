@@ -1,0 +1,147 @@
+{
+  "data": [
+    {
+      "action": "ordering",
+      "regulatory_requirements": [
+        {
+          "name": "Contact Information (Name, Business Name, Phone Number)",
+          "description": "Contact information for the business or end user, including: (1) the name of the contact person (full given name and family name), (2) the business name when the end user is a business (registered   legal name where applicable; may be omitted or stated as 'N/A' for individual end users), and (3) one or more contact phone numbers where the business or end user can be reached. Contact person name and at least one phone number are mandatory; business name is required only when the end user is a business entity. Phone numbers should be in international E.164 format where possible.",
+          "id": "2708e569-696a-4fc7-9305-5fdb3eb9c7dd",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "Contact: Maria Garc\u00eda L\u00f3pez | Business: Bloom & Petal Florist Ltd. | Phone: +34 612 345 678. For individual end users: Contact: John Smith | Business: N/A | Phone: +1 (555) 123-4567.",
+          "field_type": "textual"
+        },
+        {
+          "name": "Company Registration Number \u2014 Switzerland",
+          "description": "Enter the Company Registration Number shown on the Local Company Registration Certificate. The Business Registration Number in Switzerland referred to Unique Identification Number (UID) / Num\u00e9ro d'Identification des Entreprises (IDE). The number must start with CHE followed by exactly 9 numeric characters.",
+          "id": "80b88912-a16a-401d-afe4-28a47d31bf89",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": false,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "CHE123456789",
+          "field_type": "textual"
+        },
+        {
+          "name": "Address Matching the DID Area Code (Geographic Match)",
+          "description": "A physical address that matches the geographic area covered by the phone number's area code. The address must include street name and number, postal/ZIP code, city, and country, and the city/region of the address must fall within the geographic area assigned to the DID's area code. Addresses outside the area code's geographic region are not acceptable for this requirement; a different (broader, national-level) address requirement must be selected if the customer cannot provide a matching local address.",
+          "id": "a7d9a3a3-70ed-4cb4-821b-b94e8ea6dc9b",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "311 W Superior St, Chicago, IL 60654 (matches Chicago area code 312). For a +44 20 (Greater London) DID: an address within Greater London such as '60 Holborn Viaduct, London EC1A 2FD'. The address must lie within the area code's geographic boundaries.",
+          "field_type": "address"
+        },
+        {
+          "name": "Proof of Address (Recent Bill or Invoice)",
+          "description": "A document evidencing the customer's physical address. Acceptable documents include government-issued identification, official government documents, utility bills, telecommunications provider invoices, bank statements, insurance documents, and other recognized proof-of-address documents. Government-issued documents are not subject to the 3-month issue-date restriction. Acceptable government documents include national identity cards (ID cards), passports, driver's licenses, residence permits, government-issued residency cards, government-issued address certificates, tax notices, official government correspondence, and other government-issued documents confirming the customer's residential or registered business address. Government-issued identification documents with an expiration date must be valid and unexpired at the time of submission. Government correspondence and other official government documents without an expiration date may be accepted regardless of their issue date. Non-government documents must have been issued within the past 3 months (90 days) relative to submission. Acceptable non-government documents include utility bills (electricity, water, gas, internet, landline telephone), invoices from the customer's current telecommunications provider, bank statements, insurance policy documents, invoices from recognized service providers, and other official statements confirming the customer's physical address. All submitted documents must clearly display the full name of the individual or registered business name matching the order, the complete physical address (street, postal code, city, country), and the issuing authority or organization. Non-government documents must also display a verifiable issue date. Government-issued identification documents must display an expiration date where applicable. Documents that do not display a complete physical address cannot be accepted as proof of address, even if they are valid government-issued identification. Handwritten documents, expired government-issued identification, and non-government documents older than 3 months are not acceptable.",
+          "id": "b0197fa1-c2fd-4500-9875-2c658b2396eb",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "A clear color scan or PDF of a valid national ID card, driver's license, passport, or residence permit showing the customer's full name and complete physical address. Government-issued identification does not need to have been issued within the past 3 months, provided it remains valid and unexpired.  Alternatively, a PDF of the latest invoice from the customer's current telecommunications provider, addressed to the end user at their registered physical address, with an issue date within the past 90 days.  An electricity, water, gas, internet, or landline telephone bill, bank statement, or insurance policy document displaying the customer's full name, complete physical address, and an issue date within the past 90 days is also acceptable.",
+          "field_type": "document"
+        },
+        {
+          "name": "Contact Email Address of End Client",
+          "description": "A valid email address for the end client (the natural person or business that will use the phone number), used for compliance follow-up. The submitted value must be a syntactically valid email address (max 150 characters) and should reach the end client directly. Generic or shared role-based addresses (e.g., info@, contact@) are acceptable but a personal address tied to the named end client is preferred.",
+          "id": "bf1cb27c-3693-41af-bbf6-ff4de8d41006",
+          "acceptance_criteria": {
+            "max_length": 150,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": 1,
+            "time_limit": null
+          },
+          "example": "maria.garcia@bloomandpetal.com or contact@acme-coffee.de. The address must be syntactically valid (matching the standard email format) and should be a working address.",
+          "field_type": "textual"
+        },
+        {
+          "name": "Local Company Registration Certificate \u2014 Switzerland",
+          "description": "Upload an official document issued by a recognized Swiss government authority or commercial registry confirming that the company is legally registered and authorized to conduct business in Switzerland. The document must clearly display the registered legal company name, unique registration or incorporation number, date of registration or incorporation, registered business address, issuing authority, and the registry\u2019s seal or letterhead. Submit a clear color scan or original PDF in a Swiss local language or English. Photographs, screenshots, and unsigned drafts are not acceptable.",
+          "id": "d28957ae-1170-4b17-919f-e78b5b6dcdba",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": false,
+            "acceptable_characters": null,
+            "acceptable_values": null,
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "An official Swiss commercial registry extract showing the company\u2019s legal name, CHE registration number, registration date, registered address, issuing registry, and official seal or letterhead.",
+          "field_type": "document"
+        },
+        {
+          "name": "Company Name (Full Legal Name)",
+          "description": "The full legal name of the company associated with the phone number, exactly as registered with the relevant national company registry. The name must include any legal suffix such as 'LLC', 'Ltd.', 'GmbH', 'S.A.', 'S.r.l.', or equivalent. Maximum 150 characters, minimum 1 character. Trade names and informal abbreviations without legal status are not acceptable; the registered legal name is required.",
+          "id": "d3641c72-734e-4421-8bca-510b4137c0c5",
+          "acceptance_criteria": {
+            "max_length": 150,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": 1,
+            "time_limit": null
+          },
+          "example": "Telnyx LLC, Acme Florist Limited, Bloom & Petal GmbH, or Empresa Ejemplo S.A. The submitted name must match the company's official registration certificate; informal trading names ('Acme', 'Bloom') without the legal suffix are not acceptable.",
+          "field_type": "textual"
+        },
+        {
+          "name": "Passport or Government-Issued ID Copy (End User or Authorized Representative)",
+          "description": "A clear color copy of a valid, unexpired government-issued identity document for the end user (for personal accounts) or the authorized representative of the company (for business accounts). Acceptable documents are the biographical data page of a passport, a national identity card (front and back), or, where local rules permit, a driver's license. The copy must legibly show the holder's full legal name, photograph, date of birth, document number, issuing country and authority, issue date, and expiration date. The document must not be expired as of the submission date and must be a color scan or original PDF. Black-and-white copies, photographs at extreme angles, and screenshots of digital wallet IDs are not acceptable.",
+          "id": "ec029bc6-357f-404d-bdfd-f61d4e578896",
+          "acceptance_criteria": {
+            "max_length": null,
+            "regex": null,
+            "case_sensitive": true,
+            "acceptable_characters": null,
+            "acceptable_values": [],
+            "locality_limit": null,
+            "min_length": null,
+            "time_limit": null
+          },
+          "example": "A color PDF of the biographical data page of a U.S. passport, or a color scan of both sides of a French Carte Nationale d'Identit\u00e9. The holder's name on the document must match the name provided in the order's customer or representative fields.",
+          "field_type": "document"
+        }
+      ],
+      "phone_number_type": "local",
+      "country_code": "CH"
+    }
+  ]
+}
