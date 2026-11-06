@@ -487,6 +487,10 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
     elif row.state == "submitting" and status.state == "pending":
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
+        if status.reason and (row.provider_refs or {}).get("needs_information"):
+            # Held for answers on this same poll: a held row is not polled
+            # again, so keep the repair guidance now.
+            row.rejection_reason = status.reason
         return True
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
@@ -550,9 +554,16 @@ async def _poll_and_apply(
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
-    elif changed and status is not None and status.state == "pending" and status.reason:
-        # A refused campaign held for the customer's answers. The carrier's
-        # text can quote personal data: audit row only, never the log.
+    elif (
+        changed
+        and status is not None
+        and status.state == "pending"
+        and status.reason
+        and (row.provider_refs or {}).get("campaign_needs_repair")
+    ):
+        # A refused campaign held for the customer's answers (a legacy
+        # evidence hold is no refusal). The carrier's text can quote
+        # personal data: audit row only, never the log.
         await write_audit_log(
             row.organization_id,
             None,
@@ -1993,7 +2004,14 @@ async def get_verification_application(
     """
     row = await _org_row_or_404(db, principal, verification_id)
     application = (row.provider_refs or {}).get("application")
-    if row.purpose == "sms" and not isinstance(application, dict):
+    # Answers deleted after APPLICATION_KEPT_FOR are not rebuilt from the
+    # carrier either.
+    expired = (
+        row.state in ("cancelled", "rejected")
+        and (row.cancelled_at or row.updated_at)
+        <= datetime.now(timezone.utc) - APPLICATION_KEPT_FOR
+    )
+    if row.purpose == "sms" and not isinstance(application, dict) and not expired:
         provider = registry(row.provider, "sms")
         if isinstance(provider, SmsRegistrationProvider):
             try:
@@ -2063,9 +2081,12 @@ async def amend_sms_application(
     )
     digest = hashlib.sha256(raw.encode()).hexdigest()
     refs = row.provider_refs or {}
-    if refs.get("application_amendment_hash") == digest and row.state in (
-        "submitted",
-        "approved",
+    # A row held again after this same amendment (the carrier refused it, or
+    # the customer fixed a public page) takes the same answers once more.
+    if (
+        refs.get("application_amendment_hash") == digest
+        and row.state in ("submitted", "approved")
+        and not refs.get("needs_information")
     ):
         return _out(row, registry)
     if (

@@ -126,6 +126,7 @@ outage returns a retryable error. A saved application is not proof of recipient 
 The background pass deletes the saved answers (`provider_refs.application`) of a cancelled or
 rejected registration 30 days after it ended (`cancelled_at`, else `updated_at`;
 `APPLICATION_KEPT_FOR` in `routes/verifications.py`). The rest of the refs stay for billing.
+After that, `GET .../application` returns 404 and does not rebuild the answers from the carrier.
 
 A legacy brand-only registration that lacks current campaign evidence stays `submitted` with
 `step=needs_information`. It retains the same registration, sender identity, paid brand and

@@ -49,6 +49,10 @@ _SOLE_PROP_TRUST_POLICY = "RN670d5d2e282a6130ae063b234b6019c8"
 _OTP_RESEND_AFTER = timedelta(hours=24)
 
 
+# The SDK lets requests' own transport errors through: both are an outage.
+_TWILIO_ERRORS = (TwilioException, requests.RequestException)
+
+
 class _NotCompliant(TwilioRestException):
     """A Trust Hub evaluation found a detail of the form not compliant: a
     definite refusal of the customer's answers, whatever its wording."""
@@ -113,8 +117,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return bool(
                 self._client.incoming_phone_numbers.list(phone_number=e164, limit=1)
             )
-        except (TwilioException, requests.RequestException) as exc:
-            # The SDK lets requests' own transport errors through.
+        except _TWILIO_ERRORS as exc:
             raise VerificationProviderError(
                 "Could not check the mobile number. Try again."
             ) from exc
@@ -341,7 +344,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def status(self, refs) -> ProviderStatus:
         try:
             return await asyncio.to_thread(self._status, refs)
-        except (TwilioException, requests.RequestException) as exc:
+        except _TWILIO_ERRORS as exc:
             raise VerificationProviderError("Twilio request failed") from exc
 
     def _status(self, refs) -> ProviderStatus:
@@ -447,9 +450,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def recover_campaign(self, refs) -> bool:
         try:
             return await asyncio.to_thread(self._recover_campaign, refs)
-        except (TwilioException, requests.RequestException) as exc:
-            # Twilio errors and transport errors (the SDK lets requests'
-            # own exceptions through) are both a retryable outage.
+        except _TWILIO_ERRORS as exc:
             raise VerificationProviderError("Campaign discovery unavailable") from exc
 
     async def application_identity(self, refs, subject_type) -> dict | None:
@@ -614,7 +615,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
         try:
             return await asyncio.to_thread(run)
-        except TwilioException as exc:
+        except _TWILIO_ERRORS as exc:
             raise VerificationProviderError("Twilio request failed") from exc
 
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
@@ -628,7 +629,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     self._client.messaging.v1.services(service).phone_numbers.list,
                     limit=20,
                 )
-            except TwilioException as exc:
+            except _TWILIO_ERRORS as exc:
                 raise VerificationProviderError("Twilio request failed") from exc
             if any(getattr(p, "sid", None) != provider_resource_id for p in present):
                 logger.warning("10DLC: service %s already holds a number", service)

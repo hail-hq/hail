@@ -4856,6 +4856,30 @@ async def test_legacy_application_has_actionable_missing_answers(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_expired_answers_are_not_rebuilt_from_the_carrier(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    from datetime import datetime, timedelta, timezone
+
+    _, _, key = org_and_key
+    asked = []
+
+    async def identity(refs, subject_type):
+        asked.append(refs)
+        return {"fields": {}, "address": {}}
+
+    monkeypatch.setattr(sms_carrier, "application_identity", identity)
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "rejected"
+    row.updated_at = datetime.now(timezone.utc) - timedelta(days=31)
+    row.provider_refs = {"brand_sid": "BN1"}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404 and asked == []
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_old_ended_applications_lose_their_saved_answers(
     client, org_and_key, sms_carrier, async_session
 ):
@@ -5083,6 +5107,37 @@ async def test_amendment_keeps_same_row_brand_and_original_charge(
     )
     assert len(audits) == 1 and str(audits[0].resource_id) == vid
     assert set(audits[0].payload) == {"requirements_version"}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_same_answers_lift_a_new_hold_after_an_amendment(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    first = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert first.status_code == 200, first.text
+    # The carrier refuses the amended campaign (say, a policy page was down).
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    row.provider_refs = {
+        **row.provider_refs,
+        "needs_information": True,
+        "campaign_needs_repair": True,
+    }
+    row.rejection_reason = "Review your privacy policy."
+    await async_session.commit()
+    again = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert again.status_code == 200 and again.json()["step"] == "filing"
+    await async_session.refresh(row)
+    assert "needs_information" not in row.provider_refs
+    assert row.rejection_reason is None
 
 
 @pytest.mark.usefixtures("us_number")
@@ -5315,3 +5370,50 @@ async def test_incomplete_legacy_provider_address_returns_support_guidance(
     monkeypatch.setattr(sms_carrier, "application_identity", incomplete)
     response = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
     assert response.status_code == 404 and "support" in response.json()["detail"]
+
+
+def test_a_hold_found_while_submitting_keeps_its_repair_guidance() -> None:
+    from datetime import datetime, timezone
+
+    row = CarrierVerification(
+        state="submitting",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={"needs_information": True, "campaign_needs_repair": True},
+    )
+    status = ProviderStatus(state="pending", reason="Review the terms.", raw_reason="x")
+    assert verifications_routes._apply_status(row, status) is True
+    assert row.state == "submitted" and row.rejection_reason == "Review the terms."
+
+
+async def test_a_legacy_evidence_hold_is_not_audited_as_a_refusal(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    written: list = []
+
+    async def fake_audit(*args, **kwargs):
+        written.append(args[2])
+
+    monkeypatch.setattr(verifications_routes, "write_audit_log", fake_audit)
+    row = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={"needs_information": True},
+    )
+    legacy = ProviderStatus(state="pending", reason="Complete the evidence.")
+    refs = dict(row.provider_refs)
+    assert await verifications_routes._poll_and_apply(
+        None, row, legacy, lambda *a: None, refs
+    )
+    assert row.rejection_reason == "Complete the evidence." and written == []
+    row.provider_refs = {**refs, "campaign_needs_repair": True}
+    refused = ProviderStatus(
+        state="pending", reason="Review the terms.", raw_reason="x"
+    )
+    assert await verifications_routes._poll_and_apply(
+        None, row, refused, lambda *a: None, dict(row.provider_refs)
+    )
+    assert written == ["verification.campaign_refused"]
