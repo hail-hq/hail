@@ -151,15 +151,26 @@ def _row(
         "verification_required": verification_required,
         "available": True,
     }
-    if setup_usd is not None and setup_usd != "0.00":
+    if setup_usd is not None:
         row["setup_usd"] = setup_usd
     if notes:
         row["notes"] = notes
-    # Written only when true: a row without them is sold as usual.
-    if receive_only:
-        row["receive_only"] = True
-    if by_request:
-        row["by_request"] = True
+    row["receive_only"] = receive_only
+    row["by_request"] = by_request
+    return _drop_unset(row)
+
+
+def _drop_unset(row: dict) -> dict:
+    """Remove the optional fields a row writes only when set: a zero setup
+    fee, and the receive_only and by_request flags (a row without them is
+    sold as usual)."""
+    for k, unset in (
+        ("setup_usd", "0.00"),
+        ("receive_only", False),
+        ("by_request", False),
+    ):
+        if k in row and row[k] in (unset, None):
+            del row[k]
     return row
 
 
@@ -512,7 +523,7 @@ DIDWW_TYPE = {
 }
 
 
-def _didww_type_fields(all_groups: list[dict]) -> dict:
+def _didww_type_fields(all_groups: list[dict]) -> tuple[dict, list[Decimal]]:
     """The row fields for one number type, from its areas. Hail sells a
     number it can show (listed) and that can place calls: the price comes
     from the areas Hail can sell, and the row is marked when there are
@@ -523,19 +534,21 @@ def _didww_type_fields(all_groups: list[dict]) -> dict:
     groups = sellable or outbound or all_groups
     prices = sorted(g["monthly"] for g in groups)
     cheapest = min(groups, key=lambda g: g["monthly"])
-    notes = None
-    if prices[0] != prices[-1]:
-        notes = f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(groups)} areas"
     return {
         "usd_per_month": money(prices[0]),
         "setup_usd": money(cheapest["setup"]),
         "voice": any(f.startswith("voice") for f in features),
         "sms": any(f.startswith("sms") for f in features),
         "verification_required": cheapest["needs_registration"] or cheapest["address"],
-        "notes": notes,
         "receive_only": not outbound,
         "by_request": bool(outbound) and not sellable,
-    }
+    }, prices
+
+
+def _didww_range_note(prices: list[Decimal]) -> str | None:
+    if prices[0] == prices[-1]:
+        return None
+    return f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(prices)} areas"
 
 
 def map_didww(
@@ -627,11 +640,12 @@ def map_didww(
                 skipped.append(f"{iso}:{number_type}: listed, no price on any group")
                 continue
             skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
-            fields = _didww_type_fields(unstocked[number_type])
-            fields.pop("notes")
-            no_stock[f"{iso}:{number_type}"] = fields
+            no_stock[f"{iso}:{number_type}"], _ = _didww_type_fields(
+                unstocked[number_type]
+            )
         for number_type, all_groups in by_type.items():
-            fields = _didww_type_fields(all_groups)
+            fields, prices = _didww_type_fields(all_groups)
+            fields["notes"] = _didww_range_note(prices)
             rows.append(
                 _row(
                     country_code=iso,
@@ -869,15 +883,11 @@ def merge(
                 continue
             # A row that vanished stays hidden: listed again with nothing to
             # buy is not back on sale. Stock coming back puts it on sale.
-            new = {**row, **prices}
-            # Written only when set, as _row does.
-            for k, unset in (
-                ("setup_usd", "0.00"),
-                ("receive_only", False),
-                ("by_request", False),
-            ):
-                if new.get(k) == unset:
-                    new.pop(k)
+            new = _drop_unset({**row, **prices})
+            # Papers follow the flag, as attach_requirements does for fetched
+            # rows: run_provider fetched a block for a row that needs one.
+            if not new.get("verification_required") and new.get("requirements"):
+                new["requirements"] = None
             changed = [k for k in watched if row.get(k) != new.get(k)]
             # A hidden row keeps its vanished note: the day it went off sale
             # still holds for numbers already held.
@@ -917,9 +927,15 @@ def merge(
             # Appended, not written over: a hand-verified row's notes say why
             # a human confirmed it and must outlive the carrier's feed.
             kept["notes"] = "; ".join(
-                [*_own_notes(kept.get("notes")), _VANISHED_NOTE.format(today=today)]
+                [
+                    *_own_notes(kept.get("notes"), keep_ranges=True),
+                    _VANISHED_NOTE.format(today=today),
+                ]
             )
-        elif _NO_STOCK_NOTE in (kept.get("notes") or ""):
+        elif any(
+            part.startswith(_NO_STOCK_NOTE)
+            for part in (kept.get("notes") or "").split("; ")
+        ):
             # Hidden, then listed without stock, now dropped: the no-stock
             # note is no longer true. The first vanished date stays.
             parts = _own_notes(kept.get("notes"), keep_vanished=True)
@@ -938,10 +954,14 @@ _VANISHED_NOTE = (
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
 
 
-def _own_notes(notes: str | None, keep_vanished: bool = False) -> list[str]:
+def _own_notes(
+    notes: str | None, keep_vanished: bool = False, keep_ranges: bool = False
+) -> list[str]:
     """The parts of a row's notes that the sync did not write. The vanished,
     no-stock and price-range notes are written again on each run; other
-    notes stay. ``keep_vanished`` keeps the dated vanished note as one part."""
+    notes stay. ``keep_vanished`` keeps the dated vanished note as one part.
+    ``keep_ranges`` keeps a price-range note: a vanished row keeps the notes
+    it had (rule 2)."""
     parts, rest = [], notes or ""
     for m in _VANISHED_NOTE_RE.finditer(rest):
         if keep_vanished:
@@ -953,7 +973,7 @@ def _own_notes(notes: str | None, keep_vanished: bool = False) -> list[str]:
             for part in rest.split("; ")
             if part.strip()
             and not part.startswith(_NO_STOCK_NOTE)
-            and not _PRICE_RANGE_NOTE_RE.fullmatch(part)
+            and (keep_ranges or not _PRICE_RANGE_NOTE_RE.fullmatch(part))
         ),
         *parts,
     ]
@@ -1295,7 +1315,7 @@ def _row_sections(summary: list[str], report: dict[str, list[str]]) -> None:
         ("Listed with no numbers in stock (checked, noted)", "no_stock"),
         ("Not observed this run (kept as is)", "unobserved"),
     ):
-        if report.get(key):
+        if report[key]:
             summary.append(f"### {label} ({len(report[key])})")
             summary.extend(f"- {line}" for line in report[key])
 
@@ -1375,12 +1395,16 @@ def run_provider(
     # refreshed: their papers say nothing about a number anyone can buy.
     fetched_keys = {f"{r['country_code']}:{r['number_type']}" for r in rows}
     sold_unseen = skipped_keys(skipped) - fetched_keys
-    kept_rows = [
-        dict(n)
-        for n in existing
-        if f"{n['country_code']}:{n['number_type']}" in sold_unseen
-        and n.get("verification_required")
-    ]
+    # A DIDWW row out of stock takes its verification flag from the empty
+    # areas, so its papers follow that flag. A hidden row is not on sale.
+    kept_rows = []
+    for n in existing:
+        key = f"{n['country_code']}:{n['number_type']}"
+        needs = no_stock.get(key, {}).get(
+            "verification_required", n.get("verification_required")
+        )
+        if key in sold_unseen and needs and n.get("available", True):
+            kept_rows.append({**n, "verification_required": True})
     attach_requirements(provider, rows, existing, requirement_errors, kept_rows)
     numbers, report = merge(
         existing,

@@ -524,6 +524,25 @@ def test_merge_keeps_a_vanished_row_listed_again_without_stock_hidden():
     assert gone[0]["notes"] == vanished
 
 
+def test_merge_drops_papers_when_empty_areas_need_none():
+    block = {"person": {"accepted": True, "items": ["id_document"]}}
+    prev = _no_stock_prev(requirements=block)
+    numbers, report = _merge_no_stock(
+        [prev], {"usd_per_month": "5.00", "verification_required": False}
+    )
+    assert numbers[0]["verification_required"] is False
+    assert numbers[0]["requirements"] is None
+    assert "verification_required" in report["no_stock"][0]
+
+
+def test_vanish_keeps_a_price_range_note():
+    prev = _no_stock_prev(
+        notes="monthly price varies by number: 1.00 to 2.00 USD in a sample of 5"
+    )
+    gone, _ = sync.merge([prev], [], "2026-11-20", "https://src", "telnyx-api-sync")
+    assert gone[0]["notes"].startswith(prev["notes"] + "; not offered")
+
+
 def test_merge_keeps_a_hand_note_that_starts_like_a_sync_note():
     prev = _no_stock_prev(notes="monthly price varies by city; ask support")
     numbers, _ = _merge_no_stock([prev], {"usd_per_month": "5.00"})
@@ -1507,6 +1526,7 @@ def test_row_sections_are_not_capped():
         "changed": lines,
         "added": [],
         "vanished": [],
+        "no_stock": [],
         "unobserved": [],
     }
     out: list[str] = []
