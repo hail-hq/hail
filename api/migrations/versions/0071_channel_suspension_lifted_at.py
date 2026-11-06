@@ -11,6 +11,8 @@ sent after the org's last lift.
   index on active rows, so an org can be suspended again after a lift.
 * ``emails_outbound_sent_at_idx``: the hourly email abuse check reads
   outbound mail by ``sent_at``; without it, each check scans ``emails``.
+  Built CONCURRENTLY so writes to ``emails`` do not block; that cannot run
+  in a transaction, hence the autocommit block.
 
 Tables checked: this extends ``channel_suspensions`` itself, the table that
 holds these rows. No new table.
@@ -43,16 +45,23 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("lifted_at IS NULL"),
     )
-    op.create_index(
-        "emails_outbound_sent_at_idx",
-        "emails",
-        ["sent_at"],
-        postgresql_where=sa.text("direction = 'outbound'"),
-    )
+    with op.get_context().autocommit_block():
+        op.create_index(
+            "emails_outbound_sent_at_idx",
+            "emails",
+            ["sent_at"],
+            postgresql_where=sa.text("direction = 'outbound'"),
+            postgresql_concurrently=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("emails_outbound_sent_at_idx", table_name="emails")
+    with op.get_context().autocommit_block():
+        op.drop_index(
+            "emails_outbound_sent_at_idx",
+            table_name="emails",
+            postgresql_concurrently=True,
+        )
     op.drop_index("channel_suspensions_active_uq", table_name="channel_suspensions")
     op.execute("DELETE FROM channel_suspensions WHERE lifted_at IS NOT NULL")
     op.create_unique_constraint(

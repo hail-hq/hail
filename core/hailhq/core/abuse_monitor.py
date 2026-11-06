@@ -67,6 +67,9 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
         .outerjoin(last_lift, last_lift.c.organization_id == UsageEvent.organization_id)
         .where(
             UsageEvent.channel == "sms",
+            # The plain bound lets the (channel, occurred_at) index limit
+            # the scan; GREATEST then narrows it after a lift.
+            UsageEvent.occurred_at >= window_start,
             UsageEvent.occurred_at >= _counted_from(window_start, last_lift),
         )
         .group_by(UsageEvent.organization_id)
@@ -88,6 +91,7 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
         .where(
             Suppression.channel == "sms",
             Suppression.source == "stop_keyword",
+            Suppression.created_at >= window_start,
             Suppression.created_at >= _counted_from(window_start, last_lift),
             Suppression.organization_id.is_not(None),
             # After a lift, a STOP counts only if the org texted that number
@@ -127,7 +131,6 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
         )
         if await _suspend(db, org_id, "sms", reason):
             suspended += 1
-    await db.flush()
     return suspended
 
 
@@ -221,7 +224,10 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
     already_suspended = await _suspended_orgs(db, "email")
     last_lift = _last_lift("email")
     in_window = and_(
-        _org_own_send(), Email.sent_at >= _counted_from(window_start, last_lift)
+        _org_own_send(),
+        # The plain bound lets emails_outbound_sent_at_idx limit the scan.
+        Email.sent_at >= window_start,
+        Email.sent_at >= _counted_from(window_start, last_lift),
     )
 
     # Each distinct address counts once per email, so repeating one address
@@ -249,14 +255,9 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         .outerjoin(last_lift, last_lift.c.organization_id == Email.organization_id)
         .where(in_window)
         .group_by(Email.id)
-        .subquery()
+        # A CTE used twice below: Postgres computes it once.
+        .cte("email_recipients")
     )
-    send_stmt = select(
-        email_recipients.c.organization_id, func.sum(email_recipients.c.recipients)
-    ).group_by(email_recipients.c.organization_id)
-    send_counts = {
-        org_id: int(sends) for org_id, sends in (await db.execute(send_stmt)).all()
-    }
 
     # One SES event can name several recipients; each (email, recipient)
     # counts once per kind, so a repeated feedback report for the same
@@ -311,27 +312,42 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         )
         .subquery()
     )
-    event_stmt = select(
-        per_email.c.organization_id,
-        func.sum(per_email.c.bounces),
-        func.sum(per_email.c.complaints),
-    ).group_by(per_email.c.organization_id)
-    event_counts = {
-        org_id: (int(bounces), int(complaints))
-        for org_id, bounces, complaints in (await db.execute(event_stmt)).all()
-    }
+    sends = (
+        select(
+            email_recipients.c.organization_id,
+            func.sum(email_recipients.c.recipients).label("sends"),
+        )
+        .group_by(email_recipients.c.organization_id)
+        .subquery()
+    )
+    events = (
+        select(
+            per_email.c.organization_id,
+            func.sum(per_email.c.bounces).label("bounces"),
+            func.sum(per_email.c.complaints).label("complaints"),
+        )
+        .group_by(per_email.c.organization_id)
+        .subquery()
+    )
+    rates_stmt = select(
+        sends.c.organization_id,
+        sends.c.sends,
+        func.coalesce(events.c.bounces, 0),
+        func.coalesce(events.c.complaints, 0),
+    ).outerjoin(events, events.c.organization_id == sends.c.organization_id)
+    rows = (await db.execute(rates_stmt)).all()
 
     window = settings.hail_email_abuse_window_hours
     max_bounce = settings.hail_email_abuse_max_bounce_rate
     max_complaint = settings.hail_email_abuse_max_complaint_rate
 
     suspended = 0
-    for org_id, sends in send_counts.items():
+    for org_id, sent_to, bounces, complaints in rows:
+        sends, bounces, complaints = int(sent_to), int(bounces), int(complaints)
         if org_id in already_suspended:
             continue
         if sends < settings.hail_email_abuse_min_sends:
             continue
-        bounces, complaints = event_counts.get(org_id, (0, 0))
         bounce_rate = bounces / sends
         complaint_rate = complaints / sends
         if bounce_rate > max_bounce:
@@ -348,7 +364,6 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             continue
         if await _suspend(db, org_id, "email", reason):
             suspended += 1
-    await db.flush()
     return suspended
 
 
