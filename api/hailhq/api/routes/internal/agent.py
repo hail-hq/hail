@@ -510,7 +510,7 @@ async def _send_email_to(
         actor_kind="system",
     )
 
-    err = await deliver_email(db, email_provider, email)
+    err = await deliver_email(db, email_provider, email, at_most_once=True)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -1026,7 +1026,9 @@ async def agent_reply_email(
             await db.refresh(prior)
             return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
         await db.refresh(prior)
-        err = await deliver_email(db, email_provider, prior, claimed_at=claimed_at)
+        err = await deliver_email(
+            db, email_provider, prior, claimed_at=claimed_at, at_most_once=True
+        )
         if err is not None:
             return _send_failure(err, prior)
         return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
@@ -1071,7 +1073,9 @@ async def agent_reply_email(
         },
         actor_kind="system",
     )
-    err = await deliver_email(db, email_provider, reply, claimed_at=reply.requested_at)
+    err = await deliver_email(
+        db, email_provider, reply, claimed_at=reply.requested_at, at_most_once=True
+    )
     if err is not None:
         return _send_failure(err, reply)
     return AgentReplyEmailResponse(ok=True, state="done", reply_id=reply.id)
@@ -1906,7 +1910,7 @@ async def agent_handover_email(
         },
         actor_kind="system",
     )
-    err = await deliver_email(db, email_provider, email)
+    err = await deliver_email(db, email_provider, email, at_most_once=True)
     if err is not None:
         await write_audit_log(
             organization_id=org,
