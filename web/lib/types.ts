@@ -165,6 +165,19 @@ export type NumberProvider = 'twilio' | 'telnyx' | 'didww';
 /** A catalog row plus the carrier it came from (the file's `provider`). */
 export interface NumberRow extends TelephonyNumberRow {
   provider: NumberProvider;
+  /** The fees this number's capabilities add to `usd_per_month`. */
+  monthly_fees: { label: string; usd_per_month: string }[];
+  /** `usd_per_month` plus `monthly_fees`. */
+  total_usd_per_month: string;
+}
+
+/** A carrier's monthly fee, charged once when any listed capability is used. */
+export interface CapabilityMonthlyFee {
+  capabilities: ('voice' | 'sms' | 'mms' | 'fax')[];
+  usd_per_month: string;
+  source_url: string;
+  last_verified: string;
+  effective_from: string;
 }
 
 export interface TelephonyFeeRow extends TelephonyProvenance {
@@ -195,6 +208,7 @@ export interface NumberCatalogFile {
   license: 'CC-BY-4.0';
   provider: NumberProvider;
   numbers: TelephonyNumberRow[];
+  capability_monthly_fees?: CapabilityMonthlyFee[];
   a2p_10dlc?: TelephonyFeeRow[];
 }
 
