@@ -491,7 +491,6 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
             # Held for answers on this same poll: a held row is not polled
             # again, so keep the repair guidance now.
             row.rejection_reason = status.reason
-        return True
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
     elif (
@@ -1651,6 +1650,15 @@ _RETRY_SUBMIT_AFTER = timedelta(minutes=2)
 APPLICATION_KEPT_FOR = timedelta(days=30)
 
 
+def _application_expired(row: CarrierVerification, now: datetime) -> bool:
+    """True once a cancelled or rejected application is past
+    ``APPLICATION_KEPT_FOR`` (from ``cancelled_at``, else ``updated_at``)."""
+    return (
+        row.state in ("cancelled", "rejected")
+        and (row.cancelled_at or row.updated_at) <= now - APPLICATION_KEPT_FOR
+    )
+
+
 async def _lock_waiting(
     db: AsyncSession, verification_id: UUID
 ) -> CarrierVerification | None:
@@ -1892,14 +1900,9 @@ async def forget_old_applications(db: AsyncSession, now: datetime) -> int:
         if row is None:
             continue
         await db.refresh(row, with_for_update=True)
-        ended_at = row.cancelled_at or row.updated_at
         refs = row.provider_refs or {}
         # Re-checked under the lock: an amend or a new state may have won.
-        if (
-            row.state in ("cancelled", "rejected")
-            and "application" in refs
-            and ended_at <= now - APPLICATION_KEPT_FOR
-        ):
+        if "application" in refs and _application_expired(row, now):
             row.provider_refs = {k: v for k, v in refs.items() if k != "application"}
             flag_modified(row, "provider_refs")
             forgotten += 1
@@ -1996,6 +1999,8 @@ async def get_verification_application(
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> SmsApplicationResponse:
     """Read your organization's saved SMS answers, including after rejection.
+    Answers of a cancelled or rejected registration are kept for 30 days
+    after it ended; after that this returns 404.
 
     Older applications may recover their verified sender identity through
     read-only provider calls; a 404 asks for original details and support when
@@ -2003,14 +2008,10 @@ async def get_verification_application(
     fields or addresses. No records are filed or charged here.
     """
     row = await _org_row_or_404(db, principal, verification_id)
-    application = (row.provider_refs or {}).get("application")
-    # Answers deleted after APPLICATION_KEPT_FOR are not rebuilt from the
-    # carrier either.
-    expired = (
-        row.state in ("cancelled", "rejected")
-        and (row.cancelled_at or row.updated_at)
-        <= datetime.now(timezone.utc) - APPLICATION_KEPT_FOR
-    )
+    # Answers past APPLICATION_KEPT_FOR are gone, even before the background
+    # pass deletes them, and are not rebuilt from the carrier either.
+    expired = _application_expired(row, datetime.now(timezone.utc))
+    application = None if expired else (row.provider_refs or {}).get("application")
     if row.purpose == "sms" and not isinstance(application, dict) and not expired:
         provider = registry(row.provider, "sms")
         if isinstance(provider, SmsRegistrationProvider):

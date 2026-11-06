@@ -5237,6 +5237,10 @@ paths:
       description:
         "Read your organization's saved SMS answers, including after rejection.
 
+        Answers of a cancelled or rejected registration are kept for 30 days
+
+        after it ended; after that this returns 404.
+
 
         Older applications may recover their verified sender identity through
 
@@ -9882,7 +9886,9 @@ components:
         cancellable:
           type: boolean
           title: Cancellable
-          description: True when `DELETE /v1/verifications/{id}` accepts this verification now.
+          description:
+            True when `DELETE /v1/verifications/{id}` accepts this verification
+            now.
           default: false
         identity_confirmed:
           type: boolean

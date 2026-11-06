@@ -4877,6 +4877,11 @@ async def test_expired_answers_are_not_rebuilt_from_the_carrier(
     await async_session.commit()
     saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
     assert saved.status_code == 404 and asked == []
+    # Stored answers past the limit are gone before the background pass runs.
+    row.provider_refs = {"brand_sid": "BN1", "application": {"fields": {}}}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404
 
 
 @pytest.mark.usefixtures("us_number")
