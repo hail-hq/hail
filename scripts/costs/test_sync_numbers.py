@@ -670,17 +670,17 @@ def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():
     """Brazil national sat in the catalog at $10.00 since July. The account
     listing offers only local numbers, and the Pricing API prices only local.
     A type with neither stock nor price is observed gone. A type the Pricing
-    API still prices (Ireland mobile here) stays unobserved."""
+    API still prices (mobile in the made-up country ZZ) stays unobserved."""
     countries = [
         {"country_code": "BR", "country": "Brazil"},
-        {"country_code": "IE", "country": "Ireland"},
+        {"country_code": "ZZ", "country": "Testland"},
     ]
-    types = {"BR": ["local"], "IE": ["local"]}
+    types = {"BR": ["local"], "ZZ": ["local"]}
     pricing = {
         "BR": {
             "phone_number_prices": [{"number_type": "local", "current_price": "4.25"}]
         },
-        "IE": {
+        "ZZ": {
             "phone_number_prices": [
                 {"number_type": "local", "current_price": "1.80"},
                 {"number_type": "mobile", "current_price": "6.50"},
@@ -689,16 +689,43 @@ def test_twilio_marks_a_type_it_neither_lists_nor_prices_as_gone():
     }
     keys = sync.twilio_observed_keys(countries, types, pricing=pricing)
     assert {"BR:local", "BR:mobile", "BR:toll_free", "BR:national"} <= keys
-    assert "IE:mobile" not in keys
-    assert "IE:local" in keys
+    assert "ZZ:mobile" not in keys
+    assert "ZZ:local" in keys
+
+    # Through the merge: the gone row is kept, unavailable, with the note.
+    existing = [
+        {
+            "country_code": "BR",
+            "number_type": "national",
+            "usd_per_month": "10.00",
+            "available": True,
+            "last_verified": "2026-07-17",
+            "last_changed_at": "2026-07-17",
+            "verification_method": "carrier-sync",
+            "verified_by": "twilio-sync",
+            "source_url": "https://src",
+        }
+    ]
+    numbers, report = sync.merge(
+        existing,
+        [],
+        "2026-11-06",
+        "https://src",
+        "twilio-sync",
+        unobserved=sync.unobserved_keys(existing, [], keys),
+    )
+    assert report["vanished"] == ["BR:national"]
+    assert numbers[0]["available"] is False
+    assert numbers[0]["last_verified"] == "2026-11-06"
+    assert "not offered by the carrier as of 2026-11-06" in numbers[0]["notes"]
 
 
 def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
     """Bulgaria sat in the catalog at $3.00 since July while Twilio sold no
     Bulgarian number: absent from the account listing, and the Pricing API
     answers with no prices at all. That country is observed gone. A country
-    the Pricing API still prices (Uganda) stays unobserved: the account may
-    only lack it."""
+    the Pricing API still prices (Uganda) keeps its priced types unobserved:
+    the account may only lack them."""
     countries = [{"country_code": "GB", "country": "United Kingdom"}]
     types = {"GB": ["local"]}
     assert sync.twilio_observed_keys(countries, types, unsold={"BG"}) == {
@@ -746,12 +773,16 @@ def test_twilio_marks_a_country_it_no_longer_prices_as_gone():
         FakeHttp(), "AC1", {"GB": "44"}, catalog_countries={"GB", "BG", "UG"}
     )
     assert rows == [] and skipped == ["GB:local: no numbers offered to this account"]
-    # GB lists and prices only local, so its other types are observed gone.
+    # GB lists and prices only local, and UG prices only local, so their
+    # other types are observed gone. UG local stays unobserved.
     assert observed == {
         "GB:local",
         "GB:mobile",
         "GB:toll_free",
         "GB:national",
+        "UG:mobile",
+        "UG:toll_free",
+        "UG:national",
         "BG:local",
         "BG:mobile",
         "BG:toll_free",

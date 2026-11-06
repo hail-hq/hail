@@ -560,7 +560,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/BR",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -578,7 +578,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/BR",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -847,7 +847,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/CZ",
       "requirements": {
         "person": {
           "accepted": true,
@@ -1081,7 +1081,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/DK",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -1677,7 +1677,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/HR",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -1733,7 +1733,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/HU",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -1885,7 +1885,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/IE",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
@@ -2805,7 +2805,7 @@
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
-      "source_url": "https://www.twilio.com/content/dam/twilio-com/pricing-data/en/csv/PMded94a0dae30eaaec0f115f22859bd38_SiteNumbersPricing.csv",
+      "source_url": "https://pricing.twilio.com/v1/PhoneNumbers/Countries/PL",
       "notes": "not offered by the carrier as of 2026-11-06; kept so held numbers stay billable"
     },
     {
