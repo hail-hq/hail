@@ -1,10 +1,15 @@
 """Put an organization's US long codes on its approved SMS registration, and
 take them off again. ``PhoneNumber.sms_registration_id`` records which
-numbers are on which registration; the send gate reads it."""
+numbers are on which registration; the send gate reads it.
+
+A number the carrier refuses keeps its retry state in
+``provisioning_metadata['sms_attach_refused']``: the registration, the wait,
+and when the background pass may try it again."""
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from hailhq.api.audit import write_audit_log
@@ -16,6 +21,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+_REFUSED = "sms_attach_refused"
+# The background pass waits this long after a refusal, doubling each time.
+_FIRST_WAIT_HOURS = 1
+_MAX_WAIT_HOURS = 24
 
 # What makes a number eligible for a US SMS registration.
 _ELIGIBLE_NUMBER = (
@@ -59,26 +69,86 @@ async def registered_numbers(
     return list(numbers)
 
 
+def _refusal(row: CarrierVerification, number: PhoneNumber) -> dict | None:
+    """The number's retry state for this registration, if it was refused.
+    State left by another registration does not count."""
+    refusal = number.provisioning_metadata.get(_REFUSED)
+    if refusal and refusal["registration_id"] == str(row.id):
+        return refusal
+    return None
+
+
+def _waiting(row: CarrierVerification, number: PhoneNumber) -> bool:
+    """True while the background pass must leave a refused number alone."""
+    refusal = _refusal(row, number)
+    return refusal is not None and datetime.now(timezone.utc) < (
+        datetime.fromisoformat(refusal["retry_at"])
+    )
+
+
+async def _record_refusal(
+    row: CarrierVerification, number: PhoneNumber, reason: str
+) -> None:
+    """Push the number's next background try back. The first refusal also
+    writes the audit row that says why the number's texts fail."""
+    refusal = _refusal(row, number)
+    hours = _FIRST_WAIT_HOURS
+    if refusal:
+        hours = min(refusal["wait_hours"] * 2, _MAX_WAIT_HOURS)
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        _REFUSED: {
+            "registration_id": str(row.id),
+            "wait_hours": hours,
+            "retry_at": (
+                datetime.now(timezone.utc) + timedelta(hours=hours)
+            ).isoformat(),
+        },
+    }
+    if refusal is None:
+        await write_audit_log(
+            row.organization_id,
+            None,
+            "verification.sms_attach_refused",
+            "phone_number",
+            number.id,
+            {
+                "e164": number.e164,
+                "verification_id": str(row.id),
+                "carrier_reason": reason,
+            },
+            actor_kind="system",
+        )
+
+
 async def _attach(
     row: CarrierVerification, provider: SmsRegistrationProvider, number: PhoneNumber
 ) -> bool:
     """Attach one number and record it. A failure is logged with the number
-    id. True when the number is now on the registration."""
+    id and recorded (see ``_record_refusal``). True when the number is now on
+    the registration."""
     try:
         await provider.attach_number(
             row.provider_refs,
             provider_resource_id=number.provider_resource_id,
             e164=number.e164,
         )
-    except Exception:
+    except Exception as exc:
         logger.warning(
             "SMS registration attach failed for number %s", number.id, exc_info=True
         )
+        # A failed re-attach leaves a number on the registration: it still texts.
+        if number.sms_registration_id != row.id:
+            await _record_refusal(row, number, str(exc)[:500] or repr(exc))
         return False
     number.sms_registration_id = row.id
     service = (row.provider_refs or {}).get("messaging_service_sid")
     if service:
         number.messaging_service_sid = service
+    if _REFUSED in number.provisioning_metadata:
+        number.provisioning_metadata = {
+            k: v for k, v in number.provisioning_metadata.items() if k != _REFUSED
+        }
     return True
 
 
@@ -168,6 +238,9 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
         return
     if number.id not in {n.id for n in await registered_numbers(db, row)}:
         return  # a person's registration holds one number only
+    # Read under the org lock: the background pass may have changed these
+    # while this request waited for it.
+    await db.refresh(number, ["provisioning_metadata", "sms_registration_id"])
     await _attach(row, provider, number)
 
 
@@ -176,6 +249,8 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
 
     Only an existing approved campaign is used; this never files a new brand
     or campaign. The org lock serializes repair with cancellation and release.
+    A refused number is skipped until its wait ends; ``attach_if_registered``
+    (POST /numbers/{id}/enable-sms) does not wait.
     """
     missing_number = (
         select(PhoneNumber.id)
@@ -217,6 +292,8 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
                 for number in await registered_numbers(db, row):
                     if number.sms_registration_id is not None:
                         continue
+                    if _waiting(row, number):
+                        continue
                     if await _attach(row, provider, number):
                         attached += 1
                     else:
@@ -224,8 +301,8 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
             organization_id, verification_id = row.organization_id, row.id
             await db.commit()
             total += attached
-            # A refused number retries on every pass: _attach logs each failure,
-            # and the audit trail records only numbers that moved.
+            # _attach audits a refused number once; this row counts the
+            # numbers that moved.
             if attached:
                 await write_audit_log(
                     organization_id,

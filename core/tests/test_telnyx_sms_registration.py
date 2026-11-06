@@ -389,6 +389,18 @@ async def test_attach_posts_and_conflict_is_success() -> None:
         )
 
 
+async def test_a_refused_attach_carries_telnyx_reason() -> None:
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"code": "10015", "detail": "Number not eligible"}]}
+        )
+
+    with pytest.raises(VerificationProviderError, match="Number not eligible"):
+        await _provider(handler).attach_number(
+            {"campaign_id": "C1"}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
 async def test_detach_deletes_the_number_campaign_link() -> None:
     calls = []
 

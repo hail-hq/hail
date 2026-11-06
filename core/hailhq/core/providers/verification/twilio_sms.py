@@ -478,7 +478,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 provider_resource_id=provider_resource_id,
             )
         except SmsProvisioningError as exc:
-            raise VerificationProviderError("Twilio request failed") from exc
+            raise VerificationProviderError(exc.detail) from exc
 
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
         """A company's campaign covers the organization's service, which the
