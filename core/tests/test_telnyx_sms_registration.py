@@ -678,6 +678,39 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert not [c for c in calls if c[0] == "GET" and "/10dlc/campaign" in c[1]]
 
 
+@pytest.mark.parametrize("code", [404, 410])
+async def test_a_kept_brand_telnyx_no_longer_holds_files_a_new_one(code) -> None:
+    calls: list = []
+    inner = _kept_brand_handler(calls, KEPT_BRAND)
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append((req.method, req.url.path))
+            return httpx.Response(code, json={})
+        return inner(req)
+
+    draft = await _kept_draft(_provider(handler), new_brand_funded=True)
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+
+
+@pytest.mark.parametrize("code", [400, 401, 403])
+async def test_a_kept_brand_lookup_refusal_buys_no_new_brand(code) -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    calls: list = []
+    inner = _kept_brand_handler(calls, KEPT_BRAND)
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append((req.method, req.url.path))
+            return httpx.Response(code, json={})
+        return inner(req)
+
+    with pytest.raises(VerificationProviderError):
+        await _kept_draft(_provider(handler), new_brand_funded=True)
+    assert ("POST", "/v2/10dlc/brand") not in calls
+
+
 async def test_a_reused_brand_files_when_a_new_brand_is_not_funded() -> None:
     calls: list = []
     p = _provider(_kept_brand_handler(calls, KEPT_BRAND))
@@ -2186,10 +2219,12 @@ async def test_campaign_submission_refusal_returns_safe_repair_guidance():
         "campaign": campaign_text(FIELDS, "business").__dict__,
     }
     result = await _provider(handler).status(refs)
-    assert result.state == "rejected" and "privacy policy" in result.reason
+    assert result.state == "pending" and "privacy policy" in result.reason
     assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
     assert "Ada Secret" in result.raw_reason
     assert "campaign_id" not in refs
+    # Held for the customer's answers on the same paid brand.
+    assert refs["needs_information"] is True and refs["brand_id"] == "B1"
 
 
 @pytest.mark.parametrize("status", [400, 422])
@@ -2247,8 +2282,9 @@ async def test_campaign_structured_validation_requests_repair(status, field):
         "campaign": campaign_text(FIELDS, "business").__dict__,
     }
     result = await _provider(handler).status(refs)
-    assert result.state == "rejected" and result.reason
+    assert result.state == "pending" and result.reason
     assert refs["campaign_needs_repair"] is True
+    assert refs["needs_information"] is True
     assert refs["brand_id"] == "B1" and "campaign_id" not in refs
     assert writes == [("POST", "/v2/10dlc/campaignBuilder")]
     if field == "messageFlow":

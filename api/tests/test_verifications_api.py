@@ -962,7 +962,7 @@ async def test_cancel_is_refused_while_under_review(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
-    assert got["state"] == "submitted"
+    assert got["state"] == "submitted" and got["cancellable"] is False
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 409 and "under review" in resp.json()["detail"]
     assert carrier.discarded == []
@@ -1975,7 +1975,8 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0} and carrier.submitted == []
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert carrier.submitted == []
     await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
     carrier.remote_status = ProviderStatus(state="approved")
     counts = await sweep_verifications(
@@ -2068,7 +2069,7 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
@@ -4855,6 +4856,40 @@ async def test_legacy_application_has_actionable_missing_answers(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_old_ended_applications_lose_their_saved_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.api.routes.verifications import forget_old_applications
+
+    _, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    rows = {}
+    for name, state, age in (
+        ("old_cancelled", "cancelled", 31),
+        ("old_rejected", "rejected", 31),
+        ("new_cancelled", "cancelled", 29),
+        ("old_submitted", "submitted", 31),
+    ):
+        vid = (await _post_sms(client, key)).json()["id"]
+        row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+        row.state = state
+        row.cancelled_at = now - timedelta(days=age) if state == "cancelled" else None
+        row.updated_at = now - timedelta(days=age)
+        row.provider_refs = {"brand_reused": True, "application": {"fields": {}}}
+        rows[name] = row
+        await async_session.commit()
+    assert await forget_old_applications(async_session, now) == 2
+    for name, row in rows.items():
+        await async_session.refresh(row)
+        kept = "application" in row.provider_refs
+        assert kept is (name in ("new_cancelled", "old_submitted")), name
+        # Only the answers go: the billing mark stays.
+        assert row.provider_refs["brand_reused"] is True
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_campaign_acceptance_is_distinct_from_runtime_readiness(
     client, org_and_key, sms_carrier, async_session, monkeypatch
 ):
@@ -4875,6 +4910,8 @@ async def test_campaign_acceptance_is_distinct_from_runtime_readiness(
     assert response.json()["step"] == "runtime_setup"
     assert response.json()["campaign_accepted"] is True
     assert response.json()["runtime_ready"] is False
+    # The console shows Cancel from this flag, not its own copy of the rule.
+    assert response.json()["cancellable"] is True
 
 
 @pytest.mark.usefixtures("us_number")
@@ -5034,6 +5071,18 @@ async def test_amendment_keeps_same_row_brand_and_original_charge(
     )
     assert repeat.status_code == 200 and repeat.json()["id"] == vid
     assert sms_carrier.campaigns_created == 1 and len(sms_carrier.drafts) == 1
+    # One audit row for the change, none for the identical retry, no answers.
+    audits = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "verification.amend")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audits) == 1 and str(audits[0].resource_id) == vid
+    assert set(audits[0].payload) == {"requirements_version"}
 
 
 @pytest.mark.usefixtures("us_number")

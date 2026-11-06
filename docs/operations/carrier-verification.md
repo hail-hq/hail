@@ -123,12 +123,22 @@ The ordinary verification response never includes the application. For an older 
 the API may recover the original sender fields through a read-only provider lookup. If they
 cannot be recovered, a 404 asks for the actual original details; do not guess them. A provider
 outage returns a retryable error. A saved application is not proof of recipient consent.
+The background pass deletes the saved answers (`provider_refs.application`) of a cancelled or
+rejected registration 30 days after it ended (`cancelled_at`, else `updated_at`;
+`APPLICATION_KEPT_FOR` in `routes/verifications.py`). The rest of the refs stay for billing.
 
 A legacy brand-only registration that lacks current campaign evidence stays `submitted` with
 `step=needs_information`. It retains the same registration, sender identity, paid brand and
 provider IDs. It is not a carrier rejection and must not be cancelled and recreated to repair
 its evidence. Already-filed campaigns continue normal review, and approved registrations
 remain approved; this evidence gate applies before a new campaign is filed.
+
+A campaign create the carrier refuses for an answer the customer gave gets the same hold, on
+Telnyx and Twilio, for a person or a company: `provider_refs.needs_information` and
+`campaign_needs_repair` are set, the paid brand stays, and `rejection_reason` holds Hail's
+repair guidance. The carrier's own text goes only to the audit row
+`verification.campaign_refused` (it can quote personal data). Before this, the row was
+`rejected` and dismissing it deleted a company's paid brand.
 
 Use `PATCH /verifications/{id}/application` with the complete replacement `fields` and complete
 actual `address` to repair that same row. The API validates the current form and requires the
@@ -139,6 +149,7 @@ If a previous campaign create succeeded but its response was lost, the API recov
 existing filing before allowing changes. The PATCH performs no paid provider action: it clears
 the information hold only after validation, then a later poll resumes campaign filing and its
 normal review fee. An identical retry is safe, including after that campaign has been filed.
+Each accepted change writes the audit row `verification.amend` with the caller; it holds no answers.
 
 CLI recovery uses `hail numbers get-sms-application <verification-id>` followed by
 `hail numbers amend-sms <verification-id> --field ... --address ...`. Supply the complete current
@@ -190,8 +201,8 @@ registration does not verify toll-free messaging.
 `DELETE /verifications/{id}`:
 
 - `awaiting_review` → `cancelled`, draft discarded at the carrier.
-- `rejected` → `cancelled` (dismiss), draft discarded. Exception for a Telnyx person (`purpose=sms`) whose PIN was confirmed and whose campaign was filed: only the campaign is deleted, the brand stays at Telnyx, and the cancelled row holds `provider_refs.kept_brand_id`. The next filing reuses that brand when Telnyx still shows it confirmed and first name, last name, email and mobile match: no new brand, no PIN, `provider_refs.brand_reused`, no submission fee. Otherwise it files a new brand, or returns 402 with no brand when the credit does not cover one. The kept brand then stays at Telnyx, as does the brand of a customer who never files again: Telnyx refuses to delete a brand for 3 months after its campaign.
-- `submitting`, `submitted` → **409** while review is pending. Exception: an SMS campaign already accepted by the carrier but waiting in `runtime_setup` (`campaign_accepted=true`, `runtime_ready=false`) can be cancelled. The API rates the existing campaign before discarding it and rechecks eligibility under locks, preserving normal billing and provider cleanup behavior. A `needs_information` registration is repaired with PATCH on its existing row, not cancellation.
+- `rejected` → `cancelled` (dismiss), draft discarded. Exception for a Telnyx person (`purpose=sms`) whose PIN was confirmed and whose campaign was filed: only the campaign is deleted, the brand stays at Telnyx, and the cancelled row holds `provider_refs.kept_brand_id`. The next filing reuses that brand when Telnyx still shows it confirmed and first name, last name, email and mobile match: no new brand, no PIN, `provider_refs.brand_reused`, no submission fee. A kept brand Telnyx answers 404 or 410 for is gone; any other error is a retryable 503, so an auth or account error never buys a second brand. Otherwise it files a new brand, or returns 402 with no brand when the credit does not cover one. The kept brand then stays at Telnyx, as does the brand of a customer who never files again: Telnyx refuses to delete a brand for 3 months after its campaign.
+- `submitting`, `submitted` → **409** while review is pending. Exception: an SMS campaign already accepted by the carrier but waiting in `runtime_setup` (`campaign_accepted=true`, `runtime_ready=false`) can be cancelled. The API rates the existing campaign before discarding it and rechecks eligibility under locks, preserving normal billing and provider cleanup behavior. A `needs_information` registration is repaired with PATCH on its existing row, not cancellation. Every verification response carries `cancellable`: true when `DELETE` accepts the row now. Clients show Cancel from it.
 - `approved` with `purpose=sms` → `cancelled`. Each number on it (`phone_numbers.sms_registration_id`) leaves the campaign (Telnyx unlink; a person's Twilio number leaves the person's service and is set up in the org's service again), then the campaign, brand, bundle and profile are discarded. `cancelled_at` is set; the website rater bills the monthly fee through that month. Telnyx bills at least 3 monthly fees from approval, so for Telnyx the rater bills through the later of the cancel month and the approval month + 2 (`minimum_months` in `costs/sms-registration.json`). Audit row `verification.cancel`.
 - `approved` with `purpose=number`, `cancelled` → 409.
 

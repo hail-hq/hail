@@ -956,12 +956,14 @@ async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
     responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
     responses["us_app_to_person.create"] = refused
     provider = _provider(responses)
-    result = await provider.status(
-        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
-    )
-    assert result.state == "rejected" and "privacy policy" in result.reason
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
+    result = await provider.status(refs)
+    assert result.state == "pending" and "privacy policy" in result.reason
     assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
     assert "Ada Secret" in result.raw_reason
+    # Held for the customer's answers on the same paid brand.
+    assert refs["needs_information"] is True and refs["brand_sid"] == "BN1"
+    assert provider.step(refs) == "needs_information"
 
 
 async def test_keyword_campaign_sends_actual_confirmation_and_content_flags():

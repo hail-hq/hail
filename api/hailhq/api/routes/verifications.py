@@ -490,6 +490,15 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         return True
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
+    elif (
+        status.state == "pending"
+        and status.reason
+        and (row.provider_refs or {}).get("needs_information")
+        and row.rejection_reason != status.reason
+    ):
+        # A filing held for the customer's answers: say what to fix. The
+        # amend route clears it.
+        row.rejection_reason, row.updated_at = status.reason, now
     else:
         return False
     _last_polled.pop(row.id, None)
@@ -541,6 +550,18 @@ async def _poll_and_apply(
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
+    elif changed and status is not None and status.state == "pending" and status.reason:
+        # A refused campaign held for the customer's answers. The carrier's
+        # text can quote personal data: audit row only, never the log.
+        await write_audit_log(
+            row.organization_id,
+            None,
+            "verification.campaign_refused",
+            "carrier_verification",
+            row.id,
+            {"reason": row.rejection_reason, "carrier_reason": status.raw_reason},
+            actor_kind="system",
+        )
     if row.provider_refs != refs_before:
         flag_modified(row, "provider_refs")
         changed = True
@@ -803,6 +824,7 @@ def _out(
             "runtime_ready": (
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
+            "cancellable": _can_cancel(row),
         }
     )
 
@@ -1613,6 +1635,9 @@ async def _submit_row(
 # An 'awaiting_review' row this old was not submitted at creation (the
 # carrier was down); the sweeper retries it.
 _RETRY_SUBMIT_AFTER = timedelta(minutes=2)
+# How long a cancelled or rejected US texting application keeps the saved
+# answers (address, tax id, mobile, email) so the customer can file again.
+APPLICATION_KEPT_FOR = timedelta(days=30)
 
 
 async def _lock_waiting(
@@ -1824,7 +1849,51 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         if row.state != before:
             refreshed += 1
     await reconcile_approved_registrations(db, registry)
-    return {"submitted": submitted, "refreshed": refreshed}
+    forgotten = await forget_old_applications(db, now)
+    return {"submitted": submitted, "refreshed": refreshed, "forgotten": forgotten}
+
+
+async def forget_old_applications(db: AsyncSession, now: datetime) -> int:
+    """Delete the saved answers of US texting applications cancelled or
+    rejected more than ``APPLICATION_KEPT_FOR`` ago. Only the ``application``
+    key goes: the other refs still dismiss the filing and bill it right.
+    Returns how many rows lost their answers."""
+    ended = func.coalesce(
+        CarrierVerification.cancelled_at, CarrierVerification.updated_at
+    )
+    ids = (
+        (
+            await db.execute(
+                select(CarrierVerification.id).where(
+                    CarrierVerification.purpose == "sms",
+                    CarrierVerification.state.in_(("cancelled", "rejected")),
+                    CarrierVerification.provider_refs.has_key("application"),
+                    ended <= now - APPLICATION_KEPT_FOR,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    forgotten = 0
+    for verification_id in ids:
+        row = await db.get(CarrierVerification, verification_id)
+        if row is None:
+            continue
+        await db.refresh(row, with_for_update=True)
+        ended_at = row.cancelled_at or row.updated_at
+        refs = row.provider_refs or {}
+        # Re-checked under the lock: an amend or a new state may have won.
+        if (
+            row.state in ("cancelled", "rejected")
+            and "application" in refs
+            and ended_at <= now - APPLICATION_KEPT_FOR
+        ):
+            row.provider_refs = {k: v for k, v in refs.items() if k != "application"}
+            flag_modified(row, "provider_refs")
+            forgotten += 1
+        await db.commit()
+    return forgotten
 
 
 async def _org_row_or_404(
@@ -2056,6 +2125,18 @@ async def amend_sms_application(
     flag_modified(row, "provider_refs")
     _last_polled.pop(row.id, None)
     await db.commit()
+    actor_user_id, actor_kind = actor_of(principal)
+    # Records who amended it, never the answers (personal data).
+    await write_audit_log(
+        row.organization_id,
+        principal.api_key_id,
+        "verification.amend",
+        "carrier_verification",
+        row.id,
+        {"requirements_version": row.requirements_version},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
     return _out(row, registry)
 
 

@@ -449,10 +449,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 "GET", "/10dlc/campaign", params={"brandId": brand_id}
             )
         except httpx.HTTPStatusError as exc:
-            # The lookup is optional: a refusal must not block the filing.
-            # An outage or 429 raises: retrying beats paying for a new brand.
+            # A brand Telnyx no longer holds (404, 410) files a new one. Any
+            # other answer raises: an outage, a 429 or an auth error must not
+            # buy a second brand.
             status = exc.response.status_code
-            if status == 404:
+            if status in (404, 410):
                 logger.warning("10DLC kept brand lookup failed: status=%s", status)
                 return False
             raise
@@ -737,10 +738,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
                 if _refused(exc) and exc.request.url.path.endswith("/campaignBuilder"):
+                    # The paid brand stays: the customer fixes the answers on
+                    # this same registration (PATCH .../application), then
+                    # the background pass files the campaign again.
                     refs["campaign_needs_repair"] = True
+                    refs["needs_information"] = True
                     raw = str(_errors(exc.response))
+                    logger.warning("10DLC campaign refused; held for answers")
                     return ProviderStatus(
-                        state="rejected",
+                        state="pending",
                         reason=campaign_repair_reason(raw),
                         raw_reason=raw,
                     )

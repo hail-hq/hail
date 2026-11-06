@@ -2806,6 +2806,10 @@ class VerificationResponse(BaseModel):
         default=None,
         description="True when required runtime configuration was verified, false while setup retries, null when not independently tracked.",
     )
+    cancellable: bool = Field(
+        default=False,
+        description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
+    )
     identity_confirmed: bool = Field(
         default=False,
         description=(

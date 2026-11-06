@@ -9879,6 +9879,11 @@ components:
           description:
             True when required runtime configuration was verified, false
             while setup retries, null when not independently tracked.
+        cancellable:
+          type: boolean
+          title: Cancellable
+          description: True when `DELETE /v1/verifications/{id}` accepts this verification now.
+          default: false
         identity_confirmed:
           type: boolean
           title: Identity Confirmed

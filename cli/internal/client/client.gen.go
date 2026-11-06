@@ -3530,6 +3530,9 @@ type VerificationResponse struct {
 	// CampaignAccepted The carrier accepted the SMS campaign; this alone does not mean a number is ready to send.
 	CampaignAccepted *bool `json:"campaign_accepted,omitempty"`
 
+	// Cancellable True when `DELETE /v1/verifications/{id}` accepts this verification now.
+	Cancellable *bool `json:"cancellable,omitempty"`
+
 	// Confirmation For a person's US texting registration: 'code' when you must enter the code the carrier texted (POST /verifications/{id}/confirm), 'reply' when you must answer the carrier's text, null when nothing is pending.
 	Confirmation *string `json:"confirmation,omitempty"`
 

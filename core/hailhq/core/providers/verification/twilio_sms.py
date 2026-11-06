@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+import requests
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
@@ -34,7 +35,6 @@ from hailhq.core.providers.verification.sms_review import (
     application_validation_error,
     campaign_repair_reason,
 )
-import requests
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -396,8 +396,14 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 )
             except TwilioRestException as exc:
                 if application_validation_error(exc.status, exc.msg):
+                    # The paid brand stays: the customer fixes the answers on
+                    # this same registration (PATCH .../application), then
+                    # the background pass files the campaign again.
+                    refs["campaign_needs_repair"] = True
+                    refs["needs_information"] = True
+                    logger.warning("A2P campaign refused; held for answers")
                     return ProviderStatus(
-                        state="rejected",
+                        state="pending",
                         reason=campaign_repair_reason(exc.msg),
                         raw_reason=exc.msg,
                     )
