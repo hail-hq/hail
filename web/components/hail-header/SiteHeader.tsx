@@ -5,7 +5,13 @@ import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
 import styles from "./SiteHeader.module.css";
 
-export type SiteHeaderActive = "docs" | null;
+export type SiteHeaderActive =
+  | "product"
+  | "setup"
+  | "pricing"
+  | "docs"
+  | "blog"
+  | null;
 
 const RESOURCES = [
   {
@@ -19,10 +25,8 @@ const RESOURCES = [
     ],
   },
   {
-    label: "Guides",
+    label: "Compare and estimate",
     items: [
-      { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
-      { label: "Domain warmup guide", href: "/email#domain-warmup" },
       { label: "Compare platforms", href: "/compare" },
       { label: "Free tools", href: "/tools" },
       { label: "AI model pricing", href: "/costs" },
@@ -47,6 +51,13 @@ const SETUP_GUIDES = [
       { label: "Inbox", href: "/agent-templates/inbox" },
     ],
   },
+  {
+    label: "Phone and email",
+    items: [
+      { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
+      { label: "Domain warmup guide", href: "/email#domain-warmup" },
+    ],
+  },
 ];
 
 function navLinkClass(isActive: boolean, extra?: string) {
@@ -66,6 +77,7 @@ export function SiteHeader({
   themeControl: ReactNode;
   origin?: string;
 }) {
+  const current = active;
   const siteHref = (path: string) => new URL(path, origin).href;
   const { open, setOpen, ref } = useDropdown();
   const {
@@ -132,7 +144,7 @@ export function SiteHeader({
           <div className={styles.dropdown} ref={ref}>
             <button
               type="button"
-              className={navLinkClass(false)}
+              className={navLinkClass(current === "product")}
               aria-haspopup="true"
               aria-expanded={open}
               onClick={() => {
@@ -178,7 +190,7 @@ export function SiteHeader({
           <div className={styles.dropdown} ref={setupRef}>
             <button
               type="button"
-              className={navLinkClass(false)}
+              className={navLinkClass(current === "setup")}
               aria-haspopup="true"
               aria-expanded={setupOpen}
               onClick={() => {
@@ -221,18 +233,26 @@ export function SiteHeader({
               </div>
             )}
           </div>
-          <a href={siteHref("/pricing")} className={navLinkClass(false)}>
-            Pricing
-          </a>
           <a
             href={siteHref("/docs")}
-            aria-current={active === "docs" ? "page" : undefined}
-            className={navLinkClass(active === "docs")}
+            aria-current={current === "docs" ? "true" : undefined}
+            className={navLinkClass(current === "docs")}
           >
             Docs
           </a>
-          <a href={siteHref("/blog")} className={navLinkClass(false)}>
+          <a
+            href={siteHref("/blog")}
+            aria-current={current === "blog" ? "true" : undefined}
+            className={navLinkClass(current === "blog")}
+          >
             Blog
+          </a>
+          <a
+            href={siteHref("/pricing")}
+            aria-current={current === "pricing" ? "true" : undefined}
+            className={navLinkClass(current === "pricing")}
+          >
+            Pricing
           </a>
           <a
             className={`${styles.primary} ${styles.menuCta}`}
