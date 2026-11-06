@@ -590,6 +590,30 @@ async def test_audio_after_the_greeting_is_never_checked(monkeypatch, leg) -> No
     await line.aclose()
 
 
+async def test_silent_line_stops_reading(leg) -> None:
+    """Ruled silent: the line read stops, so no audio is handled after."""
+    vad, _ = _vad([])
+    line = handover_watch.ContactLine(object(), "human-x", vad)
+    assert await line.speaks(0.05) is False
+    await asyncio.sleep(0.01)
+    assert line._read is not None and line._read.done()
+    kept = len(line._pcm)
+    await asyncio.sleep(0.05)
+    assert len(line._pcm) == kept
+    await line.aclose()
+
+
+def test_one_shot_deepgram_takes_the_call_language(monkeypatch) -> None:
+    from hailhq.voicebot import amd
+
+    made: list[dict] = []
+    monkeypatch.setattr(amd.deepgram, "STT", lambda **kw: made.append(kw) or kw)
+    amd.recheck_stt("nova-3", "key", "fr")
+    amd.recheck_stt("nova-3", "key")
+    assert made[0] == {"model": "nova-3", "language": "fr", "api_key": "key"}
+    assert made[1] == {"model": "nova-3", "detect_language": True, "api_key": "key"}
+
+
 async def test_end_ends_speaks_at_once(leg) -> None:
     vad, _ = _vad([])
     line = handover_watch.ContactLine(object(), "human-x", vad)
@@ -617,8 +641,8 @@ def deepgram(monkeypatch):
     monkeypatch.setattr(handover_watch.settings, "deepgram_model", "nova-3")
     built: list[tuple] = []
 
-    def _stt(model, api_key):
-        built.append((model, api_key))
+    def _stt(model, api_key, language=None):
+        built.append((model, api_key, language))
         return SimpleNamespace(model=model, aclose=AsyncMock())
 
     monkeypatch.setattr(handover_watch, "recheck_stt", _stt)
@@ -637,8 +661,9 @@ async def test_only_hail_keys_and_house_classifiers(monkeypatch, deepgram) -> No
 
     monkeypatch.setattr(handover_watch, "build_classifier", _classifier)
     session = SimpleNamespace(llm=object())  # a per-call or org LLM: unused
-    models = handover_watch.build_check_models(session)  # type: ignore[arg-type]
-    assert deepgram == [("nova-3", "dg-house")]
+    models = handover_watch.build_check_models(session, "fr")  # type: ignore[arg-type]
+    # The call's language goes to the one-shot Deepgram.
+    assert deepgram == [("nova-3", "dg-house", "fr")]
     assert seen == {} and models.llm is llm
     await models.aclose()
 

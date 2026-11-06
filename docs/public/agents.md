@@ -106,8 +106,10 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
-  contact's side has spoken and stayed on the line for 10 seconds, and
-  the check did not find a voicemail greeting.
+  contact's side has spoken and stayed on the line for 10 seconds. A clear
+  "leave a message" greeting heard in the first seconds gives the caller
+  back instead, with no webhook. Other greetings, voicemail ones included,
+  can still connect and send it, as before.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
 ## What happens on an inbound call

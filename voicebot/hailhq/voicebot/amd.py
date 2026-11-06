@@ -248,11 +248,14 @@ def build_classifier(
     return ClassifierFailover(*classifiers), classifiers
 
 
-def recheck_stt(model: str, api_key: str) -> STT:
-    """One-shot Deepgram for a finished greeting. Deepgram detects the
-    language only in one-shot requests, and its default is English.
+def recheck_stt(model: str, api_key: str, language: str | None = None) -> STT:
+    """One-shot Deepgram for a finished greeting, in ``language`` when it is
+    known. Otherwise Deepgram detects the language, which it does only in
+    one-shot requests (its default is English).
     https://developers.deepgram.com/docs/language-detection
     """
+    if language:
+        return deepgram.STT(model=model, language=language, api_key=api_key)
     return deepgram.STT(model=model, detect_language=True, api_key=api_key)
 
 

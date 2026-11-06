@@ -2681,36 +2681,36 @@ async def test_shutdown_verdict_writes_are_bounded(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "org_cfgs,llm_cfg,language,skip",
+    "org_cfgs,llm_cfg,provider,skip",
     [
-        ({}, None, None, False),
-        (None, None, "en", False),
-        ({"tts": object()}, None, "fr", False),
-        ({"stt": object()}, None, "en", True),
-        ({"llm": object()}, None, "en", True),
-        ({}, {"base_url": "https://llm.example.com"}, "en", True),
-        # Swedish calls transcribe with Speechmatics, not Deepgram.
-        ({}, None, "sv", True),
-        ({}, None, "xx", True),
+        ({}, None, "deepgram", False),
+        (None, None, "deepgram", False),
+        ({"tts": object()}, None, "deepgram", False),
+        ({"stt": object()}, None, "deepgram", True),
+        ({"llm": object()}, None, "deepgram", True),
+        ({}, {"base_url": "https://llm.example.com"}, "deepgram", True),
+        # The session's STT is Speechmatics (for example a Swedish call).
+        ({}, None, "speechmatics", True),
+        ({}, None, None, True),
     ],
     ids=[
         "house",
-        "house_en",
+        "no_org",
         "own_tts_only",
         "own_stt",
         "own_llm",
         "per_call_llm",
-        "speechmatics_language",
-        "unknown_language",
+        "speechmatics_call",
+        "unknown_provider",
     ],
 )
-def test_voicemail_check_skips(org_cfgs, llm_cfg, language, skip) -> None:
-    """An org on its own STT or LLM (standing or per call), or a language
-    whose STT is not Deepgram, gets no check. A house setup in a Deepgram
-    language (an own voice alone included) runs it."""
+def test_voicemail_check_skips(org_cfgs, llm_cfg, provider, skip) -> None:
+    """An org on its own STT or LLM (standing or per call), or a call whose
+    STT (as build_session chose it) is not Hail's Deepgram, gets no check. A
+    house setup on Deepgram (an own voice alone included) runs it."""
     from hailhq.voicebot import agent as agent_mod
 
-    assert agent_mod.skip_voicemail_check(org_cfgs, llm_cfg, language) is skip
+    assert agent_mod.skip_voicemail_check(org_cfgs, llm_cfg, provider) is skip
     ctx = FakeJobContext()
     session = SimpleNamespace(vad=object())
     line = agent_mod._contact_line(

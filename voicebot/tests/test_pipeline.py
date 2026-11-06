@@ -452,6 +452,9 @@ def test_session_stt_turns_for_speechmatics_language() -> None:
     session = _make_session("da")
     assert session.turn_detection == "stt"
     assert isinstance(session.stt, speechmatics_plugin.STT)
+    # Exposed for the handover voicemail check, which skips non-Deepgram.
+    assert session.hail_stt_provider == "speechmatics"
+    assert session.hail_stt_language == "da"
 
 
 def test_session_org_deepgram_row_overrides_auto_speechmatics_routing() -> None:
@@ -489,6 +492,8 @@ def test_session_auto_falls_back_to_deepgram_without_speechmatics_key(
         session = _make_session("da")
     assert isinstance(session.stt, deepgram_plugin.STT)
     assert session.turn_detection == "vad"
+    # The provider the call really runs on, after the fallback.
+    assert session.hail_stt_provider == "deepgram"
     assert any(
         "da" in record.message and "speechmatics" in record.message
         for record in caplog.records

@@ -931,7 +931,7 @@ def build_session(
         provider = "deepgram"
     mode = turn_mode_for(language, provider)
     turn_detection: Any = inference.TurnDetector() if mode == "semantic" else mode
-    return AgentSession(
+    session = AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
         tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
@@ -943,3 +943,8 @@ def build_session(
             interruption={"min_words": 1},
         ),
     )
+    # The STT provider and language this call runs on, for the handover
+    # voicemail check (agent.skip_voicemail_check, handover_watch).
+    session.hail_stt_provider = provider  # type: ignore[attr-defined]
+    session.hail_stt_language = language  # type: ignore[attr-defined]
+    return session

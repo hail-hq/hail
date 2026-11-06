@@ -139,17 +139,18 @@ async def _contact_audio(room: rtc.Room, identity: str) -> rtc.AudioStream | Non
     )
 
 
-def _build_stt() -> STT | None:
+def _build_stt(language: str | None = None) -> STT | None:
     """Hail's one-shot Deepgram: Hail's key and ``DEEPGRAM_MODEL``, the
-    model the outbound recheck uses. Never an org's key or model. None
-    (no check) when either is unset."""
+    model the outbound recheck uses, in the call's language when it is
+    known. Never an org's key or model. None (no check) when either is
+    unset."""
     model, api_key = settings.deepgram_model, settings.deepgram_api_key
     if not (model and api_key):
         return None
-    return recheck_stt(model, api_key)
+    return recheck_stt(model, api_key, language)
 
 
-def build_check_models(session: AgentSession) -> AMDModels:
+def build_check_models(session: AgentSession, language: str | None = None) -> AMDModels:
     """The handover check's clients, built once per call from Hail's own
     keys and house classifiers only (never an org's STT key, an org LLM or
     a per-call ``llm``). Close them with ``AMDModels.aclose`` at job end.
@@ -158,7 +159,7 @@ def build_check_models(session: AgentSession) -> AMDModels:
     check (the line connects as before)."""
     models = AMDModels(llm=None, stt=None)
     try:
-        stt = _build_stt()
+        stt = _build_stt(language)
         if stt is None:
             logger.warning("handover machine check has no Hail Deepgram; skipping")
             return models
@@ -262,21 +263,14 @@ class ContactLine:
         """True when the contact starts speaking within ``seconds`` from now,
         or when the line's audio could not be read (connect, as before this
         check). False when they stay silent, publish no audio, or leave."""
-        if self._read is None:
+        if self._read is None and not self._stopped:
             self._read = asyncio.create_task(self._listen(), name="handover_line")
-        waits = [
-            asyncio.ensure_future(event.wait())
-            for event in (self._spoke, self._ended, self._call_ending)
-        ]
-        try:
-            await asyncio.wait(
-                waits, timeout=seconds, return_when=asyncio.FIRST_COMPLETED
-            )
-        finally:
-            for wait in waits:
-                wait.cancel()
-            await asyncio.gather(*waits, return_exceptions=True)
-        return self._spoke.is_set() or self._failed
+        await self._wait(seconds, self._spoke, self._call_ending)
+        if self._spoke.is_set() or self._failed:
+            return True
+        # Ruled silent: stop reading, so no more audio is handled.
+        self.stop()
+        return False
 
     async def machine(self) -> bool:
         """True when the check heard a clear voicemail greeting. False when
@@ -294,11 +288,13 @@ class ContactLine:
         return self._category == DROP_CATEGORY
 
     def stop(self) -> None:
-        """Stop the checks now, and start no new one. A check cancelled
-        mid-flight records ``timeout`` itself (see :meth:`_check_greeting`)."""
+        """Stop the checks and the line read now, and start no new check. A
+        check cancelled mid-flight records ``timeout`` itself (see
+        :meth:`_check_greeting`)."""
         self._stopped = True
-        if self._checking is not None and not self._checking.done():
-            self._checking.cancel()
+        for task in (self._checking, self._read):
+            if task is not None and not task.done():
+                task.cancel()
 
     def end(self) -> None:
         """Job shutdown: stop the checks, and end :meth:`speaks` now."""
@@ -437,14 +433,14 @@ class ContactLine:
         )
         return self._speech_seconds + open_part
 
-    async def _wait(self, seconds: float | None, event: asyncio.Event) -> None:
-        """Up to ``seconds`` (None: no limit) for ``event``, or the end of
-        the greeting or the audio."""
+    async def _wait(self, seconds: float | None, *events: asyncio.Event) -> None:
+        """Up to ``seconds`` (None: no limit) for any of ``events``, or the
+        end of the greeting or the audio."""
         if seconds is not None and seconds <= 0:
             return
         waits = [
             asyncio.ensure_future(e.wait())
-            for e in (event, self._greeting_over, self._ended)
+            for e in (*events, self._greeting_over, self._ended)
         ]
         try:
             await asyncio.wait(

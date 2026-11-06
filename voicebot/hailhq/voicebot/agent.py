@@ -49,7 +49,7 @@ from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
-from hailhq.core.languages import SUPPORTED_LANGUAGES, resolve_stt_provider
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import release_pool_reservation
@@ -971,19 +971,17 @@ def make_bridge_cancel(
 def skip_voicemail_check(
     org_cfgs: dict[str, Any] | None,
     llm_cfg: dict[str, Any] | None,
-    language: str | None,
+    stt_provider: str | None,
 ) -> bool:
     """True when the handover voicemail check must not run (fail open):
     the org brings its own STT or LLM (a standing org layer or a per-call
     ``llm``), so its contact's audio and words never go to a provider it
-    did not choose; or the call's language routes STT away from Deepgram
-    (for example to Speechmatics), the only transcriber the check uses."""
+    did not choose; or this call's STT (``stt_provider``, the one
+    ``build_session`` chose) is not Hail's Deepgram, the only transcriber
+    the check uses."""
     if llm_cfg is not None or {"stt", "llm"} & set(org_cfgs or {}):
         return True
-    try:
-        return resolve_stt_provider(None, language) != "deepgram"
-    except KeyError:
-        return True  # a language Hail does not route: no check
+    return stt_provider != "deepgram"
 
 
 def _contact_line(
@@ -995,7 +993,7 @@ def _contact_line(
     """The bridge's line check: silence, then voicemail. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
     the silence check runs. ``models`` returns the call's check clients,
-    built once at call start and reused by every dial, or None when the
+    built on the first pickup and reused by later dials, or None when the
     check is skipped (:func:`skip_voicemail_check`) or job shutdown began:
     then only the silence check runs (row reason ``no_check``)."""
     if session.vad is None:
@@ -2515,8 +2513,8 @@ async def _run_call(
     # Human handover: identity of the contact's leg while one is dialed or
     # connected, and whether it answered. Written by the bridge handle.
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
-    # The handover check's clients: built at call start when the agent can
-    # hand over, reused by every dial, closed at job end
+    # The handover check's clients: built on the first pickup (no network
+    # call, a few ms), reused by later dials, closed at job end
     # (finish_handover_checks).
     handover_models: AMDModels | None = None
 
@@ -2690,13 +2688,17 @@ async def _run_call(
         if handover_stopping(bridge_state).is_set():
             # Job shutdown began: no new clients, none that may be closed.
             return None
-        if skip_voicemail_check(org_cfgs, llm_cfg, language):
-            # Own STT or LLM, or a language Deepgram does not transcribe
-            # for this call: no voicemail check (fail open).
+        if skip_voicemail_check(
+            org_cfgs, llm_cfg, getattr(session, "hail_stt_provider", None)
+        ):
+            # Own STT or LLM, or this call's STT is not Hail's Deepgram:
+            # no voicemail check (fail open).
             return None
         if handover_models is None:
             # Hail's own keys and house classifiers only.
-            handover_models = build_check_models(session)
+            handover_models = build_check_models(
+                session, getattr(session, "hail_stt_language", None)
+            )
         return handover_models
 
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
@@ -2736,10 +2738,6 @@ async def _run_call(
             call_id,
             [t.info.name for t in agent_tools],
         )
-    if any(t.info.name == transfer_call.SPEC.name for t in agent_tools):
-        # The handover check's clients, built now (no network, a few ms)
-        # so that a pickup never waits on client setup.
-        _handover_models()
 
     known = await other_party_task
     if known is not None and stt_takes_keyterms(session.stt):
