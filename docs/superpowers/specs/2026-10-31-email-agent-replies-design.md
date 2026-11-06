@@ -31,7 +31,7 @@ only when all of these hold:
    carry only that header, so the rule stays.
 4. It has an envelope sender. The `From` address is not
    `noreply`-style or a mailer daemon, and not an address on the hail-mail base
-   domain, and not one of the message's own recipients.
+   domain.
 5. The sender is proven, under both scopes: one well-formed `From` address and a
    DMARC `PASS`. Other mail gets no reply. A reply to a forged `From` would reach
    an innocent third party. SES reports `GRAY` when only an unaligned SPF or DKIM

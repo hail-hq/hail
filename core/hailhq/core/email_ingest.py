@@ -544,7 +544,6 @@ async def ingest_inbound(
                 domain,
                 parsed=parsed,
                 envelope_from=message.envelope_from,
-                recipients=message.envelope_recipients,
                 dmarc_verdict=message.dmarc_verdict,
                 suppress=suppress,
                 over_cap=over_cap,
