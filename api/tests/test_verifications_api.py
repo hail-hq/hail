@@ -5165,6 +5165,34 @@ async def test_expired_answers_are_not_rebuilt_from_the_carrier(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_rejecting_a_long_waiting_application_keeps_its_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    from datetime import datetime, timedelta, timezone
+
+    _, _, key = org_and_key
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "awaiting_review"
+    row.updated_at = datetime.now(timezone.utc) - timedelta(days=31)
+    row.provider_refs = {**(row.provider_refs or {}), "application": {"fields": {}}}
+    await async_session.commit()
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    resp = await client.post(
+        f"/admin/verifications/{vid}/reject",
+        json={"reason": "Website unreachable"},
+        headers=_auth(key),
+    )
+    app.dependency_overrides.pop(require_superadmin)
+    assert resp.status_code == 200, resp.text
+    await async_session.refresh(row)
+    # The 30 days start at the rejection, not at the last change before it.
+    assert "application" in row.provider_refs
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_old_ended_applications_lose_their_saved_answers(
     client, org_and_key, sms_carrier, async_session
 ):

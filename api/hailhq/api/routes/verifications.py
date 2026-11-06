@@ -1818,8 +1818,10 @@ async def _reject_row(
             row.updated_at = datetime.now(timezone.utc)
         await db.commit()
         return "kept"
-    row.state, row.rejection_reason = "rejected", reason
+    # Wiped before the state moves: the row has not ended yet, so its
+    # answers are kept however long it waited.
     row.provider_refs = _wiped_refs(row)
+    row.state, row.rejection_reason = "rejected", reason
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -2518,8 +2520,9 @@ async def admin_reject(
             row.updated_at = datetime.now(timezone.utc)
             await _commit_and_notify(db, row, before)
             raise _carrier_unavailable() from exc
-    row.state, row.rejection_reason = "rejected", body.reason
+    # Wiped before the state moves (see _reject_row).
     row.provider_refs = _wiped_refs(row)
+    row.state, row.rejection_reason = "rejected", body.reason
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     _notify_billing([row])
