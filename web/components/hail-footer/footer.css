@@ -24,8 +24,8 @@
 }
 .hail-footer-grid {
   display: grid;
-  grid-template-columns: 1.5fr repeat(4, 1fr);
-  gap: 32px;
+  grid-template-columns: 1.2fr repeat(5, 1fr);
+  gap: 28px;
   padding-block: 56px 40px;
 }
 .hail-footer a {

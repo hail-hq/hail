@@ -5,6 +5,7 @@ import { ThemeButton } from "./hail-footer/ThemeToggle";
 export function Header() {
   return (
     <SiteHeader
+      active="product"
       origin={SITE_ORIGIN}
       themeControl={<ThemeButton />}
     />
