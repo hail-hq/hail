@@ -54,8 +54,8 @@ SETTINGS_HELP_STUB = (
     "# Helping with Hail settings\n\n"
     "Only discuss Hail settings when asked about the voice, greeting, behavior, "
     "or configuration. Otherwise stay with the call's purpose. When asked, use "
-    "the hail_settings_help tool before you answer, and never guess a menu or "
-    "a voice name. You cannot see or change settings during this call. If the "
+    "the hail_settings_help tool before you answer (never say its name aloud), "
+    "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
     "tool is missing or fails, say you cannot look that up right now."
 )
 
@@ -121,6 +121,8 @@ symbols that cannot be read aloud.
 respond. Ask one question at a time.
 - Speak only words intended for the other party. Keep your planning, tool \
 selection, and internal reasoning silent.
+- Use ordinary punctuation and capitalization — it sets the pacing and \
+intonation of your speech.
 - Say amounts, times, and email addresses in plain written words.
 - For phone numbers, confirmation codes, appointment or booking numbers, IDs, \
 and serial numbers, wrap them in <spell>...</spell> so they are read out \
@@ -294,4 +296,6 @@ def build_text_instructions(
     framing = (
         f"{TEXT_PREAMBLE} {THREAD_TOOL_HINT_TEXT}" if thread_tool else TEXT_PREAMBLE
     )
-    return f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}\n\n{PRIVACY_REMINDER}"
+    caller = (system_prompt or "").strip()
+    body = f"{framing}\n\n{TEXT_HEADING}\n\n{caller}" if caller else framing
+    return f"{body}\n\n{PRIVACY_REMINDER}"

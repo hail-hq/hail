@@ -55,16 +55,15 @@ def _tctx():
     )
 
 
-async def test_empty_opt_out_leaves_only_the_settings_help_tool():
+async def test_empty_opt_out_leaves_no_tools():
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": []},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert [t.info.name for t in tools] == ["hail_settings_help"]
-    if api is not None:
-        await api.aclose()
+    assert tools == []
+    assert api is None
 
 
 async def test_missing_organization_id_disables_tools():

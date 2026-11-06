@@ -174,7 +174,8 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The settings guide is loaded by tool, not carried in the prompt. No
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    specs.append(hail_help.SPEC)
+    if allowed != []:  # `tools: []` opts out of every tool
+        specs.append(hail_help.SPEC)
     if not specs:
         return [], None
 
