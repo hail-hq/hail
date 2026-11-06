@@ -87,7 +87,10 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   seconds of the greeting before that. Anything else stays connected: a
   person, "not available" without a request for a message, "please hold"
   or hold music, a phone menu (the caller can press keys), a full mailbox,
-  or a check that is unsure or fails. If nobody on the contact's side makes a
+  or a check that is unsure or fails. The check runs on Hail's own speech
+  and language providers only. An organization that brings its own STT or
+  LLM (a standing setting or a per-call `llm`) gets no check, and the line
+  stays connected. If nobody on the contact's side makes a
   sound for 15 seconds (some mailboxes answer in silence), or the line
   hangs up within 10 seconds of its first sound (a carrier message), the
   agent also hangs up that line and comes back. The verdict is a

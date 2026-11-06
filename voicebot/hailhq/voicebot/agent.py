@@ -968,6 +968,15 @@ def make_bridge_cancel(
     return _cancel
 
 
+def uses_own_provider(
+    org_cfgs: dict[str, Any] | None, llm_cfg: dict[str, Any] | None
+) -> bool:
+    """True when the org brings its own STT or LLM (a standing org layer
+    or a per-call ``llm``). The handover voicemail check runs on Hail's
+    providers only, so it is skipped then."""
+    return llm_cfg is not None or bool({"stt", "llm"} & set(org_cfgs or {}))
+
+
 def _contact_line(
     ctx: JobContext,
     session: AgentSession,
@@ -977,8 +986,9 @@ def _contact_line(
     """The bridge's line check: silence, then voicemail. None (connect at
     once, no check) without a VAD. Without a transcriber or classifier only
     the silence check runs. ``models`` returns the call's check clients,
-    built on the first pickup and reused by later dials, or None once job
-    shutdown began: then only the silence check runs."""
+    built on the first pickup and reused by later dials, or None when the
+    org uses its own STT or LLM, or once job shutdown began: then only the
+    silence check runs (row reason ``no_check``)."""
     if session.vad is None:
         return None
     current = models()
@@ -2669,6 +2679,10 @@ async def _run_call(
         nonlocal handover_models
         if handover_stopping(bridge_state).is_set():
             # Job shutdown began: no new clients, none that may be closed.
+            return None
+        if uses_own_provider(org_cfgs, llm_cfg):
+            # The contact's audio and words never go to a provider the org
+            # did not choose: no voicemail check (fail open).
             return None
         if handover_models is None:
             # Hail's own keys and house classifiers only.

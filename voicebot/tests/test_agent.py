@@ -2680,6 +2680,35 @@ async def test_shutdown_verdict_writes_are_bounded(monkeypatch) -> None:
     assert done.done() and not done.cancelled() and stuck.cancelled()
 
 
+@pytest.mark.parametrize(
+    "org_cfgs,llm_cfg,own",
+    [
+        ({}, None, False),
+        (None, None, False),
+        ({"tts": object()}, None, False),
+        ({"stt": object()}, None, True),
+        ({"llm": object()}, None, True),
+        ({}, {"base_url": "https://llm.example.com"}, True),
+    ],
+    ids=["house", "no_org", "own_tts_only", "own_stt", "own_llm", "per_call_llm"],
+)
+def test_own_provider_skips_the_voicemail_check(org_cfgs, llm_cfg, own) -> None:
+    """An org on its own STT or LLM (standing or per call) gets no check:
+    its contact's audio and words never go to Hail's providers. A house
+    setup (an own voice alone included) runs it."""
+    from hailhq.voicebot import agent as agent_mod
+
+    assert agent_mod.uses_own_provider(org_cfgs, llm_cfg) is own
+    ctx = FakeJobContext()
+    session = SimpleNamespace(vad=object())
+    line = agent_mod._contact_line(
+        ctx, session, "human-1", lambda: None  # type: ignore[arg-type]
+    )
+    # No models (own provider): the silence check only, row reason no_check.
+    assert line is not None and line._check is None
+    assert line._reason == "no_check"
+
+
 async def test_contact_line_uses_the_call_check(monkeypatch) -> None:
     """The call's check, or none once job shutdown began (the row then says
     call_ending)."""
