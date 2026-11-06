@@ -172,10 +172,9 @@ async def build_agent_tools(
             # Its dial runs in the background: cancel_transfer stops the ring.
             # It comes with transfer_call, so a `tools` list never names it.
             specs.append(transfer_call.CANCEL_SPEC)
-    if metadata.get("direction") == "inbound":
-        # The settings guide is loaded by tool, not carried in the prompt. No
-        # `tools` list names it, so it is added here, as cancel_transfer is.
-        specs.append(hail_help.SPEC)
+    # The settings guide is loaded by tool, not carried in the prompt. No
+    # `tools` list names it, so every call gets it here, as cancel_transfer is.
+    specs.append(hail_help.SPEC)
     if not specs:
         return [], None
 

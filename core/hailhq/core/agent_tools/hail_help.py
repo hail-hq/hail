@@ -1,7 +1,7 @@
 """hail_settings_help: the spoken guide to Hail settings, loaded on demand.
 
 Not in the registry: the registry feeds the names a customer may allow-list.
-The voicebot adds this tool to every inbound call (see
+The voicebot adds this tool to every call (see
 ``voicebot/hailhq/voicebot/tools.py``), like ``cancel_transfer``.
 """
 

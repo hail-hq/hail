@@ -181,7 +181,7 @@ suggest speaking with a qualified professional.
 - Protect privacy: share only what the call requires.""".replace(
         "{closing}", _OUTBOUND_CLOSING
     )
-    + f"\n\n{PLATFORM_PRIVACY}"
+    + f"\n\n{PLATFORM_PRIVACY}\n\n{SETTINGS_HELP_STUB}"
 )
 
 # Short repeat of the privacy rule, placed after the customer's instructions so
@@ -213,7 +213,6 @@ VOICE_PREAMBLE_INBOUND = (
         "can help.\n\n# Tools",
         1,
     )
-    + f"\n\n{SETTINGS_HELP_STUB}"
 )
 
 # A text is a text: short, plain, no markdown, no voice stage directions.
