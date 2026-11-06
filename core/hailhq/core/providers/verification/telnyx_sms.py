@@ -897,17 +897,23 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         except (httpx.HTTPError, KeyError) as exc:
             raise VerificationProviderError("Telnyx request failed") from exc
 
-    async def discard(self, refs) -> None:
+    async def discard(self, refs, *, strict: bool = False) -> None:
         steps = (
             ("campaign", refs.get("campaign_id")),
             ("brand", refs.get("brand_id")),
         )
+        # Rejected personal registrations keep a confirmed brand for reuse.
+        # Organization erasure must remove that retained resource too.
+        if strict and refs.get("kept_brand_id") != refs.get("brand_id"):
+            steps += (("brand", refs.get("kept_brand_id")),)
         for key, resource_id in steps:
             if not resource_id:
                 continue
             try:
                 await self._api.request("DELETE", f"/10dlc/{key}/{resource_id}")
             except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404 and strict:
+                    raise
                 if exc.response.status_code != 404:
                     logger.warning(
                         "10DLC discard failed: step=%s status=%s",
@@ -915,6 +921,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         exc.response.status_code,
                     )
             except Exception:
+                if strict:
+                    raise
                 logger.warning("10DLC discard failed: step=%s", key)
 
 

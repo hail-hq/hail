@@ -547,7 +547,7 @@ class TelnyxVerificationProvider(VerificationProvider):
 
     # -- discard -----------------------------------------------------------
 
-    async def discard(self, refs: dict) -> None:
+    async def discard(self, refs: dict, *, strict: bool = False) -> None:
         paths = []
         if refs.get("group_id"):
             paths.append(f"/requirement_groups/{path_id(refs['group_id'])}")
@@ -557,7 +557,16 @@ class TelnyxVerificationProvider(VerificationProvider):
         for path in paths:
             try:
                 await self._api.request("DELETE", path)
-            except Exception:  # best effort; a stray draft is harmless
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404 and strict:
+                    raise
+                if exc.response.status_code != 404:
+                    logger.warning(
+                        "telnyx verification cleanup step failed", exc_info=True
+                    )
+            except Exception:
+                if strict:
+                    raise
                 logger.warning("telnyx verification cleanup step failed", exc_info=True)
 
 

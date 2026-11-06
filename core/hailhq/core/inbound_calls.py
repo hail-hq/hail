@@ -32,7 +32,7 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import session_scope
+from hailhq.core.db import lock_open_organization, session_scope
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.models import (
@@ -141,6 +141,8 @@ async def open_inbound_call(
     number = await active_dedicated_number(db, attrs.dialed)
     if number is None or number.organization_id is None:
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
+        return Rejected("unknown_number")
+    if not await lock_open_organization(db, number.organization_id):
         return Rejected("unknown_number")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
     # number's carrier. Carriers may share one trunk (one wildcard inbound

@@ -21,6 +21,7 @@ from hailhq.core.compliance_gate import (
     remove_suppression,
 )
 from hailhq.core.config import settings
+from hailhq.core.db import lock_open_organization
 from hailhq.core.models import PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.telemetry import bind_organization
@@ -145,6 +146,8 @@ async def ingest_inbound_sms(
     if number is None or number.organization_id is None:
         logger.info("inbound sms to unrecognized/pool number=%s dropped", to_e164)
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
+    if not await lock_open_organization(db, number.organization_id):
+        return IngestResult(sms_id=None, dropped_reason="organization_deleted")
 
     if number.provider != carrier or "sms" not in number.capabilities:
         logger.info(

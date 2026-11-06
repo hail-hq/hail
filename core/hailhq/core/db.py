@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 import logfire
-from hailhq.core.config import settings
+from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.telemetry import instrument, telemetry_enabled
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -26,6 +26,11 @@ from sqlalchemy.ext.asyncio import (
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_guard_engine: AsyncEngine | None = None
+_guard_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+ORGANIZATION_DELETE_PREPARING = "organization_delete_preparing"
+ORGANIZATION_DELETE = "organization_delete"
 
 
 _SCHEME_ALIASES = (
@@ -107,11 +112,15 @@ def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
 
 
 async def dispose_engine() -> None:
-    global _engine, _sessionmaker
+    global _engine, _sessionmaker, _guard_engine, _guard_sessionmaker
     if _engine is not None:
         await _engine.dispose()
     _engine = None
     _sessionmaker = None
+    if _guard_engine is not None:
+        await _guard_engine.dispose()
+    _guard_engine = None
+    _guard_sessionmaker = None
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -127,10 +136,49 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+@asynccontextmanager
+async def organization_guard_scope() -> AsyncIterator[AsyncSession]:
+    """A separate pool prevents admission guards from starving route queries."""
+    global _guard_engine, _guard_sessionmaker
+    if _guard_sessionmaker is None:
+        _guard_engine = create_async_engine(to_async_url(settings.database_url))
+        _guard_sessionmaker = async_sessionmaker(_guard_engine, expire_on_commit=False)
+    async with _guard_sessionmaker() as session:
+        yield session
+
+
 async def org_lock(db: AsyncSession, org: UUID) -> None:
     """Hold this organization's lock until the transaction ends. Billing
     and number writes of one organization take it, so they run in order."""
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": str(org)},
+    )
+
+
+async def lock_open_organization(db: AsyncSession, org: UUID) -> bool:
+    """Drain mutations before deletion, including across external I/O.
+
+    Deletion stops admission with a preparing marker, then drains existing
+    requests before publishing the final marker that rejects metadata writes.
+    A caller holds this KEY SHARE lock until its transaction ends. HTTP
+    callers use a separate session so route commits do not release it early.
+    Inbound writers use their ingest transaction. A tombstone rejects callers
+    that waited for deletion and callers retrying while cleanup is paused.
+    """
+    from hailhq.core.models import Organization, OrgClosure
+    from sqlalchemy import select
+
+    if org == SELF_HOSTED_ORG_ID:
+        return True
+
+    await db.execute(
+        select(Organization.id)
+        .where(Organization.id == org)
+        .with_for_update(read=True, key_share=True)
+    )
+    closure = await db.get(OrgClosure, org)
+    return closure is None or closure.source not in (
+        ORGANIZATION_DELETE_PREPARING,
+        ORGANIZATION_DELETE,
     )

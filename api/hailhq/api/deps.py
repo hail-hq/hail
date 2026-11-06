@@ -17,6 +17,7 @@ from __future__ import annotations
 import hmac
 import json
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
@@ -30,8 +31,13 @@ from hailhq.api.auth import (
     verify_jwt,
 )
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, session_scope
-from hailhq.core.models import ApiKey, Organization, OrganizationMember
+from hailhq.core.db import (
+    get_session,
+    lock_open_organization,
+    organization_guard_scope,
+    session_scope,
+)
+from hailhq.core.models import ApiKey, Organization, OrganizationMember, User
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import (
@@ -380,6 +386,22 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
             status_code=status.HTTP_403_FORBIDDEN, detail=not_member_detail
         )
 
+    if "azp" in claims and active_org_uuid is None:
+        # Only unbound legacy JWTs can fall through to a new default org.
+        # Explicit workspace tokens are constrained by membership above.
+        # OAuth resource JWTs are signed but not stored as access-token rows.
+        # Deleting grants alone cannot revoke one or prevent tenant fallback.
+        valid_after = (
+            await db.execute(
+                select(User.oauth_tokens_valid_after).where(User.id == user_uuid)
+            )
+        ).scalar_one_or_none()
+        issued = claims.get("iat")
+        if valid_after is not None and (
+            not isinstance(issued, (int, float)) or issued <= valid_after.timestamp()
+        ):
+            raise _unauthorized("OAuth access was revoked; reconnect this app")
+
     return Principal(
         auth_kind="jwt",
         api_key_id=None,
@@ -390,7 +412,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     )
 
 
-async def get_current_principal(
+async def _authenticate_principal(
     authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_session),
 ) -> Principal:
@@ -413,6 +435,27 @@ async def get_current_principal(
         span.set_attribute("organization_id", str(principal.organization_id))
         span.set_attribute("auth_kind", principal.auth_kind)
     return principal
+
+
+async def get_current_principal(
+    authorization: Annotated[str | None, Header()] = None,
+    db: AsyncSession = Depends(get_session),
+) -> AsyncIterator[Principal]:
+    # Close the read-only authentication transaction before waiting for a
+    # guard. No waiter may retain a connection that admitted routes need.
+    async with session_scope() as auth_db:
+        principal = await _authenticate_principal(authorization, auth_db)
+    if principal.auth_kind == "shared":
+        yield principal
+        return
+    # Keep the row lock through every route commit and provider/storage await.
+    async with organization_guard_scope() as guard:
+        if not await lock_open_organization(guard, principal.organization_id):
+            raise HTTPException(
+                403,
+                "This organization is being deleted. Retry deletion in workspace settings.",
+            )
+        yield principal
 
 
 async def _resolve_current_principal(

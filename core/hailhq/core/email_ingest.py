@@ -23,6 +23,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
+from hailhq.core.db import lock_open_organization
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -465,6 +466,9 @@ async def ingest_inbound(
     for recipient in message.envelope_recipients:
         domain = await _find_domain_for_recipient(db, recipient, hail_mail_base_domain)
         if domain is None:
+            result.skipped_recipients.append(recipient)
+            continue
+        if not await lock_open_organization(db, domain.organization_id):
             result.skipped_recipients.append(recipient)
             continue
         scope = domain.id if domain.kind == "custom" else domain.organization_id

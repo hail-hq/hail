@@ -366,8 +366,9 @@ class VerificationProvider(ABC):
         ``{"verification_id": str, "address_id": str | None}``."""
 
     @abstractmethod
-    async def discard(self, refs: dict) -> None:
-        """Delete a draft. Best effort; never raises."""
+    async def discard(self, refs: dict, *, strict: bool = False) -> None:
+        """Delete provider records. Strict mode propagates all but not-found
+        failures, so organization erasure retains its retry references."""
 
     def subject_name(
         self,

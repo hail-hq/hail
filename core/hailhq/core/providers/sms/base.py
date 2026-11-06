@@ -88,3 +88,9 @@ class SmsProvider(ABC):
     ) -> None:
         """Attach a purchased phone number (by its Twilio SID) to a
         Messaging Service's sender pool."""
+
+    async def delete_organization_services(
+        self, organization_id: UUID, service_ids: set[str]
+    ) -> None:
+        """Delete org-owned messaging containers. Never ignore a failure."""
+        raise NotImplementedError("Messaging service cleanup is unavailable")

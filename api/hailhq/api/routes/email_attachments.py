@@ -11,6 +11,7 @@ metadata + first-use so the GC worker knows what's safe to delete.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 from uuid import uuid4
 
@@ -85,8 +86,11 @@ async def create_email_attachment(
     content_type = file.content_type or "application/octet-stream"
     upload_id = uuid4()
     key = f"outbound-attachments/{principal.organization_id}/{upload_id}"
-    await s3.put_attachment(key, payload, content_type)
 
+    # Commit the erasure reference before storage can accept any bytes.
+    # Admission stays locked through both operations, so deletion drains this
+    # request before using the reference. Keep it on uncertain put failures:
+    # deletion or the unused-upload GC must still be able to erase the object.
     row = EmailAttachmentUpload(
         id=upload_id,
         organization_id=principal.organization_id,
@@ -98,6 +102,23 @@ async def create_email_attachment(
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    put = asyncio.create_task(s3.put_attachment(key, payload, content_type))
+    try:
+        await asyncio.shield(put)
+    except asyncio.CancelledError:
+        # The storage SDK runs in a thread. Cancellation cannot stop that
+        # write, so keep admission held until it settles, even on repeat
+        # cancellation. Otherwise deletion could erase before a late write.
+        while not put.done():
+            try:
+                await asyncio.shield(put)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not put.cancelled():
+            put.exception()  # Retrieve any failure while preserving cancellation.
+        raise
 
     return EmailAttachmentUploadResponse.model_validate(row)
 

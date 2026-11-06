@@ -217,6 +217,26 @@ class TwilioSmsProvider(SmsProvider):
                 return service.sid
         return None
 
+    async def delete_organization_services(
+        self, organization_id: UUID, service_ids: set[str]
+    ) -> None:
+        names = {f"hail-org-{organization_id}", f"hail-org-{organization_id}-person"}
+
+        # Also find services created before their first number attach failed.
+        def owned() -> set[str]:
+            return {
+                s.sid
+                for s in self._client.messaging.v1.services.stream()
+                if s.friendly_name in names
+            }
+
+        for sid in service_ids | await asyncio.to_thread(owned):
+            try:
+                await asyncio.to_thread(self._client.messaging.v1.services(sid).delete)
+            except TwilioRestException as exc:
+                if exc.status != 404:
+                    raise
+
     def _service_holding(self, provider_resource_id: str) -> str | None:
         """The sid of the messaging service that holds this number, if any.
         Twilio has no lookup by number, so every service is scanned."""
@@ -238,6 +258,13 @@ class LazyTwilioSmsProvider(SmsProvider):
         if self._inner is None:
             self._inner = TwilioSmsProvider()
         return self._inner
+
+    async def delete_organization_services(
+        self, organization_id: UUID, service_ids: set[str]
+    ) -> None:
+        await self._provider().delete_organization_services(
+            organization_id, service_ids
+        )
 
     async def send_sms(
         self,

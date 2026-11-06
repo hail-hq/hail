@@ -504,16 +504,18 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
         return True
 
-    async def discard(self, refs) -> None:
+    async def discard(self, refs, *, strict: bool = False) -> None:
         # A brand cannot be deleted through the API; it is left behind.
         ms = refs.get("messaging_service_sid")
         client = self._client
         steps = [
             (
                 "campaign_sid",
-                lambda: client.messaging.v1.services(ms)
-                .us_app_to_person(refs["campaign_sid"])
-                .delete(),
+                lambda: (
+                    client.messaging.v1.services(ms)
+                    .us_app_to_person(refs["campaign_sid"])
+                    .delete()
+                ),
             ),
             (
                 "trust_sid",
@@ -532,6 +534,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             try:
                 await asyncio.to_thread(step)
             except TwilioRestException as exc:
+                if exc.status != 404 and strict:
+                    raise
                 if exc.status != 404:
                     logger.warning(
                         "10DLC discard failed: step=%s status=%s code=%s",
@@ -540,6 +544,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                         exc.code,
                     )
             except Exception:
+                if strict:
+                    raise
                 logger.warning("10DLC discard failed: step=%s", key)
 
 
