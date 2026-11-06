@@ -11,6 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Verification: when several Twilio requirements take the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
 - Verification: when Twilio refuses to check the submitted details, the customer sees that the details were not accepted, instead of "carrier unavailable; try again later".
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.

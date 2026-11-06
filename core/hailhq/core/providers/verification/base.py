@@ -167,6 +167,10 @@ class DocumentSlot(BaseModel):
     options: tuple[DocumentOption, ...] = Field(
         description="The accepted ways to fill this slot. The customer picks one."
     )
+    # Every requirement this slot stands for, as (name, label), when a carrier
+    # that takes one document of each type gets one slot for several of them.
+    # Empty: the slot is its own requirement. Internal: not in the public form.
+    also: tuple[tuple[str, str], ...] = Field(default=(), exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

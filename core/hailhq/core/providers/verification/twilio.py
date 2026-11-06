@@ -199,7 +199,46 @@ def _map_requirements(
                     options=tuple(options),
                 )
             )
-    return tuple(subject_fields), tuple(slots), address_required
+    return tuple(subject_fields), _one_slot_per_type(slots), address_required
+
+
+def _one_slot_per_type(slots: list[DocumentSlot]) -> tuple[DocumentSlot, ...]:
+    """Twilio takes one document of each type per check. Slots that accept
+    only the same type (South Africa: name and ID number, both a
+    government-issued document) become one slot, so the form asks once. It is
+    labelled with the document's name and lists every requirement it stands
+    for, as (name, label), in ``also``."""
+    out: list[DocumentSlot] = []
+    at: dict[str, int] = {}
+    for slot in slots:
+        key = slot.options[0].key if len(slot.options) == 1 else None
+        if key is None or key not in at:
+            if key is not None:
+                at[key] = len(out)
+            out.append(slot)
+            continue
+        first = out[at[key]]
+        a, b = first.options[0], slot.options[0]
+        names = {f.name for f in a.fields}
+        option = a.model_copy(
+            update={
+                "file_required": a.file_required or b.file_required,
+                "fields": a.fields + tuple(f for f in b.fields if f.name not in names),
+                "copies": tuple(sorted(set(a.copies) | set(b.copies))),
+                "needs_address": a.needs_address or b.needs_address,
+            }
+        )
+        out[at[key]] = first.model_copy(
+            update={
+                "label": a.label,
+                "help": " ".join(h for h in (first.help, slot.help) if h),
+                "options": (option,),
+                # Every requirement the slot stands for, itself first.
+                "also": (first.also or ((first.name, first.label),))
+                + ((slot.name, slot.label),),
+            }
+        )
+    return tuple(out)
 
 
 def _one_document_per_type(
@@ -358,7 +397,11 @@ class TwilioVerificationProvider(VerificationProvider):
         documents: dict[str, DocumentInput],
     ) -> DraftResult:
         refs: dict = {
-            "slots": {s.label: s.name for s in requirements.documents},
+            "slots": {
+                label: s.name
+                for s in requirements.documents
+                for label in (s.label, *(lbl for _, lbl in s.also))
+            },
             "document_sids": [],
         }
         clean = {k: v.strip() for k, v in fields.items() if v and v.strip()}
