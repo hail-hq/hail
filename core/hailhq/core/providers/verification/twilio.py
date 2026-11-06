@@ -394,6 +394,18 @@ class TwilioVerificationProvider(VerificationProvider):
             problems = self._evaluate(refs)
         except TwilioRestException as exc:
             self._discard_sync(refs)
+            if exc.status == 400:
+                # Twilio refused to check the bundle: a refusal of the
+                # details, not an outage. Say so, and keep its reason.
+                logger.warning(
+                    "Twilio refused the bundle check (code %s): %s",
+                    exc.code,
+                    exc.msg,
+                )
+                return DraftResult(
+                    refs={},
+                    problems=[Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)],
+                )
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
             self._discard_sync(refs)
