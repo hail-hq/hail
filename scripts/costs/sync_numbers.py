@@ -520,6 +520,12 @@ def _decimal(value: Any) -> Decimal | None:
     return d if d is not None and d.is_finite() else None
 
 
+def _setup_price(sku: dict) -> Decimal | None:
+    """A SKU's setup fee: 0 when DIDWW gives none, None when it is broken."""
+    value = sku.get("setup_price")
+    return Decimal(0) if value in (None, "") else _decimal(value)
+
+
 def _didww_type_fields(all_groups: list[dict]) -> tuple[dict, list[Decimal]]:
     """The row fields for one number type, from its areas. Hail sells a
     number it can show (listed) and that can place calls: the price comes
@@ -588,27 +594,34 @@ def map_didww(
                 .get("data", [])
                 if ("stock_keeping_units", s["id"]) in included
             ]
-            # A SKU without a valid price is passed over: it must not stop the
-            # run.
-            priced = [
-                (s, d)
-                for s in skus
-                if (d := _decimal(s.get("monthly_price"))) is not None
-            ]
+            # The base SKU (no channels) sets the price; a bundle is used only
+            # when the area has no base SKU. A SKU with a broken monthly or
+            # setup price is passed over, so the area may end up unpriced:
+            # it must not stop the run, nor be priced from another SKU.
+            base_skus = [
+                s for s in skus if s.get("channels_included_count") == 0
+            ] or skus
             base = [
-                (s, d) for s, d in priced if s.get("channels_included_count") == 0
-            ] or priced
+                (s, d)
+                for s in base_skus
+                if (d := _decimal(s.get("monthly_price"))) is not None
+                and _setup_price(s) is not None
+            ]
             available = g.get("meta", {}).get("is_available", True)
             if not base:
                 if available:
                     stocked_unpriced.add(number_type)
+                if base_skus:
+                    skipped.append(
+                        f"{iso}: group {g.get('id')} has no valid price, passed over"
+                    )
                 continue
             cheapest, monthly = min(base, key=lambda sd: sd[1])
             features = g["attributes"].get("features", [])
             (by_type if available else unstocked)[number_type].append(
                 {
                     "monthly": monthly,
-                    "setup": _decimal(cheapest.get("setup_price")) or Decimal(0),
+                    "setup": _setup_price(cheapest),
                     "features": set(features),
                     "needs_registration": bool(
                         g.get("meta", {}).get("needs_registration")
@@ -1395,7 +1408,10 @@ def run_provider(
         kept_rows=kept_rows,
     )
     write_catalog(path, provider, numbers)
-    summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
+    summary.append(
+        f"## {provider}: {len(numbers)} rows, {len(countries)} countries"
+        + (f" ({len(stocked)} with stock)" if stocked != countries else "")
+    )
     _row_sections(summary, report)
     _section(summary, "Requirements not refreshed", requirement_errors)
     _section(summary, "Skipped by the sync", skipped)

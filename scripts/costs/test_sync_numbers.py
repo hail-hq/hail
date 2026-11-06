@@ -583,7 +583,14 @@ def test_didww_passes_over_broken_prices():
         "included": [sku("a", "NaN", "0"), sku("b", "", "0"), sku("c", 9.1, "x")],
     }
     rows, skipped = sync.map_didww(countries, types, {"CO": payload})
-    assert skipped == []
+    # a: NaN, b: empty, c: broken setup price. Each is passed over, loudly.
+    assert rows == []
+    assert skipped == [
+        f"CO: group {g} has no valid price, passed over" for g in "abc"
+    ] + ["CO:mobile: listed, no price on any group"]
+
+    payload["included"][2] = sku("c", 9.1, "")
+    rows, _ = sync.map_didww(countries, types, {"CO": payload})
     assert rows[0][sync.NO_STOCK] is True
     assert rows[0]["usd_per_month"] == "9.10" and "setup_usd" not in rows[0]
 
@@ -930,7 +937,8 @@ def test_didww_out_of_stock_is_not_gone():
     assert skipped == ["CO:mobile: listed, an area on sale has no price"]
     assert rows == []
 
-    # Base SKUs without a price fall back to a priced bundled SKU.
+    # A base SKU without a price is not replaced by a bundle: the area is
+    # unpriced and the run says so.
     bundled = group("g6", "t-mobile", False)
     bundled["relationships"]["stock_keeping_units"]["data"].append(
         {"type": "stock_keeping_units", "id": "sku-g6b"}
@@ -950,8 +958,9 @@ def test_didww_out_of_stock_is_not_gone():
             },
         ],
     }
-    (row,), _ = sync.map_didww(countries, types, {"CO": with_bundle})
-    assert row["usd_per_month"] == "30.00"
+    rows, skipped = sync.map_didww(countries, types, {"CO": with_bundle})
+    assert rows == []
+    assert skipped[0] == "CO: group g6 has no valid price, passed over"
 
     # A group with no price at all is not "out of stock": nothing is known.
     unpriced = {"data": [group("g1", "t-mobile", False)], "included": []}
