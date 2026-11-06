@@ -273,7 +273,13 @@ def _wiped_refs(row: CarrierVerification) -> dict:
     the submission."""
     refs = row.provider_refs or {}
     kept = {"brand_reused": True} if refs.get("brand_reused") else {}
-    if row.purpose == "sms" and isinstance(refs.get("application"), dict):
+    # Expired answers are not carried over: a dismissal stamps a new
+    # ``cancelled_at``, which would make them readable for 30 more days.
+    if (
+        row.purpose == "sms"
+        and isinstance(refs.get("application"), dict)
+        and not _application_expired(row, datetime.now(timezone.utc))
+    ):
         kept["application"] = copy.deepcopy(refs["application"])
     return kept
 

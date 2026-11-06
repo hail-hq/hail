@@ -4881,6 +4881,13 @@ async def test_expired_answers_are_not_rebuilt_from_the_carrier(
     row.provider_refs = {"brand_sid": "BN1", "application": {"fields": {}}}
     await async_session.commit()
     saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404 and asked == []
+    # Dismissing it later does not make the expired answers readable again.
+    cancelled = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert cancelled.status_code == 200, cancelled.text
+    await async_session.refresh(row)
+    assert "application" not in row.provider_refs
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
     assert saved.status_code == 404
 
 
