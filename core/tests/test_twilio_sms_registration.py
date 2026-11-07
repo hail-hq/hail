@@ -611,8 +611,8 @@ async def test_attach_number_refused_by_carrier_raises() -> None:
     from hailhq.core.providers.sms.base import SmsProvisioningError
     from hailhq.core.providers.verification.base import VerificationProviderError
 
-    p = _provider(sms=FakeSms(attach_error=SmsProvisioningError("no")))
-    with pytest.raises(VerificationProviderError):
+    p = _provider(sms=FakeSms(attach_error=SmsProvisioningError("number not allowed")))
+    with pytest.raises(VerificationProviderError, match="number not allowed"):
         await p.attach_number(
             {"messaging_service_sid": "MG1", "subject_type": "business"},
             provider_resource_id="PN1",

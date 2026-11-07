@@ -232,6 +232,12 @@
 .primary.primary::after {
   margin-left: -0.55em;
 }
+.chev {
+  transition: transform 200ms var(--ease);
+}
+.navLink[aria-expanded="true"] .chev {
+  transform: rotate(180deg);
+}
 .header :is(a, button):focus-visible {
   outline: 2px solid var(--a-text);
   outline-offset: 2px;
@@ -403,17 +409,10 @@
     line-height: 24px;
   }
 }
-.menuCta {
-  display: none;
-}
 .menuSignIn {
   display: none;
 }
 @media (max-width: 900px) {
-  /* The bar keeps the main action in view, even when the menu is open. */
-  .menuCta.menuCta {
-    display: none;
-  }
 }
 @media (max-width: 480px) {
   /* On a phone the bar shows Get started. Sign in moves into the menu. */

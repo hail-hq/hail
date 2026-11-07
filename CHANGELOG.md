@@ -17,6 +17,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
 - Numbers: a number you can buy online now ranks above one only support can order, even when that one needs no papers.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
+- US texting: a number the carrier refuses for a registration now gets an audit row with the reason (a new one when the reason changes), and Hail retries it less often.
+- US texting: when the carrier refuses a person's number, Hail now tries their next number.
 
 ## [0.32.0] (2026-10-30)
 

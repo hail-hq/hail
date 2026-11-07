@@ -108,12 +108,16 @@ export function SiteHeader({
           // The open phone menu covers the page: Tab cycles between the toggle and the menu links.
           if (event.key === "Tab" && mobileOpen && menuButton.current) {
             const nav = document.getElementById(navId);
+            const shown = (el: HTMLElement) => {
+              const style = getComputedStyle(el);
+              return style.display !== "none" && style.visibility !== "hidden";
+            };
             const items = [
               menuButton.current,
               ...(nav
                 ? Array.from(nav.querySelectorAll<HTMLElement>("a, button"))
                 : []),
-            ];
+            ].filter(shown);
             // The toggle is last in the DOM, so step through this list instead of letting Tab leave it.
             const at = items.indexOf(document.activeElement as HTMLElement);
             if (at >= 0) {
@@ -145,6 +149,7 @@ export function SiteHeader({
             <button
               type="button"
               className={navLinkClass(current === "product")}
+              aria-current={current === "product" ? "true" : undefined}
               aria-haspopup="true"
               aria-expanded={open}
               onClick={() => {
@@ -191,6 +196,7 @@ export function SiteHeader({
             <button
               type="button"
               className={navLinkClass(current === "setup")}
+              aria-current={current === "setup" ? "true" : undefined}
               aria-haspopup="true"
               aria-expanded={setupOpen}
               onClick={() => {
@@ -259,12 +265,6 @@ export function SiteHeader({
             href={siteHref("/signin")}
           >
             Sign in
-          </a>
-          <a
-            className={`${styles.primary} ${styles.menuCta}`}
-            href={siteHref("/signup")}
-          >
-            Get started
           </a>
         </nav>
         <div className={styles.navActions}>
