@@ -46,12 +46,23 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["FanoutFn", "ForwardEnqueue", "FundsCheck", "IngestResult", "ingest_inbound"]
+__all__ = [
+    "INSUFFICIENT_FUNDS",
+    "FanoutFn",
+    "ForwardEnqueue",
+    "FundsCheck",
+    "IngestResult",
+    "ingest_inbound",
+]
 
 
 ForwardEnqueue = Callable[..., Awaitable[None]]
 FanoutFn = Callable[..., Awaitable[int]]
 FundsCheck = Callable[[AsyncSession, UUID], Awaitable[bool]]
+
+# Suppression reason for a forward skipped because the org has no credit.
+# The forward worker writes the same reason when it re-checks at send time.
+INSUFFICIENT_FUNDS = "insufficient_funds"
 
 # Inbound dedup indexes whose unique violation is a benign concurrent-delivery
 # race (absorbed, not raised). Mirrors the four partial indexes defined in
@@ -534,7 +545,7 @@ async def ingest_inbound(
             elif domain.forward_to:
                 # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
-                row_reasons.append("insufficient_funds")
+                row_reasons.append(INSUFFICIENT_FUNDS)
 
         for reason in row_reasons:
             if reason not in result.suppressed_reasons:

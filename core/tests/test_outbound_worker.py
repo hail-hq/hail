@@ -18,6 +18,8 @@ from hailhq.core.models import (
     EmailDomain,
     Organization,
     PlatformFlag,
+    WebhookDelivery,
+    WebhookSubscription,
 )
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.providers.email.base import ProviderSendResult
@@ -607,6 +609,14 @@ async def test_unfunded_stamp_is_not_repeated_for_two_targets(async_session):
     inbound_id = inbound.id
     async_session.add(_queued_forward(org_id, dom.id, inbound_id))
     async_session.add(_queued_forward(org_id, dom.id, inbound_id))
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/hook",
+            secret_encrypted="hash",
+            event_types=["email.received.suppressed"],
+        )
+    )
     await async_session.commit()
 
     provider = AsyncMock()
@@ -614,6 +624,35 @@ async def test_unfunded_stamp_is_not_repeated_for_two_targets(async_session):
 
     assert processed == 2
     provider.send_email.assert_not_awaited()
+    async_session.expire_all()
+    src = (
+        await async_session.execute(select(Email).where(Email.id == inbound_id))
+    ).scalar_one()
+    assert src.metadata_["suppressed_reasons"] == ["insufficient_funds"]
+    # Same webhook the ingest check fires, once per mail, not per target.
+    deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
+    assert len(deliveries) == 1
+    assert deliveries[0].event_type == "email.received.suppressed"
+    assert deliveries[0].event_id == inbound_id
+    assert deliveries[0].payload["data"]["reason"] == "insufficient_funds"
+    assert deliveries[0].payload["data"]["email_domain"] == "alice+acme@mail.hail.so"
+
+
+@pytest.mark.asyncio
+async def test_unfunded_stamp_handles_json_null_reasons(async_session):
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    inbound = _inbound(org_id, dom.id, metadata={"suppressed_reasons": None})
+    async_session.add(inbound)
+    await async_session.flush()
+    inbound_id = inbound.id
+    async_session.add(_queued_forward(org_id, dom.id, inbound_id))
+    await async_session.commit()
+
+    await _worker(async_session, AsyncMock(), funds_check=has_funds).tick()
+
     async_session.expire_all()
     src = (
         await async_session.execute(select(Email).where(Email.id == inbound_id))

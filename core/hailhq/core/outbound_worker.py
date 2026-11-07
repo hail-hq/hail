@@ -24,8 +24,9 @@ can reach zero before this worker sends it. So a billed forward is checked
 again here, with the same ``funds_check`` the ingest uses. Unfunded: the row
 is failed with ``end_reason='insufficient_funds'``, nothing is sent or
 metered, and ``insufficient_funds`` is added to the inbound row's
-``metadata.suppressed_reasons`` (the key the ingest check writes). System
-mail is never billed and skips the check.
+``metadata.suppressed_reasons`` (the key the ingest check writes), with one
+``email.received.suppressed`` event. System mail is never billed and skips
+the check.
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ from uuid import UUID
 
 from hailhq.core.agent_caps import agent_outbound_halted
 from hailhq.core.email_delivery_events import record_sent_event
-from hailhq.core.email_ingest import FundsCheck
-from hailhq.core.models import Email, EmailAttachment
+from hailhq.core.email_ingest import INSUFFICIENT_FUNDS, FundsCheck
+from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import operation, telemetry_enabled
@@ -50,15 +51,14 @@ from hailhq.core.telemetry_identity import (
     resolve_identity,
     tag_outbound_email,
 )
-from sqlalchemy import cast, func, not_, or_, select, update
+from hailhq.core.webhook_fanout import fanout_email_event
+from sqlalchemy import cast, func, literal_column, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 POLL_BATCH = 20
-
-INSUFFICIENT_FUNDS = "insufficient_funds"
 
 SessionFactory = Callable[[], "asynccontextmanager[AsyncSession]"]
 
@@ -75,6 +75,11 @@ class UsageCallback(Protocol):
     async def __call__(
         self, *, organization_id: UUID, forward_email_id: UUID
     ) -> None: ...
+
+
+def _billable(row: Email) -> bool:
+    """System mail is Hail's own, never billed to the tenant."""
+    return (row.metadata_ or {}).get("system_kind") is None
 
 
 def _is_missing_object_error(exc: Exception) -> bool:
@@ -170,8 +175,7 @@ class OutboundForwardWorker:
                 # factory with expire_on_commit would otherwise re-fetch them).
                 forward_org_id = row.organization_id
                 forward_email_id = row.id
-                # System mail is Hail's own, never billed to the tenant.
-                billable = (row.metadata_ or {}).get("system_kind") is None
+                billable = _billable(row)
                 await session.commit()
             if outcome == "deferred":
                 # Transient infra failure (S3) — stop the tick; retry next poll.
@@ -259,9 +263,8 @@ class OutboundForwardWorker:
 
         # Same rule as ingest: billed mail needs a positive balance. System
         # mail (no tenant charge) skips the check.
-        billable = meta.get("system_kind") is None
         if (
-            billable
+            _billable(row)
             and self._funds_check is not None
             and not await self._funds_check(session, row.organization_id)
         ):
@@ -359,25 +362,61 @@ class OutboundForwardWorker:
 async def _stamp_insufficient_funds(
     session: AsyncSession, inbound_id: UUID, organization_id: UUID
 ) -> None:
-    """Add ``insufficient_funds`` to the inbound row's ``suppressed_reasons``.
+    """Record ``insufficient_funds`` on the inbound row, as the ingest does.
 
-    Appends in SQL, so reasons the ingest already wrote stay, and two forward
-    rows of one mail list the reason once.
+    Adds the reason to ``metadata.suppressed_reasons`` in SQL, so reasons the
+    ingest already wrote stay, then fires one ``email.received.suppressed``
+    event. Two forward rows of one mail list the reason once and fire one
+    event: the second update matches no row.
     """
-    reasons = func.coalesce(Email.metadata_["suppressed_reasons"], cast([], JSONB))
-    await session.execute(
-        update(Email)
-        .where(Email.id == inbound_id)
-        .where(Email.organization_id == organization_id)
-        .where(not_(reasons.bool_op("?")(INSUFFICIENT_FUNDS)))
-        .values(
-            metadata_=func.coalesce(Email.metadata_, cast({}, JSONB)).op("||")(
-                func.jsonb_build_object(
-                    "suppressed_reasons",
-                    reasons.op("||")(cast([INSUFFICIENT_FUNDS], JSONB)),
+    # A JSON null in the key reads as "no reasons yet".
+    current = func.nullif(
+        Email.metadata_["suppressed_reasons"], literal_column("'null'::jsonb")
+    )
+    reasons = func.coalesce(current, cast([], JSONB))
+    stamped = (
+        await session.execute(
+            update(Email)
+            .where(Email.id == inbound_id)
+            .where(Email.organization_id == organization_id)
+            .where(not_(reasons.bool_op("?")(INSUFFICIENT_FUNDS)))
+            .values(
+                metadata_=func.coalesce(Email.metadata_, cast({}, JSONB)).op("||")(
+                    func.jsonb_build_object(
+                        "suppressed_reasons",
+                        reasons.op("||")(cast([INSUFFICIENT_FUNDS], JSONB)),
+                    )
                 )
             )
+            .returning(Email.email_domain_id)
         )
+    ).first()
+    if stamped is None:
+        return
+    inbound = (
+        await session.execute(select(Email).where(Email.id == inbound_id))
+    ).scalar_one()
+    domain = (
+        await session.get(EmailDomain, inbound.email_domain_id)
+        if inbound.email_domain_id
+        else None
+    )
+    await fanout_email_event(
+        session,
+        organization_id=organization_id,
+        email_domain_id=inbound.email_domain_id,
+        event_type="email.received.suppressed",
+        event_id=inbound_id,
+        data={
+            "id": str(inbound_id),
+            "direction": "inbound",
+            "email_domain": domain.domain if domain else None,
+            "from_address": inbound.from_address,
+            "to_addresses": list(inbound.to_addresses or []),
+            "subject": inbound.subject or "",
+            "message_id": inbound.message_id,
+            "reason": INSUFFICIENT_FUNDS,
+        },
     )
 
 
