@@ -45,7 +45,7 @@ from hailhq.api.sms_registration import (
     reconcile_approved_registrations,
 )
 from hailhq.api.superadmin import require_superadmin
-from hailhq.core import sms_registration_fees, sms_setup
+from hailhq.core import sms_registration_fees, sms_setup, verification_hold
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
@@ -114,6 +114,10 @@ _last_polled: dict[UUID, float] = {}
 
 PURPOSES = {"number", "sms"}
 
+# An approved number verification keeps its credit set aside this long for
+# the purchase; after that the sweeper gives it back.
+HOLD_AFTER_APPROVAL_DAYS = 30
+
 # (name, purpose) -> plug-in
 Registry = Callable[[str, str], VerificationProvider | None]
 
@@ -121,6 +125,17 @@ Registry = Callable[[str, str], VerificationProvider | None]
 def get_verification_registry() -> Registry:
     """Dependency so tests can swap in a fake carrier."""
     return get_verification_provider
+
+
+def _hold_402(cents: int) -> HTTPException:
+    """402 for a number verification the balance cannot set aside."""
+    return HTTPException(
+        status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+        detail=(
+            "not enough credit to start verification; setup and the first "
+            f"month cost ${cents / 100:.2f}; add credit first"
+        ),
+    )
 
 
 def _quote_required(where: str) -> HTTPException:
@@ -132,17 +147,18 @@ def _quote_required(where: str) -> HTTPException:
     )
 
 
-async def _quote_provider_name(
+async def _quote_offer(
     db: AsyncSession,
     organization_id: UUID,
     quote_id: UUID,
     country_code: str,
     number_type: str,
     where: str,
-) -> str:
-    """The carrier of a number quote, so a client can verify for an offer
-    without knowing which carrier backs it. The quote must be for the same
-    country and number type as the request."""
+) -> dict:
+    """The stored offer of a number quote. Its ``provider`` is the carrier,
+    so a client can verify for an offer without knowing which carrier backs
+    it. The quote must be for the same country and number type as the
+    request."""
     offer = (
         await db.execute(
             select(NumberOffer.offer).where(
@@ -164,7 +180,7 @@ async def _quote_provider_name(
             "quote_id is for a different country_code or number_type",
             loc=[where, "quote_id"],
         )
-    return offer["provider"]
+    return offer
 
 
 async def _sms_carriers(
@@ -561,6 +577,7 @@ async def _poll_and_apply(
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
+        await _release_number_hold(db, row)
     elif (
         changed
         and status is not None
@@ -1009,14 +1026,16 @@ async def get_requirements(
             db, principal.organization_id, number_id, "query"
         )
     elif quote_id is not None:
-        name = await _quote_provider_name(
-            db,
-            principal.organization_id,
-            quote_id,
-            country_code,
-            number_type,
-            "query",
-        )
+        name = (
+            await _quote_offer(
+                db,
+                principal.organization_id,
+                quote_id,
+                country_code,
+                number_type,
+                "query",
+            )
+        )["provider"]
     else:
         raise _quote_required("query")
     requirements = await _requirements(
@@ -1243,6 +1262,16 @@ async def _read_file(upload) -> UploadedFile:
     response_model=VerificationResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="create_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit. A number verification needs the offer's "
+                "setup and first month (`setup_cents` + `monthly_cents` of the "
+                "quote) and sets that amount aside until you buy the number. "
+                "A US SMS registration needs its filing fee. Nothing is filed."
+            ),
+        },
+    },
 )
 async def create_verification(
     request: Request,
@@ -1274,6 +1303,14 @@ async def create_verification(
     one of the same subject type and the same name is a 409, and so is a
     second live one of the same subject type when the form holds no name.
     A 409 comes before your files are checked and before anything is filed.
+
+    A number verification needs credit for the offer's setup and first month
+    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+    nothing is filed. That amount is set aside from your balance while the
+    carrier checks your papers. It pays for setup and the first month when
+    you buy the number with this verification, and comes back if the
+    verification is rejected or cancelled, or if no number is bought with it
+    within 30 days of approval. A by-request offer sets nothing aside.
 
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
@@ -1324,12 +1361,13 @@ async def create_verification(
         raise unprocessable(
             "number_id is only for purpose=sms", loc=["body", "number_id"]
         )
+    offer: dict = {}
     if sub.purpose == "sms":
         provider_name = await _sms_provider_name(
             db, principal.organization_id, sub.number_id, "body"
         )
     elif sub.quote_id is not None:
-        provider_name = await _quote_provider_name(
+        offer = await _quote_offer(
             db,
             principal.organization_id,
             sub.quote_id,
@@ -1337,9 +1375,24 @@ async def create_verification(
             sub.number_type,
             "body",
         )
+        provider_name = offer["provider"]
     else:
         raise _quote_required("body")
     provider = _provider_or_404(registry, provider_name, sub.purpose)
+
+    # A billed number verification sets aside setup and the first month
+    # until the number is bought (a by-request offer is ordered by hand, so
+    # no purchase would give it back). Checked here first, before any
+    # carrier call, and again under the lock when the row is saved.
+    hold_cents = 0
+    if (
+        sub.purpose == "number"
+        and principal.auth_kind != "shared"
+        and not offer.get("by_request")
+    ):
+        hold_cents = offer["setup_cents"] + offer["monthly_cents"]
+        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+            raise _hold_402(hold_cents)
 
     if sub.purpose == "sms":
         # Held until the row is saved: a second filing at the same time
@@ -1534,8 +1587,28 @@ async def create_verification(
         provider_refs=draft.refs,
         requirements_version=requirements.version,
     )
+    if hold_cents:
+        # Not held across the carrier calls above: a top-up must not wait.
+        await org_lock(db, principal.organization_id)
+        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+            await db.rollback()
+            # Nothing of the customer's is left at the carrier.
+            try:
+                await provider.discard(draft.refs)
+            except Exception:
+                logger.exception("verification draft discard failed")
+            raise _hold_402(hold_cents)
     db.add(row)
     try:
+        if hold_cents:
+            await db.flush()
+            await verification_hold.place_hold(
+                db,
+                principal.organization_id,
+                row.id,
+                hold_cents,
+                channel="voice" if "voice" in offer["capabilities"] else "sms",
+            )
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it
@@ -1826,6 +1899,7 @@ async def _reject_row(
     row.state, row.rejection_reason = "rejected", reason
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     await write_audit_log(
@@ -1877,6 +1951,8 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         await _refresh(db, row, registry)
         if row.state != before:
             refreshed += 1
+    # Before the repair pass: a carrier error there must not keep holds.
+    await _release_unused_holds(db, now)
     await reconcile_approved_registrations(db, registry)
     forgotten = await forget_old_applications(db, now)
     return {"submitted": submitted, "refreshed": refreshed, "forgotten": forgotten}
@@ -1918,6 +1994,53 @@ async def forget_old_applications(db: AsyncSession, now: datetime) -> int:
             forgotten += 1
         await db.commit()
     return forgotten
+
+
+async def _release_number_hold(db: AsyncSession, row: CarrierVerification) -> None:
+    """Give back the credit a number verification set aside, in the
+    caller's transaction. Call it wherever a row becomes rejected or
+    cancelled. A second call, or a row with no hold, adds nothing."""
+    if row.purpose == "number":
+        await verification_hold.release_hold(db, row.organization_id, row.id)
+
+
+async def _release_unused_holds(db: AsyncSession, now: datetime) -> None:
+    """Give back the hold of approved number verifications no number was
+    bought with within ``HOLD_AFTER_APPROVAL_DAYS`` of approval. A purchase
+    releases the hold itself, so a row with an open hold this old was not
+    used. Each release runs under the organization lock, like a purchase."""
+
+    def ledger_row(source: str):
+        # The SQL form of hold_ref / release_ref: "<source>:<verification id>".
+        return select(AccountCredit.id).where(
+            AccountCredit.organization_id == CarrierVerification.organization_id,
+            AccountCredit.ref
+            == func.concat(f"{source}:", CarrierVerification.id.cast(String)),
+        )
+
+    stale = (
+        await db.execute(
+            select(CarrierVerification.id, CarrierVerification.organization_id).where(
+                CarrierVerification.purpose == "number",
+                CarrierVerification.state == "approved",
+                CarrierVerification.approved_at
+                <= now - timedelta(days=HOLD_AFTER_APPROVAL_DAYS),
+                ledger_row(verification_hold.HOLD_SOURCE).exists(),
+                ~ledger_row(verification_hold.RELEASE_SOURCE).exists(),
+            )
+        )
+    ).all()
+    await db.commit()
+    for verification_id, org in stale:
+        # One failed release must not stop the others; it is tried again
+        # on the next pass.
+        try:
+            await org_lock(db, org)
+            await verification_hold.release_hold(db, org, verification_id)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("verification hold release failed for %s", verification_id)
 
 
 async def _org_row_or_404(
@@ -2245,6 +2368,7 @@ async def cancel_verification(
     now = datetime.now(timezone.utc)
     row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     if approved_sms:
@@ -2526,6 +2650,7 @@ async def admin_reject(
     row.provider_refs = _wiped_refs(row)
     row.state, row.rejection_reason = "rejected", body.reason
     row.updated_at = datetime.now(timezone.utc)
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     actor_user_id, actor_kind = actor_of(admin)
