@@ -310,6 +310,35 @@ async def test_retried_text_of_unfunded_org(async_session) -> None:
     assert sent_row.agent_reply_state == "done"
 
 
+async def test_retried_text_with_a_sent_reply_is_done_at_claim(
+    async_session,
+) -> None:
+    """A funded org's retry whose reply row exists is not handed to the
+    model again: the POST timed out after the send."""
+    org, agent, number = await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM26")
+    row = await async_session.get(Sms, result.sms_id)
+    row.agent_reply_attempts = 1
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="Yes.",
+            metadata_={"reply_to_sms_id": str(result.sms_id)},
+        )
+    )
+    await async_session.commit()
+
+    assert await text_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "done"
+
+
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
     """A text whose agent went away is skipped and the same call takes the next
     pending row, so a backlog of dropped texts does not cost a poll each."""

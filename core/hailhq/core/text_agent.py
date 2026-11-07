@@ -153,9 +153,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     crashed worker's lease runs out and the row is claimed again, up to
     ``MAX_ATTEMPTS`` claims. Texts older than
     ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
-    A pending text whose org has no funds (``has_funds``, the same rule as
-    ``POST /internal/agent/reply-sms``) is skipped before any model call, or
-    marked done when an earlier attempt already sent its reply.
+    A retried pending text whose reply was already sent is marked done. A
+    pending text whose org has no funds (``has_funds``, the same rule as
+    ``POST /internal/agent/reply-sms``) is skipped before any model call.
     """
     now = datetime.now(timezone.utc)
     await _expire_unclaimable(db, now)
@@ -204,17 +204,20 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             await finish_reply(db, sms, "skipped")
             continue
         org = sms.organization_id
-        # Only a pending row: an expired lease may still have a live worker,
-        # so it is reclaimed as before and reply-sms decides.
-        if sms.agent_reply_state == "pending" and (
-            org in unfunded or not await has_funds(db, org)
+        # Only pending rows: an expired lease may still have a live worker, so
+        # it is reclaimed as before and reply-sms decides.
+        pending = sms.agent_reply_state == "pending"
+        if (
+            pending
+            and sms.agent_reply_attempts
+            and await prior_reply(db, sms) is not None
         ):
-            unfunded.add(org)
-            if sms.agent_reply_attempts and await prior_reply(db, sms) is not None:
-                # An earlier attempt sent the reply but its POST timed out.
-                await finish_reply(db, sms, "done")
-                continue
+            # An earlier attempt sent the reply but its POST timed out.
+            await finish_reply(db, sms, "done")
+            continue
+        if pending and (org in unfunded or not await has_funds(db, org)):
             # reply-sms would refuse the send: skip before the model runs.
+            unfunded.add(org)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
             sms.agent_reply_state = "skipped"
             sms.metadata_ = {
