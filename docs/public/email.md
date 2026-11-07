@@ -24,8 +24,9 @@ These apply to mail you send with `POST /v1/emails` or through an agent. Forward
 - **One-click unsubscribe.** An email with exactly one recipient carries `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). The link works for one year. A click on it, or the Unsubscribe button in Gmail or Yahoo, adds the address to your suppression list. An email with two or more recipients carries no unsubscribe header.
 - **Hard bounces and spam complaints stop future sends.** The addresses named in the bounce or complaint are added to your suppression list. A soft bounce (mailbox full, server busy) is recorded as an event only.
 - **Send limits.** Each organization has an hourly and a daily send cap. Over the cap, `POST /v1/emails` returns `403`.
+- **Bounce and complaint rates.** Every hour Hail checks your hard bounce rate and spam complaint rate over the last 7 days, once you have sent to 500 recipients. Over 4% hard bounces or 0.3% complaints, Hail pauses email for your organization until support lifts it. After a lift, only mail sent after it counts. A self-hosted install sets these limits with the `HAIL_EMAIL_ABUSE_*` settings in `.env`.
 
-The suppression list belongs to your organization. Another organization on Hail can still send to that address.
+Your suppression list belongs to your organization. After a hard bounce or a spam complaint, other organizations on Hail may also be unable to send to that address.
 
 ## Blocked sends
 
@@ -36,6 +37,12 @@ A send to a suppressed address returns `403` with the reason:
 ```
 
 Reasons: `recipient_unsubscribed`, `hard_bounce`, `spam_complaint`. One suppressed recipient in `to`, `cc` or `bcc` blocks the whole send.
+
+While email is paused for your organization, every send returns `403`:
+
+```json
+{ "detail": "Email sending is suspended for this organization (contact support)" }
+```
 
 List your suppressions, and remove an address:
 

@@ -326,13 +326,23 @@ async def check_sms_allowed(
 async def check_email_allowed(
     db: AsyncSession, organization_id: UUID, to_addresses: list[str]
 ) -> GateResult:
-    """Pre-send checks for an outbound email: suppression, then velocity cap.
+    """Pre-send checks for an outbound email: channel suspension, then
+    suppression, then velocity cap.
 
     ``to_addresses`` should include every recipient the caller wants
     screened (to/cc/bcc) — the gate blocks the whole send if any one of
     them is suppressed.
     """
     checks: dict[str, Any] = {}
+
+    if await check_channel_suspended(db, organization_id, "email"):
+        checks["channel_suspended"] = True
+        return GateResult(
+            allowed=False,
+            reason="Email sending is suspended for this organization (contact support)",
+            checks=checks,
+        )
+    checks["channel_suspended"] = False
     normalized = [normalize_recipient(a) for a in to_addresses]
 
     hit = await _suppression_hit(db, organization_id, normalized, "email")
@@ -430,6 +440,7 @@ async def check_channel_suspended(
         .where(
             ChannelSuspension.organization_id == organization_id,
             ChannelSuspension.channel == channel,
+            ChannelSuspension.lifted_at.is_(None),
         )
         .limit(1)
     )

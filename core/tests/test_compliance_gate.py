@@ -541,3 +541,41 @@ async def test_check_sms_allowed_blocks_when_channel_suspended(async_session) ->
     result = await check_sms_allowed(async_session, org_id, "+14155551234")
     assert result.allowed is False
     assert "suspend" in result.reason.lower()
+
+
+async def test_check_email_allowed_blocks_when_channel_suspended(async_session) -> None:
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(organization_id=org_id, channel="email", reason="abuse")
+    )
+    await async_session.commit()
+
+    result = await check_email_allowed(async_session, org_id, ["ok@example.com"])
+    assert result.allowed is False
+    assert "suspend" in result.reason.lower()
+    assert result.checks["channel_suspended"] is True
+
+
+async def test_check_email_allowed_passes_after_suspension_lifted(
+    async_session,
+) -> None:
+    from datetime import datetime, timezone
+
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id,
+            channel="email",
+            reason="abuse",
+            lifted_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    result = await check_email_allowed(async_session, org_id, ["ok@example.com"])
+    assert result.allowed is True
+    assert result.checks["channel_suspended"] is False

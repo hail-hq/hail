@@ -108,3 +108,26 @@ async def test_channel_suspension_unique_per_org_and_channel(async_session) -> N
     )
     with pytest.raises(IntegrityError):
         await async_session.commit()
+
+
+async def test_channel_suspension_allows_a_new_row_after_a_lift(async_session) -> None:
+    import uuid
+    from datetime import datetime, timezone
+
+    from hailhq.core.models import ChannelSuspension
+
+    org_id = uuid.uuid4()
+    async_session.add(
+        ChannelSuspension(
+            organization_id=org_id,
+            channel="sms",
+            reason="a",
+            lifted_at=datetime.now(timezone.utc),
+        )
+    )
+    await async_session.commit()
+
+    async_session.add(
+        ChannelSuspension(organization_id=org_id, channel="sms", reason="b")
+    )
+    await async_session.commit()

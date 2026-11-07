@@ -718,7 +718,7 @@ describe-active-receipt-rule-set` again.
   not, raise `HAIL_FORWARD_MAX_HOPS`, or blacklist the target:
   clear `forward_to`.
 
-## SMS abuse monitor & channel suspensions
+## Abuse monitor & channel suspensions
 
 All orgs share one Hail-owned A2P 10DLC campaign, so one org's high opt-out
 rate can cause carriers to throttle the whole platform. `AbuseMonitorWorker`
@@ -729,25 +729,41 @@ rolling opt-out rate. Past the threshold
 outbound SMS. The thresholds are unvalidated starting guesses. Expect to
 tune them when real traffic arrives.
 
+Email works the same way. All orgs send from one email provider account,
+and one org's bounces or complaints can get that account paused. The same
+worker computes each org's hard bounce rate and complaint rate per
+recipient over `HAIL_EMAIL_ABUSE_WINDOW_HOURS`. Past
+`HAIL_EMAIL_ABUSE_MAX_BOUNCE_RATE` or `HAIL_EMAIL_ABUSE_MAX_COMPLAINT_RATE`
+(once the org has `HAIL_EMAIL_ABUSE_MIN_SENDS` recipients), it inserts a
+`channel_suspensions` row with `channel = 'email'`. `check_email_allowed`
+then blocks `POST /v1/emails` and agent sends. Forwards and Hail's own
+notices are not counted and are not blocked.
+
 **You must lift a suspension manually for now — there is no CLI/route/expiry.**
-An auto-suspended org stays blocked until an operator runs raw SQL. Inspect
-and lift:
+An auto-suspended org stays blocked until an operator runs raw SQL. Lifting
+sets `lifted_at` and keeps the row. Inspect and lift:
 
 ```bash
 # See who is suspended and why
 psql "$DATABASE_URL" -c \
-  "SELECT organization_id, channel, reason, suspended_at FROM channel_suspensions;"
+  "SELECT organization_id, channel, reason, suspended_at FROM channel_suspensions WHERE lifted_at IS NULL;"
 
 # Lift one org's SMS suspension (re-enables outbound immediately)
 psql "$DATABASE_URL" -c \
-  "DELETE FROM channel_suspensions WHERE organization_id = '<org-uuid>' AND channel = 'sms';"
+  "UPDATE channel_suspensions SET lifted_at = now() WHERE organization_id = '<org-uuid>' AND channel = 'sms' AND lifted_at IS NULL;"
+
+# Lift one org's email suspension
+psql "$DATABASE_URL" -c \
+  "UPDATE channel_suspensions SET lifted_at = now() WHERE organization_id = '<org-uuid>' AND channel = 'email' AND lifted_at IS NULL;"
 ```
 
-Before you lift a suspension, confirm that the opt-out spike was benign (a
-burst of legitimate STOPs, not abuse). Otherwise, the next hourly tick
-suspends the org again. There is no cooldown/backoff yet, so a
-persistently-abusive org trips again on the next run. If you see false
-positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
+After a lift, both checks count only activity after `lifted_at`, so the
+spike that caused the suspension does not trip it again. Before you lift,
+confirm that the SMS opt-out spike was benign (a burst of legitimate STOPs,
+not abuse), or that the org cleaned the email list that bounced. An org
+that keeps the same practice trips again once its new activity crosses the
+threshold. If you see false positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE`
+or the `HAIL_EMAIL_ABUSE_*` rates up.
 
 ## Carry-forwards / open work
 

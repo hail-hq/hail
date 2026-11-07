@@ -8,6 +8,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
+- Email: Hail pauses an organization's email when its hard bounce rate or spam complaint rate gets too high, so one sender cannot get email paused for every organization.
 
 ### Fixed
 
