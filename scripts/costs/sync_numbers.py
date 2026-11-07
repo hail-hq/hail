@@ -20,7 +20,8 @@ Rules the merge follows, in this order:
   carrier dropping the type. Telnyx shows no price without a number, so
   such a row is checked against telnyx.com/pricing.md: the same price there
   marks it checked today; another price leaves it as it was and lists it
-  for a person. The page never changes a price.
+  in the summary (a row that had vanished is not listed). The page never
+  changes a price: Hail pays what the API shows.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
   API, and its rows vanish. Per type, too: a type that is neither in the
@@ -635,9 +636,9 @@ def confirm_from_telnyx_page(
             continue
         if row.get("verification_method") == "manual-confirmed":
             continue
-        ours = (row["usd_per_month"], row.get("setup_usd", "0.00"))
+        ours = (row["usd_per_month"], row.get("setup_usd") or "0.00")
         hidden = not row.get("available", True)
-        if ours != page:
+        if tuple(map(_decimal, ours)) != tuple(map(_decimal, page)):
             # An off-sale row needs no one's time: it stays as it vanished.
             if not hidden:
                 differs[key] = (
@@ -1506,7 +1507,6 @@ def run_provider(
         dial_codes.setdefault(iso, prefix)
     session = requests.Session()
     observed: set[str] | None = None
-    page_prices: dict[tuple[str, str], tuple[str, str]] = {}
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
@@ -1528,14 +1528,6 @@ def run_provider(
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
-        # Read only when a type had no stock. A session of its own: the API
-        # key is not sent to the website.
-        if telnyx_no_stock_keys(skipped):
-            page_prices, page_problem = fetch_telnyx_pricing(
-                http_factory(requests.Session())
-            )
-            if page_problem:
-                skipped.append(page_problem)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
@@ -1598,13 +1590,27 @@ def run_provider(
     )
     confirmed: list[str] = []
     differs: dict[str, str] = {}
-    if provider == "telnyx":
+    # Read the page only when a row it could confirm exists. A session of
+    # its own: the API key is not sent to the website.
+    no_stock = telnyx_no_stock_keys(skipped) if provider == "telnyx" else set()
+    checkable = any(
+        f"{n['country_code']}:{n['number_type']}" in no_stock
+        and n.get("verification_method") != "manual-confirmed"
+        for n in numbers
+    )
+    if checkable:
+        page_prices, page_problem = fetch_telnyx_pricing(
+            http_factory(requests.Session())
+        )
+        if page_problem:
+            skipped.append(page_problem)
         confirmed, differs = confirm_from_telnyx_page(
             numbers, skipped, page_prices, today
         )
         # Each key in one section only.
         listed = {*confirmed, *differs}
         report["unobserved"] = [k for k in report["unobserved"] if k not in listed]
+        skipped = [line for line in skipped if line.partition(": ")[0] not in listed]
     write_catalog(path, provider, numbers)
     summary.append(
         f"## {provider}: {len(numbers)} rows, {len(countries)} countries"

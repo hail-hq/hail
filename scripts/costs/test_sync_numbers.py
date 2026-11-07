@@ -2092,6 +2092,7 @@ def test_telnyx_run_checks_out_of_stock_rows_against_the_page(tmp_path, monkeypa
         "- SG:national"
     ) in text
     assert "Not observed this run" not in text
+    assert "Skipped by the sync" not in text
 
 
 def test_telnyx_run_lists_a_differing_row_once(tmp_path, monkeypatch):
@@ -2149,3 +2150,33 @@ def test_telnyx_page_ignores_an_off_sale_row_with_another_price():
     )
     assert (confirmed, differs) == ([], {})
     assert numbers == [hidden]
+
+
+def test_telnyx_page_compares_prices_as_numbers():
+    row = _telnyx_row("SG", "national", "7.0", "8")
+    numbers = [row]
+    confirmed, differs = sync.confirm_from_telnyx_page(
+        numbers,
+        ["SG:national: no numbers in stock"],
+        {("SG", "national"): ("7.00", "8.00")},
+        "2026-11-14",
+    )
+    assert (confirmed, differs) == (["SG:national"], {})
+
+
+def test_telnyx_page_is_not_read_for_types_new_to_the_catalog(tmp_path, monkeypatch):
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
+    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    monkeypatch.setattr(
+        sync,
+        "fetch_telnyx",
+        lambda *a, **k: ([stocked], ["SG:national: no numbers in stock"]),
+    )
+
+    def no_page(http):
+        raise AssertionError("page read")
+
+    monkeypatch.setattr(sync, "fetch_telnyx_pricing", no_page)
+    sync.run_provider(
+        "telnyx", {"TELNYX_API_KEY": "k"}, tmp_path, "2026-11-14", [], not_synced=[]
+    )
