@@ -156,11 +156,13 @@ Each accepted change writes the audit row `verification.amend` with the caller; 
 CLI recovery uses `hail numbers get-sms-application <verification-id>` followed by
 `hail numbers amend-sms <verification-id> --field ... --address ...`. Supply the complete current
 answers and address; these are not partial field updates. MCP exposes `get_sms_application`
-and `amend_sms_application` (and `preview_sms_application`, which shows the campaign text before
-a first `submit_verification` with `purpose: "sms"`, filing and charging nothing); amendment requires explicit `attest_authorized=true` after the
+and `amend_sms_application`; amendment requires explicit `attest_authorized=true` after the
 user reviews the corrections. Both preserve the existing ID and use authenticated API routes.
 After an uncertain timeout, check that same registration before retrying. Neither recovery
 client creates or cancels a registration as a fallback.
+
+Before a first filing, MCP clients call `preview_sms_application` with the answers they will submit.
+It returns the campaign text a carrier reviews. It files and charges nothing.
 
 Each organization registers its own US A2P 10DLC brand and campaign. Fees are priced and
 charged per step by the website's US texting rater. The console reviews the whole application

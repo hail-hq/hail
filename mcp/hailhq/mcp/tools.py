@@ -1023,28 +1023,15 @@ async def preview_sms_application(
     number_id: Any = None,
 ) -> dict[str, Any]:
     if subject_type not in _SUBJECT_TYPES:
-        return {
-            "error": "subject_type must be 'person' or 'business'. Nothing was sent."
-        }
+        return {"error": f"{_SUBJECT_TYPE_ERROR}. Nothing was sent."}
     number_id_ = None
     if number_id is not None:
         number_id_ = _as_uuid(number_id)
         if number_id_ is None:
             return _not_uuid("number_id")
-    shape_error = _verification_shape_error(fields, {}, [], address)
-    if shape_error:
-        return {"error": f"{shape_error}. Nothing was sent."}
-    if len(fields) > _VERIFICATION_MAX_FIELDS:
-        return {
-            "error": f"too many fields (at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
-        }
-    if (
-        sum(len(json.dumps(part)) for part in (fields, address or {}))
-        > _VERIFICATION_MAX_DETAILS_BYTES
-    ):
-        return {
-            "error": f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
-        }
+    input_error = _application_input_error(fields, address)
+    if input_error:
+        return {"error": f"{input_error}. Nothing was sent."}
     try:
         return await client.preview_sms_application(
             subject_type=subject_type,
@@ -1053,16 +1040,43 @@ async def preview_sms_application(
             number_id=number_id_,
         )
     except HailAPIError as exc:
-        if exc.status == 422:
+        problems = exc.problems or []
+        answers = [
+            p
+            for p in problems
+            if list(p.get("loc", []))[1:2] in (["fields"], ["address"])
+        ]
+        if exc.status == 422 and problems and len(answers) == len(problems):
             return {
                 "error": "Correct the listed fields with the user, then preview again before submitting.",
-                "problems": exc.problems or [],
+                "problems": problems,
             }
+        # Anything else (no US number, pick a number_id, number not found) is
+        # the API's own sentence, so the agent can say what to change.
+        if exc.status in (404, 422):
+            return {"error": exc.detail, **({"problems": problems} if problems else {})}
         return _format_api_error(exc)
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
     except Exception:
         return {"error": _UNEXPECTED_ERROR}
+
+
+def _application_input_error(fields: Any, address: Any) -> str | None:
+    """The shape or size problem with application answers, or None. Sizes
+    count UTF-8 bytes, so non-ASCII text is not over-counted."""
+    shape_error = _verification_shape_error(fields, {}, [], address)
+    if shape_error:
+        return shape_error
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return f"too many fields (at most {_VERIFICATION_MAX_FIELDS})"
+    size = sum(
+        len(json.dumps(part, ensure_ascii=False).encode())
+        for part in (fields, address or {})
+    )
+    if size > _VERIFICATION_MAX_DETAILS_BYTES:
+        return f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes"
+    return None
 
 
 async def amend_sms_application(
@@ -1084,20 +1098,9 @@ async def amend_sms_application(
         return {
             "error": "address is required; use the saved address only if still correct. Nothing was sent."
         }
-    shape_error = _verification_shape_error(fields, {}, [], address)
-    if shape_error:
-        return {"error": f"{shape_error}. Nothing was sent."}
-    if len(fields) > _VERIFICATION_MAX_FIELDS:
-        return {
-            "error": f"too many fields (at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
-        }
-    if (
-        sum(len(json.dumps(part)) for part in (fields, address or {}))
-        > _VERIFICATION_MAX_DETAILS_BYTES
-    ):
-        return {
-            "error": f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
-        }
+    input_error = _application_input_error(fields, address)
+    if input_error:
+        return {"error": f"{input_error}. Nothing was sent."}
     try:
         return _without_carrier(
             await client.amend_sms_application(

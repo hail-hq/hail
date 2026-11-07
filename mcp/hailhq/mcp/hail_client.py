@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import asdict
 from typing import Any
 from urllib.parse import quote
 
@@ -31,6 +32,7 @@ import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
 from hailhq.core.providers.verification import VerificationRequirements
+from hailhq.core.providers.verification.sms_form import CampaignText
 from hailhq.core.regions import NumberRegionsResponse
 from hailhq.core.schemas import (
     AgentCreate,
@@ -63,6 +65,7 @@ from hailhq.core.schemas import (
     VerificationResponse,
     WhoamiResponse,
 )
+from pydantic import TypeAdapter
 from typing_extensions import Self
 
 
@@ -615,14 +618,9 @@ class HailClient:
         if number_id is not None:
             body["number_id"] = number_id
         resp = await self._client.post("/verifications/sms/preview", json=body)
-        if not 200 <= resp.status_code < 300:
-            raise HailAPIError(
-                status=resp.status_code,
-                detail=_error_detail(resp),
-                retry_after=resp.headers.get("retry-after"),
-                problems=_problems(resp) if resp.status_code == 422 else None,
-            )
-        return resp.json()
+        # Checked against the core shape, so nothing else reaches the agent.
+        text = TypeAdapter(CampaignText).validate_python(_decode(resp, problems=True))
+        return asdict(text)
 
     async def amend_sms_application(
         self,
@@ -638,14 +636,9 @@ class HailClient:
             json=body.model_dump(mode="json"),
             timeout=120.0,
         )
-        if not 200 <= resp.status_code < 300:
-            raise HailAPIError(
-                status=resp.status_code,
-                detail=_error_detail(resp),
-                retry_after=resp.headers.get("retry-after"),
-                problems=_problems(resp) if resp.status_code == 422 else None,
-            )
-        return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
+        return VerificationResponse.model_validate(
+            _decode(resp, problems=True)
+        ).model_dump(mode="json")
 
     async def cancel_verification(self, verification_id: str) -> dict[str, Any]:
         verification_id_ = _path_id(verification_id, name="verification_id")
@@ -907,14 +900,16 @@ def _path_id(value: str, *, name: str = "id") -> str:
     return quote(value, safe="")
 
 
-def _decode(resp: httpx.Response) -> Any:
-    """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
+def _decode(resp: httpx.Response, *, problems: bool = False) -> Any:
+    """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise.
+    With ``problems``, a 422 carries its field problems (without the input)."""
     if 200 <= resp.status_code < 300:
         return resp.json()
     raise HailAPIError(
         status=resp.status_code,
         detail=_error_detail(resp),
         retry_after=resp.headers.get("retry-after"),
+        problems=_problems(resp) if problems and resp.status_code == 422 else None,
     )
 
 

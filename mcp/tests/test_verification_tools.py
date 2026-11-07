@@ -1371,6 +1371,25 @@ async def test_amend_sms_application_timeout_keeps_recovery_on_same_row(
     assert len(respx.calls) == 1
 
 
+_CAMPAIGN_TEXT = {
+    "use_case": "SOLE_PROPRIETOR",
+    "description": "Appointment reminders.",
+    "message_flow": "Patients tick an unchecked SMS box.",
+    "samples": ["Acme: your visit is tomorrow at 9. Reply STOP to stop."],
+    "has_links": False,
+    "privacy_policy_url": "https://acme.test/privacy",
+    "terms_url": "https://acme.test/terms",
+    "text_types": ["CUSTOMER_CARE"],
+    "contact_email": "ada@acme.test",
+    "has_phone": False,
+    "age_gated": False,
+    "direct_lending": False,
+    "opt_in_message": "",
+    "opt_in_keywords": [],
+    "schema_version": 1,
+}
+
+
 @respx.mock
 async def test_preview_sms_application_returns_campaign_text_without_filing(
     client: HailClient,
@@ -1378,9 +1397,9 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
     number_id = str(uuid4())
     fields = {"program_name": "Acme", "campaign_description": "Appointment reminders."}
     address = _kwargs(client)["address"]
-    preview = {"use_case": "SOLE_PROPRIETOR", "description": "Appointment reminders."}
+    preview = _CAMPAIGN_TEXT
     route = respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
-        return_value=httpx.Response(200, json=preview)
+        return_value=httpx.Response(200, json={**preview, "provider": "private"})
     )
     result = await tools.preview_sms_application(
         client=client,
@@ -1456,3 +1475,40 @@ async def test_preview_sms_application_field_errors_strip_private_input(
     ]
     assert _FIELD_VALUE not in json.dumps(result)
     assert "preview again" in result["error"]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "status,detail",
+    [
+        (404, "Number not found among your active US local numbers that can text."),
+        (422, [{"loc": ["body", "number_id"], "msg": "Pass number_id."}]),
+    ],
+)
+async def test_preview_sms_application_passes_the_api_sentence_for_non_field_errors(
+    client: HailClient, status, detail
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(status, json={"detail": detail})
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert "preview again" not in result["error"]
+    assert result["error"] != "resource not found"
+
+
+async def test_preview_sms_application_counts_utf8_bytes_not_escapes(
+    client: HailClient,
+) -> None:
+    # 20,000 accented characters: 40 KB in UTF-8, over 64 KiB once escaped.
+    with respx.mock:
+        respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+            return_value=httpx.Response(200, json=_CAMPAIGN_TEXT)
+        )
+        result = await tools.preview_sms_application(
+            client=client,
+            subject_type="person",
+            fields={"campaign_description": "é" * 20000},
+        )
+    assert result == _CAMPAIGN_TEXT
