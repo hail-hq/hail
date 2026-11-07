@@ -13,6 +13,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Verification: when several Twilio requirements accept only the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
+- Voice replies start sooner: the call's instructions are cached after the first turn.
+- `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.
 - Verification: when Twilio refuses to check the submitted details, the customer sees that the details were not accepted, instead of "carrier unavailable; try again later".
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
 - Numbers: a number you can buy online now ranks above one only support can order, even when that one needs no papers.

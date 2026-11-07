@@ -19,11 +19,9 @@ from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
-    CAMPAIGN_REJECTED,
     SMS_REFUSED,
     SMS_VALUE_REFUSED,
     DraftResult,
-    FieldSpec,
     Problem,
     ProviderStatus,
     RegistrationHoldsAnotherNumber,
@@ -34,10 +32,13 @@ from hailhq.core.providers.verification.base import (
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
-    field_problems,
     sms_requirements,
     sms_subject_name,
-    text_types_field,
+)
+from hailhq.core.providers.verification.sms_review import (
+    LEGACY_APPLICATION,
+    application_validation_error,
+    campaign_repair_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,6 @@ _LIST_PAGE_SIZE = 20
 # A guard against a listing that never ends (1,000 records).
 _MAX_LIST_PAGES = 50
 
-_EIN = re.compile(r"^\d{2}-?\d{7}$")
 _OPT_OUT = "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
 _HELP = "HELP,INFO"
 # The STOP confirmation declared in the campaign filing. Telnyx answers STOP
@@ -66,9 +66,11 @@ _HELP = "HELP,INFO"
 # Hail's own replies (settings.hail_sms_compliance_replies_enabled) stay off:
 # on top of Telnyx's they would text the subscriber twice.
 _OPT_OUT_MESSAGE = (
-    "You are unsubscribed and will get no more messages from this number."
+    "You are unsubscribed and will get no more messages from this workspace."
 )
-# The opt-in confirmation declared in the campaign filing. Carriers reject a
+# Legacy opt-in text, retained only when reading an existing old campaign.
+# New applications file only the actual response the customer supplies.
+# Carriers reject a
 # campaign whose opt-in text lacks the message frequency and the rates notice
 # (TCR error 611).
 _OPT_IN_MESSAGE = (
@@ -84,11 +86,6 @@ _TEXT_MAX = 255
 # A sender name cut to fit stops at a word boundary only when that keeps at
 # least this many characters; else it is cut mid-word.
 _NAME_MIN = 20
-# Polls that see the campaign approved while the auto-replies are not set
-# yet. Each one reports pending and tries again; after the last, the
-# registration is approved anyway and an error is logged. Polls are a
-# minute or more apart (the background pass runs every 10 minutes).
-_REPLY_WAITS = 6
 # The messaging profile auto-replies set from the filing: Telnyx's op, the
 # filed text it sends, its keywords. "info" is the API's name for HELP.
 _AUTO_REPLIES = (
@@ -105,10 +102,6 @@ _SUCCESS_SMS = "Hail: your number is confirmed. Reply STOP to opt out."
 # A PIN is valid this long; past it, status() sends a new one.
 _OTP_RESEND_AFTER = timedelta(hours=24)
 _WRONG_CODE = "That code is wrong or has expired. Ask for a new one and try again."
-# Sub use cases for a campaign filed before the form asked for them
-# (`text_types`). SOLE_PROPRIETOR needs at least 1 and MIXED at least 2
-# (GET /10dlc/enum/usecase); without them Telnyx refuses with 400.
-_SUB_USECASES = ("CUSTOMER_CARE", "ACCOUNT_NOTIFICATION")
 # A campaign is approved once the mobile carriers accept it; TCR_ACCEPTED
 # alone is pending (the carriers have not reviewed it yet).
 _APPROVED = {"MNO_ACCEPTED", "MNO_PROVISIONED", "ACTIVE"}
@@ -154,6 +147,39 @@ _FORM_FIELDS = {
         **_ADDRESS_FIELDS,
     },
 }
+# Campaign content and consent declarations filed from the application.
+# Resource IDs, messaging-profile configuration and number pooling are not
+# customer-editable evidence and must not turn operational errors into refusals.
+_CAMPAIGN_FIELDS = {
+    "usecase",
+    "subUsecases",
+    "description",
+    "messageFlow",
+    "sample1",
+    "sample2",
+    "sample3",
+    "sample4",
+    "sample5",
+    "embeddedLink",
+    "embeddedPhone",
+    "ageGated",
+    "directLending",
+    "subscriberOptin",
+    "subscriberOptout",
+    "subscriberHelp",
+    "optinKeywords",
+    "optoutKeywords",
+    "helpKeywords",
+    "optinMessage",
+    "optoutMessage",
+    "helpMessage",
+    "termsAndConditions",
+    "privacyPolicyLink",
+    "termsAndConditionsLink",
+}
+_APPLICATION_POINTERS = {
+    f"/{field}" for field in _CAMPAIGN_FIELDS | set().union(*_FORM_FIELDS.values())
+}
 _DUPLICATE = {
     "mobile_phone_number": "This mobile number is on too many registrations. Use another one.",
     "email": "This email is on too many registrations. Use another one.",
@@ -180,9 +206,12 @@ def _campaign_replies(brand: dict, refs: dict) -> dict:
     help_text = f"Reply STOP to opt out. For help contact {contact}."
     if len(f"{name}: {help_text}" if name else help_text) > _TEXT_MAX:
         help_text = f"Reply STOP to opt out. For help contact {_HELP_CONTACT}."
+    optin = _named(name, _OPT_IN_MESSAGE)
+    if isinstance(snapshot, dict) and snapshot.get("schema_version", 1) >= 2:
+        optin = snapshot.get("opt_in_message") or ""
     return {
         "helpMessage": _named(name, help_text),
-        "optinMessage": _named(name, _OPT_IN_MESSAGE),
+        **({"optinMessage": optin} if optin else {}),
         # Required when subscriberOptout is true (Telnyx 10015).
         "optoutMessage": _named(name, _OPT_OUT_MESSAGE),
     }
@@ -243,8 +272,7 @@ def _store_replies(refs: dict, campaign: dict, brand: dict) -> None:
 
 
 def _policy_links(text: dict) -> dict:
-    """Privacy and terms links for the campaign. Drafts filed before these
-    fields existed carry no links; they are filed without them."""
+    """File dedicated policy fields exactly as saved, without invented links."""
     links = {}
     if text.get("privacy_policy_url"):
         links["privacyPolicyLink"] = text["privacy_policy_url"]
@@ -256,6 +284,9 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # subscriberOptin describes consent before sending, not keyword support.
+    # Every self-service program requires consent and an actual confirmation.
+    opt_in_message_required = True
     # Telnyx brand maximums. The person's first and last name are also
     # filed together as the brand name, under the same 100 (``_validate``).
     field_limits = MappingProxyType(
@@ -266,6 +297,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             "first_name": 100,
             "last_name": 100,
             "email": 100,
+            "opt_in_message": 255,
         }
     )
 
@@ -277,19 +309,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     ) -> Requirements:
         return sms_requirements(self, subject_type)
 
-    def extra_fields(self, subject_type) -> tuple[FieldSpec, ...]:
-        return (text_types_field(subject_type),)
-
-    def _validate(self, fields, address, subject_type) -> list[Problem]:
-        problems = field_problems(self, fields, subject_type)
-        mobile = (fields.get("mobile_phone_number") or "").strip()
-        if subject_type == "person" and mobile and not mobile.startswith("+1"):
-            problems.append(
-                Problem(
-                    field="mobile_phone_number",
-                    message="Use a US or Canadian mobile number.",
-                )
-            )
+    def validate_application(self, fields, address, subject_type) -> list[Problem]:
+        problems = super().validate_application(fields, address, subject_type)
         first = (fields.get("first_name") or "").strip()
         last = (fields.get("last_name") or "").strip()
         if subject_type == "person" and text_length(f"{first} {last}") > 100:
@@ -302,14 +323,16 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             )
         if (
             subject_type == "business"
-            and fields.get("ein")
-            and not _EIN.match(fields["ein"])
+            and address
+            and fields.get("registration_country")
+            not in (None, address.country_code.upper())
         ):
             problems.append(
-                Problem(field="ein", message="Nine digits, like 12-3456789.")
+                Problem(
+                    field="registration_country",
+                    message="This registration flow currently supports businesses whose registration country matches their address country. Contact support for this combination.",
+                )
             )
-        if address is None:
-            problems.append(Problem(field="address", message="An address is required."))
         return problems
 
     async def create_draft(
@@ -326,7 +349,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         new_brand_funded=False,
     ) -> DraftResult:
         subject_type = requirements.subject_type
-        problems = self._validate(fields, address, subject_type)
+        problems = self.validate_application(fields, address, subject_type)
         if problems:
             return DraftResult(refs={}, problems=problems)
         text = campaign_text(fields, subject_type)
@@ -401,14 +424,14 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         return DraftResult(refs=refs)
 
     def keeps_brand(self, refs) -> bool:
-        """A person's confirmed brand stays at Telnyx when a campaign was
-        filed: it is paid for, and the campaign is what the carriers refused.
+        """A person's confirmed brand stays when its campaign needs repair
+        or was filed: it is paid for, and the campaign is what the carriers refused.
         The next filing with the same details reuses it, with no new brand
         fee and no new PIN. A failed brand has no ``identity_verified``
-        (``status``), and with no campaign the brand itself failed."""
+        (``status``), and an unconfirmed brand cannot be reused."""
         return bool(
             refs.get("brand_id")
-            and refs.get("campaign_id")
+            and (refs.get("campaign_id") or refs.get("campaign_needs_repair"))
             and refs.get("subject_type") == "person"
             and refs.get("identity_verified") is True
         )
@@ -442,10 +465,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 "GET", "/10dlc/campaign", params={"brandId": brand_id}
             )
         except httpx.HTTPStatusError as exc:
-            # The lookup is optional: a refusal must not block the filing.
-            # An outage or 429 raises: retrying beats paying for a new brand.
+            # A brand Telnyx no longer holds (404, 410) files a new one. Any
+            # other answer raises: an outage, a 429 or an auth error must not
+            # buy a second brand.
             status = exc.response.status_code
-            if status < 500 and status != 429:
+            if status in (404, 410):
                 logger.warning("10DLC kept brand lookup failed: status=%s", status)
                 return False
             raise
@@ -672,20 +696,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if "campaign_id" not in refs:
                 # A campaign filed by an earlier call whose answer was lost
                 # (a timeout): take it. Each campaign sent for review is paid.
-                found = await self._api.request(
-                    "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
-                )
-                existing = [
-                    r
-                    for r in found.get("records") or []
-                    if isinstance(r, dict) and r.get("campaignId")
-                ]
-                if existing:
-                    refs["campaign_id"] = existing[0]["campaignId"]
-                    _store_replies(refs, existing[0], brand)
+                if await self.recover_campaign(refs, brand):
                     await self._set_replies(refs)
                     return ProviderStatus(state="pending")
                 text = refs["campaign"]
+                if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
+                    refs["needs_information"] = True
+                    return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
                 replies = _campaign_replies(brand, refs)
                 campaign = await self._api.request(
                     "POST",
@@ -693,17 +710,28 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     json={
                         "brandId": refs["brand_id"],
                         "usecase": text["use_case"],
-                        "subUsecases": list(text.get("text_types") or _SUB_USECASES),
+                        **(
+                            {"subUsecases": list(text["text_types"])}
+                            if text["use_case"] in {"MIXED", "SOLE_PROPRIETOR"}
+                            else {}
+                        ),
                         "description": text["description"],
                         "messageFlow": text["message_flow"],
-                        "sample1": text["samples"][0],
-                        "sample2": text["samples"][1],
+                        **{
+                            f"sample{i}": sample
+                            for i, sample in enumerate(text["samples"], 1)
+                        },
                         "embeddedLink": text["has_links"],
-                        "embeddedPhone": False,
+                        "embeddedPhone": text["has_phone"],
                         "numberPool": False,
-                        "ageGated": False,
-                        "directLending": False,
+                        "ageGated": text["age_gated"],
+                        "directLending": text["direct_lending"],
                         "subscriberOptin": True,
+                        **(
+                            {"optinKeywords": ",".join(text["opt_in_keywords"])}
+                            if text.get("opt_in_keywords")
+                            else {}
+                        ),
                         "subscriberOptout": True,
                         "subscriberHelp": True,
                         "optoutKeywords": _OPT_OUT,
@@ -725,6 +753,19 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             await self._set_replies(refs)
         except (httpx.HTTPError, KeyError) as exc:
             if isinstance(exc, httpx.HTTPStatusError):
+                if _refused(exc) and exc.request.url.path.endswith("/campaignBuilder"):
+                    # The paid brand stays: the customer fixes the answers on
+                    # this same registration (PATCH .../application), then
+                    # the background pass files the campaign again.
+                    refs["campaign_needs_repair"] = True
+                    refs["needs_information"] = True
+                    raw = str(_errors(exc.response))
+                    logger.warning("10DLC campaign refused; held for answers")
+                    return ProviderStatus(
+                        state="pending",
+                        reason=campaign_repair_reason(raw),
+                        raw_reason=raw,
+                    )
                 logger.warning(
                     "10DLC status failed: status=%s errors=%s",
                     exc.response.status_code,
@@ -735,9 +776,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if status in _APPROVED:
             return self._approved(refs)
         if status in _REJECTED:
+            refs["campaign_accepted"] = False
+            refs["runtime_ready"] = False
             return ProviderStatus(
                 state="rejected",
-                reason=CAMPAIGN_REJECTED,
+                reason=campaign_repair_reason(campaign.get("failureReasons")),
                 raw_reason=(
                     str(campaign["failureReasons"])
                     if campaign.get("failureReasons")
@@ -746,26 +789,25 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             )
         return ProviderStatus(state="pending")
 
+    def step(self, refs) -> str | None:
+        if refs.get("campaign_accepted") and not refs.get("replies_set"):
+            return "runtime_setup"
+        return super().step(refs)
+
     def _approved(self, refs) -> ProviderStatus:
-        """Approved, once the auto-replies are set: until then pending, so
-        the next poll sets them (an approved row is not polled again). After
-        ``_REPLY_WAITS`` such polls it is approved anyway and an error is
-        logged; the profile then needs its replies set by hand."""
-        if refs.get("replies_set"):
+        """Keep polling an accepted campaign until required replies are set.
+
+        A transient setup failure never undoes carrier acceptance and never
+        enables sending. Retry only the idempotent profile configuration.
+        """
+        refs["campaign_accepted"] = True
+        refs["runtime_ready"] = bool(refs.get("replies_set"))
+        if refs["runtime_ready"]:
             return ProviderStatus(state="approved")
-        waits = refs.get("replies_waits")
-        waits = (waits if isinstance(waits, int) else 0) + 1
-        refs["replies_waits"] = waits
-        if waits <= _REPLY_WAITS:
-            return ProviderStatus(state="pending")
-        logger.error(
-            "10DLC campaign approved without its STOP and HELP auto-replies:"
-            " campaign=%s brand=%s profile=%s",
-            refs.get("campaign_id"),
-            refs.get("brand_id"),
-            refs.get("messaging_profile_id"),
+        return ProviderStatus(
+            state="pending",
+            reason="The campaign is accepted. Required STOP and HELP responses are still being configured; Hail will retry automatically.",
         )
-        return ProviderStatus(state="approved")
 
     async def _set_replies(self, refs) -> None:
         """Make the STOP and HELP auto-replies of the organization's
@@ -857,6 +899,85 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             return None
         refs["messaging_profile_id"] = profile
         return profile
+
+    async def recover_campaign(self, refs, brand=None) -> bool:
+        if self.campaign_filed(refs):
+            return True
+        try:
+            found = await self._api.request(
+                "GET", "/10dlc/campaign", params={"brandId": refs["brand_id"]}
+            )
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Campaign discovery unavailable") from exc
+        existing = [
+            item
+            for item in found.get("records") or []
+            if isinstance(item, dict) and item.get("campaignId")
+        ]
+        if existing:
+            refs["campaign_id"] = existing[0]["campaignId"]
+            _store_replies(refs, existing[0], brand or {})
+            refs.pop("needs_information", None)
+            return True
+        return False
+
+    async def application_identity(self, refs, subject_type) -> dict | None:
+        if not refs.get("brand_id"):
+            return None
+        try:
+            brand = await self._api.request(
+                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
+        except (httpx.HTTPError, KeyError) as exc:
+            raise VerificationProviderError(
+                "Sender identity lookup unavailable"
+            ) from exc
+        if brand.get("identityStatus") not in _VERIFIED or brand.get("failureReasons"):
+            return None
+        country = brand.get("country")
+        fields = {
+            "sender_country": country,
+            "has_tax_id": "NO" if subject_type == "person" else "YES",
+        }
+        mapping = (
+            {
+                "first_name": "firstName",
+                "last_name": "lastName",
+                "email": "email",
+                "mobile_phone_number": "mobilePhone",
+            }
+            if subject_type == "person"
+            else {
+                "legal_name": "companyName",
+                "ein": "ein",
+                "business_type": "entityType",
+                "industry": "vertical",
+                "website": "website",
+                "rep_email": "email",
+                "rep_phone": "phone",
+            }
+        )
+        fields.update(
+            {key: brand[value] for key, value in mapping.items() if brand.get(value)}
+        )
+        if subject_type == "business":
+            fields["registration_country"] = country
+        return {
+            "fields": fields,
+            "address": {
+                "street": brand.get("street"),
+                "city": brand.get("city"),
+                "region": brand.get("state"),
+                "postal_code": brand.get("postalCode"),
+                "country_code": country,
+            },
+        }
 
     async def purchase_handle(self, refs) -> dict:
         return {}
@@ -1059,12 +1180,22 @@ def _digits(value: str | None) -> str:
 
 
 def _refused(exc: Exception) -> bool:
-    """Telnyx refused a value (a 4xx). Not 429 (slow down), and not 404:
-    for about 2 seconds after a new brand, its PIN and vetting calls answer
-    404, so the brand is kept and the background pass asks again."""
-    return isinstance(exc, httpx.HTTPStatusError) and (
-        400 <= exc.response.status_code < 500
-        and exc.response.status_code not in (404, 429)
+    """Recognize definite input refusals; auth/configuration stays retryable."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    errors = _errors(exc.response)
+    # Application payload fields are top-level. Keep both brand and campaign
+    # validation evidence without interpreting arbitrary operational paths.
+    # Telnyx points at campaign fields as "/body/<field>" too (10015).
+    known_field = any(
+        (_pointer(error) or "").removeprefix("/body") in _APPLICATION_POINTERS
+        for error in errors
+    )
+    prose = " ".join(
+        f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
+    )
+    return application_validation_error(
+        exc.response.status_code, prose, known_field=known_field
     )
 
 

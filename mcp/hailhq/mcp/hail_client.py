@@ -55,6 +55,8 @@ from hailhq.core.schemas import (
     PhoneNumberListResponse,
     PhoneNumberResponse,
     PhoneNumberRoutingUpdate,
+    SmsApplicationAmendRequest,
+    SmsApplicationResponse,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
@@ -588,6 +590,36 @@ class HailClient:
         return VerificationResponse.model_validate(_decode(resp)).model_dump(
             mode="json"
         )
+
+    async def get_sms_application(self, verification_id: str) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        resp = await self._client.get(f"/verifications/{verification_id_}/application")
+        return SmsApplicationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def amend_sms_application(
+        self,
+        verification_id: str,
+        *,
+        fields: dict[str, str] | None = None,
+        address: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        body = SmsApplicationAmendRequest(fields=fields, address=address)
+        resp = await self._client.patch(
+            f"/verifications/{verification_id_}/application",
+            json=body.model_dump(mode="json"),
+            timeout=120.0,
+        )
+        if not 200 <= resp.status_code < 300:
+            raise HailAPIError(
+                status=resp.status_code,
+                detail=_error_detail(resp),
+                retry_after=resp.headers.get("retry-after"),
+                problems=_problems(resp) if resp.status_code == 422 else None,
+            )
+        return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
 
     async def cancel_verification(self, verification_id: str) -> dict[str, Any]:
         verification_id_ = _path_id(verification_id, name="verification_id")
