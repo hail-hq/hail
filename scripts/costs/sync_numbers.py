@@ -20,9 +20,8 @@ Rules the merge follows, in this order:
   carrier dropping the type. Telnyx shows no price without a number, so
   such a row is checked against telnyx.com/pricing.md: the same price there
   marks it checked today; another price leaves it as it was and lists it
-  in the summary (a row that had vanished stays under "not observed"). The
-  page never
-  changes a price: Hail pays what the API shows.
+  in the summary (a row that had vanished stays under "not observed").
+  The page never changes a price: Hail pays what the API shows.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
   API, and its rows vanish. Per type, too: a type that is neither in the
@@ -560,12 +559,13 @@ def parse_telnyx_pricing(text: str) -> dict[tuple[str, str], tuple[str, str]]:
     iso = None
     for line in text.splitlines():
         if line.startswith("### "):
-            title = line[4:]
-            section = next(
-                (s for s in TELNYX_PRICING_SECTIONS if title.startswith(s + " ")),
-                None,
-            )
+            # "### Global Numbers (`global-numbers`, 956 rates)"
+            title = line[4:].split(" (", 1)[0].strip()
+            section = title if title in TELNYX_PRICING_SECTIONS else None
             iso = None
+            continue
+        if line.startswith(("# ", "## ")):
+            section = iso = None  # a higher heading ends the section
             continue
         if line.startswith("#### "):
             code = line[5:].strip()
@@ -613,7 +613,7 @@ def fetch_telnyx_pricing(
 
 def confirm_from_telnyx_page(
     numbers: list[dict],
-    skipped: list[str],
+    candidates: set[str],
     page_prices: dict[tuple[str, str], tuple[str, str]],
     today: str,
 ) -> tuple[list[str], dict[str, str]]:
@@ -627,7 +627,6 @@ def confirm_from_telnyx_page(
     date moves, as in merge().
     Edits ``numbers`` in place. Returns (confirmed, differs): the keys
     confirmed, and a summary line for each key whose page price differs."""
-    candidates = telnyx_page_candidates(numbers, skipped)
     confirmed: list[str] = []
     differs: dict[str, str] = {}
     for i, row in enumerate(numbers):
@@ -1603,14 +1602,17 @@ def run_provider(
     differs: dict[str, str] = {}
     # Read the page only when a row it could confirm exists. A session of
     # its own: the API key is not sent to the website.
-    if provider == "telnyx" and telnyx_page_candidates(numbers, skipped):
+    candidates = (
+        telnyx_page_candidates(numbers, skipped) if provider == "telnyx" else set()
+    )
+    if candidates:
         page_prices, page_problem = fetch_telnyx_pricing(
             http_factory(requests.Session())
         )
         if page_problem:
             skipped.append(page_problem)
         confirmed, differs = confirm_from_telnyx_page(
-            numbers, skipped, page_prices, today
+            numbers, candidates, page_prices, today
         )
         # Not also under "Not observed" or "Skipped".
         listed = {*confirmed, *differs}

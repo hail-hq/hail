@@ -1884,6 +1884,14 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Toll-Free Monthly Recurring Cost. | $1 | number | mrc | — | — |
 | Toll-Free One Time Cost. | $1 | number | otc | — | — |
 
+## Other
+
+#### DE
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Germany Toll-Free Monthly Recurring Cost | $99 | number | mrc | — | — |
+
 ### Voice Api (`voice-api`, 1 rate)
 
 #### DE
@@ -2000,7 +2008,7 @@ def test_telnyx_page_confirms_a_price_but_never_changes_one():
     ] + ["PT:local: capabilities not checked"]
 
     confirmed, differs = sync.confirm_from_telnyx_page(
-        numbers, skipped, page, "2026-11-14"
+        numbers, sync.telnyx_page_candidates(numbers, skipped), page, "2026-11-14"
     )
 
     assert confirmed == ["SG:national", "MD:local", "GH:mobile"]
@@ -2144,7 +2152,7 @@ def test_telnyx_page_ignores_an_off_sale_row_with_another_price():
     numbers = [dict(hidden)]
     confirmed, differs = sync.confirm_from_telnyx_page(
         numbers,
-        ["GH:mobile: no numbers in stock"],
+        {"GH:mobile"},
         {("GH", "mobile"): ("45.00", "40.00")},
         "2026-11-14",
     )
@@ -2157,7 +2165,7 @@ def test_telnyx_page_compares_prices_as_numbers():
     numbers = [row]
     confirmed, differs = sync.confirm_from_telnyx_page(
         numbers,
-        ["SG:national: no numbers in stock"],
+        {"SG:national"},
         {("SG", "national"): ("7.00", "8.00")},
         "2026-11-14",
     )
@@ -2219,7 +2227,7 @@ def test_telnyx_page_is_not_read_for_hand_verified_rows(tmp_path, monkeypatch):
     def no_page(http):
         raise AssertionError("page read")
 
-    _run_telnyx_out_of_stock(
+    text = _run_telnyx_out_of_stock(
         tmp_path,
         monkeypatch,
         _telnyx_row(
@@ -2227,3 +2235,8 @@ def test_telnyx_page_is_not_read_for_hand_verified_rows(tmp_path, monkeypatch):
         ),
         no_page,
     )
+    assert "### Not observed this run (kept as is) (1)\n- SG:national" in text
+    out = json.loads((tmp_path / "telnyx.json").read_text())["numbers"]
+    sg = next(n for n in out if n["number_type"] == "national")
+    assert sg["last_verified"] == "2026-10-01"
+    assert sg["verification_method"] == "manual-confirmed"
