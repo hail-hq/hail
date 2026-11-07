@@ -3606,8 +3606,18 @@ async def test_the_oldest_registration_gets_the_credit_first(
 
 
 @pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "filed_at",
+    [
+        "not a time",
+        "2026-11-07 pending",
+        "2026-13-45T00:00:00",
+        "2026-11-07T25:00:00",
+        "2026-11-07T10:00:00+99:00",
+    ],
+)
 async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
-    client, org_and_key, sms_carrier, async_session
+    client, org_and_key, sms_carrier, async_session, filed_at
 ) -> None:
     org_id, _, key = org_and_key
     vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
@@ -3621,7 +3631,7 @@ async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
             subject_type="business",
             state="cancelled",
             # No submission owed, so only the bad time is in play.
-            provider_refs={"campaign_filed_at": "not a time", "brand_reused": True},
+            provider_refs={"campaign_filed_at": filed_at, "brand_reused": True},
             requirements_version="1",
         )
     )

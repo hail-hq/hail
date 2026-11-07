@@ -86,7 +86,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import DateTime, String, case, cast, func, select, text, update
+from sqlalchemy import DateTime, Row, String, case, cast, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
@@ -307,10 +307,12 @@ async def _kept_brand(
     return (row.provider_refs or {}).get("kept_brand_id")
 
 
-# An ISO 8601 time as the API writes it (``isoformat()``).
+# An ISO 8601 date, or date and time, that Postgres casts to timestamptz:
+# the API writes isoformat(). Month, day, hour and offset are in range.
 _ISO_TIME = (
     r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
-    r"[T ]([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)?$"
+    r"([T ]([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?"
+    r"(Z|[+-](0\d|1[0-4])(:?[0-5]\d)?)?)?$"
 )
 
 
@@ -334,7 +336,7 @@ async def _uncharged_sms_steps(
         ]
     else:
         filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
-        # Cast only a value that starts as an ISO date (the API writes
+        # Cast only an ISO 8601 date or time (_ISO_TIME; the API writes
         # isoformat()); anything else is not a time and must not fail the read.
         filed = case(
             (
@@ -730,43 +732,49 @@ async def _campaign_unfunded(
     return unfunded & given.keys()
 
 
-async def _check_credit(
-    db: AsyncSession, row, registry: Registry, *, wait: bool = True
-) -> bool | None:
-    """The campaign credit check of one row before a step that leads to
-    filing its campaign. False: go on (covered, or no check applies).
-    True: not covered. None: the org lock is busy (only with ``wait``
-    False).
+async def _campaign_may_go(
+    db: AsyncSession,
+    row: CarrierVerification | Row,
+    registry: Registry,
+    *,
+    wait: bool = True,
+) -> bool:
+    """The campaign credit check of one row, before a step that leads to
+    filing its campaign. True: go on (covered, or no check applies). False:
+    stop, with no carrier call: not covered, or (``wait`` False) the org
+    lock is busy, so the next poll asks.
 
     Reads the balance under the organization's lock (``org_lock``), after
     the billing writes in flight, as the filing check does, then commits to
     release it: it is not held through the row lock and the carrier calls
     that follow, which can take seconds while the website's rater and other
-    billing writes wait for the same lock. Polls do not wait for it, like
-    the row lock."""
+    billing writes wait for the same lock. Background and GET polls do not
+    wait for it (like the row lock); a confirmed code, the retry and the
+    approve do."""
     if not _campaign_gated(row, registry):
-        return False
+        return True
     if wait:
         await org_lock(db, row.organization_id)
     elif not await try_org_lock(db, row.organization_id):
         await db.commit()
-        return None
+        return False
     unfunded = bool(await _campaign_unfunded(db, [row], registry))
     await db.commit()  # ends the org lock
-    return unfunded
+    return not unfunded
 
 
 async def _unfunded_by_id(
     db: AsyncSession, verification_id: UUID, registry: Registry
 ) -> bool:
-    """``_check_credit`` for the retry and the approve, by id. Reads columns
-    only, so the locked read that follows loads the row fresh."""
+    """Not ``_campaign_may_go``, for the retry and the approve, by id.
+    Reads columns only, so the locked read that follows loads the row
+    fresh."""
     found = (
         await db.execute(
             select(*_GATE_COLUMNS).where(CarrierVerification.id == verification_id)
         )
     ).one_or_none()
-    return found is not None and bool(await _check_credit(db, found, registry))
+    return found is not None and not await _campaign_may_go(db, found, registry)
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -948,7 +956,7 @@ async def _refresh(
         return
     # Not covered, or the org lock is busy (another poll or a billing
     # write: the next poll asks): no carrier call, the row as it is.
-    if await _check_credit(db, row, registry, wait=wait_for_org_lock) is not False:
+    if not await _campaign_may_go(db, row, registry, wait=wait_for_org_lock):
         return
     if not await _lock_for_poll(db, row):
         return
