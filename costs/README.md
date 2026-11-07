@@ -50,9 +50,9 @@ git log -p costs/llm.json | grep -A 5 '"model_id": "claude-opus-4-7"'
 
 ## Currency and units
 
-- All prices are in USD (`currency: "USD"` implicit).
+- Prices are in USD. A vendor that publishes no USD price uses the matching EUR fields instead: `_usd` becomes `_eur` (for example `price_per_minute_eur`), and `usd_per_segment` becomes `eur_per_segment`. A row uses one currency only, and prices are never converted.
 - LLM prices are per 1M tokens (`*_per_mtok_usd`).
-- STT prices are per minute of audio (`price_per_minute_usd`).
+- STT prices are per minute of audio (`price_per_minute_usd`, or `price_per_minute_eur`).
 - TTS prices are per 1M characters of input (`price_per_1m_chars_usd`).
 - Prices are stored as decimal strings — `"0.0048"`, not `0.0048` — to avoid float roundtrip errors. Parse with `Decimal` (Python), `decimal.js` or `big.js` (JS), or any fixed-point library — do not use native `Number` or `parseFloat`.
 

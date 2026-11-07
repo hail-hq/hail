@@ -12,12 +12,18 @@ Rules the merge follows, in this order:
   never overwritten and never marked unavailable. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
-- A row the sync could not observe this run (no numbers in stock, no price,
-  no dial code, or a country the sync account cannot see) is left exactly as
-  it was: not seeing stock is not the same as the carrier dropping the type.
+- A row DIDWW lists with no numbers in stock takes the price DIDWW shows
+  for the empty areas: its check date moves and it gets a note.
+- A row the sync could not observe this run (no numbers in stock at Telnyx
+  or Twilio, no price, no dial code, or a country the sync account cannot
+  see) is left exactly as it was: not seeing stock is not the same as the
+  carrier dropping the type. Telnyx shows no price without a number, so
+  such a row goes stale until its price is read on telnyx.com/pricing.md.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
-  API, and its rows vanish.
+  API, and its rows vanish. Per type, too: a type that is neither in the
+  listing nor in the country's Pricing API answer is not sold, and its row
+  vanishes.
 - A carrier without credentials is skipped with a printed reason, not an error.
 
 Calls, texts and MMS flags: a feature a sampled number has is a yes. For a
@@ -41,7 +47,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -204,12 +210,7 @@ def map_twilio(
     rows, skipped = [], []
     for c in countries:
         iso, name = c["country_code"], c["country"]
-        prices = {
-            TWILIO_PRICING_TYPE.get(p["number_type"], p["number_type"]): p[
-                "current_price"
-            ]
-            for p in pricing_by_country.get(iso, {}).get("phone_number_prices", [])
-        }
+        prices = twilio_prices(pricing_by_country.get(iso))
         for number_type in types_by_country.get(iso, []):
             if number_type not in NUMBER_TYPES:
                 skipped.append(f"{iso}:{number_type}: unknown number type")
@@ -247,20 +248,34 @@ def map_twilio(
     return rows, skipped
 
 
+def twilio_prices(answer: dict | None) -> dict[str, str]:
+    """Number type to price, from one Pricing API country answer."""
+    return {
+        TWILIO_PRICING_TYPE.get(p["number_type"], p["number_type"]): p["current_price"]
+        for p in (answer or {}).get("phone_number_prices") or []
+    }
+
+
 def twilio_observed_keys(
     countries: list[dict],
     types_by_country: dict[str, list[str]],
     unsold: Iterable[str] = (),
+    pricing: dict[str, dict] | None = None,
 ) -> set[str]:
-    """The "ISO:type" pairs the account's listing enumerated. Twilio's
-    AvailablePhoneNumbers list is scoped to the account's geographic
-    permissions: a country it is not enabled for is simply absent, which
-    says nothing about what Twilio sells. Only these keys were observed.
+    """The "ISO:type" pairs this run settled. A key is observed when the
+    account's listing enumerates it. Twilio's AvailablePhoneNumbers list is
+    scoped to the account's geographic permissions: a country or type it
+    leaves out says nothing about what Twilio sells on its own.
 
-    ``unsold`` names catalog countries outside the listing for which the
-    Pricing API has no prices at all. Twilio sells nothing there through the
-    API (Hail's only way to buy), so every key of theirs counts as observed:
-    absent from the rows, they vanish."""
+    The Pricing API settles the rest. ``unsold`` names catalog countries
+    outside the listing for which it has no prices at all: Twilio sells
+    nothing there through the API (Hail's only way to buy), so every key of
+    theirs counts as observed and, absent from the rows, vanishes.
+    ``pricing`` holds the Pricing API answer for each country that has one,
+    listed or not. A type that the listing leaves out and the answer does not
+    price is not sold either (Brazil national, 2026-11), so it is observed
+    gone too. A type the answer still prices stays unobserved: the account
+    may only lack it."""
     keys = {
         f"{c['country_code']}:{t}"
         for c in countries
@@ -268,6 +283,16 @@ def twilio_observed_keys(
         if t in NUMBER_TYPES
     }
     keys |= {f"{iso}:{t}" for iso in unsold for t in NUMBER_TYPES}
+    for iso, answer in (pricing or {}).items():
+        priced = set(twilio_prices(answer))
+        if not priced:
+            continue
+        listed_types = set(types_by_country.get(iso, []))
+        keys |= {
+            f"{iso}:{t}"
+            for t in NUMBER_TYPES
+            if t not in listed_types and t not in priced
+        }
     return keys
 
 
@@ -277,7 +302,8 @@ def fetch_twilio(
     dial_codes: dict[str, str],
     catalog_countries: Iterable[str] = (),
 ) -> tuple[list[dict], list[str], set[str]]:
-    """Rows, skipped lines, and the keys the account could see at all.
+    """Rows, skipped lines, and the keys this run settled (see
+    ``twilio_observed_keys``).
 
     ``catalog_countries`` are the countries the catalog on disk has. One
     outside the account listing is asked the Pricing API: no prices at all
@@ -288,6 +314,7 @@ def fetch_twilio(
     countries = http.get(f"{base}.json")["countries"]
     listed = {c["country_code"] for c in countries}
     unsold: set[str] = set()
+    pricing: dict[str, dict] = {}
     for iso in sorted(set(catalog_countries) - listed):
         progress(f"twilio {iso} (not in the account listing)")
         try:
@@ -300,10 +327,11 @@ def fetch_twilio(
             continue
         if not prices.get("phone_number_prices"):
             unsold.add(iso)
+        else:
+            pricing[iso] = prices
     types_by_country: dict[str, list[str]] = {}
     samples: dict[tuple[str, str], list[dict]] = {}
     capabilities: dict[tuple[str, str], dict[str, bool]] = {}
-    pricing: dict[str, dict] = {}
     for c in countries:
         iso = c["country_code"]
         progress(f"twilio {iso}")
@@ -355,7 +383,11 @@ def fetch_twilio(
         dial_codes,
         capabilities,
     )
-    return rows, skipped, twilio_observed_keys(countries, types_by_country, unsold)
+    return (
+        rows,
+        skipped,
+        twilio_observed_keys(countries, types_by_country, unsold, pricing),
+    )
 
 
 # -- Telnyx -------------------------------------------------------------------
@@ -479,12 +511,59 @@ DIDWW_TYPE = {
 }
 
 
+def _decimal(value: Any) -> Decimal | None:
+    """A finite price, or None for a missing, empty or broken one."""
+    try:
+        d = Decimal(str(value)) if value not in (None, "") else None
+    except InvalidOperation:
+        return None
+    return d if d is not None and d.is_finite() else None
+
+
+def _setup_price(sku: dict) -> Decimal | None:
+    """A SKU's setup fee: 0 when DIDWW gives none, None when it is broken."""
+    value = sku.get("setup_price")
+    return Decimal(0) if value in (None, "") else _decimal(value)
+
+
+def _didww_type_fields(all_groups: list[dict]) -> tuple[dict, list[Decimal]]:
+    """The row fields for one number type, from its areas. Hail sells a
+    number it can show (listed) and that can place calls: the price comes
+    from the areas Hail can sell, and the row is marked when there are
+    none."""
+    features = set().union(*(g["features"] for g in all_groups))
+    outbound = [g for g in all_groups if g["outbound"]]
+    sellable = [g for g in outbound if g["listed"]]
+    groups = sellable or outbound or all_groups
+    prices = sorted(g["monthly"] for g in groups)
+    cheapest = min(groups, key=lambda g: g["monthly"])
+    return {
+        "usd_per_month": money(prices[0]),
+        "setup_usd": money(cheapest["setup"]),
+        "voice": any(f.startswith("voice") for f in features),
+        "sms": any(f.startswith("sms") for f in features),
+        "verification_required": cheapest["needs_registration"] or cheapest["address"],
+        "receive_only": not outbound,
+        "by_request": bool(outbound) and not sellable,
+    }, prices
+
+
+def _didww_range_note(prices: list[Decimal]) -> str | None:
+    if prices[0] == prices[-1]:
+        return None
+    return f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(prices)} areas"
+
+
 def map_didww(
     countries: list[dict],
     group_types: dict[str, str],
     groups_by_country: dict[str, dict],
 ) -> tuple[list[dict], list[str]]:
-    """groups_by_country[iso] = {"data": [...did_groups...], "included": [...]}"""
+    """groups_by_country[iso] = {"data": [...did_groups...], "included": [...]}
+
+    A type DIDWW lists with no numbers in stock is still a row, read from
+    its empty areas (DIDWW shows their price and features) and marked with
+    ``NO_STOCK``. merge() decides what the mark does."""
     rows, skipped = [], []
     for c in countries:
         iso, name, prefix = (
@@ -497,6 +576,8 @@ def map_didww(
             continue
         included = {(i["type"], i["id"]): i for i in payload.get("included", [])}
         by_type: dict[str, list[dict]] = defaultdict(list)
+        unstocked: dict[str, list[dict]] = defaultdict(list)
+        stocked_unpriced: set[str] = set()
         listed: set[str] = set()
         for g in payload.get("data", []):
             gt = g["relationships"].get("did_group_type", {}).get("data") or {}
@@ -506,8 +587,6 @@ def map_didww(
                     skipped.append(f"{iso}: group {g.get('id')} has no resolvable type")
                 continue
             listed.add(number_type)
-            if not g.get("meta", {}).get("is_available", True):
-                continue
             skus = [
                 included[("stock_keeping_units", s["id"])]["attributes"]
                 for s in g["relationships"]
@@ -515,15 +594,35 @@ def map_didww(
                 .get("data", [])
                 if ("stock_keeping_units", s["id"]) in included
             ]
-            base = [s for s in skus if s.get("channels_included_count") == 0] or skus
+            # The base SKU (no channels) sets the price; a bundle is used only
+            # when the area has no base SKU. A SKU with a broken monthly or
+            # setup price is passed over, so the area may end up unpriced:
+            # it must not stop the run, nor be priced from another SKU.
+            base_skus = [
+                s for s in skus if s.get("channels_included_count") == 0
+            ] or skus
+            base = [
+                (s, d)
+                for s in base_skus
+                if (d := _decimal(s.get("monthly_price"))) is not None
+                and _setup_price(s) is not None
+            ]
+            available = g.get("meta", {}).get("is_available", True)
             if not base:
+                if available:
+                    stocked_unpriced.add(number_type)
+                if base_skus:
+                    skipped.append(
+                        f"{iso}: group {g.get('id')} has no valid price, passed over"
+                    )
                 continue
-            cheapest = min(base, key=lambda s: Decimal(s["monthly_price"]))
-            by_type[number_type].append(
+            cheapest, monthly = min(base, key=lambda sd: sd[1])
+            features = g["attributes"].get("features", [])
+            (by_type if available else unstocked)[number_type].append(
                 {
-                    "monthly": Decimal(cheapest["monthly_price"]),
-                    "setup": Decimal(cheapest.get("setup_price") or 0),
-                    "features": set(g["attributes"].get("features", [])),
+                    "monthly": monthly,
+                    "setup": _setup_price(cheapest),
+                    "features": set(features),
                     "needs_registration": bool(
                         g.get("meta", {}).get("needs_registration")
                     ),
@@ -531,7 +630,7 @@ def map_didww(
                     .get("address_requirement", {})
                     .get("data")
                     is not None,
-                    "outbound": "voice_out" in g["attributes"].get("features", []),
+                    "outbound": "voice_out" in features,
                     # DIDWW lists each number of this area for sale, so a
                     # customer can be shown one and buy it. When false,
                     # DIDWW picks the number at order time.
@@ -540,45 +639,43 @@ def map_didww(
                     ),
                 }
             )
-        # DIDWW still lists the type but has nothing to sell right now (no
-        # stock, or no price on any group). Out of stock is not dropped: the
-        # line below keeps the row as it was instead of marking it gone.
+        # DIDWW still lists the type but has nothing to sell right now. Out
+        # of stock is not dropped: the row is read from the empty areas, the
+        # same way as areas with stock, and marked. A type with no price on
+        # any group, or with an area on sale that has no price, is skipped
+        # and kept exactly as it was.
         for number_type in sorted(listed - set(by_type)):
-            skipped.append(f"{iso}:{number_type}: listed, no numbers in stock")
-        for number_type, all_groups in by_type.items():
-            features = set().union(*(g["features"] for g in all_groups))
-            # Hail sells a number it can show (listed) and that can place
-            # calls. Price the row from the areas Hail can sell; mark the row
-            # when there are none.
-            outbound = [g for g in all_groups if g["outbound"]]
-            sellable = [g for g in outbound if g["listed"]]
-            groups = sellable or outbound or all_groups
-            receive_only = not outbound
-            by_request = bool(outbound) and not sellable
-            prices = sorted(g["monthly"] for g in groups)
-            cheapest = min(groups, key=lambda g: g["monthly"])
-            notes = None
-            if prices[0] != prices[-1]:
-                notes = f"monthly price varies by area: {money(prices[0])} to {money(prices[-1])} USD across {len(groups)} areas"
-            rows.append(
-                _row(
-                    country_code=iso,
-                    number_type=number_type,
-                    country_name=name,
-                    dial_code=prefix,
-                    usd_per_month=money(prices[0]),
-                    setup_usd=money(cheapest["setup"]),
-                    voice=any(f.startswith("voice") for f in features),
-                    sms=any(f.startswith("sms") for f in features),
-                    mms=False,
-                    verification_required=cheapest["needs_registration"]
-                    or cheapest["address"],
-                    notes=notes,
-                    receive_only=receive_only,
-                    by_request=by_request,
+            if number_type in stocked_unpriced:
+                skipped.append(
+                    f"{iso}:{number_type}: listed, an area on sale has no price"
                 )
+            elif not unstocked[number_type]:
+                skipped.append(f"{iso}:{number_type}: listed, no price on any group")
+        groups_by_type = [(t, g, False) for t, g in by_type.items()] + [
+            (t, g, True)
+            for t, g in unstocked.items()
+            if g and t not in by_type and t not in stocked_unpriced
+        ]
+        for number_type, all_groups, empty in groups_by_type:
+            fields, prices = _didww_type_fields(all_groups)
+            row = _row(
+                country_code=iso,
+                number_type=number_type,
+                country_name=name,
+                dial_code=prefix,
+                mms=False,
+                notes=_didww_range_note(prices),
+                **fields,
             )
+            if empty:
+                row[NO_STOCK] = True
+            rows.append(row)
     return rows, skipped
+
+
+# Set by a mapper on a row read while the carrier had no numbers in stock.
+# merge() removes it before the row is written.
+NO_STOCK = "_no_stock"
 
 
 def fetch_didww(http: Http) -> tuple[list[dict], list[str], dict[str, str]]:
@@ -679,6 +776,12 @@ def merge(
     ``unobserved`` names the keys the sync skipped this run; their rows are
     kept as they are instead of being marked vanished.
 
+    A fetched row marked ``NO_STOCK`` was read while the carrier had no
+    numbers for sale. It is merged like any fetched row and gets a note,
+    with one difference: a row that had vanished stays exactly as it
+    vanished, and only its check date moves. The next sync that sees stock
+    rebuilds the row without the note.
+
     ``kept_rows`` holds copies of unobserved rows whose ``requirements`` were
     refreshed by attach_requirements; only that field is taken from them."""
     fresh_by_key = {
@@ -705,6 +808,7 @@ def merge(
         "changed": [],
         "added": [],
         "vanished": [],
+        "no_stock": [],
         "unobserved": [],
     }
     watched = (
@@ -725,6 +829,7 @@ def merge(
         key = f"{n['country_code']}:{n['number_type']}"
         seen.add(key)
         prev = prev_by_key.get(key)
+        no_stock = n.pop(NO_STOCK, False)
         n.setdefault("available", True)
         if not n.get("dial_code") and prev:
             n["dial_code"] = prev["dial_code"]
@@ -760,16 +865,30 @@ def merge(
                 kept["last_changed_at"] = today
             numbers.append(kept)
             continue
+        if no_stock and prev is None:
+            # A type the catalog never had, with nothing to buy: not added
+            # until the carrier has a number for sale.
+            report["no_stock"].append(f"{key}: new, not added until in stock")
+            continue
+        if no_stock and _no_stock_unused(prev):
+            # Vanished, now listed with nothing to buy: still not on sale.
+            # It stays exactly as it vanished, so held numbers keep their
+            # price; only the check date moves, as on the vanished path.
+            report["no_stock"].append(f"{key}: hidden, kept as it vanished")
+            numbers.append({**prev, "last_verified": today})
+            continue
+        if no_stock:
+            # Notes are rebuilt like any synced row's (rule 3), plus this one.
+            n["notes"] = "; ".join(filter(None, [n.get("notes"), _NO_STOCK_NOTE]))
         changed = [k for k in watched if (prev or {}).get(k) != n.get(k)]
-        if prev is None:
+        if no_stock:
+            report["no_stock"].append(_change_line(key, prev, n, changed))
+        elif prev is None:
             report["added"].append(
                 f"{key}: {n['usd_per_month']} voice={n['voice']} sms={n['sms']} verify={n['verification_required']}"
             )
         elif changed:
-            report["changed"].append(
-                f"{key}: "
-                + ", ".join(_change(k, prev.get(k), n.get(k)) for k in changed)
-            )
+            report["changed"].append(_change_line(key, prev, n, changed))
         numbers.append(
             {
                 **n,
@@ -805,7 +924,15 @@ def merge(
             # Appended, not written over: a hand-verified row's notes say why
             # a human confirmed it and must outlive the carrier's feed.
             kept["notes"] = "; ".join(
-                filter(None, [kept.get("notes"), _VANISHED_NOTE.format(today=today)])
+                [
+                    # A no-stock note no longer holds once the type is gone.
+                    *(
+                        part
+                        for part in (kept.get("notes") or "").split("; ")
+                        if part and part != _NO_STOCK_NOTE
+                    ),
+                    _VANISHED_NOTE.format(today=today),
+                ]
             )
         report["vanished"].append(key)
         numbers.append(kept)
@@ -816,6 +943,27 @@ def merge(
 _VANISHED_NOTE = (
     "not offered by the carrier as of {today}; kept so held numbers stay billable"
 )
+_NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
+
+
+def _no_stock_unused(prev: dict | None) -> bool:
+    """merge() does not write a row read with no stock over ``prev``: a type
+    new to the catalog is not added, and a vanished row (not hand-verified)
+    stays as it vanished. Its papers need no fetch."""
+    if prev is None:
+        return True
+    return not prev.get("available", True) and (
+        prev.get("verification_method") != "manual-confirmed"
+    )
+
+
+def _change_line(key: str, prev: dict | None, new: dict, changed: list[str]) -> str:
+    """One summary line: the key, then each watched field that changed."""
+    if not changed:
+        return key
+    return f"{key}: " + ", ".join(
+        _change(k, (prev or {}).get(k), new.get(k)) for k in changed
+    )
 
 
 def regulatory_block(existing: dict, numbers: list[dict], provider: str) -> dict:
@@ -1142,6 +1290,7 @@ def _row_sections(summary: list[str], report: dict[str, list[str]]) -> None:
         ("Changed", "changed"),
         ("Added", "added"),
         ("No longer offered (kept, noted)", "vanished"),
+        ("Listed with no numbers in stock (checked, noted)", "no_stock"),
         ("Not observed this run (kept as is)", "unobserved"),
     ):
         if report[key]:
@@ -1212,10 +1361,13 @@ def run_provider(
             f"{r['country_code']}:{r['number_type']}: no dial code known; add one by hand"
         )
     rows = [r for r in rows if r["dial_code"]]
+    # Rows read with no stock do not count: a stock fault at the carrier
+    # must not pass the shrink guard.
     countries = {r["country_code"] for r in rows}
-    if len(countries) < COUNTRY_FLOOR and existing:
+    stocked = {r["country_code"] for r in rows if not r.get(NO_STOCK)}
+    if len(stocked) < COUNTRY_FLOOR and existing:
         raise CatalogShrunk(
-            f"only {len(countries)} countries fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
+            f"only {len(stocked)} countries with stock fetched (< {COUNTRY_FLOOR}); refusing to shrink the catalog"
         )
     requirement_errors: list[str] = []
     # Rows still sold but not seen this run (a skip with a reason). Rows the
@@ -1229,7 +1381,23 @@ def run_provider(
         if f"{n['country_code']}:{n['number_type']}" in sold_unseen
         and n.get("verification_required")
     ]
-    attach_requirements(provider, rows, existing, requirement_errors, kept_rows)
+    by_key = {f"{n['country_code']}:{n['number_type']}": n for n in existing}
+    attach_requirements(
+        provider,
+        [
+            r
+            for r in rows
+            if not (
+                r.get(NO_STOCK)
+                and _no_stock_unused(
+                    by_key.get(f"{r['country_code']}:{r['number_type']}")
+                )
+            )
+        ],
+        existing,
+        requirement_errors,
+        kept_rows,
+    )
     numbers, report = merge(
         existing,
         rows,
@@ -1240,7 +1408,10 @@ def run_provider(
         kept_rows=kept_rows,
     )
     write_catalog(path, provider, numbers)
-    summary.append(f"## {provider}: {len(numbers)} rows, {len(countries)} countries")
+    summary.append(
+        f"## {provider}: {len(numbers)} rows, {len(countries)} countries"
+        + (f" ({len(stocked)} with stock)" if stocked != countries else "")
+    )
     _row_sections(summary, report)
     _section(summary, "Requirements not refreshed", requirement_errors)
     _section(summary, "Skipped by the sync", skipped)

@@ -5,7 +5,13 @@ import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
 import styles from "./SiteHeader.module.css";
 
-export type SiteHeaderActive = "docs" | null;
+export type SiteHeaderActive =
+  | "product"
+  | "setup"
+  | "pricing"
+  | "docs"
+  | "blog"
+  | null;
 
 const RESOURCES = [
   {
@@ -19,14 +25,37 @@ const RESOURCES = [
     ],
   },
   {
-    label: "Guides",
+    label: "Compare and estimate",
     items: [
-      { label: "Engineering blog", href: "/blog" },
-      { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
-      { label: "Domain warmup guide", href: "/email#domain-warmup" },
       { label: "Compare platforms", href: "/compare" },
       { label: "Free tools", href: "/tools" },
       { label: "AI model pricing", href: "/costs" },
+    ],
+  },
+];
+
+const SETUP_GUIDES = [
+  {
+    label: "Start here",
+    items: [{ label: "Create an AI agent", href: "/create-ai-agent" }],
+  },
+  {
+    label: "Agent templates",
+    items: [
+      { label: "Front desk", href: "/agent-templates/front-desk" },
+      { label: "Appointments", href: "/agent-templates/appointments" },
+      { label: "Customer support", href: "/agent-templates/customer-support" },
+      { label: "Sales inquiries", href: "/agent-templates/sales-inquiries" },
+      { label: "Delivery updates", href: "/agent-templates/delivery-updates" },
+      { label: "After hours", href: "/agent-templates/after-hours" },
+      { label: "Inbox", href: "/agent-templates/inbox" },
+    ],
+  },
+  {
+    label: "Phone and email",
+    items: [
+      { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
+      { label: "Domain warmup guide", href: "/email#domain-warmup" },
     ],
   },
 ];
@@ -48,8 +77,14 @@ export function SiteHeader({
   themeControl: ReactNode;
   origin?: string;
 }) {
+  const current = active;
   const siteHref = (path: string) => new URL(path, origin).href;
   const { open, setOpen, ref } = useDropdown();
+  const {
+    open: setupOpen,
+    setOpen: setSetupOpen,
+    ref: setupRef,
+  } = useDropdown();
   const {
     open: mobileOpen,
     setOpen: setMobileOpen,
@@ -67,17 +102,22 @@ export function SiteHeader({
           if (event.key === "Escape" && mobileOpen) {
             setMobileOpen(false);
             setOpen(false);
+            setSetupOpen(false);
             menuButton.current?.focus();
           }
           // The open phone menu covers the page: Tab cycles between the toggle and the menu links.
           if (event.key === "Tab" && mobileOpen && menuButton.current) {
             const nav = document.getElementById(navId);
+            const shown = (el: HTMLElement) => {
+              const style = getComputedStyle(el);
+              return style.display !== "none" && style.visibility !== "hidden";
+            };
             const items = [
               menuButton.current,
               ...(nav
                 ? Array.from(nav.querySelectorAll<HTMLElement>("a, button"))
                 : []),
-            ];
+            ].filter(shown);
             // The toggle is last in the DOM, so step through this list instead of letting Tab leave it.
             const at = items.indexOf(document.activeElement as HTMLElement);
             if (at >= 0) {
@@ -101,18 +141,37 @@ export function SiteHeader({
             if ((event.target as HTMLElement).closest("a")) {
               setMobileOpen(false);
               setOpen(false);
+              setSetupOpen(false);
             }
           }}
         >
           <div className={styles.dropdown} ref={ref}>
             <button
               type="button"
-              className={navLinkClass(false)}
+              className={navLinkClass(current === "product")}
+              aria-current={current === "product" ? "true" : undefined}
               aria-haspopup="true"
               aria-expanded={open}
-              onClick={() => setOpen(!open)}
+              onClick={() => {
+                setOpen(!open);
+                setSetupOpen(false);
+              }}
             >
-              Product <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+              Product
+              <svg
+                className={styles.chev}
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 3.5 5 6.5 8 3.5" />
+              </svg>
             </button>
             {open && (
               <div className={styles.panel}>
@@ -133,24 +192,79 @@ export function SiteHeader({
               </div>
             )}
           </div>
-          <a href={siteHref("/pricing")} className={navLinkClass(false)}>
-            Pricing
-          </a>
+          <div className={styles.dropdown} ref={setupRef}>
+            <button
+              type="button"
+              className={navLinkClass(current === "setup")}
+              aria-current={current === "setup" ? "true" : undefined}
+              aria-haspopup="true"
+              aria-expanded={setupOpen}
+              onClick={() => {
+                setSetupOpen(!setupOpen);
+                setOpen(false);
+              }}
+            >
+              Setup guide
+              <svg
+                className={styles.chev}
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
+            {setupOpen && (
+              <div className={styles.panel}>
+                {SETUP_GUIDES.map((group) => (
+                  <div key={group.label}>
+                    <div className={styles.panelGroup}>{group.label}</div>
+                    {group.items.map((item) => (
+                      <a
+                        key={item.href}
+                        href={siteHref(item.href)}
+                        onClick={() => setSetupOpen(false)}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <a
             href={siteHref("/docs")}
-            aria-current={active === "docs" ? "page" : undefined}
-            className={navLinkClass(active === "docs")}
+            aria-current={current === "docs" ? "true" : undefined}
+            className={navLinkClass(current === "docs")}
           >
             Docs
           </a>
-          <a href={siteHref("/blog")} className={navLinkClass(false)}>
-            Resources
+          <a
+            href={siteHref("/blog")}
+            aria-current={current === "blog" ? "true" : undefined}
+            className={navLinkClass(current === "blog")}
+          >
+            Blog
           </a>
           <a
-            className={`${styles.primary} ${styles.menuCta}`}
-            href={siteHref("/signup")}
+            href={siteHref("/pricing")}
+            aria-current={current === "pricing" ? "true" : undefined}
+            className={navLinkClass(current === "pricing")}
           >
-            Get started
+            Pricing
+          </a>
+          <a
+            className={`${styles.navLink} ${styles.menuSignIn}`}
+            href={siteHref("/signin")}
+          >
+            Sign in
           </a>
         </nav>
         <div className={styles.navActions}>
@@ -171,6 +285,7 @@ export function SiteHeader({
             onClick={() => {
               setMobileOpen(!mobileOpen);
               setOpen(false);
+              setSetupOpen(false);
             }}
           >
             <span aria-hidden="true" />

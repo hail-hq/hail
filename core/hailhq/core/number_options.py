@@ -62,13 +62,15 @@ def option_key(
     setup_cents: int,
     paperwork_known: bool = True,
 ) -> tuple[int, int, int, int, int, int]:
-    """Sort key, best first: status, then buy before by request, then fewer
+    """Sort key, best first: buy before by request, then status, then fewer
     jobs missing from the type's union (see ``_missing_jobs``), then a known
     paper list before an unknown one, then fewer papers, then lower monthly
     plus setup."""
+    # Buy first: a number the customer can buy online, even after a check,
+    # beats one only support can order, even when that one needs no papers.
     return (
-        _STATUS_RANK[status],
         0 if how == "buy" else 1,
+        _STATUS_RANK[status],
         missing,
         0 if paperwork_known else 1,
         paperwork_count,
@@ -255,7 +257,7 @@ def number_options(
     """One row per number type, with the best option per subject.
 
     With a ``capabilities`` filter, only options that have all of them
-    compete. With none, after status and how, an option that does every job
+    compete. With none, after how and status, an option that does every job
     its number type offers (the union over all options of that type, both
     subjects) ranks before one that does fewer. ``more_options`` counts every
     other option.
