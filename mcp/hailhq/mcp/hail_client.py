@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from dataclasses import asdict
+from dataclasses import fields as dataclass_fields
 from typing import Any
 from urllib.parse import quote
 
@@ -65,7 +65,6 @@ from hailhq.core.schemas import (
     VerificationResponse,
     WhoamiResponse,
 )
-from pydantic import TypeAdapter
 from typing_extensions import Self
 
 
@@ -618,9 +617,15 @@ class HailClient:
         if number_id is not None:
             body["number_id"] = number_id
         resp = await self._client.post("/verifications/sms/preview", json=body)
-        # Checked against the core shape, so nothing else reaches the agent.
-        text = TypeAdapter(CampaignText).validate_python(_decode(resp, problems=True))
-        return asdict(text)
+        data = _decode(resp, problems=True)
+        # Only the core CampaignText keys reach the agent. A key the API adds
+        # or drops later does not break the tool.
+        keys = {f.name for f in dataclass_fields(CampaignText)}
+        return (
+            {k: v for k, v in data.items() if k in keys}
+            if isinstance(data, dict)
+            else {}
+        )
 
     async def amend_sms_application(
         self,

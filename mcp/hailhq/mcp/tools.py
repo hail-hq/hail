@@ -1040,21 +1040,11 @@ async def preview_sms_application(
             number_id=number_id_,
         )
     except HailAPIError as exc:
-        problems = exc.problems or []
-        answers = [
-            p
-            for p in problems
-            if list(p.get("loc", []))[1:2] in (["fields"], ["address"])
-        ]
-        if exc.status == 422 and problems and len(answers) == len(problems):
-            return {
-                "error": "Correct the listed fields with the user, then preview again before submitting.",
-                "problems": problems,
-            }
-        # Anything else (no US number, pick a number_id, number not found) is
-        # the API's own sentence, so the agent can say what to change.
         if exc.status in (404, 422):
-            return {"error": exc.detail, **({"problems": problems} if problems else {})}
+            return _answer_problems(
+                exc,
+                "Correct the listed fields with the user, then preview again before submitting.",
+            )
         return _format_api_error(exc)
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
@@ -1062,21 +1052,53 @@ async def preview_sms_application(
         return {"error": _UNEXPECTED_ERROR}
 
 
+def _details_bytes(*parts: Any) -> int | None:
+    """The UTF-8 size of the parts as JSON, so non-ASCII text is not
+    over-counted; None when a part is not valid JSON text."""
+    try:
+        return sum(len(json.dumps(p, ensure_ascii=False).encode()) for p in parts)
+    except (TypeError, ValueError):
+        return None
+
+
 def _application_input_error(fields: Any, address: Any) -> str | None:
-    """The shape or size problem with application answers, or None. Sizes
-    count UTF-8 bytes, so non-ASCII text is not over-counted."""
+    """The shape or size problem with application answers, or None."""
     shape_error = _verification_shape_error(fields, {}, [], address)
     if shape_error:
         return shape_error
     if len(fields) > _VERIFICATION_MAX_FIELDS:
         return f"too many fields (at most {_VERIFICATION_MAX_FIELDS})"
-    size = sum(
-        len(json.dumps(part, ensure_ascii=False).encode())
-        for part in (fields, address or {})
-    )
+    size = _details_bytes(fields, address or {})
+    if size is None:
+        return "fields and address must be valid text"
     if size > _VERIFICATION_MAX_DETAILS_BYTES:
         return f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes"
     return None
+
+
+# Request parts a 422 can name that are not the user's answers.
+_NOT_ANSWERS = {"number_id", "subject_type", "purpose", "country_code", "number_type"}
+
+
+def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
+    """The reply to a 404 or 422 about an application. Problems on the
+    user's answers get `fix`; anything else (pick a number, contact support)
+    gets the API's own messages, read from the stripped problems only, so no
+    submitted value is echoed."""
+    problems = exc.problems or []
+    answers = [
+        p
+        for p in problems
+        if len(p.get("loc", [])) >= 2 and str(p["loc"][1]) not in _NOT_ANSWERS
+    ]
+    if problems and len(answers) == len(problems):
+        return {"error": fix, "problems": problems}
+    if problems:
+        return {"error": " ".join(p["msg"] for p in problems), "problems": problems}
+    detail = exc.detail
+    if isinstance(detail, str) and detail and len(detail) <= 300 and "<" not in detail:
+        return {"error": detail}
+    return _format_api_error(exc)
 
 
 async def amend_sms_application(
@@ -1109,10 +1131,10 @@ async def amend_sms_application(
         )
     except HailAPIError as exc:
         if exc.status == 422:
-            return {
-                "error": "Correct the listed application fields with the user, then amend the same verification_id.",
-                "problems": exc.problems or [],
-            }
+            return _answer_problems(
+                exc,
+                "Correct the listed application fields with the user, then amend the same verification_id.",
+            )
         return _format_api_error(exc)
     except httpx.TransportError:
         return {
@@ -1203,11 +1225,8 @@ async def submit_verification(
             "error": f"too many fields: {len(fields)} "
             f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
         }
-    try:
-        details_bytes = sum(
-            len(json.dumps(part)) for part in (fields, address or {}, documents)
-        )
-    except (TypeError, ValueError):
+    details_bytes = _details_bytes(fields, address or {}, documents)
+    if details_bytes is None:
         return {"error": "fields, address and documents must be JSON values"}
     if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
         return {
