@@ -18,6 +18,14 @@ and commit — which re-queues at most the one in-flight row): a forward
 is best-effort relay; the inbound row and raw MIME survive in S3 for
 manual replay. Transient S3 fetch failures are the one exception — the
 row stays queued (no send was attempted) and the next tick retries.
+
+Funds: ingest checks the balance before it queues a forward, but the balance
+can reach zero before this worker sends it. So a billed forward is checked
+again here, with the same ``funds_check`` the ingest uses. Unfunded: the row
+is failed with ``end_reason='insufficient_funds'``, nothing is sent or
+metered, and ``insufficient_funds`` is added to the inbound row's
+``metadata.suppressed_reasons`` (the key the ingest check writes). System
+mail is never billed and skips the check.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ from uuid import UUID
 
 from hailhq.core.agent_caps import agent_outbound_halted
 from hailhq.core.email_delivery_events import record_sent_event
+from hailhq.core.email_ingest import FundsCheck
 from hailhq.core.models import Email, EmailAttachment
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
@@ -41,12 +50,15 @@ from hailhq.core.telemetry_identity import (
     resolve_identity,
     tag_outbound_email,
 )
-from sqlalchemy import or_, select
+from sqlalchemy import cast, func, not_, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 POLL_BATCH = 20
+
+INSUFFICIENT_FUNDS = "insufficient_funds"
 
 SessionFactory = Callable[[], "asynccontextmanager[AsyncSession]"]
 
@@ -79,12 +91,14 @@ class OutboundForwardWorker:
         provider_factory: Callable[[], EmailProvider],
         s3_factory: Callable[[], S3MailClient],
         usage_callback: UsageCallback | None = None,
+        funds_check: FundsCheck | None = None,
         poll_interval: float = 1.0,
     ) -> None:
         self._session_factory = session_factory
         self._provider_factory = provider_factory
         self._s3_factory = s3_factory
         self._usage_callback = usage_callback
+        self._funds_check = funds_check
         self._provider: EmailProvider | None = None
         self._s3: S3MailClient | None = None
         self._poll_interval = poll_interval
@@ -243,6 +257,23 @@ class OutboundForwardWorker:
             )
             return "deferred"
 
+        # Same rule as ingest: billed mail needs a positive balance. System
+        # mail (no tenant charge) skips the check.
+        billable = meta.get("system_kind") is None
+        if (
+            billable
+            and self._funds_check is not None
+            and not await self._funds_check(session, row.organization_id)
+        ):
+            row.status = "failed"
+            row.end_reason = INSUFFICIENT_FUNDS
+            row.failed_at = now
+            if inbound_uuid is not None:
+                await _stamp_insufficient_funds(
+                    session, inbound_uuid, row.organization_id
+                )
+            return "failed"
+
         try:
             attachments = await self._load_attachments(session, inbound_uuid)
         except Exception as exc:
@@ -323,6 +354,31 @@ class OutboundForwardWorker:
                 )
             )
         return out
+
+
+async def _stamp_insufficient_funds(
+    session: AsyncSession, inbound_id: UUID, organization_id: UUID
+) -> None:
+    """Add ``insufficient_funds`` to the inbound row's ``suppressed_reasons``.
+
+    Appends in SQL, so reasons the ingest already wrote stay, and two forward
+    rows of one mail list the reason once.
+    """
+    reasons = func.coalesce(Email.metadata_["suppressed_reasons"], cast([], JSONB))
+    await session.execute(
+        update(Email)
+        .where(Email.id == inbound_id)
+        .where(Email.organization_id == organization_id)
+        .where(not_(reasons.bool_op("?")(INSUFFICIENT_FUNDS)))
+        .values(
+            metadata_=func.coalesce(Email.metadata_, cast({}, JSONB)).op("||")(
+                func.jsonb_build_object(
+                    "suppressed_reasons",
+                    reasons.op("||")(cast([INSUFFICIENT_FUNDS], JSONB)),
+                )
+            )
+        )
+    )
 
 
 __all__ = ["OutboundForwardWorker"]

@@ -49,6 +49,7 @@ from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
+from hailhq.core.billing import has_funds
 from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
@@ -239,6 +240,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             provider_factory=SesEmailProvider,
             s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
             usage_callback=_meter_forward_send,
+            # Re-check credit at send: the balance can reach zero after ingest.
+            funds_check=has_funds,
         )
         forward_task = asyncio.create_task(
             forward_worker.run_forever(), name="outbound-forward-worker"
