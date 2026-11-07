@@ -41,6 +41,7 @@ from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.call_limits import outbound_call_backstop
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
@@ -576,6 +577,13 @@ async def create_call(
                     call.id,
                 )
 
+        targets = await handover_targets(db, agent.id if agent else None, call.to_e164)
+        handover_seconds = (
+            agent.handover_max_duration_seconds if agent else None
+        ) or HANDOVER_DEFAULT_MAX_SECONDS
+        transfer_enabled = body.tools is None or "transfer_call" in body.tools
+        can_handover = transfer_enabled and any(not t.get("on_call") for t in targets)
+
         dispatch_id = await lk.dispatch_agent(
             room_name=room_name,
             agent_name="hail-voicebot",
@@ -595,13 +603,8 @@ async def create_call(
                 "ai_disclosure": body.ai_disclosure,
                 "ai_disclosure_line": ai_disclosure_line,
                 "tools": body.tools,
-                "handover_targets": await handover_targets(
-                    db, agent.id if agent else None, call.to_e164
-                ),
-                "handover_max_duration_seconds": (
-                    agent.handover_max_duration_seconds if agent else None
-                )
-                or HANDOVER_DEFAULT_MAX_SECONDS,
+                "handover_targets": targets,
+                "handover_max_duration_seconds": handover_seconds,
                 "org_name": await org_name_task,
             },
         )
@@ -621,6 +624,9 @@ async def create_call(
             from_e164=call.from_e164,
             sip_trunk_id=trunk_id,
             participant_identity=f"caller-{call.id}",
+            max_call_duration_seconds=outbound_call_backstop(
+                call.max_duration_seconds, handover_seconds if can_handover else 0
+            ),
             **({"headers": sip_headers} if sip_headers else {}),
         )
     except WorkerGaveUp:

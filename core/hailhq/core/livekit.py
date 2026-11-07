@@ -22,6 +22,7 @@ import json
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
+from google.protobuf.duration_pb2 import Duration
 from hailhq.core.config import settings
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import get_identity
@@ -143,6 +144,7 @@ class LiveKitClient:
         sip_trunk_id: str,
         participant_identity: str,
         headers: dict[str, str] | None = None,
+        max_call_duration_seconds: int | None = None,
     ) -> api.SIPParticipantInfo:
         """Place an outbound SIP call into ``room_name`` via LiveKit.
 
@@ -154,6 +156,8 @@ class LiveKitClient:
 
         LiveKit's SIP service issues the INVITE through the trunk pointed to
         by ``sip_trunk_id`` (which in v1 is a Twilio Elastic SIP Trunk).
+        ``max_call_duration_seconds`` is a native backstop including ringing;
+        None omits the field and retains LiveKit's existing defaults.
         """
         return await self._lkapi.sip.create_sip_participant(
             api.CreateSIPParticipantRequest(
@@ -164,6 +168,11 @@ class LiveKitClient:
                 participant_identity=participant_identity,
                 participant_name=participant_identity,
                 headers=headers or {},
+                max_call_duration=(
+                    Duration(seconds=max_call_duration_seconds)
+                    if max_call_duration_seconds is not None
+                    else None
+                ),
             )
         )
 

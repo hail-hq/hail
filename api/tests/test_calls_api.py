@@ -299,6 +299,7 @@ async def test_post_calls_happy_path_201(
     assert sip_kwargs["to_e164"] == "+14155559999"
     assert sip_kwargs["from_e164"] == pn.e164
     assert sip_kwargs["participant_identity"] == f"caller-{body['id']}"
+    assert sip_kwargs["max_call_duration_seconds"] == 410
 
     # Audit log row written.
     audit = (
@@ -1300,12 +1301,17 @@ async def test_post_calls_dispatch_metadata_org_name_none_on_lookup_failure(
     assert dispatch_kwargs["metadata"]["org_name"] is None
 
 
+@pytest.mark.parametrize(
+    "handover_seconds,expected_native", [(None, 2235), (900, 1335)]
+)
 async def test_post_calls_dispatch_metadata_carries_handover_targets(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
+    handover_seconds,
+    expected_native,
 ) -> None:
     import json
 
@@ -1325,6 +1331,7 @@ async def test_post_calls_dispatch_metadata_carries_handover_targets(
             "name": "Helper",
             "system_prompt": "Help.",
             "handover_contacts": [{"contact_id": cid, "note": "Billing"}],
+            "handover_max_duration_seconds": handover_seconds,
         },
         headers=headers,
     )
@@ -1344,6 +1351,69 @@ async def test_post_calls_dispatch_metadata_carries_handover_targets(
         {"contact_id": cid, "label": "Sam", "note": "Billing"}
     ]
     assert "+14155550111" not in json.dumps(meta)
+    assert (
+        livekit_mock.create_sip_participant.await_args.kwargs[
+            "max_call_duration_seconds"
+        ]
+        == expected_native
+    )
+
+
+@pytest.mark.parametrize(
+    "tools,targets,agent_limit,expected",
+    [
+        (None, [], 300, 410),
+        (None, [{"contact_id": "test", "label": "Sam"}], 300, 2235),
+        (["transfer_call"], [{"contact_id": "test", "label": "Sam"}], 300, 2235),
+        ([], [{"contact_id": "test", "label": "Sam"}], 300, 410),
+        (["end_call"], [{"contact_id": "test", "label": "Sam"}], 300, 410),
+        (None, [{"contact_id": "test", "label": "Sam", "on_call": True}], 300, 410),
+        (None, [{"contact_id": "test", "label": "Sam"}], 0, None),
+    ],
+)
+async def test_outbound_native_limit_reserves_only_available_handover(
+    client,
+    async_session,
+    org_and_key,
+    livekit_mock,
+    add_phone_number,
+    monkeypatch,
+    tools,
+    targets,
+    agent_limit,
+    expected,
+):
+    from hailhq.api.routes import calls as calls_mod
+
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    monkeypatch.setattr(
+        calls_mod.settings, "hail_voice_max_duration_seconds", agent_limit
+    )
+    resolve_targets = AsyncMock(return_value=targets)
+    monkeypatch.setattr(calls_mod, "handover_targets", resolve_targets)
+    resp = await client.post(
+        "/calls",
+        json={
+            "to": "+14155559999",
+            "system_prompt": "Help.",
+            "recipient_consent": True,
+            "tools": tools,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert (
+        livekit_mock.create_sip_participant.await_args.kwargs[
+            "max_call_duration_seconds"
+        ]
+        == expected
+    )
+    assert (
+        livekit_mock.dispatch_agent.await_args.kwargs["metadata"]["handover_targets"]
+        == targets
+    )
+    resolve_targets.assert_awaited_once()
 
 
 async def test_voice_config_stt_rejected_422(

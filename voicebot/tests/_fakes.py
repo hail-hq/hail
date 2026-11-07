@@ -261,6 +261,7 @@ class FakeJobContext:
         self.delete_room_error: Exception | None = None
         self.room = FakeRoom()
         self.api = FakeLKApi()
+        self.api.room.delete_room = AsyncMock(side_effect=self._delete_room_request)
         # An answered dial puts the contact's leg in the room.
         self.api.sip.create_sip_participant.side_effect = self._join
 
@@ -270,6 +271,10 @@ class FakeJobContext:
 
     def shutdown(self, reason: str = "") -> None:
         self.shutdown_calls.append(reason)
+
+    async def _delete_room_request(self, request) -> None:
+        assert request.room == self.room.name
+        await self.delete_room()
 
     def delete_room(self) -> asyncio.Future[None]:
         self.delete_room_calls += 1
