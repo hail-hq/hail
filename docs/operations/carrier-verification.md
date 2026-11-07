@@ -156,7 +156,8 @@ Each accepted change writes the audit row `verification.amend` with the caller; 
 CLI recovery uses `hail numbers get-sms-application <verification-id>` followed by
 `hail numbers amend-sms <verification-id> --field ... --address ...`. Supply the complete current
 answers and address; these are not partial field updates. MCP exposes `get_sms_application`
-and `amend_sms_application`; amendment requires explicit `attest_authorized=true` after the
+and `amend_sms_application` (and `preview_sms_application`, which shows the campaign text before
+a first `submit_verification` with `purpose: "sms"`, filing and charging nothing); amendment requires explicit `attest_authorized=true` after the
 user reviews the corrections. Both preserve the existing ID and use authenticated API routes.
 After an uncertain timeout, check that same registration before retrying. Neither recovery
 client creates or cancels a registration as a fallback.

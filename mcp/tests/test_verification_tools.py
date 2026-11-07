@@ -1369,3 +1369,90 @@ async def test_amend_sms_application_timeout_keeps_recovery_on_same_row(
     assert "same verification_id" in result["error"]
     assert "private details" not in result["error"]
     assert len(respx.calls) == 1
+
+
+@respx.mock
+async def test_preview_sms_application_returns_campaign_text_without_filing(
+    client: HailClient,
+) -> None:
+    number_id = str(uuid4())
+    fields = {"program_name": "Acme", "campaign_description": "Appointment reminders."}
+    address = _kwargs(client)["address"]
+    preview = {"use_case": "SOLE_PROPRIETOR", "description": "Appointment reminders."}
+    route = respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(200, json=preview)
+    )
+    result = await tools.preview_sms_application(
+        client=client,
+        subject_type="person",
+        fields=fields,
+        address=address,
+        number_id=number_id,
+    )
+    assert result == preview
+    request = route.calls[0].request
+    assert request.headers["authorization"] == f"Bearer {_API_KEY}"
+    assert json.loads(request.content) == {
+        "subject_type": "person",
+        "fields": fields,
+        "address": address,
+        "number_id": number_id,
+    }
+    assert len(respx.calls) == 1
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"subject_type": "robot"},
+        {"number_id": "not-a-uuid"},
+        {"fields": {f"f{i}": "x" for i in range(101)}},
+        {"fields": {"x": "x" * 65537}},
+        {"fields": {"private": [_FIELD_VALUE]}},
+        {"address": {"private": [_FIELD_VALUE]}},
+    ],
+)
+async def test_preview_sms_application_refuses_invalid_input_without_sending(
+    client: HailClient, over
+) -> None:
+    args = {
+        "client": client,
+        "subject_type": "business",
+        "fields": {"program_name": "Acme"},
+    }
+    args.update(over)
+    result = await tools.preview_sms_application(**args)
+    assert "error" in result and _FIELD_VALUE not in json.dumps(result)
+    assert not respx.calls.called
+
+
+@respx.mock
+async def test_preview_sms_application_field_errors_strip_private_input(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "loc": ["body", "fields", "consent_disclosure"],
+                        "msg": "Include both policy links",
+                        "input": _FIELD_VALUE,
+                    }
+                ]
+            },
+        )
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert result["problems"] == [
+        {
+            "loc": ["body", "fields", "consent_disclosure"],
+            "msg": "Include both policy links",
+        }
+    ]
+    assert _FIELD_VALUE not in json.dumps(result)
+    assert "preview again" in result["error"]

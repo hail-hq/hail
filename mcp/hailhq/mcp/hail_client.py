@@ -598,6 +598,32 @@ class HailClient:
             mode="json"
         )
 
+    async def preview_sms_application(
+        self,
+        *,
+        subject_type: str,
+        fields: dict[str, str],
+        address: dict[str, str] | None = None,
+        number_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications/sms/preview: the campaign text a carrier
+        reviews. Files nothing and charges nothing. A 422 carries the field
+        problems."""
+        body: dict[str, Any] = {"subject_type": subject_type, "fields": fields}
+        if address is not None:
+            body["address"] = address
+        if number_id is not None:
+            body["number_id"] = number_id
+        resp = await self._client.post("/verifications/sms/preview", json=body)
+        if not 200 <= resp.status_code < 300:
+            raise HailAPIError(
+                status=resp.status_code,
+                detail=_error_detail(resp),
+                retry_after=resp.headers.get("retry-after"),
+                problems=_problems(resp) if resp.status_code == 422 else None,
+            )
+        return resp.json()
+
     async def amend_sms_application(
         self,
         verification_id: str,

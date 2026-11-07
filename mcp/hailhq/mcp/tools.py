@@ -42,6 +42,7 @@ Exposes the following tools to the calling agent:
 * ``list_verifications`` — the org's verifications and their states
 * ``get_verification`` — one verification; poll or repair its reported step
 * ``get_sms_application`` — read the saved application or recover the original sender
+* ``preview_sms_application`` — the campaign text a carrier reviews, before submitting
 * ``amend_sms_application`` — correct evidence on the same paid sender and row
   (needs ``attest_authorized=True``)
 * ``cancel_verification`` — cancel or dismiss (``awaiting_review``/``rejected``, or an
@@ -1006,6 +1007,57 @@ async def get_sms_application(
     try:
         return _without_carrier(await client.get_sms_application(verification_id_))
     except HailAPIError as exc:
+        return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        return {"error": _UNEXPECTED_ERROR}
+
+
+async def preview_sms_application(
+    *,
+    client: HailClient,
+    subject_type: Any,
+    fields: Any,
+    address: Any = None,
+    number_id: Any = None,
+) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {
+            "error": "subject_type must be 'person' or 'business'. Nothing was sent."
+        }
+    number_id_ = None
+    if number_id is not None:
+        number_id_ = _as_uuid(number_id)
+        if number_id_ is None:
+            return _not_uuid("number_id")
+    shape_error = _verification_shape_error(fields, {}, [], address)
+    if shape_error:
+        return {"error": f"{shape_error}. Nothing was sent."}
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return {
+            "error": f"too many fields (at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
+        }
+    if (
+        sum(len(json.dumps(part)) for part in (fields, address or {}))
+        > _VERIFICATION_MAX_DETAILS_BYTES
+    ):
+        return {
+            "error": f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
+        }
+    try:
+        return await client.preview_sms_application(
+            subject_type=subject_type,
+            fields=fields,
+            address=address,
+            number_id=number_id_,
+        )
+    except HailAPIError as exc:
+        if exc.status == 422:
+            return {
+                "error": "Correct the listed fields with the user, then preview again before submitting.",
+                "problems": exc.problems or [],
+            }
         return _format_api_error(exc)
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
@@ -2728,7 +2780,9 @@ def register_tools(
         credit at filing. Pass the same ``purpose`` to
         get_verification_requirements. For ``purpose='number'``, pass the
         same ``quote_id`` you passed to get_verification_requirements. For
-        ``purpose='sms'``, pass the same ``number_id`` if you passed one.
+        ``purpose='sms'``, pass the same ``number_id`` if you passed one, and
+        first call preview_sms_application with the same answers so the user
+        approves the campaign text the carrier will review.
 
         ``subject_type`` is required: ``person`` (the user) or ``business``
         (the user's company), the same one passed to
@@ -2905,6 +2959,47 @@ def register_tools(
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_sms_application(
                     client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="preview_sms_application",
+        title="Preview a US texting registration",
+        annotations=ToolAnnotations(
+            title="Preview a US texting registration",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def preview_sms_application_tool(
+        ctx: Context,
+        subject_type: str,
+        fields: _JsonObject,
+        address: _JsonObjectOrNone = None,
+        number_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Show the campaign text a carrier reviews for a US texting
+        registration, before submit_verification with purpose='sms'.
+
+        Pass the same subject_type, fields, address and number_id you will
+        submit (from get_verification_requirements with purpose='sms').
+        Nothing is filed or charged. The API checks the answers the same way
+        submit does; a field problem comes back as ``problems``. Show the
+        returned description, consent flow and samples to the user and get
+        their approval before submitting. Never invent consent evidence.
+        Maximum 100 fields and 64 KiB of fields/address combined.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await preview_sms_application(
+                    client=client,
+                    subject_type=subject_type,
+                    fields=fields,
+                    address=address,
+                    number_id=number_id,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}
