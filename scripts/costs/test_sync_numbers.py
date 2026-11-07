@@ -1806,3 +1806,264 @@ def test_only_unobserved_rows_need_verification_and_no_plugin(tmp_path, monkeypa
         "twilio: 1 rows not observed this run kept their papers: "
         "verification is not configured"
     ) in "\n".join(summary)
+
+
+# -- Telnyx pricing page ---------------------------------------------------------
+
+_TELNYX_PAGE = """# Telnyx Pricing
+
+### Sms Api (`sms-api`, 2 rates)
+
+#### SG
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Singapore National Monthly Recurring Cost | $99 | number | mrc | — | — |
+
+### Global Numbers (`global-numbers`, 9 rates)
+
+#### Global
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| France Local Range Numbers Monthly Recurring Cost | $123.7 | number_range | mrc | — | — |
+| Port One Time Cost for local numbers. | $0 | number | otc | — | — |
+
+#### SG
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Singapore Direct Inward Dial Monthly Recurring Cost | $7 | number | mrc | — | — |
+| Singapore Local Monthly Recurring Cost | $5 | number | mrc | — | — |
+| Singapore Local One Time Cost | $5 | number | otc | — | — |
+| Singapore National Monthly Recurring Cost | $7 | number | mrc | — | — |
+| Singapore National One Time Cost | $8 | number | otc | — | — |
+| Singapore Shared-Cost Monthly Recurring Cost | $26.67 | number | mrc | — | — |
+| Singapore Inbound Local from Landline per minute | $0.008 | minute | usage | — | — |
+
+#### MD
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Moldova, Republic of Local number Monthly Recurring Cost | $30 | number | mrc | — | — |
+| Moldova, Republic of Mobile number One Time Cost | $30 | number | otc | — | — |
+
+#### CY
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Cyprus National Monthly Recurring Cost | $5.5 | number | mrc | — | — |
+| Cyprus National number Monthly Recurring Cost. | $5.5 | number | mrc | — | — |
+| Cyprus Local Monthly Recurring Cost | $2 | number | mrc | — | — |
+| Cyprus Local number Monthly Recurring Cost | $3 | number | mrc | — | — |
+
+### Toll Free Numbers (`toll-free-numbers`, 3 rates)
+
+#### DE
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Germany Toll-Free Monthly Recurring Cost | $30 | number | mrc | — | — |
+| Germany Toll-Free One Time Cost | $40 | number | otc | — | — |
+| Germany Toll-Free Usage Cost - amount is per minute. | $0.38 | minute | usage | — | — |
+
+#### US
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| US Toll-Free Rate 3 Monthly Recurring Cost. | $9 | number | mrc | — | — |
+
+### Voice Api (`voice-api`, 1 rate)
+
+#### DE
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Germany Mobile Monthly Recurring Cost | $1 | number | mrc | — | — |
+"""
+
+
+def test_telnyx_pricing_page_is_read_by_country_heading(monkeypatch):
+    monkeypatch.setattr(sync, "TELNYX_PRICING_FLOOR", 1)
+    assert sync.parse_telnyx_pricing(_TELNYX_PAGE) == {
+        ("SG", "local"): ("5.00", "5.00"),
+        ("SG", "national"): ("7.00", "8.00"),
+        # A monthly price with no one-time line: setup 0.
+        ("MD", "local"): ("30.00", "0.00"),
+        # The same price written twice is one price.
+        ("CY", "national"): ("5.50", "0.00"),
+        ("DE", "toll_free"): ("30.00", "40.00"),
+    }
+    # Left out: Direct Inward Dial, Shared-Cost, usage, number ranges, the
+    # "#### Global" table, a one-time cost with no monthly price (MD
+    # mobile), two different prices (CY local), rate tiers (US toll-free),
+    # and number lines outside the number sections (Sms Api, Voice Api).
+
+
+def test_telnyx_pricing_page_with_too_few_prices_is_not_used(monkeypatch):
+    class Page:
+        def get_text(self, url):
+            assert url == "https://telnyx.com/pricing.md"
+            return _TELNYX_PAGE
+
+    prices, problem = sync.fetch_telnyx_pricing(Page())
+    assert prices == {}
+    assert problem == (
+        "https://telnyx.com/pricing.md: not read (only 5 number prices found "
+        "(< 100)); out-of-stock rows not checked"
+    )
+
+
+def test_telnyx_pricing_page_that_cannot_be_reached_is_not_used():
+    class Down:
+        def get_text(self, url):
+            raise sync.requests.exceptions.RetryError("gave up after retries")
+
+    prices, problem = sync.fetch_telnyx_pricing(Down())
+    assert prices == {}
+    assert problem.startswith("https://telnyx.com/pricing.md: not read (gave up")
+
+
+def _telnyx_row(cc, number_type, usd, setup=None, **extra):
+    row = {
+        "country_code": cc,
+        "number_type": number_type,
+        "display_name": f"{cc} {number_type}",
+        "dial_code": "65",
+        "usd_per_month": usd,
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": False,
+        "available": True,
+        "last_verified": "2026-10-01",
+        "last_changed_at": "2026-10-01",
+        "verification_method": "community-pr",
+        "verified_by": "telnyx-pricing-page",
+        "source_url": "https://telnyx.com/pricing.md",
+        **extra,
+    }
+    if setup is not None:
+        row["setup_usd"] = setup
+    return row
+
+
+def test_telnyx_page_confirms_a_price_but_never_changes_one():
+    page = {
+        ("SG", "national"): ("7.00", "8.00"),
+        ("SG", "local"): ("5.00", "5.00"),
+        ("MD", "local"): ("30.00", "0.00"),
+        ("DE", "toll_free"): ("30.00", "40.00"),
+        ("GH", "mobile"): ("40.00", "40.00"),
+        ("PT", "local"): ("1.00", "1.00"),
+    }
+    same = _telnyx_row(
+        "SG",
+        "national",
+        "7.00",
+        "8.00",
+        notes="hand note; Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+    )
+    no_setup = _telnyx_row("MD", "local", "30.00", verification_method="carrier-sync")
+    other = _telnyx_row("SG", "local", "4.00", "5.00")
+    hand = _telnyx_row(
+        "DE", "toll_free", "30.00", "40.00", verification_method="manual-confirmed"
+    )
+    hidden = _telnyx_row(
+        "GH", "mobile", "40.00", "40.00", available=False, notes="not offered"
+    )
+    in_stock = _telnyx_row("PT", "local", "1.00", "1.00")
+    numbers = [same, no_setup, other, hand, hidden, in_stock]
+    before = [dict(r) for r in numbers]
+    skipped = [
+        f"{k}: no numbers in stock"
+        for k in ("SG:national", "MD:local", "SG:local", "DE:toll_free", "GH:mobile")
+    ] + ["PT:local: capabilities not checked"]
+
+    confirmed, differs = sync.confirm_from_telnyx_page(
+        numbers, skipped, page, "2026-11-14"
+    )
+
+    assert confirmed == ["SG:national", "MD:local", "GH:mobile"]
+    assert differs == ["SG:local: catalog 4.00 a month + 5.00 setup, page 5.00 + 5.00"]
+    checked = {
+        "last_verified": "2026-11-14",
+        "verification_method": "carrier-sync",
+        "verified_by": "telnyx-pricing-page",
+        "source_url": "https://telnyx.com/pricing.md",
+    }
+    assert numbers[0] == {
+        **before[0],
+        **checked,
+        "notes": f"hand note; {sync._NO_STOCK_NOTE}",
+    }
+    assert numbers[1] == {**before[1], **checked, "notes": sync._NO_STOCK_NOTE}
+    # Hidden: checked, but its vanished note stays as it was.
+    assert numbers[4] == {**before[4], **checked}
+    # Another price, hand-verified, or not skipped for stock: untouched.
+    assert numbers[2] == before[2]
+    assert numbers[3] == before[3]
+    assert numbers[5] == before[5]
+    for row in numbers:
+        assert row["last_changed_at"] == "2026-10-01"
+
+
+def test_telnyx_run_checks_out_of_stock_rows_against_the_page(tmp_path, monkeypatch):
+    prev = _telnyx_row("SG", "national", "7.00", "8.00", dial_code="65")
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    for k in (
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url",
+    ):
+        stocked.pop(k)
+    monkeypatch.setattr(
+        sync,
+        "fetch_telnyx",
+        lambda *a, **k: ([stocked], ["SG:national: no numbers in stock"]),
+    )
+    sessions = []
+
+    class FakeHttp:
+        def __init__(self, session):
+            sessions.append(session)
+
+        def get_text(self, url):
+            return "page"
+
+    monkeypatch.setattr(
+        sync,
+        "parse_telnyx_pricing",
+        lambda text: {("SG", "national"): ("7.00", "8.00")},
+    )
+    summary: list[str] = []
+    sync.run_provider(
+        "telnyx",
+        {"TELNYX_API_KEY": "secret"},
+        tmp_path,
+        "2026-11-14",
+        summary,
+        http_factory=FakeHttp,
+        not_synced=[],
+    )
+    # The API session carries the key; the website session does not.
+    assert [s.headers.get("Authorization") for s in sessions] == [
+        "Bearer secret",
+        None,
+    ]
+    out = {
+        f"{n['country_code']}:{n['number_type']}": n
+        for n in json.loads((tmp_path / "telnyx.json").read_text())["numbers"]
+    }
+    assert out["SG:national"]["last_verified"] == "2026-11-14"
+    assert out["SG:national"]["verification_method"] == "carrier-sync"
+    text = "\n".join(summary)
+    assert (
+        "### No numbers in stock, price confirmed on telnyx.com/pricing.md (1)\n"
+        "- SG:national"
+    ) in text
+    assert "Not observed this run" not in text

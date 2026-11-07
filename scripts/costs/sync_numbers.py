@@ -18,7 +18,9 @@ Rules the merge follows, in this order:
   or Twilio, no price, no dial code, or a country the sync account cannot
   see) is left exactly as it was: not seeing stock is not the same as the
   carrier dropping the type. Telnyx shows no price without a number, so
-  such a row goes stale until its price is read on telnyx.com/pricing.md.
+  such a row is checked against telnyx.com/pricing.md: the same price there
+  marks it checked today; another price leaves it as it was and lists it
+  for a person. The page never changes a price.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
   API, and its rows vanish. Per type, too: a type that is neither in the
@@ -42,6 +44,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -102,6 +105,12 @@ class Http:
         self._last = 0.0
 
     def get(self, url: str, **kw: Any) -> Any:
+        return self._get(url, **kw).json()
+
+    def get_text(self, url: str, **kw: Any) -> str:
+        return self._get(url, **kw).text
+
+    def _get(self, url: str, **kw: Any) -> requests.Response:
         for attempt in range(6):
             gap = self.min_gap - (time.monotonic() - self._last)
             if gap > 0:
@@ -116,7 +125,7 @@ class Http:
                 time.sleep(min(2**attempt, 30))
                 continue
             resp.raise_for_status()
-            return resp.json()
+            return resp
         # A RequestException so main() reports "catalog left unchanged" and
         # moves on to the next carrier instead of aborting the whole run.
         raise requests.exceptions.RetryError(f"gave up after retries: {url}")
@@ -424,7 +433,7 @@ def map_telnyx(
                 continue  # shared_cost and friends are not sold by Hail
             sample = samples.get((iso, number_type), [])
             if not sample:
-                skipped.append(f"{iso}:{number_type}: no numbers in stock")
+                skipped.append(f"{iso}:{number_type}: {_TELNYX_NO_STOCK}")
                 continue
             monthly = sorted(
                 Decimal(n["cost_information"]["monthly_cost"]) for n in sample
@@ -499,6 +508,151 @@ def fetch_telnyx(
             )
             requirements[(iso, number_type)] = req.get("data", [])
     return map_telnyx(coverage, samples, requirements, dial_codes, capabilities)
+
+
+TELNYX_PRICING_URL = "https://telnyx.com/pricing.md"
+# Sections of telnyx.com/pricing.md that hold number prices, one "#### XX"
+# table per country.
+TELNYX_PRICING_SECTIONS = ("Global Numbers", "Toll Free Numbers")
+TELNYX_PRICING_TYPE = {
+    "Local": "local",
+    "Mobile": "mobile",
+    "National": "national",
+    "Toll-Free": "toll_free",
+}
+# Fewer priced types than this means the page layout changed.
+TELNYX_PRICING_FLOOR = 100
+_TELNYX_RATE = re.compile(
+    r"^\| (?P<item>[^|]+?) \| \$(?P<rate>[0-9]+(?:\.[0-9]+)?) \| number \| (?P<kind>mrc|otc) \|"
+)
+_TELNYX_ITEM = re.compile(
+    r"^.+? (?P<type>Local|Mobile|National|Toll-Free)(?: number)? "
+    r"(?:Monthly Recurring|One Time) Cost\.?$"
+)
+_TELNYX_NO_STOCK = "no numbers in stock"
+
+
+class PricingPageUnusable(ValueError):
+    """telnyx.com/pricing.md did not parse into enough number prices."""
+
+
+def parse_telnyx_pricing(text: str) -> dict[tuple[str, str], tuple[str, str]]:
+    """(ISO, type) -> (monthly, setup) as money() strings, from
+    telnyx.com/pricing.md.
+
+    Rows look like ``| Singapore National One Time Cost | $8 | number | otc |``
+    under a ``#### SG`` heading. The heading gives the country, so country
+    names ("Moldova, Republic of") are never matched. A type with a monthly
+    price and no one-time line has setup 0. A type with no monthly price, or
+    with two different prices for the same line, is left out."""
+    found: dict[tuple[str, str, str], set[Decimal]] = defaultdict(set)
+    section = None
+    iso = None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            title = line[4:]
+            section = next(
+                (s for s in TELNYX_PRICING_SECTIONS if title.startswith(s + " ")),
+                None,
+            )
+            iso = None
+            continue
+        if line.startswith("#### "):
+            code = line[5:].strip()
+            iso = code if len(code) == 2 and code.isalpha() and code.isupper() else None
+            continue
+        if section is None or iso is None:
+            continue
+        rate = _TELNYX_RATE.match(line)
+        item = rate and _TELNYX_ITEM.match(rate["item"])
+        if not item:
+            continue  # Direct Inward Dial, Shared-Cost, rate tiers, usage
+        number_type = TELNYX_PRICING_TYPE[item["type"]]
+        found[(iso, number_type, rate["kind"])].add(Decimal(rate["rate"]))
+    prices = {}
+    for (iso, number_type, kind), monthly in found.items():
+        setup = found.get((iso, number_type, "otc"), {Decimal(0)})
+        if kind == "mrc" and len(monthly) == 1 and len(setup) == 1:
+            prices[(iso, number_type)] = (money(min(monthly)), money(min(setup)))
+    if len(prices) < TELNYX_PRICING_FLOOR:
+        raise PricingPageUnusable(
+            f"only {len(prices)} number prices found (< {TELNYX_PRICING_FLOOR})"
+        )
+    return prices
+
+
+def fetch_telnyx_pricing(
+    http: Http,
+) -> tuple[dict[tuple[str, str], tuple[str, str]], str | None]:
+    """The page prices, or ({}, why) when the page cannot be used. The page
+    only adds checks: without it, the run is the same as before."""
+    try:
+        return parse_telnyx_pricing(http.get_text(TELNYX_PRICING_URL)), None
+    except (requests.RequestException, PricingPageUnusable) as exc:
+        return (
+            {},
+            f"{TELNYX_PRICING_URL}: not read ({exc}); out-of-stock rows not checked",
+        )
+
+
+def confirm_from_telnyx_page(
+    numbers: list[dict],
+    skipped: list[str],
+    page_prices: dict[tuple[str, str], tuple[str, str]],
+    today: str,
+) -> tuple[list[str], list[str]]:
+    """Check rows Telnyx has no numbers in stock for against its pricing page.
+
+    The page only confirms: Hail pays the price the API shows, and the page
+    is not tied to billing. Same monthly and setup price: the row is marked
+    checked today, with the page as source. Another price: the row is left
+    as it is and listed for a person. Hand-verified rows are not touched.
+    Edits ``numbers`` in place. Returns (confirmed, differs) summary lines."""
+    no_stock = {
+        line.split(": ", 1)[0]
+        for line in skipped
+        if line.split(": ", 1)[-1] == _TELNYX_NO_STOCK
+    }
+    confirmed, differs = [], []
+    for i, row in enumerate(numbers):
+        key = f"{row['country_code']}:{row['number_type']}"
+        page = page_prices.get((row["country_code"], row["number_type"]))
+        if key not in no_stock or page is None:
+            continue
+        if row.get("verification_method") == "manual-confirmed":
+            continue
+        ours = (row["usd_per_month"], row.get("setup_usd", "0.00"))
+        if ours != page:
+            differs.append(
+                f"{key}: catalog {ours[0]} a month + {ours[1]} setup, "
+                f"page {page[0]} + {page[1]}"
+            )
+            continue
+        checked = {
+            **row,
+            "last_verified": today,
+            "verification_method": "carrier-sync",
+            "verified_by": "telnyx-pricing-page",
+            "source_url": TELNYX_PRICING_URL,
+        }
+        if checked.get("available", True):
+            # The same note DIDWW out-of-stock rows get; a hand check's
+            # "Re-verified" note is replaced by this newer check.
+            checked["notes"] = "; ".join(
+                [
+                    *(
+                        part
+                        for part in (row.get("notes") or "").split("; ")
+                        if part
+                        and part != _NO_STOCK_NOTE
+                        and not part.startswith("Re-verified ")
+                    ),
+                    _NO_STOCK_NOTE,
+                ]
+            )
+        numbers[i] = checked
+        confirmed.append(key)
+    return confirmed, differs
 
 
 # -- DIDWW --------------------------------------------------------------------
@@ -1326,6 +1480,7 @@ def run_provider(
         dial_codes.setdefault(iso, prefix)
     session = requests.Session()
     observed: set[str] | None = None
+    page_prices: dict[tuple[str, str], tuple[str, str]] = {}
     if provider == "twilio":
         sid, tok = config.get("TWILIO_ACCOUNT_SID"), config.get("TWILIO_AUTH_TOKEN")
         if not sid or not tok:
@@ -1347,6 +1502,12 @@ def run_provider(
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
+        # A session of its own: the API key is not sent to the website.
+        page_prices, page_problem = fetch_telnyx_pricing(
+            http_factory(requests.Session())
+        )
+        if page_problem:
+            skipped.append(page_problem)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
@@ -1407,12 +1568,24 @@ def run_provider(
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
     )
+    confirmed, differs = confirm_from_telnyx_page(numbers, skipped, page_prices, today)
+    report["unobserved"] = [k for k in report["unobserved"] if k not in confirmed]
     write_catalog(path, provider, numbers)
     summary.append(
         f"## {provider}: {len(numbers)} rows, {len(countries)} countries"
         + (f" ({len(stocked)} with stock)" if stocked != countries else "")
     )
     _row_sections(summary, report)
+    for label, lines in (
+        ("No numbers in stock, price confirmed on telnyx.com/pricing.md", confirmed),
+        (
+            "No numbers in stock, telnyx.com/pricing.md shows another price (check by hand)",
+            differs,
+        ),
+    ):
+        if lines:
+            summary.append(f"### {label} ({len(lines)})")
+            summary.extend(f"- {line}" for line in lines)
     _section(summary, "Requirements not refreshed", requirement_errors)
     _section(summary, "Skipped by the sync", skipped)
     return True
