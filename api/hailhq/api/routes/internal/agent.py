@@ -78,6 +78,7 @@ from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
     MAX_REPLIES_PER_THREAD,
     answers_texts,
+    prior_reply,
     replies_in_thread,
     thread_lock_key,
 )
@@ -460,24 +461,8 @@ async def agent_reply_sms(
         {"key": thread_lock_key(inbound)},
     )
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
-    # ``first()`` stays as a belt for rows written before the lock existed.
-    prior = (
-        (
-            await db.execute(
-                select(Sms)
-                .where(
-                    Sms.organization_id == org,
-                    Sms.direction == "outbound",
-                    Sms.agent_id.is_not(None),
-                    Sms.to_e164 == inbound.from_e164,
-                    Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
-                )
-                .order_by(Sms.requested_at)
-            )
-        )
-        .scalars()
-        .first()
-    )
+    # The oldest row wins, a belt for rows written before the lock existed.
+    prior = await prior_reply(db, inbound)
     if prior is not None:
         return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
 

@@ -43,6 +43,7 @@ __all__ = [
     "build_chat_messages",
     "claim_pending_reply",
     "finish_reply",
+    "prior_reply",
     "replies_in_thread",
     "retry_reply",
     "should_queue_reply",
@@ -125,17 +126,22 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     )
 
 
-async def _reply_sent(db: AsyncSession, sms: Sms) -> bool:
-    """True when an agent reply row to ``sms`` exists (the reply-sms
-    idempotency lookup)."""
-    stmt = select(Sms.id).where(
-        Sms.organization_id == sms.organization_id,
-        Sms.direction == "outbound",
-        Sms.agent_id.is_not(None),
-        Sms.to_e164 == sms.from_e164,
-        Sms.metadata_["reply_to_sms_id"].astext == str(sms.id),
+async def prior_reply(db: AsyncSession, inbound: Sms) -> Sms | None:
+    """The first agent reply row to ``inbound``, or None. The one lookup for
+    "this text was already answered": reply-sms idempotency and the claim."""
+    stmt = (
+        select(Sms)
+        .where(
+            Sms.organization_id == inbound.organization_id,
+            Sms.direction == "outbound",
+            Sms.agent_id.is_not(None),
+            Sms.to_e164 == inbound.from_e164,
+            Sms.metadata_["reply_to_sms_id"].astext == str(inbound.id),
+        )
+        .order_by(Sms.requested_at)
+        .limit(1)
     )
-    return (await db.execute(stmt.limit(1))).first() is not None
+    return (await db.execute(stmt)).scalars().first()
 
 
 async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
@@ -147,9 +153,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     crashed worker's lease runs out and the row is claimed again, up to
     ``MAX_ATTEMPTS`` claims. Texts older than
     ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
-    A text whose org has no funds (``has_funds``, the same rule as
-    ``POST /internal/agent/reply-sms``) is skipped before any model call,
-    unless an earlier attempt already sent its reply.
+    A pending text whose org has no funds (``has_funds``, the same rule as
+    ``POST /internal/agent/reply-sms``) is skipped before any model call, or
+    marked done when an earlier attempt already sent its reply.
     """
     now = datetime.now(timezone.utc)
     await _expire_unclaimable(db, now)
@@ -198,13 +204,17 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             await finish_reply(db, sms, "skipped")
             continue
         org = sms.organization_id
-        # A retry may follow a reply that was sent but whose POST timed out:
-        # reply-sms records that one as done, so it is not skipped here.
-        if (org in unfunded or not await has_funds(db, org)) and (
-            sms.agent_reply_attempts == 0 or not await _reply_sent(db, sms)
+        # Only a pending row: an expired lease may still have a live worker,
+        # so it is reclaimed as before and reply-sms decides.
+        if sms.agent_reply_state == "pending" and (
+            org in unfunded or not await has_funds(db, org)
         ):
-            # reply-sms would refuse the send: skip before the model runs.
             unfunded.add(org)
+            if sms.agent_reply_attempts and await prior_reply(db, sms) is not None:
+                # An earlier attempt sent the reply but its POST timed out.
+                await finish_reply(db, sms, "done")
+                continue
+            # reply-sms would refuse the send: skip before the model runs.
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
             sms.agent_reply_state = "skipped"
             sms.metadata_ = {
