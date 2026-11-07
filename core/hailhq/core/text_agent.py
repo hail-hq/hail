@@ -14,6 +14,7 @@ would refuse.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -160,6 +161,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
+    # Orgs already read as unfunded in this call: a backlog of one org's texts
+    # costs one ledger read, not one per text.
+    unfunded: set[uuid.UUID] = set()
     while True:
         sms = (await db.execute(stmt)).scalar_one_or_none()
         if sms is None:
@@ -179,8 +183,10 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # each.
             await finish_reply(db, sms, "skipped")
             continue
-        if not await has_funds(db, sms.organization_id):
+        org = sms.organization_id
+        if org in unfunded or not await has_funds(db, org):
             # reply-sms would refuse the send: skip before the model runs.
+            unfunded.add(org)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
             sms.agent_reply_state = "skipped"
             sms.metadata_ = {

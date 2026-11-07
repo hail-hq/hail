@@ -236,8 +236,11 @@ async def test_claim_skips_unfunded_org_and_takes_the_next_row(
     no model call runs for a reply that cannot be sent."""
     poor_org, _agent, poor_number = await _seed(async_session, credits=0)
     poor = await _ingest(async_session, "hi", "SM20")
+    poor2 = await _ingest(async_session, "still there?", "SM22")
     poor_row = await async_session.get(Sms, poor.sms_id)
     poor_row.requested_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    poor_row2 = await async_session.get(Sms, poor2.sms_id)
+    poor_row2.requested_at = datetime.now(timezone.utc) - timedelta(minutes=4)
     poor_number.provisioning_state = "released"  # free the e164 for the next org
     await async_session.commit()
     _org, _agent2, _number2 = await _seed(async_session)
@@ -251,6 +254,9 @@ async def test_claim_skips_unfunded_org_and_takes_the_next_row(
     assert poor_row.agent_reply_state == "skipped"
     assert poor_row.agent_reply_attempts == 0
     assert poor_row.metadata_["skipped_reason"] == "insufficient_funds"
+    await async_session.refresh(poor_row2)
+    assert poor_row2.agent_reply_state == "skipped"
+    assert poor_row2.metadata_["skipped_reason"] == "insufficient_funds"
 
 
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
