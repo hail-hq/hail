@@ -13,6 +13,7 @@ Programmatic consumers (agents, scripts, dashboards) should fetch directly:
 - TTS: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json>
 - Phone numbers, one file per carrier: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telnyx.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/didww.json>
 - SMS base rates: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/sms.json>
+- Call rates per minute: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/voice.json>
 
 Schemas are served at their `$id` URLs:
 
@@ -21,12 +22,15 @@ Schemas are served at their `$id` URLs:
 - <https://hail.so/costs/schema/tts.json>
 - <https://hail.so/costs/schema/sms.json>
 - <https://hail.so/costs/schema/numbers.json> (shared by the three number catalogs)
+- <https://hail.so/costs/schema/voice.json>
 
 **Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony or SMS data (out of scope; a later PR).
 
 ## How AI agents should use this
 
 Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`; the weekly workflow, secrets, merge rules and PR review steps are in [docs/operations/number-catalog-sync.md](../docs/operations/number-catalog-sync.md). See the JSON Schemas above for the exact shape per category.
+
+`voice.json` holds carrier call rates in `rates[]`, one row per carrier rate, with `usd_per_minute`. An `outbound` row covers the numbers in `destination_prefixes`, for calls whose caller ID starts with one of `origination_prefixes` (`ALL`: any caller ID; `ROW`: caller IDs no other row of that destination lists). Pick the row with the longest matching destination prefix. An `inbound` row prices calls to a number of that `number_type`. Refresh: `uv run python scripts/costs/sync_voice.py --env-file .env`; see [docs/operations/voice-rate-sync.md](../docs/operations/voice-rate-sync.md).
 
 Number catalog `usd_per_month` is the base rental. Optional provider-level `capability_monthly_fees` are additional monthly costs for selected capabilities. Each entry applies once when any listed capability is selected; SMS and MMS can share one fee. Keep source and verification fields with the fee. `effective_from` is Hail's prospective start for existing calendar billing periods, not a claimed carrier price-change date. New purchases include the fee immediately. The sync preserves this separately sourced block and never folds it into base rental.
 

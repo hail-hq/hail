@@ -1,0 +1,45 @@
+name: costs-sync-voice
+
+# Weekly pull of the carriers' call rates (USD per minute) into
+# costs/voice.json. Twilio comes from its Pricing API. Telnyx and DIDWW have
+# no rate API yet: the summary lists them as not synced and their rows stay
+# as they are. The same script runs by hand:
+# uv run python scripts/costs/sync_voice.py --env-file .env
+on:
+  schedule:
+    - cron: "30 8 * * 1" # Mondays 08:30 UTC, after the number sync
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - name: Sync call rates from the carriers
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+        run: |
+          uv sync --all-packages --all-extras
+          uv run python scripts/costs/sync_voice.py --provider all --summary-file /tmp/sync-summary.md
+      - name: Validate
+        run: pipx run check-jsonschema==0.29.4 --schemafile costs/schema/voice.schema.json costs/voice.json
+      - name: Open PR on change
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: costs/voice-sync
+          title: "chore(costs): call rate sync"
+          commit-message: "chore(costs): call rate sync"
+          body-path: /tmp/sync-summary.md
+          labels: costs-sync
+          # The review request is what sends the email: GitHub does not
+          # notify anyone about a bot's new pull request on its own.
+          reviewers: r13i

@@ -79,6 +79,7 @@ picking up this codebase: read it before making any infra-shaped change.**
 Internal runbooks (not published) live in `docs/operations/`:
 [carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
 [number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
+[voice-rate-sync.md](docs/operations/voice-rate-sync.md) (carrier call rates in `costs/voice.json`, weekly sync),
 [refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
