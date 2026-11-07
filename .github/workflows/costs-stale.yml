@@ -2,7 +2,8 @@ name: costs-stale
 
 on:
   schedule:
-    # Every Monday at 09:00 UTC
+    # Mondays 09:00 UTC, after the syncs. Order of the Monday jobs:
+    # costs/README.md, "Weekly jobs, in order"
     - cron: "0 9 * * 1"
   workflow_dispatch: {}
 

@@ -1,5 +1,6 @@
-# Written by scripts/costs/sync_numbers.py with json.dumps. Prettier would
+# Written by scripts/costs/sync_numbers.py and sync_voice.py with json.dumps. Prettier would
 # reformat every sync commit, so it leaves these files alone.
 costs/twilio.json
 costs/telnyx.json
 costs/didww.json
+costs/voice.json
