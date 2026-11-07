@@ -153,8 +153,8 @@ needs `HAIL_INTERNAL_SECRET` and `HAIL_API_URL`. It answers
 `HAIL_TEXT_REPLY_CONCURRENCY` texts at once. A failed model or API call is
 retried up to 3 times with backoff; a text still unanswered after
 `HAIL_TEXT_REPLY_MAX_AGE_SECONDS` is skipped. A text to a workspace with no
-credits is skipped before the model runs, with
-`metadata.skipped_reason: "insufficient_funds"`.
+credits is skipped and gets no reply. Most such texts are skipped before the
+model runs and carry `metadata.skipped_reason: "insufficient_funds"`.
 
 ## Threads
 
