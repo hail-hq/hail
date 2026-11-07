@@ -90,6 +90,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
   fan-out/forwarding. `data.reason` is one of `forward_loop`, `forward_rate_limit`,
   `inbound_rate_limit`, `insufficient_funds`. One event fires _per reason_
   (a single message can produce more than one suppressed event).
+  `insufficient_funds` can also fire later, when a queued forward is about to
+  be sent and the balance has run out.
 - **`email.delivered`** — SES accepted the message for delivery.
 - **`email.delivery_delayed`** — SES reports a transient delay.
 - **`email.bounced`** — the recipient mail server rejected the message (permanent or soft bounce).
