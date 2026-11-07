@@ -20,6 +20,7 @@ from hailhq.api.number_orders import (
     sync_sms_setup,
 )
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
+from hailhq.api.sms_registration import drain_audits as drain_sms_audits
 from hailhq.api.routes import agents as agents_routes
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
@@ -315,6 +316,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(verification_worker, verification_task)
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
+        # Refusal audits run after the request commits. Let them finish while
+        # the database engine is still open.
+        await drain_sms_audits()
         await dispose_engine()
         await asyncio.to_thread(flush_telemetry)
 
