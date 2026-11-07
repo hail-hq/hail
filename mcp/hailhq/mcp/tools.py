@@ -97,7 +97,12 @@ from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
-from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
+from hailhq.mcp.hail_client import (
+    HailAPIError,
+    HailClient,
+    InvalidPathIdError,
+    PreviewShapeError,
+)
 from pydantic import StrictBool, ValidationError, WithJsonSchema
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -1046,6 +1051,11 @@ async def preview_sms_application(
                 "Correct the listed fields with the user, then preview again before submitting.",
             )
         return _format_api_error(exc)
+    except PreviewShapeError:
+        return {
+            "error": "the preview reply does not match this MCP version; retrying will not help. "
+            "Ask the user to review the application in the Hail console, or contact support."
+        }
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
     except Exception:
@@ -1086,19 +1096,33 @@ def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
     add the API's own messages, read from the stripped problems or the API's
     plain sentence only, so no submitted value or proxy page is echoed."""
     problems = exc.problems or []
+    # A user's answer is a body part that is not a request setting.
     others = [
         p["msg"]
         for p in problems
-        if len(p.get("loc", [])) < 2 or str(p["loc"][1]) in _NOT_ANSWERS
+        if not (
+            len(p.get("loc", [])) >= 2
+            and p["loc"][0] == "body"
+            and str(p["loc"][1]) not in _NOT_ANSWERS
+        )
     ]
     if problems:
         parts = [*others, fix] if len(others) < len(problems) else others
-        return {"error": " ".join(parts), "problems": problems}
-    if exc.message:
-        return {"error": exc.message}
+        return {"error": " ".join(_sentence(m) for m in parts), "problems": problems}
+    message = exc.message
+    if message and len(message) <= 300 and "<" not in message:
+        return {"error": message}
     if exc.status == 404:
         return _format_api_error(exc)
-    return {"error": f"the API refused the request ({exc.status})"}
+    return {
+        "error": f"the API refused the request ({exc.status}). Nothing was saved. "
+        "Check the answers against get_verification_requirements with the user."
+    }
+
+
+def _sentence(text: str) -> str:
+    text = text.strip()
+    return text if text.endswith((".", "!", "?")) else f"{text}."
 
 
 async def amend_sms_application(

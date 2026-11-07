@@ -65,7 +65,7 @@ from hailhq.core.schemas import (
     VerificationResponse,
     WhoamiResponse,
 )
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from typing_extensions import Self
 
 
@@ -98,6 +98,11 @@ class HailAPIError(Exception):
         # Carrier problems from a 422 on POST /verifications, reduced to
         # ``loc`` and ``msg`` only. See ``HailClient.submit_verification``.
         self.problems = problems
+
+
+class PreviewShapeError(Exception):
+    """The preview reply does not match this MCP's CampaignText: the API and
+    MCP versions differ. Retrying does not help."""
 
 
 # The preview's reply shape, built once.
@@ -626,9 +631,14 @@ class HailClient:
         if number_id is not None:
             body["number_id"] = number_id
         resp = await self._client.post("/verifications/sms/preview", json=body)
-        # Checked against the core shape: extra keys are dropped, and a
-        # missing or wrong key fails, so the agent never shows partial text.
-        return asdict(_CAMPAIGN_TEXT.validate_python(_decode(resp, problems=True)))
+        # Checked strictly against the core shape: extra keys are dropped, and
+        # a missing or wrong-typed key fails, so the agent never shows partial
+        # or altered text.
+        _decode(resp, problems=True)  # raises on an error reply
+        try:
+            return asdict(_CAMPAIGN_TEXT.validate_json(resp.content, strict=True))
+        except ValidationError as exc:
+            raise PreviewShapeError from exc
 
     async def amend_sms_application(
         self,
@@ -1000,4 +1010,4 @@ def _error_detail(resp: httpx.Response) -> str:
     return str(payload)
 
 
-__all__ = ["HailAPIError", "HailClient"]
+__all__ = ["HailAPIError", "HailClient", "PreviewShapeError"]
