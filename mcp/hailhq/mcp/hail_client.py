@@ -25,6 +25,7 @@ import json
 import re
 import uuid
 from dataclasses import asdict
+from dataclasses import fields as dataclass_fields
 from typing import Any
 from urllib.parse import quote
 
@@ -107,6 +108,7 @@ class PreviewShapeError(Exception):
 
 # The preview's reply shape, built once.
 _CAMPAIGN_TEXT = TypeAdapter(CampaignText)
+_CAMPAIGN_KEYS = frozenset(f.name for f in dataclass_fields(CampaignText))
 
 
 class HailClient:
@@ -631,10 +633,21 @@ class HailClient:
         if number_id is not None:
             body["number_id"] = number_id
         resp = await self._client.post("/verifications/sms/preview", json=body)
-        # Checked strictly against the core shape: extra keys are dropped, and
-        # a missing or wrong-typed key fails, so the agent never shows partial
-        # or altered text.
-        _decode(resp, problems=True)  # raises on an error reply
+        if not resp.is_success:
+            _decode(resp, problems=True)  # raises the API error
+        # The reply must be exactly this MCP's CampaignText, version 1: every
+        # key, no other key, each of the right type. Anything else means the
+        # API and MCP differ, and the agent must not show partial text.
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise PreviewShapeError from exc
+        if (
+            not isinstance(data, dict)
+            or set(data) != _CAMPAIGN_KEYS
+            or data.get("schema_version") != 1
+        ):
+            raise PreviewShapeError
         try:
             return asdict(_CAMPAIGN_TEXT.validate_json(resp.content, strict=True))
         except ValidationError as exc:

@@ -1052,10 +1052,7 @@ async def preview_sms_application(
             )
         return _format_api_error(exc)
     except PreviewShapeError:
-        return {
-            "error": "the preview reply does not match this MCP version; retrying will not help. "
-            "Ask the user to review the application in the Hail console, or contact support."
-        }
+        return {"error": _VERSION_MISMATCH}
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
     except Exception:
@@ -1109,9 +1106,13 @@ def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
     if problems:
         parts = [*others, fix] if len(others) < len(problems) else others
         return {"error": " ".join(_sentence(m) for m in parts), "problems": problems}
-    message = exc.message
-    if message and len(message) <= 300 and "<" not in message:
-        return {"error": message}
+    message = (exc.message or "").strip()
+    # FastAPI's own "Not Found" means the route is missing: an older API.
+    if exc.status == 404 and message == "Not Found":
+        return {"error": _VERSION_MISMATCH}
+    # A plain API sentence, not an HTML page.
+    if message and len(message) <= 500 and not message.startswith("<"):
+        return {"error": _sentence(message)}
     if exc.status == 404:
         return _format_api_error(exc)
     return {
@@ -1121,8 +1122,16 @@ def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
 
 
 def _sentence(text: str) -> str:
+    """The text with an end mark, unless it already has one (also before a
+    closing quote or bracket)."""
     text = text.strip()
-    return text if text.endswith((".", "!", "?")) else f"{text}."
+    return text if text.rstrip("\"')]").endswith((".", "!", "?")) else f"{text}."
+
+
+_VERSION_MISMATCH = (
+    "the API and this MCP version differ; retrying will not help. "
+    "Ask the user to review the application in the Hail console, or contact support."
+)
 
 
 async def amend_sms_application(

@@ -1396,7 +1396,7 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
     address = _kwargs(client)["address"]
     preview = _CAMPAIGN_TEXT
     route = respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
-        return_value=httpx.Response(200, json={**preview, "provider": "private"})
+        return_value=httpx.Response(200, json=preview)
     )
     result = await tools.preview_sms_application(
         client=client,
@@ -1618,7 +1618,7 @@ async def test_amend_sms_application_non_field_refusal_says_what_the_api_said(
 
 
 @respx.mock
-async def test_preview_sms_application_drops_extra_keys_and_refuses_coercion(
+async def test_preview_sms_application_refuses_extra_keys_and_coercion(
     client: HailClient,
 ) -> None:
     route = respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
@@ -1629,7 +1629,7 @@ async def test_preview_sms_application_drops_extra_keys_and_refuses_coercion(
     result = await tools.preview_sms_application(
         client=client, subject_type="person", fields={"program_name": "Acme"}
     )
-    assert result == _CAMPAIGN_TEXT
+    assert "retrying will not help" in result["error"]
     route.mock(
         return_value=httpx.Response(200, json={**_CAMPAIGN_TEXT, "has_links": "yes"})
     )
@@ -1665,3 +1665,40 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         attest_authorized=True,
     )
     assert result["error"] == "Input should be a valid UUID."
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx.Response(200, text="<html>ok</html>"),
+        httpx.Response(
+            200, json={k: v for k, v in _CAMPAIGN_TEXT.items() if k != "opt_in_message"}
+        ),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2}),
+        httpx.Response(404, json={"detail": "Not Found"}),
+    ],
+)
+async def test_preview_sms_application_version_mismatch_says_not_to_retry(
+    client: HailClient, reply
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(return_value=reply)
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert "retrying will not help" in result["error"]
+
+
+@respx.mock
+async def test_preview_sms_application_passes_a_plain_422_sentence(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(
+            422, json={"detail": "Keep samples < 160 characters"}
+        )
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert result == {"error": "Keep samples < 160 characters."}
