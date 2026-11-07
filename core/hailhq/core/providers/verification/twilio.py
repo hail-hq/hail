@@ -17,6 +17,7 @@ from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     DETAILS_REJECTED,
     NOT_ACCEPTED,
+    SAME_DOCUMENT,
     VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
@@ -201,6 +202,36 @@ def _map_requirements(
     return tuple(subject_fields), tuple(slots), address_required
 
 
+def _one_document_per_type(
+    requirements: Requirements, documents: dict[str, DocumentInput]
+) -> list[Problem]:
+    """Twilio takes one document of each type per check, so slots that pick
+    the same type must carry the same file and agree on every value. A slot
+    that differs gets a problem, before anything is sent."""
+    files: dict[str, bytes] = {}
+    values: dict[str, dict[str, str]] = {}
+    problems: list[Problem] = []
+    for slot in requirements.documents:
+        doc = documents.get(slot.name)
+        if doc is None:
+            continue
+        option = pick_option(slot, doc)
+        if option is None:
+            continue
+        # Compare with every earlier slot of this type, not just the first.
+        seen = values.setdefault(option.key, {})
+        new = {k: v.strip() for k, v in doc.fields.items() if v.strip()}
+        files_differ = doc.file is not None and (
+            files.setdefault(option.key, doc.file.data) != doc.file.data
+        )
+        values_differ = any(seen.get(k, v) != v for k, v in new.items())
+        if files_differ or values_differ:
+            problems.append(Problem(field=slot.name, message=SAME_DOCUMENT))
+            continue
+        seen.update(new)
+    return problems
+
+
 class TwilioVerificationProvider(VerificationProvider):
     name = "twilio"
 
@@ -304,6 +335,7 @@ class TwilioVerificationProvider(VerificationProvider):
         documents: dict[str, DocumentInput],
     ) -> DraftResult:
         problems = validate_input(requirements, fields, address, documents)
+        problems = problems or _one_document_per_type(requirements, documents)
         if problems:
             return DraftResult(refs={}, problems=problems)
         return await asyncio.to_thread(
@@ -353,25 +385,38 @@ class TwilioVerificationProvider(VerificationProvider):
             )
             refs["end_user_sid"] = end_user.sid
 
+            # Twilio refuses to evaluate a bundle holding two documents of one
+            # type (South Africa: name and ID number both take a
+            # government-issued document). Slots that pick the same type
+            # become one document carrying every slot's values.
+            merged: dict[str, dict] = {}
             for slot in requirements.documents:
                 doc = documents.get(slot.name)
                 if doc is None and not slot.options:
                     continue
                 option = pick_option(slot, doc) if doc else slot.options[0]
                 assert option is not None  # validated in validate_input
-                attrs: dict = {k: clean[k] for k in option.copies if k in clean}
+                entry = merged.setdefault(
+                    option.key,
+                    {"slot": slot.name, "attrs": {}, "doc": None},
+                )
+                attrs = entry["attrs"]
+                attrs.update({k: clean[k] for k in option.copies if k in clean})
                 if option.needs_address and refs.get("address_sid"):
                     attrs["address_sids"] = [refs["address_sid"]]
                 if doc:
                     attrs.update(
                         {k: v.strip() for k, v in doc.fields.items() if v.strip()}
                     )
-                name = f"hail-{organization_id}-{slot.name}"
-                if option.file_required and doc and doc.file:
-                    sid = self._upload(name, option.key, attrs, doc)
+                if option.file_required and doc and doc.file and not entry["doc"]:
+                    entry["doc"] = doc
+            for key, entry in merged.items():
+                name = f"hail-{organization_id}-{entry['slot']}"
+                if entry["doc"]:
+                    sid = self._upload(name, key, entry["attrs"], entry["doc"])
                 else:
                     sid = self._rc.supporting_documents.create(
-                        friendly_name=name, type=option.key, attributes=attrs
+                        friendly_name=name, type=key, attributes=entry["attrs"]
                     ).sid
                 refs["document_sids"].append(sid)
 

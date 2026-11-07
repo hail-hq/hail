@@ -1,0 +1,211 @@
+{
+  "meta": {
+    "first_page_url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=ZA&NumberType=mobile&PageSize=50&EndUserType=individual&IncludeConstraints=true&Page=0",
+    "key": "results",
+    "next_page_url": null,
+    "page": 0,
+    "page_size": 50,
+    "previous_page_url": null,
+    "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations?IsoCountry=ZA&NumberType=mobile&PageSize=50&EndUserType=individual&IncludeConstraints=true&Page=0"
+  },
+  "results": [
+    {
+      "end_user_type": "individual",
+      "friendly_name": "South Africa: Mobile - Individual",
+      "iso_country": "ZA",
+      "number_type": "mobile",
+      "requirements": {
+        "end_user": [
+          {
+            "constraint": "individual != null",
+            "detailed_fields": [
+              {
+                "constraint": "individual['first_name'] != null",
+                "description": "The name appearing on the official Government-issued photo ID",
+                "friendly_name": "First Name",
+                "machine_name": "first_name"
+              },
+              {
+                "constraint": "individual['last_name'] != null",
+                "description": "",
+                "friendly_name": "Last Name",
+                "machine_name": "last_name"
+              },
+              {
+                "constraint": "individual['nationality'] != null",
+                "description": "",
+                "friendly_name": "Nationality",
+                "machine_name": "nationality"
+              }
+            ],
+            "fields": [
+              "first_name",
+              "last_name",
+              "nationality"
+            ],
+            "name": "Individual",
+            "requirement_name": "individual_info",
+            "type": "individual",
+            "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/EndUserTypes/individual"
+          }
+        ],
+        "supporting_document": [
+          [
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "tax_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "tax_document['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": [
+                    "address_sids"
+                  ],
+                  "name": "Municipal rates or tax invoice",
+                  "type": "tax_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/tax_document"
+                },
+                {
+                  "constraint": "phone_bill != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "phone_bill['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": [
+                    "address_sids"
+                  ],
+                  "name": "Recent telephone account statement",
+                  "type": "phone_bill",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/phone_bill"
+                },
+                {
+                  "constraint": "tv_bill != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "tv_bill['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": [
+                    "address_sids"
+                  ],
+                  "name": "Retailer account or current television license",
+                  "type": "tv_bill",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/tv_bill"
+                },
+                {
+                  "constraint": "drivers_license != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "drivers_license['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": [
+                    "address_sids"
+                  ],
+                  "name": "New motor vehicle license",
+                  "type": "drivers_license",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/drivers_license"
+                },
+                {
+                  "constraint": "bank_statement != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "bank_statement['address_sids'] != null",
+                      "description": "",
+                      "friendly_name": "Address sid(s)",
+                      "machine_name": "address_sids"
+                    }
+                  ],
+                  "fields": [
+                    "address_sids"
+                  ],
+                  "name": "Bank statement",
+                  "type": "bank_statement",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/bank_statement"
+                }
+              ],
+              "description": "Must be within South Africa; a PO Box is not acceptable. Supporting document must be issued in last 3 months.",
+              "name": "Proof of Address",
+              "requirement_name": "address_proof_info",
+              "type": "document"
+            },
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "individual != null && government_issued_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "government_issued_document['first_name'] != null && government_issued_document['first_name'] == individual['first_name']",
+                      "description": "",
+                      "friendly_name": "First Name",
+                      "machine_name": "first_name"
+                    },
+                    {
+                      "constraint": "government_issued_document['last_name'] != null && government_issued_document['last_name'] == individual['last_name']",
+                      "description": "",
+                      "friendly_name": "Last Name",
+                      "machine_name": "last_name"
+                    }
+                  ],
+                  "fields": [
+                    "first_name",
+                    "last_name"
+                  ],
+                  "name": "Government-issued photo ID",
+                  "type": "government_issued_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/government_issued_document"
+                }
+              ],
+              "description": "",
+              "name": "Proof of Authorized Representative Name",
+              "requirement_name": "name_info",
+              "type": "document"
+            },
+            {
+              "accepted_documents": [
+                {
+                  "constraint": "government_issued_document != null",
+                  "detailed_fields": [
+                    {
+                      "constraint": "government_issued_document['document_number'] != null",
+                      "description": "The identity number appearing on the official Government-issued photo ID",
+                      "friendly_name": "Identity Document Number",
+                      "machine_name": "document_number"
+                    }
+                  ],
+                  "fields": [
+                    "document_number"
+                  ],
+                  "name": "Government-issued photo ID",
+                  "type": "government_issued_document",
+                  "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/SupportingDocumentTypes/government_issued_document"
+                }
+              ],
+              "description": "",
+              "name": "Proof of Identity Number",
+              "requirement_name": "identity_doc_no_info",
+              "type": "document"
+            }
+          ]
+        ]
+      },
+      "sid": "RNbd5de2292c3ffd1fb18ca4c376d477b0",
+      "url": "https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations/RNbd5de2292c3ffd1fb18ca4c376d477b0"
+    }
+  ]
+}
