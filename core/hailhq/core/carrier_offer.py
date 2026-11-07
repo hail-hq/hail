@@ -28,6 +28,10 @@ class OfferVerification(BaseModel):
         default=None,
         description="Name of the person or company that verification is for, as typed in the verification form. Null when unknown.",
     )
+    held_cents: int = Field(
+        default=0,
+        description="Credit, in USD cents, set aside from your balance for this verification: setup and the first month of the offer it was started for. A purchase with this verification counts it toward the price. 0 when nothing is set aside.",
+    )
 
 
 class Approval(BaseModel):

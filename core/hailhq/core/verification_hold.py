@@ -105,7 +105,6 @@ async def release_hold(db: AsyncSession, org: UUID, verification_id: UUID) -> in
             source=RELEASE_SOURCE,
         )
     )
-    await db.flush()
     return amount
 
 

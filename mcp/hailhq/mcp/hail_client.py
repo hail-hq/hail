@@ -660,7 +660,8 @@ class HailClient:
                 detail="verification rejected",
                 problems=_problems(resp),
             )
-        if resp.status_code in (409, 503):
+        if resp.status_code in (402, 409, 503):
+            # A 402 names the credit needed; it never echoes submitted values.
             raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
         if not 200 <= resp.status_code < 300:
             # Unknown failure: keep the status, drop the body.

@@ -811,6 +811,19 @@ async def test_submit_409_named_duplicate_does_not_echo_the_name(
 
 
 @respx.mock
+async def test_submit_402_says_how_much_credit(client: HailClient) -> None:
+    detail = (
+        "not enough credit to start verification; setup and the first month "
+        "cost $23.00; add credit first"
+    )
+    respx.post(f"{_BASE_URL}/verifications").mock(
+        return_value=httpx.Response(402, json={"detail": detail})
+    )
+    result = await tools.submit_verification(**_kwargs(client))
+    assert detail in result["error"]
+
+
+@respx.mock
 async def test_submit_503(client: HailClient) -> None:
     respx.post(f"{_BASE_URL}/verifications").mock(
         return_value=httpx.Response(

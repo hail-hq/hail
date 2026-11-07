@@ -96,6 +96,7 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 2. Ask the user: "you or your company?". That is `subject_type` (`person` or `business`). It is required; never guess it.
 3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
 4. Ask the user for every field and file. The agent must not invent or guess any value.
+   The balance must cover the offer's `setup_cents` plus `monthly_cents`, or `submit_verification` returns a 402 error and sends nothing. Ask the user to add credit first. That amount is set aside while the carrier checks the papers. It pays for setup and the first month when the number is bought with this verification, and comes back if the verification is rejected or cancelled, or if no number is bought within 30 days of approval. Each entry in the offer's `verifications` shows it as `held_cents`.
 5. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
 
    ```json

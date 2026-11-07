@@ -2188,8 +2188,8 @@ paths:
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
-            Also returned when the balance doesn't cover this number's full monthly
-            price.
+            Also returned when the balance, plus the credit the verification you buy
+            with set aside, doesn't cover this number's setup and the first month.
         "409":
           description:
             The quote expired, the number is taken, the price changed,
@@ -8390,6 +8390,15 @@ components:
           description:
             Name of the person or company that verification is for, as
             typed in the verification form. Null when unknown.
+        held_cents:
+          type: integer
+          title: Held Cents
+          description:
+            "Credit, in USD cents, set aside from your balance for this
+            verification: setup and the first month of the offer it was started for.
+            A purchase with this verification counts it toward the price. 0 when nothing
+            is set aside."
+          default: 0
       type: object
       required:
         - id
