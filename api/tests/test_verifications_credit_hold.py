@@ -249,3 +249,145 @@ async def test_retry_one_hold(client, async_session, carrier) -> None:
     )
     assert len(holds) == 1
     assert await get_balance_cents(async_session, org) == 2 * NEEDED
+
+
+# -- the hold comes back ----------------------------------------------------
+
+
+async def _held(client, async_session, carrier, balance=NEEDED):
+    """An org whose verification set NEEDED aside: (org, key, vid)."""
+    org, key = await _org(async_session, balance)
+    resp = await _create(client, key, await _quote(async_session, org))
+    assert resp.status_code == 201, resp.text
+    return org, key, uuid.UUID(resp.json()["id"])
+
+
+async def _returned(async_session, org, vid) -> int:
+    rows = await _ledger(async_session, org, verification_hold.release_ref(vid))
+    assert len(rows) <= 1
+    return int(rows[0].amount_cents) if rows else 0
+
+
+async def _set(async_session, vid, **values) -> None:
+    from sqlalchemy import update
+
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == vid)
+        .values(**values)
+    )
+    await async_session.commit()
+
+
+def _superadmin() -> None:
+    from types import SimpleNamespace
+
+    from hailhq.api.superadmin import require_superadmin
+
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_superadmin():
+    yield
+    from hailhq.api.superadmin import require_superadmin
+
+    app.dependency_overrides.pop(require_superadmin, None)
+
+
+async def test_release_on_carrier_reject(client, async_session, carrier) -> None:
+    from hailhq.core.providers.verification import ProviderStatus
+
+    org, key, vid = await _held(client, async_session, carrier)
+    carrier.remote_status = ProviderStatus(state="rejected", reason="ID unreadable")
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["state"] == "rejected"
+    assert await _returned(async_session, org, vid) == NEEDED
+    assert await get_balance_cents(async_session, org) == NEEDED
+    # Dismissing it afterwards gives nothing back twice.
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["state"] == "cancelled"
+    assert await _returned(async_session, org, vid) == NEEDED
+    assert await get_balance_cents(async_session, org) == NEEDED
+
+
+async def test_release_on_submit_refusal(client, async_session, carrier) -> None:
+    from hailhq.core.providers.verification import Problem, SubmitRefused
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message="not accepted")])
+
+    carrier.submit = refuse
+    org, _, vid = await _held(client, async_session, carrier)
+    (row,) = await _rows(async_session, org)
+    assert row.state == "rejected"
+    assert await _returned(async_session, org, vid) == NEEDED
+
+
+async def test_release_on_admin_reject(client, async_session, carrier) -> None:
+    org, key, vid = await _held(client, async_session, carrier)
+    await _set(async_session, vid, state="awaiting_review")
+    _superadmin()
+    resp = await client.post(
+        f"/admin/verifications/{vid}/reject",
+        json={"reason": "ID unreadable"},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200, resp.text
+    assert await _returned(async_session, org, vid) == NEEDED
+
+
+async def test_release_on_cancel(client, async_session, carrier) -> None:
+    org, key, vid = await _held(client, async_session, carrier)
+    await _set(async_session, vid, state="awaiting_review")
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert await _returned(async_session, org, vid) == NEEDED
+    assert await get_balance_cents(async_session, org) == NEEDED
+
+
+async def _sweep() -> None:
+    async with session_scope() as db:
+        await verifications_routes.sweep_verifications(
+            db, lambda name, purpose="number": None
+        )
+
+
+async def test_release_30_days_after_approval_without_number(
+    client, async_session, carrier
+) -> None:
+    org, _, vid = await _held(client, async_session, carrier)
+    approved = datetime.now(timezone.utc) - timedelta(days=31)
+    await _set(
+        async_session, vid, state="approved", approved_at=approved, updated_at=approved
+    )
+    await _sweep()
+    assert await _returned(async_session, org, vid) == NEEDED
+    await _sweep()
+    assert await _returned(async_session, org, vid) == NEEDED
+    assert await get_balance_cents(async_session, org) == NEEDED
+
+
+async def test_no_release_before_30_days(client, async_session, carrier) -> None:
+    org, _, vid = await _held(client, async_session, carrier)
+    approved = datetime.now(timezone.utc) - timedelta(days=29)
+    await _set(
+        async_session, vid, state="approved", approved_at=approved, updated_at=approved
+    )
+    await _sweep()
+    assert await _returned(async_session, org, vid) == 0
+    assert await get_balance_cents(async_session, org) == 0
+
+
+async def test_reject_then_resubmit_passes(client, async_session, carrier) -> None:
+    from hailhq.core.providers.verification import ProviderStatus
+
+    org, key, vid = await _held(client, async_session, carrier)
+    carrier.remote_status = ProviderStatus(state="rejected", reason="ID unreadable")
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    carrier.remote_status = ProviderStatus(state="pending")
+    resp = await _create(client, key, await _quote(async_session, org))
+    assert resp.status_code == 201, resp.text
+    assert await get_balance_cents(async_session, org) == 0

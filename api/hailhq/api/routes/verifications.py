@@ -103,6 +103,10 @@ _last_polled: dict[UUID, float] = {}
 
 PURPOSES = {"number", "sms"}
 
+# An approved number verification keeps its credit set aside this long for
+# the purchase; after that the sweeper gives it back.
+HOLD_AFTER_APPROVAL_DAYS = 30
+
 # (name, purpose) -> plug-in
 Registry = Callable[[str, str], VerificationProvider | None]
 
@@ -540,6 +544,7 @@ async def _poll_and_apply(
     changed = _apply_status(row, status)
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
+        await _release_number_hold(db, row)
     if row.provider_refs != refs_before:
         flag_modified(row, "provider_refs")
         changed = True
@@ -1706,6 +1711,7 @@ async def _reject_row(
     row.provider_refs = _wiped_refs(row)
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     await write_audit_log(
@@ -1758,7 +1764,48 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         if row.state != before:
             refreshed += 1
     await reconcile_approved_registrations(db, registry)
+    await _release_unused_holds(db, now)
     return {"submitted": submitted, "refreshed": refreshed}
+
+
+async def _release_number_hold(db: AsyncSession, row: CarrierVerification) -> None:
+    """Give back the credit a number verification set aside, in the
+    caller's transaction. Call it wherever a row becomes rejected or
+    cancelled. A second call, or a row with no hold, adds nothing."""
+    if row.purpose == "number":
+        await verification_hold.release_hold(db, row.organization_id, row.id)
+
+
+async def _release_unused_holds(db: AsyncSession, now: datetime) -> None:
+    """Give back the hold of approved number verifications no number was
+    bought with within ``HOLD_AFTER_APPROVAL_DAYS`` of approval. A purchase
+    releases the hold itself, so a row with an open hold this old was not
+    used. Each release runs under the organization lock, like a purchase."""
+
+    def ledger_row(source: str):
+        return select(AccountCredit.id).where(
+            AccountCredit.organization_id == CarrierVerification.organization_id,
+            AccountCredit.ref
+            == func.concat(f"{source}:", CarrierVerification.id.cast(String)),
+        )
+
+    stale = (
+        await db.execute(
+            select(CarrierVerification.id, CarrierVerification.organization_id).where(
+                CarrierVerification.purpose == "number",
+                CarrierVerification.state == "approved",
+                CarrierVerification.approved_at
+                <= now - timedelta(days=HOLD_AFTER_APPROVAL_DAYS),
+                ledger_row(verification_hold.HOLD_SOURCE).exists(),
+                ~ledger_row(verification_hold.RELEASE_SOURCE).exists(),
+            )
+        )
+    ).all()
+    await db.commit()
+    for verification_id, org in stale:
+        await org_lock(db, org)
+        await verification_hold.release_hold(db, org, verification_id)
+        await db.commit()
 
 
 async def _org_row_or_404(
@@ -1889,6 +1936,7 @@ async def cancel_verification(
     now = datetime.now(timezone.utc)
     row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     if approved_sms:
@@ -2169,6 +2217,7 @@ async def admin_reject(
     row.state, row.rejection_reason = "rejected", body.reason
     row.provider_refs = _wiped_refs(row)
     row.updated_at = datetime.now(timezone.utc)
+    await _release_number_hold(db, row)
     await db.commit()
     _notify_billing([row])
     actor_user_id, actor_kind = actor_of(admin)
