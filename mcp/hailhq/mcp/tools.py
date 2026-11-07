@@ -2686,7 +2686,8 @@ def register_tools(
         user to add credit in the console first. That amount is set aside
         while the carrier checks the papers. It pays for setup and the first
         month when the number is bought with this verification, and comes
-        back if the verification is rejected or cancelled.
+        back if the verification is rejected or cancelled, or if no number
+        is bought with it within 30 days of approval.
 
         Returns the verification: ``id``, ``state`` and ``subject_name``.
         Review takes business days and nothing notifies you: poll

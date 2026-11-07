@@ -1763,8 +1763,9 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         await _refresh(db, row, registry)
         if row.state != before:
             refreshed += 1
-    await reconcile_approved_registrations(db, registry)
+    # Before the repair pass: a carrier error there must not keep holds.
     await _release_unused_holds(db, now)
+    await reconcile_approved_registrations(db, registry)
     return {"submitted": submitted, "refreshed": refreshed}
 
 
@@ -1783,6 +1784,7 @@ async def _release_unused_holds(db: AsyncSession, now: datetime) -> None:
     used. Each release runs under the organization lock, like a purchase."""
 
     def ledger_row(source: str):
+        # The SQL form of hold_ref / release_ref: "<source>:<verification id>".
         return select(AccountCredit.id).where(
             AccountCredit.organization_id == CarrierVerification.organization_id,
             AccountCredit.ref
@@ -1803,9 +1805,15 @@ async def _release_unused_holds(db: AsyncSession, now: datetime) -> None:
     ).all()
     await db.commit()
     for verification_id, org in stale:
-        await org_lock(db, org)
-        await verification_hold.release_hold(db, org, verification_id)
-        await db.commit()
+        # One failed release must not stop the others; it is tried again
+        # on the next pass.
+        try:
+            await org_lock(db, org)
+            await verification_hold.release_hold(db, org, verification_id)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("verification hold release failed for %s", verification_id)
 
 
 async def _org_row_or_404(

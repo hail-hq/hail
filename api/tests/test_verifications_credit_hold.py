@@ -391,3 +391,30 @@ async def test_reject_then_resubmit_passes(client, async_session, carrier) -> No
     resp = await _create(client, key, await _quote(async_session, org))
     assert resp.status_code == 201, resp.text
     assert await get_balance_cents(async_session, org) == 0
+
+
+async def test_one_failed_release_does_not_stop_the_others(
+    client, async_session, carrier, monkeypatch
+) -> None:
+    first_org, _, first = await _held(client, async_session, carrier)
+    second_org, _, second = await _held(client, async_session, carrier)
+    approved = datetime.now(timezone.utc) - timedelta(days=31)
+    for vid in (first, second):
+        await _set(
+            async_session,
+            vid,
+            state="approved",
+            approved_at=approved,
+            updated_at=approved,
+        )
+    real = verification_hold.release_hold
+
+    async def fail_first(db, org, verification_id):
+        if verification_id == first:
+            raise RuntimeError("boom")
+        return await real(db, org, verification_id)
+
+    monkeypatch.setattr(verification_hold, "release_hold", fail_first)
+    await _sweep()
+    assert await _returned(async_session, first_org, first) == 0
+    assert await _returned(async_session, second_org, second) == NEEDED
