@@ -3317,14 +3317,41 @@ def _campaign_fee() -> int:
     return sms_registration_fees.campaign_fee_cents("fake", "business")
 
 
-async def _before_campaign(client, key, async_session, org_id, sms_carrier) -> str:
+async def _charge(async_session, org_id, vid, step: str, cents: int) -> None:
+    """The website rater's debit for one step of a registration."""
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-cents,
+            qty=1,
+            ref=f"sms_registration:{vid}:{step}",
+            source=f"sms_registration_{step}",
+        )
+    )
+    await async_session.commit()
+
+
+async def _charge_submission(async_session, org_id, vid) -> None:
+    full = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _charge(async_session, org_id, vid, "submission", full - _campaign_fee())
+
+
+async def _before_campaign(
+    client, key, async_session, org_id, sms_carrier, charged=True
+) -> str:
     """A submitted US texting registration whose campaign is not filed yet:
-    the next poll files it (a billed step)."""
+    the next poll files it (a billed step). ``charged``: the rater has
+    charged its submission."""
     await _set_balance(async_session, org_id, 10_000)
     resp = await _post_sms(client, key)
     assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    if charged:
+        await _charge_submission(async_session, org_id, vid)
     sms_carrier.campaign_key = "campaign_id"
-    return resp.json()["id"]
+    return vid
 
 
 async def _stored_state(async_session, vid: str) -> str:
@@ -3400,6 +3427,27 @@ async def test_campaign_step_runs_when_funded(
     assert sms_carrier.status_calls == 2
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_submission_counts_against_the_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The rater has not charged the filing yet: the balance still holds
+    # the brand's cost, so it cannot pay for the campaign too.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(
+        client, key, async_session, org_id, sms_carrier, charged=False
+    )
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.status_calls == 0
+    await _charge_submission(async_session, org_id, vid)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
 async def test_campaign_step_skips_the_credit_check_for_the_shared_key(
     client, sms_carrier, async_session, monkeypatch
 ) -> None:
@@ -3425,6 +3473,7 @@ async def test_retry_submit_waits_without_credit(
 ) -> None:
     org_id, _, key = org_and_key
     vid = await _waiting_sms(client, key, async_session, org_id)
+    await _charge_submission(async_session, org_id, vid)
     await _set_balance(async_session, org_id, _campaign_fee() - 1)
     sent = len(sms_carrier.submitted)
     counts = await verifications_routes.sweep_verifications(
@@ -3450,6 +3499,7 @@ async def test_admin_approve_waits_without_credit(
 ) -> None:
     org_id, _, key = org_and_key
     vid = await _waiting_sms(client, key, async_session, org_id)
+    await _charge_submission(async_session, org_id, vid)
     await _set_balance(async_session, org_id, _campaign_fee() - 1)
     sent = len(sms_carrier.submitted)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -3492,6 +3542,8 @@ async def test_one_credit_files_one_campaign(
     ]
     async_session.add_all(rows)
     await async_session.commit()
+    for row in rows:
+        await _charge_submission(async_session, org_id, row.id)
     sms_carrier.campaign_key = "campaign_id"
     await _set_balance(async_session, org_id, _campaign_fee())
     verifications_routes._last_polled.clear()
@@ -3511,18 +3563,7 @@ async def test_one_credit_files_one_campaign(
     assert resp.json()["waiting_for_credit"] is True
     assert sms_carrier.campaigns_created == 1
     # Once the rater charges it and the org tops up, the other is filed.
-    async_session.add(
-        AccountCredit(
-            organization_id=org_id,
-            kind="debit",
-            channel="sms",
-            amount_cents=-_campaign_fee(),
-            qty=1,
-            ref=f"sms_registration:{filed[0].id}:review",
-            source="sms_registration_review",
-        )
-    )
-    await async_session.commit()
+    await _charge(async_session, org_id, filed[0].id, "review", _campaign_fee())
     await _set_balance(async_session, org_id, _campaign_fee())
     resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is False

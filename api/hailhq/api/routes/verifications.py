@@ -44,7 +44,7 @@ from hailhq.core import sms_registration_fees, sms_setup
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, org_lock
+from hailhq.core.db import get_session, org_lock, try_org_lock
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
     rate_sms_registration,
@@ -288,34 +288,51 @@ async def _kept_brand(
     return (row.provider_refs or {}).get("kept_brand_id")
 
 
-async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
-    """US texting filings of the last day with no ledger row yet: the
-    website's rater charges each one shortly after it is saved. A filing is
-    settled by its submission debit, or by the one-time debit of a filing
-    made before fees were charged per step. A filing that reused a brand
-    is never charged a submission, so it does not count. Exact refs, so the
-    ref index is used."""
-    ref = func.concat("sms_registration:", func.cast(CarrierVerification.id, String))
-    return (
-        await db.execute(
-            select(func.count())
-            .select_from(CarrierVerification)
+async def _uncharged_sms_steps(
+    db: AsyncSession, organization_id: UUID, step: str
+) -> list[tuple[str, str]]:
+    """``(provider, subject_type)`` of the organization's US texting rows
+    whose ``step`` ('submission' or 'review') happened in the last day with
+    no ledger row yet: the website's rater charges each one shortly after.
+    A step is settled by its debit (``sms_registration:<id>:<step>``), or by
+    the one-time debit of a filing made before fees were charged per step.
+    A submission happens at filing, except for a filing that reused a brand
+    (never charged one); a review once the campaign is filed. Exact refs,
+    so the ref index is used."""
+    if step == "submission":
+        happened = [
+            CarrierVerification.created_at > func.now() - text("interval '1 day'"),
+            CarrierVerification.provider_refs["brand_reused"].astext.is_distinct_from(
+                "true"
+            ),
+        ]
+    else:
+        filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
+        happened = [
+            cast(func.nullif(filed_at, ""), DateTime(timezone=True))
+            > func.now() - text("interval '1 day'")
+        ]
+    ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
+    found = await db.execute(
+        select(CarrierVerification.provider, CarrierVerification.subject_type).where(
+            CarrierVerification.organization_id == organization_id,
+            CarrierVerification.purpose == "sms",
+            *happened,
+            ~select(AccountCredit.id)
             .where(
-                CarrierVerification.organization_id == organization_id,
-                CarrierVerification.purpose == "sms",
-                CarrierVerification.created_at > func.now() - text("interval '1 day'"),
-                CarrierVerification.provider_refs[
-                    "brand_reused"
-                ].astext.is_distinct_from("true"),
-                ~select(AccountCredit.id)
-                .where(
-                    AccountCredit.organization_id == organization_id,
-                    AccountCredit.ref.in_([ref, func.concat(ref, ":submission")]),
-                )
-                .exists(),
+                AccountCredit.organization_id == organization_id,
+                AccountCredit.ref.in_([ref, func.concat(ref, f":{step}")]),
             )
+            .exists(),
         )
-    ).scalar_one()
+    )
+    return [(provider, subject_type) for provider, subject_type in found]
+
+
+async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
+    """US texting filings of the last day whose submission is not charged
+    yet (``_uncharged_sms_steps``)."""
+    return len(await _uncharged_sms_steps(db, organization_id, "submission"))
 
 
 async def _record_billed_refusal(
@@ -570,34 +587,27 @@ def _campaign_fee(provider: str, subject_type: str) -> int | None:
         return None
 
 
-async def _unsettled_campaigns_cents(db: AsyncSession, organization_id: UUID) -> int:
-    """Carrier fees of the organization's campaigns filed in the last day
-    with no review debit yet: the website's rater charges each one shortly
-    after it is filed. They count against the balance, as unsettled filings
-    do at filing, so two campaigns are not filed on the same credit. A
-    campaign is settled by its review debit, or by the one-time debit of a
-    filing made before fees were charged per step."""
-    filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
-    ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
-    rows = (
-        await db.execute(
-            select(
-                CarrierVerification.provider, CarrierVerification.subject_type
-            ).where(
-                CarrierVerification.organization_id == organization_id,
-                CarrierVerification.purpose == "sms",
-                cast(func.nullif(filed_at, ""), DateTime(timezone=True))
-                > func.now() - text("interval '1 day'"),
-                ~select(AccountCredit.id)
-                .where(
-                    AccountCredit.organization_id == organization_id,
-                    AccountCredit.ref.in_([ref, func.concat(ref, ":review")]),
-                )
-                .exists(),
-            )
-        )
-    ).all()
-    return sum(_campaign_fee(p, t) or 0 for p, t in rows)
+def _brand_fee(provider: str, subject_type: str) -> int:
+    """The carrier's brand cost (the submission), or 0 for a carrier with no
+    SMS registration fees."""
+    try:
+        full = sms_registration_fees.filing_fee_cents(provider, subject_type)
+        campaign = sms_registration_fees.campaign_fee_cents(provider, subject_type)
+    except KeyError:
+        return 0
+    return full - campaign
+
+
+async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
+    """Carrier costs of the organization's US texting steps not charged yet
+    (``_uncharged_sms_steps``): new brands and filed campaigns. They count
+    against the balance, as unsettled filings do at filing, so one credit
+    does not pay for two steps."""
+    brands = await _uncharged_sms_steps(db, organization_id, "submission")
+    campaigns = await _uncharged_sms_steps(db, organization_id, "review")
+    return sum(_brand_fee(p, t) for p, t in brands) + sum(
+        _campaign_fee(p, t) or 0 for p, t in campaigns
+    )
 
 
 async def _campaign_unfunded(
@@ -608,12 +618,12 @@ async def _campaign_unfunded(
     no carrier call until a top-up. The public API knows no Hail prices; the
     carrier's cost is the floor, as for the filing.
 
-    The credit is the balance less the campaigns not yet charged
-    (``_unsettled_campaigns_cents``). Each row in ``rows`` that it covers
-    uses up its fee, in order, so one credit never pays for two campaigns."""
+    The credit is the balance less the steps not yet charged
+    (``_uncharged_cents``). Each row in ``rows`` that it covers uses up its
+    fee, oldest first, so one credit never pays for two campaigns."""
     left: dict[UUID, int] = {}
     unfunded: set[UUID] = set()
-    for row in rows:
+    for row in sorted(rows, key=lambda r: r.created_at):
         if not _campaign_gated(row, registry):
             continue
         fee = _campaign_fee(row.provider, row.subject_type)
@@ -621,9 +631,8 @@ async def _campaign_unfunded(
             continue
         org = row.organization_id
         if org not in left:
-            left[org] = await get_balance_cents(
-                db, org
-            ) - await _unsettled_campaigns_cents(db, org)
+            balance = await get_balance_cents(db, org)
+            left[org] = balance - await _uncharged_cents(db, org)
         if left[org] < fee:
             unfunded.add(row.id)
         else:
@@ -827,10 +836,13 @@ async def _refresh(
     if not _pollable(row):
         return
     gated = _campaign_gated(row, registry)
-    if gated:
-        # Before the row lock (cancel_verification's order). Held through
-        # the carrier call that files the campaign, as for the filing.
-        await org_lock(db, row.organization_id)
+    # Before the row lock (cancel_verification's order). Held through the
+    # carrier call that files the campaign, as for the filing. Not waited
+    # for, like the row lock: when another poll (or a billing write) holds
+    # it, this poll skips the row and the next one asks.
+    if gated and not await try_org_lock(db, row.organization_id):
+        await db.commit()
+        return
     if not await _lock_for_poll(db, row):
         if gated:
             await db.commit()  # ends the org lock
@@ -1824,6 +1836,9 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
                 select(CarrierVerification).where(
                     CarrierVerification.state.in_(_POLLED_STATES)
                 )
+                # Oldest first: with credit for one campaign, the oldest
+                # registration gets it, as in the list.
+                .order_by(CarrierVerification.created_at)
             )
         )
         .scalars()
@@ -1881,14 +1896,13 @@ async def list_verifications(
     # Only the carrier calls run concurrently; the session is used in order.
     now = time.monotonic()
     asked = [r for r in rows if _poll_due(r, now)]
-    if any(_campaign_gated(r, registry) for r in asked):
-        # Before the row locks, as in _refresh.
-        await org_lock(db, principal.organization_id)
+    # A campaign still to file needs the credit check under the org lock:
+    # those rows go through _refresh one at a time, after the others, so
+    # the lock is not held through the other rows' carrier calls.
+    gated = [r for r in asked if _campaign_gated(r, registry)]
+    asked = [r for r in asked if r not in gated]
     # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
-    # A campaign the credit does not cover is not filed (see _refresh).
-    unfunded = await _campaign_unfunded(db, due, registry)
-    due = [r for r in due if r.id not in unfunded]
     before = [copy.deepcopy(r.provider_refs) for r in due]
     statuses = await asyncio.gather(*(_fetch_status(r, registry) for r in due))
     changed = [
@@ -1899,6 +1913,8 @@ async def list_verifications(
     if asked:
         await db.commit()  # saves changes and ends the row locks
     _notify_billing(changed)
+    for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
+        await _refresh(db, row, registry)
     waiting = await _campaign_unfunded(db, rows, registry)
     return [_out(r, registry, waiting_for_credit=r.id in waiting) for r in rows]
 
