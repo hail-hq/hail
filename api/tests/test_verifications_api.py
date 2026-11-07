@@ -3310,6 +3310,165 @@ async def test_overlapping_polls_create_one_campaign(
     assert (await _stored_refs(async_session, vid))["campaign_sid"] == "QE1"
 
 
+# -- credit for the campaign step ------------------------------------------
+
+
+def _campaign_fee() -> int:
+    return sms_registration_fees.campaign_fee_cents("fake", "business")
+
+
+async def _before_campaign(client, key, async_session, org_id, sms_carrier) -> str:
+    """A submitted US texting registration whose campaign is not filed yet:
+    the next poll files it (a billed step)."""
+    await _set_balance(async_session, org_id, 10_000)
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 201, resp.text
+    sms_carrier.campaign_key = "campaign_id"
+    return resp.json()["id"]
+
+
+async def _stored_state(async_session, vid: str) -> str:
+    return (
+        await async_session.execute(
+            select(CarrierVerification.state).where(
+                CarrierVerification.id == uuid.UUID(vid)
+            )
+        )
+    ).scalar_one()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list", "sweep"])
+async def test_campaign_step_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session, via
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    refs = await _stored_refs(async_session, vid)
+    verifications_routes._last_polled.clear()
+    if via == "sweep":
+        await verifications_routes.sweep_verifications(
+            async_session, _sms_registry(sms_carrier)
+        )
+    else:
+        url = f"/verifications/{vid}" if via == "get" else "/verifications"
+        resp = await client.get(url, headers=_auth(key))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        if via == "list":
+            body = next(v for v in body if v["id"] == vid)
+        assert body["state"] == "submitted"
+        assert body["waiting_for_credit"] is True
+    # No carrier call, nothing filed, the row as it was.
+    assert sms_carrier.status_calls == 0
+    assert sms_carrier.campaigns_created == 0
+    assert await _stored_refs(async_session, vid) == refs
+    assert await _stored_state(async_session, vid) == "submitted"
+    # The next poll after a top-up files the campaign.
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list"])
+async def test_campaign_step_runs_when_funded(
+    client, org_and_key, sms_carrier, async_session, via
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    resp = await client.get(url, headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    if via == "list":
+        body = next(v for v in body if v["id"] == vid)
+    assert sms_carrier.campaigns_created == 1
+    assert (await _stored_refs(async_session, vid))["campaign_id"] == "QE1"
+    assert body["waiting_for_credit"] is False
+    # Once the campaign is filed there is no step left to pay for.
+    await _set_balance(async_session, org_id, 0)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.status_calls == 2
+
+
+async def test_campaign_step_skips_the_credit_check_for_the_shared_key(
+    client, sms_carrier, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_api_key", "hail-test-shared-secret")
+    await _us_number(async_session, SELF_HOSTED_ORG_ID)
+    resp = await _post_sms(client, "hail-test-shared-secret")
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    sms_carrier.campaign_key = "campaign_id"
+    # The self-hosted org has no credit and is not billed.
+    assert await _balance(async_session, SELF_HOSTED_ORG_ID) < _campaign_fee()
+    resp = await client.get(
+        f"/verifications/{vid}", headers=_auth("hail-test-shared-secret")
+    )
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_retry_submit_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    sent = len(sms_carrier.submitted)
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 0
+    assert len(sms_carrier.submitted) == sent
+    assert await _stored_state(async_session, vid) == "awaiting_review"
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    # The next pass after a top-up sends it.
+    await _set_balance(async_session, org_id, _campaign_fee())
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 1
+    assert await _stored_state(async_session, vid) == "submitted"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_admin_approve_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    sent = len(sms_carrier.submitted)
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["state"] == "awaiting_review"
+    assert body["waiting_for_credit"] is True
+    assert len(sms_carrier.submitted) == sent
+    assert await _stored_state(async_session, vid) == "awaiting_review"
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:

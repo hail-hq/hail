@@ -1,7 +1,8 @@
 """Carrier costs for US A2P 10DLC registration, read from
 ``costs/sms-registration.json``. Hail's prices are not here: Hail Cloud's
-website prices and charges each step. The API uses the filing cost only as
-the balance a customer needs before filing."""
+website prices and charges each step. The API uses these costs only as the
+balance a customer needs before a billed step: the filing, then the
+campaign."""
 
 from __future__ import annotations
 
@@ -36,3 +37,10 @@ def filing_fee_cents(provider: str, subject_type: str, brand_kept: bool = False)
     row = _load()[provider][subject_type]
     vetting = _cents(row["campaign_vetting_usd"])
     return vetting if brand_kept else _cents(row["brand_usd"]) + vetting
+
+
+def campaign_fee_cents(provider: str, subject_type: str) -> int:
+    """The carrier's one-time cost of filing the campaign (its vetting), the
+    step after the brand. Raises KeyError for a carrier with no SMS
+    registration."""
+    return _cents(_load()[provider][subject_type]["campaign_vetting_usd"])

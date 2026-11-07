@@ -2758,3 +2758,12 @@ class VerificationResponse(BaseModel):
             "a rejected registration first. Ignore it on older registrations."
         ),
     )
+    waiting_for_credit: bool = Field(
+        default=False,
+        description=(
+            "True when a US texting registration waits for credit: its next "
+            "step, filing the campaign, has a carrier fee your balance does "
+            "not cover. Nothing is filed until it does. Add credit; Hail "
+            "goes on at its next check."
+        ),
+    )

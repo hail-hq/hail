@@ -529,6 +529,7 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "confirmation",
         "step",
         "identity_confirmed",
+        "waiting_for_credit",
     }
     _assert_no_sentinel(result)
 
