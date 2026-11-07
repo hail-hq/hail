@@ -259,6 +259,20 @@ async def test_claim_skips_unfunded_org_and_takes_the_next_row(
     assert poor_row2.metadata_["skipped_reason"] == "insufficient_funds"
 
 
+async def test_retried_text_of_unfunded_org_is_still_claimed(async_session) -> None:
+    """A retry may follow a send whose POST timed out; reply-sms, not the
+    claim, decides it (its idempotency check runs before its funds gate)."""
+    await _seed(async_session, credits=0)
+    result = await _ingest(async_session, "hi", "SM23")
+    row = await async_session.get(Sms, result.sms_id)
+    row.agent_reply_attempts = 1
+    await async_session.commit()
+
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None and claimed.sms.id == result.sms_id
+    assert claimed.attempt == 2
+
+
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
     """A text whose agent went away is skipped and the same call takes the next
     pending row, so a backlog of dropped texts does not cost a poll each."""

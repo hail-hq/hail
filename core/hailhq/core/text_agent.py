@@ -134,8 +134,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     crashed worker's lease runs out and the row is claimed again, up to
     ``MAX_ATTEMPTS`` claims. Texts older than
     ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
-    A text whose org has no funds (``has_funds``, the same rule as
-    ``POST /internal/agent/reply-sms``) is skipped before any model call.
+    On its first claim, a text whose org has no funds (``has_funds``, the
+    same rule as ``POST /internal/agent/reply-sms``) is skipped before any
+    model call. Retries skip this check and leave it to reply-sms.
     """
     now = datetime.now(timezone.utc)
     await _expire_unclaimable(db, now)
@@ -184,7 +185,11 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             await finish_reply(db, sms, "skipped")
             continue
         org = sms.organization_id
-        if org in unfunded or not await has_funds(db, org):
+        # First claim only: a retried text may already have been sent (POST
+        # timed out after the send), and reply-sms must record that as done.
+        if sms.agent_reply_attempts == 0 and (
+            org in unfunded or not await has_funds(db, org)
+        ):
             # reply-sms would refuse the send: skip before the model runs.
             unfunded.add(org)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
