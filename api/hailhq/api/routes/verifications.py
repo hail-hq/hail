@@ -75,7 +75,7 @@ from hailhq.core.providers.verification import (
 from hailhq.core.schemas import VerificationResponse
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import String, func, select, text, update
+from sqlalchemy import DateTime, String, cast, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
@@ -561,29 +561,73 @@ def _campaign_gated(row: CarrierVerification, registry: Registry) -> bool:
     )
 
 
+def _campaign_fee(provider: str, subject_type: str) -> int | None:
+    """``sms_registration_fees.campaign_fee_cents``; None for a carrier with
+    no SMS registration fees."""
+    try:
+        return sms_registration_fees.campaign_fee_cents(provider, subject_type)
+    except KeyError:
+        return None
+
+
+async def _unsettled_campaigns_cents(db: AsyncSession, organization_id: UUID) -> int:
+    """Carrier fees of the organization's campaigns filed in the last day
+    with no review debit yet: the website's rater charges each one shortly
+    after it is filed. They count against the balance, as unsettled filings
+    do at filing, so two campaigns are not filed on the same credit. A
+    campaign is settled by its review debit, or by the one-time debit of a
+    filing made before fees were charged per step."""
+    filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
+    ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
+    rows = (
+        await db.execute(
+            select(
+                CarrierVerification.provider, CarrierVerification.subject_type
+            ).where(
+                CarrierVerification.organization_id == organization_id,
+                CarrierVerification.purpose == "sms",
+                cast(func.nullif(filed_at, ""), DateTime(timezone=True))
+                > func.now() - text("interval '1 day'"),
+                ~select(AccountCredit.id)
+                .where(
+                    AccountCredit.organization_id == organization_id,
+                    AccountCredit.ref.in_([ref, func.concat(ref, ":review")]),
+                )
+                .exists(),
+            )
+        )
+    ).all()
+    return sum(_campaign_fee(p, t) or 0 for p, t in rows)
+
+
 async def _campaign_unfunded(
     db: AsyncSession, rows: list[CarrierVerification], registry: Registry
 ) -> set[UUID]:
     """Ids of the rows whose campaign is still to file (``_campaign_gated``)
-    while the balance does not cover the carrier's campaign fee. Those wait:
+    while the credit does not cover the carrier's campaign fee. Those wait:
     no carrier call until a top-up. The public API knows no Hail prices; the
-    carrier's cost is the floor, as for the filing."""
-    balances: dict[UUID, int] = {}
+    carrier's cost is the floor, as for the filing.
+
+    The credit is the balance less the campaigns not yet charged
+    (``_unsettled_campaigns_cents``). Each row in ``rows`` that it covers
+    uses up its fee, in order, so one credit never pays for two campaigns."""
+    left: dict[UUID, int] = {}
     unfunded: set[UUID] = set()
     for row in rows:
         if not _campaign_gated(row, registry):
             continue
-        try:
-            fee = sms_registration_fees.campaign_fee_cents(
-                row.provider, row.subject_type
-            )
-        except KeyError:
+        fee = _campaign_fee(row.provider, row.subject_type)
+        if fee is None:
             continue
         org = row.organization_id
-        if org not in balances:
-            balances[org] = await get_balance_cents(db, org)
-        if balances[org] < fee:
+        if org not in left:
+            left[org] = await get_balance_cents(
+                db, org
+            ) - await _unsettled_campaigns_cents(db, org)
+        if left[org] < fee:
             unfunded.add(row.id)
+        else:
+            left[org] -= fee
     return unfunded
 
 

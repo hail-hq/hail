@@ -3469,6 +3469,66 @@ async def test_admin_approve_waits_without_credit(
     assert await _stored_state(async_session, vid) == "awaiting_review"
 
 
+async def test_one_credit_files_one_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Two registrations of one org, each before its campaign, and credit
+    # for one campaign fee: one campaign is filed, the other waits, also on
+    # a later poll before the rater has charged the first.
+    org_id, _, key = org_and_key
+    rows = [
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{number_type}"},
+            requirements_version="1",
+        )
+        for number_type in ("local", "toll_free")
+    ]
+    async_session.add_all(rows)
+    await async_session.commit()
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    by_id = {v["id"]: v for v in resp.json()}
+    filed = [
+        r for r in rows if "campaign_id" in await _stored_refs(async_session, str(r.id))
+    ]
+    assert len(filed) == 1
+    other = next(r for r in rows if r is not filed[0])
+    assert by_id[str(filed[0].id)]["waiting_for_credit"] is False
+    assert by_id[str(other.id)]["waiting_for_credit"] is True
+    # The first campaign is not charged yet: its fee still counts.
+    resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 1
+    # Once the rater charges it and the org tops up, the other is filed.
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-_campaign_fee(),
+            qty=1,
+            ref=f"sms_registration:{filed[0].id}:review",
+            source="sms_registration_review",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 2
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
