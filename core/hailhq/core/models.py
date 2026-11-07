@@ -1915,7 +1915,9 @@ class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
     in some countries. Holds state, opaque carrier IDs and the name of the
     person or company it is for (``subject_name``). No addresses or
-    document data are stored here (see the design spec)."""
+    document data are stored for number verification. SMS provider_refs also
+    retains the submitted application text/address for organization-scoped repair;
+    document files are never stored here."""
 
     __tablename__ = "carrier_verifications"
 

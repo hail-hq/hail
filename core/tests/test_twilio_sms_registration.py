@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED, Address
+from hailhq.core.providers.verification.base import Address
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 
 
@@ -64,15 +64,40 @@ def _ok_responses():
             sid="BN1", status="PENDING", identity_status="UNVERIFIED"
         ),
         "services.create": SimpleNamespace(sid="MG1"),
+        "us_app_to_person.list": [],
     }
 
 
 FIELDS = {
+    "sender_country": "US",
+    "has_tax_id": "YES",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -82,9 +107,8 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 ADDRESS = Address(
     customer_name="Acme Inc",
@@ -162,6 +186,7 @@ async def test_person_draft_uses_sole_proprietor_and_sends_otp() -> None:
     p = _provider()
     fields = {
         **FIELDS,
+        "has_tax_id": "NO",
         "first_name": "Ada",
         "last_name": "Lovelace",
         "email": "ada@example.com",
@@ -199,6 +224,7 @@ async def test_person_draft_refuses_hail_number_as_mobile(monkeypatch) -> None:
     monkeypatch.setattr(p, "_is_hail_number", lambda e164: e164 == "+15125550199")
     fields = {
         **FIELDS,
+        "has_tax_id": "NO",
         "first_name": "Ada",
         "last_name": "Lovelace",
         "email": "ada@example.com",
@@ -225,8 +251,13 @@ def _campaign(use_case="MIXED"):
         "message_flow": "f" * 40,
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
-        "privacy_policy_url": "https://acme.example/privacy",
-        "terms_url": "https://acme.example/terms",
+        "schema_version": 2,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+        "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+        "privacy_policy_url": "https://acme.org/privacy",
+        "terms_url": "https://acme.org/terms",
     }
 
 
@@ -269,8 +300,8 @@ async def test_status_creates_campaign_once_brand_approved() -> None:
         kw for n, kw in p._client.calls if n.endswith("us_app_to_person.create")
     )
     assert create["us_app_to_person_usecase"] == "MIXED"
-    assert create["privacy_policy_url"] == "https://acme.example/privacy"
-    assert create["terms_and_conditions_url"] == "https://acme.example/terms"
+    assert create["privacy_policy_url"] == "https://acme.org/privacy"
+    assert create["terms_and_conditions_url"] == "https://acme.org/terms"
 
 
 async def test_status_files_an_old_snapshot_without_links() -> None:
@@ -282,6 +313,7 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
     )
     p = _provider(r)
     old = _campaign()
+    old.pop("schema_version")
     old.pop("privacy_policy_url")
     old.pop("terms_url")
     refs = {
@@ -290,12 +322,10 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
         "messaging_service_sid": "MG1",
         "campaign": old,
     }
-    assert (await p.status(refs)).state == "pending"
-    create = next(
-        kw for n, kw in p._client.calls if n.endswith("us_app_to_person.create")
-    )
-    assert "privacy_policy_url" not in create
-    assert create["brand_registration_sid"] == "BN1"
+    result = await p.status(refs)
+    assert result.state == "pending" and "consent evidence" in result.reason
+    assert refs["needs_information"] is True
+    assert not _calls(p, "us_app_to_person.create")
 
 
 async def test_status_person_waits_for_otp_before_campaign() -> None:
@@ -358,7 +388,7 @@ async def test_status_rejected_carries_carrier_reason() -> None:
         }
     )
     assert st.state == "rejected"
-    assert st.reason == CAMPAIGN_REJECTED
+    assert "application links" in st.reason
     assert "sufficient business information" in st.raw_reason
 
 
@@ -383,6 +413,7 @@ async def _draft(p, subject="business", **extra):
     fields = {**FIELDS, **extra}
     if subject == "person":
         fields.update(
+            has_tax_id="NO",
             first_name="Ada",
             last_name="Lovelace",
             email="ada@example.com",
@@ -516,7 +547,7 @@ async def test_draft_cleans_up_on_non_twilio_error() -> None:
 async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     p = _provider()
     draft = await _draft(p, privacy_policy_url="acme.example/privacy")
-    assert [pr.field for pr in draft.problems] == ["privacy_policy_url"]
+    assert "privacy_policy_url" in [pr.field for pr in draft.problems]
     assert draft.refs == {} and p._client.calls == []
 
 
@@ -534,8 +565,10 @@ async def test_draft_4xx_becomes_neutral_problem() -> None:
 async def test_draft_4xx_unknown_message_is_generic() -> None:
     r = _ok_responses()
     r["brand_registrations.create"] = _raise(_tw(400, "Twilio internal thing"))
-    draft = await _draft(_provider(r))
-    assert draft.problems[0].message.startswith("The 10DLC registry refused a detail")
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(r))
 
 
 async def test_draft_5xx_raises_provider_error() -> None:
@@ -555,6 +588,74 @@ async def test_draft_noncompliant_evaluation_is_problem() -> None:
     )
     draft = await _draft(_provider(r))
     assert [pr.message for pr in draft.problems] == ["Check the website address."]
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        [{"fields": [{"passed": False, "failure_reason": "Name does not match"}]}],
+        [],
+    ],
+)
+async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
+    results,
+) -> None:
+    """A failed evaluation is a refusal of the form, not an outage (503)."""
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant", results=results
+    )
+    draft = await _draft(_provider(r))
+    assert [pr.field for pr in draft.problems] == [""]
+    assert draft.refs == {}
+
+
+async def test_draft_noncompliant_account_configuration_stays_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Primary profile configuration"}
+                ]
+            }
+        ],
+    )
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(r))
+
+
+def _connection_error():
+    import requests
+
+    raise requests.ConnectionError("reset")
+
+
+async def test_status_transport_error_is_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = _connection_error
+    with pytest.raises(VerificationProviderError):
+        await _provider(r).status({"brand_sid": "BN1"})
+
+
+async def test_recover_campaign_transport_error_is_retryable() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    r = _ok_responses()
+    r["us_app_to_person.list"] = _connection_error
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1"}
+    with pytest.raises(VerificationProviderError):
+        await _provider(r).recover_campaign(refs)
+
+
+async def test_recover_campaign_missing_ref_fails_loudly() -> None:
+    with pytest.raises(KeyError):
+        await _provider().recover_campaign({"brand_sid": "BN1"})
 
 
 @pytest.mark.parametrize("brand_status", ["FAILED", "SUSPENDED"])
@@ -781,3 +882,197 @@ def test_step_follows_the_filing() -> None:
     assert p.step({"subject_type": "business", "campaign_sid": "QE1"}) == (
         "carrier_review"
     )
+
+
+async def test_lost_campaign_response_is_recovered_without_another_paid_create():
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.list"] = [
+        SimpleNamespace(sid="QEexisting", brand_registration_sid="BN1")
+    ]
+    provider = _provider(responses)
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": {}}
+    assert (await provider.status(refs)).state == "pending"
+    assert refs["campaign_sid"] == "QEexisting"
+    assert not _calls(provider, "us_app_to_person.create")
+
+
+async def test_business_can_file_canadian_registration_number():
+    provider = _provider()
+    result = await _draft(provider, registration_country="CA", ein="123456789")
+    assert not result.problems
+    business = next(
+        call["attributes"]
+        for call in _calls(provider, "end_users.create")
+        if call["type"] == "customer_profile_business_information"
+    )
+    assert business["business_registration_identifier"] == "CBN"
+    assert business["business_registration_number"] == "123456789"
+
+
+async def test_phone_attribute_and_all_samples_are_filed():
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = SimpleNamespace(sid="QE1")
+    provider = _provider(responses)
+    text = {
+        **_campaign("CUSTOMER_CARE"),
+        "has_phone": True,
+        "samples": [f"Acme support example {i}" for i in range(5)],
+    }
+    await provider.status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": text}
+    )
+    filed = _calls(provider, "us_app_to_person.create")[0]
+    assert filed["has_embedded_phone"] is True
+    assert filed["message_samples"] == text["samples"]
+    assert filed["us_app_to_person_usecase"] == "CUSTOMER_CARE"
+
+
+async def test_mobile_ownership_lookup_outage_does_not_submit():
+    from hailhq.core.providers.verification.base import VerificationProviderError
+    from twilio.base.exceptions import TwilioRestException
+
+    def fail():
+        raise TwilioRestException(503, "", msg="unavailable")
+
+    responses = _ok_responses()
+    responses["incoming_phone_numbers.list"] = fail
+    provider = _provider(responses)
+    with pytest.raises(VerificationProviderError):
+        await _draft(provider, "person")
+    assert not _calls(provider, "customer_profiles.create")
+
+
+async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
+    from twilio.base.exceptions import TwilioRestException
+
+    def refused():
+        raise TwilioRestException(
+            400, "", msg="Privacy policy absent for Ada Secret, EIN 12-3456789"
+        )
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = refused
+    provider = _provider(responses)
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
+    result = await provider.status(refs)
+    assert result.state == "pending" and "privacy policy" in result.reason
+    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert "Ada Secret" in result.raw_reason
+    # Held for the customer's answers on the same paid brand.
+    assert refs["needs_information"] is True and refs["brand_sid"] == "BN1"
+    assert provider.step(refs) == "needs_information"
+
+
+async def test_keyword_campaign_sends_actual_confirmation_and_content_flags():
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = SimpleNamespace(sid="QE1")
+    provider = _provider(responses)
+    fields = {
+        **FIELDS,
+        "consent_methods": "KEYWORD",
+        "keyword_keyword": "JOIN",
+        "age_gated": "YES",
+        "direct_lending": "YES",
+        "opt_in_message": "Acme: Enrolled for appointment updates. Reply HELP for help, STOP to stop.",
+    }
+    text = campaign_text(fields, "business").__dict__
+    await provider.status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": text}
+    )
+    posted = _calls(provider, "us_app_to_person.create")[0]
+    assert posted["opt_in_message"] == fields["opt_in_message"]
+    assert posted["opt_in_keywords"] == ["JOIN"]
+    assert posted["age_gated"] is True and posted["direct_lending"] is True
+
+
+@pytest.mark.parametrize(
+    "status,message",
+    [
+        (401, "Invalid credentials"),
+        (403, "Forbidden"),
+        (404, "Not found"),
+        (409, "Conflict"),
+        (429, "Slow down"),
+        (400, "Account configuration missing"),
+        (422, "Messaging service configuration invalid"),
+    ],
+)
+async def test_campaign_operational_errors_are_retryable(status, message):
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
+    responses["us_app_to_person.create"] = _raise(_tw(status, message))
+    refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
+    with pytest.raises(VerificationProviderError):
+        await _provider(responses).status(refs)
+    assert refs["brand_sid"] == "BN1" and "campaign_sid" not in refs
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED"
+    )
+    provider = _provider(responses)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": subject,
+        "campaign": {},
+    }
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information" and refs["brand_sid"] == "BN1"
+    assert not _calls(provider, "us_app_to_person.create")
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_twilio_recovers_original_sender_and_address_readonly(subject):
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", customer_profile_bundle_sid="BU1"
+    )
+    responses["customer_profiles_entity_assignments.list"] = [
+        SimpleNamespace(object_sid="IT1"),
+        SimpleNamespace(object_sid="RD1"),
+    ]
+    responses["end_users.fetch"] = SimpleNamespace(
+        type=(
+            "starter_customer_profile_information"
+            if subject == "person"
+            else "customer_profile_business_information"
+        ),
+        attributes={
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@acme.org",
+            "phone_number": "+15125550199",
+            "business_name": "Acme",
+            "business_registration_number": "123456789",
+            "business_registration_identifier": "EIN",
+        },
+    )
+    responses["supporting_documents.fetch"] = SimpleNamespace(
+        type="customer_profile_address", attributes={"address_sids": "AD1"}
+    )
+    responses["addresses.fetch"] = SimpleNamespace(
+        street="1 Main St",
+        city="Austin",
+        region="TX",
+        postal_code="78701",
+        iso_country="US",
+    )
+    provider = _provider(responses)
+    identity = await provider.application_identity(
+        {"brand_sid": "BN1", "profile_sid": "BU1"}, subject
+    )
+    assert identity["fields"]["sender_country"] == "US"
+    assert identity["address"]["street"] == "1 Main St"
+    assert not any(name.endswith(".create") for name, _ in provider._client.calls)
