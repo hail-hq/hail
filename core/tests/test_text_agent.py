@@ -266,10 +266,9 @@ async def test_claim_skips_unfunded_org_and_takes_the_next_row(
 
 
 async def test_retried_text_of_unfunded_org(async_session) -> None:
-    """A retry with no reply sent yet is skipped like a first claim. A retry
-    whose reply was sent (POST timed out after the send) is marked done at
-    claim, with no model call. An expired lease is reclaimed as before: its
-    worker may still be running."""
+    """A retry with no reply sent yet is skipped like a first claim, and so
+    is an expired lease. A retry whose reply was sent (POST timed out after
+    the send) is marked done at claim. No model call for any of them."""
     org, agent, number = await _seed(async_session, credits=0)
     unsent = await _ingest(async_session, "hi", "SM23")
     sent = await _ingest(async_session, "hello", "SM24")
@@ -300,12 +299,11 @@ async def test_retried_text_of_unfunded_org(async_session) -> None:
     )
     await async_session.commit()
 
-    claimed = await text_agent.claim_pending_reply(async_session)
-    assert claimed is not None and claimed.sms.id == leased.sms_id
-    assert claimed.attempt == 2
-    await async_session.refresh(unsent_row)
-    assert unsent_row.agent_reply_state == "skipped"
-    assert unsent_row.metadata_["skipped_reason"] == "insufficient_funds"
+    assert await text_agent.claim_pending_reply(async_session) is None
+    for row in (unsent_row, leased_row):
+        await async_session.refresh(row)
+        assert row.agent_reply_state == "skipped"
+        assert row.metadata_["skipped_reason"] == "insufficient_funds"
     await async_session.refresh(sent_row)
     assert sent_row.agent_reply_state == "done"
 
