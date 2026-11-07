@@ -1884,14 +1884,6 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Toll-Free Monthly Recurring Cost. | $1 | number | mrc | — | — |
 | Toll-Free One Time Cost. | $1 | number | otc | — | — |
 
-### Global Numbers Extra (`global-numbers-extra`, 1 rate)
-
-#### DE
-
-| Item | Rate | Unit | Type | Direction | Volume tiers |
-|---|---:|---|---|---|---|
-| Germany Mobile Monthly Recurring Cost | $77 | number | mrc | — | — |
-
 ## Other
 
 #### DE
@@ -1899,6 +1891,14 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Item | Rate | Unit | Type | Direction | Volume tiers |
 |---|---:|---|---|---|---|
 | Germany Toll-Free Monthly Recurring Cost | $99 | number | mrc | — | — |
+
+### Global Numbers Extra (`global-numbers-extra`, 1 rate)
+
+#### DE
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Germany Mobile Monthly Recurring Cost | $77 | number | mrc | — | — |
 
 ### Voice Api (`voice-api`, 1 rate)
 
