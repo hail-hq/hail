@@ -6,7 +6,7 @@ name: costs-sync-numbers
 # script runs by hand: uv run python scripts/costs/sync_numbers.py --env-file .env
 on:
   schedule:
-    - cron: "0 8 * * 1" # Mondays 08:00 UTC, before the stale check
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC. Order of the Monday jobs: costs/README.md, "Weekly jobs, in order"
   workflow_dispatch: {}
 
 permissions:

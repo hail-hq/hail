@@ -33,7 +33,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -67,7 +67,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -102,7 +102,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -140,7 +140,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -178,7 +178,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -228,7 +228,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -266,7 +266,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -303,7 +303,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -339,7 +339,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -357,11 +357,6 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "2.00",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
           "accepted": false,
@@ -378,7 +373,12 @@
             "company_id"
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
     },
     {
       "country_code": "BM",
@@ -410,7 +410,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -446,7 +446,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -482,7 +482,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -516,7 +516,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -556,7 +556,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -574,11 +574,12 @@
       "verification_required": false,
       "available": true,
       "setup_usd": "40.00",
-      "last_verified": "2026-10-19",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "BZ",
@@ -612,7 +613,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -631,7 +632,7 @@
       "available": true,
       "setup_usd": "1.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -650,7 +651,7 @@
       "available": true,
       "setup_usd": "1.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -669,7 +670,7 @@
       "available": true,
       "setup_usd": "27.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-28",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -705,7 +706,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -741,7 +742,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -779,7 +780,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -815,7 +816,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -853,11 +854,12 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "CO",
@@ -887,7 +889,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -906,7 +908,7 @@
       "available": true,
       "setup_usd": "20.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-10-19",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -938,7 +940,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -976,7 +978,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1014,7 +1016,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1052,7 +1054,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1090,7 +1092,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1128,7 +1130,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1175,7 +1177,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1193,11 +1195,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "40.00",
-      "last_verified": "2026-10-26",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": false,
@@ -1225,7 +1227,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "DK",
@@ -1256,7 +1259,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1296,7 +1299,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1330,7 +1333,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1366,11 +1369,12 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "EC",
@@ -1408,7 +1412,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1448,7 +1452,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1482,7 +1486,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1518,7 +1522,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1536,11 +1540,6 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "85.00",
-      "last_verified": "2026-10-12",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
           "accepted": false,
@@ -1558,7 +1557,12 @@
             }
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
     },
     {
       "country_code": "ES",
@@ -1594,7 +1598,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1632,7 +1636,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1672,7 +1676,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1706,7 +1710,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1740,7 +1744,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1774,7 +1778,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1812,7 +1816,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1830,11 +1834,6 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "1.00",
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
           "accepted": true,
@@ -1854,7 +1853,12 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
     },
     {
       "country_code": "FR",
@@ -1884,7 +1888,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1922,7 +1926,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1960,7 +1964,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -1998,7 +2002,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2036,7 +2040,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2080,7 +2084,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2122,7 +2126,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2158,7 +2162,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2176,11 +2180,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "40.00",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": true,
@@ -2198,7 +2202,8 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "GH",
@@ -2212,11 +2217,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "30.00",
-      "last_verified": "2026-10-26",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": true,
@@ -2240,7 +2245,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "GR",
@@ -2275,7 +2281,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2317,7 +2323,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2359,7 +2365,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2393,7 +2399,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2431,7 +2437,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2469,7 +2475,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2507,7 +2513,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2559,7 +2565,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2577,11 +2583,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "20.00",
-      "last_verified": "2026-10-05",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": false,
@@ -2599,7 +2605,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "IL",
@@ -2628,7 +2635,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2662,7 +2669,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2698,7 +2705,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2747,7 +2754,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2783,7 +2790,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2817,7 +2824,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2851,7 +2858,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -2903,8 +2910,42 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+    },
+    {
+      "country_code": "IT",
+      "number_type": "toll_free",
+      "display_name": "Italy toll-free",
+      "dial_code": "39",
+      "usd_per_month": "6.00",
+      "voice": true,
+      "sms": false,
+      "mms": false,
+      "verification_required": true,
+      "available": true,
+      "setup_usd": "6.00",
+      "requirements": {
+        "person": {
+          "accepted": false,
+          "items": []
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "proof_of_address",
+            "address_in_country",
+            "company_registration",
+            "company_id"
+          ]
+        }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
       "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
@@ -2921,11 +2962,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "34.65",
-      "last_verified": "2026-10-19",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": true,
@@ -2945,7 +2986,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "JP",
@@ -2983,7 +3025,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3021,7 +3063,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3061,7 +3103,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3097,7 +3139,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3131,7 +3173,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3167,7 +3209,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3201,11 +3243,12 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "LT",
@@ -3235,7 +3278,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3268,7 +3311,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3304,7 +3347,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3338,7 +3381,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3372,7 +3415,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3408,7 +3451,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3442,11 +3485,12 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "MQ",
@@ -3460,12 +3504,12 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "10.00",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
       "requirements": {
         "person": {
           "accepted": true,
@@ -3497,11 +3541,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "120.00",
-      "last_verified": "2026-10-19",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": true,
@@ -3521,7 +3565,44 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
+    },
+    {
+      "country_code": "MX",
+      "number_type": "local",
+      "display_name": "Mexico local",
+      "dial_code": "52",
+      "usd_per_month": "5.00",
+      "voice": true,
+      "sms": false,
+      "mms": false,
+      "verification_required": true,
+      "available": true,
+      "setup_usd": "5.00",
+      "requirements": {
+        "person": {
+          "accepted": true,
+          "items": [
+            "id_document",
+            "contact_details",
+            "address_in_country"
+          ]
+        },
+        "business": {
+          "accepted": true,
+          "items": [
+            "contact_details",
+            "address_in_country",
+            "company_registration"
+          ]
+        }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-06",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
     },
     {
       "country_code": "MX",
@@ -3553,7 +3634,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3589,7 +3670,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3623,7 +3704,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3657,7 +3738,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3691,7 +3772,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3709,12 +3790,12 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "1.00",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
       "requirements": {
         "person": {
           "accepted": true,
@@ -3765,7 +3846,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3806,7 +3887,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3840,7 +3921,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3876,7 +3957,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3912,7 +3993,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -3930,12 +4011,12 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "13.50",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "verified_by": "telnyx-pricing-page",
       "source_url": "https://telnyx.com/pricing.md",
-      "notes": "Re-verified 2026-11-02: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
       "requirements": {
         "person": {
           "accepted": false,
@@ -3983,7 +4064,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4001,11 +4082,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "30.00",
-      "last_verified": "2026-11-02",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": true,
@@ -4023,7 +4104,8 @@
             "address_in_country"
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "PK",
@@ -4061,7 +4143,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4105,7 +4187,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4123,11 +4205,6 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "8.50",
-      "last_verified": "2026-10-12",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
           "accepted": true,
@@ -4147,7 +4224,12 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "telnyx-api-sync",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
     },
     {
       "country_code": "PL",
@@ -4182,7 +4264,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4201,7 +4283,7 @@
       "available": true,
       "setup_usd": "3.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4220,7 +4302,7 @@
       "available": true,
       "setup_usd": "1.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4256,7 +4338,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4292,7 +4374,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4328,7 +4410,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4366,7 +4448,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4404,7 +4486,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4442,7 +4524,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4479,7 +4561,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4516,7 +4598,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4554,7 +4636,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4590,11 +4672,12 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers"
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "SE",
@@ -4628,7 +4711,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4666,7 +4749,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4684,10 +4767,10 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "5.00",
-      "last_verified": "2026-09-28",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
+      "last_verified": "2026-11-07",
+      "last_changed_at": "2026-11-07",
+      "verification_method": "community-pr",
+      "verified_by": "r13i",
       "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
@@ -4704,7 +4787,8 @@
             "company_registration"
           ]
         }
-      }
+      },
+      "notes": "Price changed 2026-11-07: 5.00 a month and 5.00 setup, confirmed by hand in a Telnyx number search; this is also the last price the API showed (2026-09-28). Was 7.00 a month and 8.00 setup; carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "SI",
@@ -4736,7 +4820,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4770,7 +4854,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4803,7 +4887,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4839,7 +4923,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4875,7 +4959,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4893,11 +4977,11 @@
       "verification_required": true,
       "available": true,
       "setup_usd": "15.00",
-      "last_verified": "2026-10-19",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
-      "verified_by": "telnyx-api-sync",
-      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
+      "verified_by": "telnyx-pricing-page",
+      "source_url": "https://telnyx.com/pricing.md",
       "requirements": {
         "person": {
           "accepted": false,
@@ -4919,7 +5003,8 @@
             }
           ]
         }
-      }
+      },
+      "notes": "carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "TT",
@@ -4951,7 +5036,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -4988,7 +5073,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5024,7 +5109,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5061,7 +5146,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5097,7 +5182,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5116,7 +5201,7 @@
       "available": true,
       "setup_usd": "1.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5135,7 +5220,7 @@
       "available": true,
       "setup_usd": "1.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5171,7 +5256,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5211,7 +5296,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5230,7 +5315,7 @@
       "available": true,
       "setup_usd": "3.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-10-05",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5248,8 +5333,9 @@
       "verification_required": false,
       "available": true,
       "setup_usd": "1.00",
+      "notes": "monthly price varies by number: 1.00 to 40.00 USD in a sample of 5",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5285,7 +5371,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5319,7 +5405,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5357,7 +5443,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5391,7 +5477,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5428,7 +5514,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "telnyx-api-sync",
@@ -5524,6 +5610,7 @@
       "IS:local",
       "IS:toll_free",
       "IT:local",
+      "IT:toll_free",
       "JM:local",
       "JP:national",
       "KE:mobile",
@@ -5541,6 +5628,7 @@
       "MD:toll_free",
       "MQ:local",
       "MT:toll_free",
+      "MX:local",
       "MX:toll_free",
       "MZ:mobile",
       "NI:mobile",

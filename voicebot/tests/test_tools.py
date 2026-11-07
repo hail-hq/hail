@@ -55,7 +55,7 @@ def _tctx():
     )
 
 
-async def test_empty_opt_out_disables_all_tools():
+async def test_empty_opt_out_leaves_no_tools():
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": []},
         call_id=uuid.uuid4(),
@@ -158,7 +158,10 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
         send_dtmf=None,
     )
     try:
-        assert [get_raw_function_info(t).name for t in tools] == ["healthy_tool"]
+        assert [get_raw_function_info(t).name for t in tools] == [
+            "healthy_tool",
+            "hail_settings_help",
+        ]
     finally:
         if api is not None:
             await api.aclose()
@@ -217,6 +220,7 @@ async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
     try:
         assert sorted(t.info.name for t in tools) == [
             "cancel_transfer",
+            "hail_settings_help",
             "transfer_call",
         ]
     finally:

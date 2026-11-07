@@ -17,6 +17,7 @@ from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     DETAILS_REJECTED,
     NOT_ACCEPTED,
+    SAME_DOCUMENT,
     VALUE_NOT_ACCEPTED,
     Address,
     DocumentInput,
@@ -54,6 +55,13 @@ _TWILIO_TO_SUBJECT: dict[str, SubjectType] = {
     "individual": "person",
     "business": "business",
 }
+# Bundle statuses that mean Twilio already has it for review.
+_SENT_STATUSES = (
+    "pending-review",
+    "in-review",
+    "provisionally-approved",
+    "twilio-approved",
+)
 # Document types that are just the address the customer gave; no file needed.
 _ADDRESS_ONLY_TYPES = {"individual_address", "business_address"}
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
@@ -191,7 +199,97 @@ def _map_requirements(
                     options=tuple(options),
                 )
             )
-    return tuple(subject_fields), tuple(slots), address_required
+    return tuple(subject_fields), _one_slot_per_type(slots), address_required
+
+
+def _one_slot_per_type(slots: list[DocumentSlot]) -> tuple[DocumentSlot, ...]:
+    """Twilio takes one document of each type per check. Slots that accept
+    only the same type (South Africa: name and ID number, both a
+    government-issued document) become one slot, so the form asks once. It is
+    labelled with the document's name and lists every requirement it stands
+    for, as (name, label), in ``also``."""
+    out: list[DocumentSlot] = []
+    at: dict[str, int] = {}
+    for slot in slots:
+        key = slot.options[0].key if len(slot.options) == 1 else None
+        if key is None or key not in at:
+            if key is not None:
+                at[key] = len(out)
+            out.append(slot)
+            continue
+        first = out[at[key]]
+        a, b = first.options[0], slot.options[0]
+        # A value both slots ask for is required when either requires it.
+        fields = {f.name: f for f in a.fields}
+        for f in b.fields:
+            if f.name not in fields or (f.required and not fields[f.name].required):
+                fields[f.name] = f
+        option = a.model_copy(
+            update={
+                "file_required": a.file_required or b.file_required,
+                "fields": tuple(fields.values()),
+                "copies": tuple(sorted(set(a.copies) | set(b.copies))),
+                "needs_address": a.needs_address or b.needs_address,
+            }
+        )
+        out[at[key]] = first.model_copy(
+            update={
+                "label": a.label,
+                # The same carrier text twice is shown once.
+                "help": (
+                    first.help
+                    if slot.help in first.help
+                    else " ".join(h for h in (first.help, slot.help) if h)
+                ),
+                "options": (option,),
+                # Every requirement the slot stands for, itself first.
+                "also": (first.also or ((first.name, first.label),))
+                + ((slot.name, slot.label),),
+            }
+        )
+    # Say what one merged document proves when the carrier gave no help text.
+    return tuple(
+        (
+            s.model_copy(
+                update={
+                    "help": "Used for: " + ", ".join(lbl for _, lbl in s.also) + "."
+                }
+            )
+            if s.also and not s.help
+            else s
+        )
+        for s in out
+    )
+
+
+def _one_document_per_type(
+    requirements: Requirements, documents: dict[str, DocumentInput]
+) -> list[Problem]:
+    """Twilio takes one document of each type per check, so slots that pick
+    the same type must carry the same file and agree on every value. A slot
+    that differs gets a problem, before anything is sent."""
+    files: dict[str, bytes] = {}
+    values: dict[str, dict[str, str]] = {}
+    problems: list[Problem] = []
+    for slot in requirements.documents:
+        doc = documents.get(slot.name)
+        if doc is None:
+            continue
+        option = pick_option(slot, doc)
+        if option is None:
+            continue
+        # Compare with every earlier slot of this type, not just the first.
+        seen = values.setdefault(option.key, {})
+        new = {k: v.strip() for k, v in doc.fields.items() if v.strip()}
+        files_differ = doc.file is not None and (
+            files.setdefault(option.key, doc.file.data) != doc.file.data
+        )
+        values_differ = any(seen.get(k, v) != v for k, v in new.items())
+        if files_differ or values_differ:
+            problems.append(Problem(field=slot.name, message=SAME_DOCUMENT))
+            continue
+        seen.update(new)
+    return problems
 
 
 class TwilioVerificationProvider(VerificationProvider):
@@ -297,6 +395,7 @@ class TwilioVerificationProvider(VerificationProvider):
         documents: dict[str, DocumentInput],
     ) -> DraftResult:
         problems = validate_input(requirements, fields, address, documents)
+        problems = problems or _one_document_per_type(requirements, documents)
         if problems:
             return DraftResult(refs={}, problems=problems)
         return await asyncio.to_thread(
@@ -319,7 +418,11 @@ class TwilioVerificationProvider(VerificationProvider):
         documents: dict[str, DocumentInput],
     ) -> DraftResult:
         refs: dict = {
-            "slots": {s.label: s.name for s in requirements.documents},
+            "slots": {
+                label: s.name
+                for s in requirements.documents
+                for label in (s.label, *(lbl for _, lbl in s.also))
+            },
             "document_sids": [],
         }
         clean = {k: v.strip() for k, v in fields.items() if v and v.strip()}
@@ -346,25 +449,38 @@ class TwilioVerificationProvider(VerificationProvider):
             )
             refs["end_user_sid"] = end_user.sid
 
+            # Twilio refuses to evaluate a bundle holding two documents of one
+            # type (South Africa: name and ID number both take a
+            # government-issued document). Slots that pick the same type
+            # become one document carrying every slot's values.
+            merged: dict[str, dict] = {}
             for slot in requirements.documents:
                 doc = documents.get(slot.name)
                 if doc is None and not slot.options:
                     continue
                 option = pick_option(slot, doc) if doc else slot.options[0]
                 assert option is not None  # validated in validate_input
-                attrs: dict = {k: clean[k] for k in option.copies if k in clean}
+                entry = merged.setdefault(
+                    option.key,
+                    {"slot": slot.name, "attrs": {}, "doc": None},
+                )
+                attrs = entry["attrs"]
+                attrs.update({k: clean[k] for k in option.copies if k in clean})
                 if option.needs_address and refs.get("address_sid"):
                     attrs["address_sids"] = [refs["address_sid"]]
                 if doc:
                     attrs.update(
                         {k: v.strip() for k, v in doc.fields.items() if v.strip()}
                     )
-                name = f"hail-{organization_id}-{slot.name}"
-                if option.file_required and doc and doc.file:
-                    sid = self._upload(name, option.key, attrs, doc)
+                if option.file_required and doc and doc.file and not entry["doc"]:
+                    entry["doc"] = doc
+            for key, entry in merged.items():
+                name = f"hail-{organization_id}-{entry['slot']}"
+                if entry["doc"]:
+                    sid = self._upload(name, key, entry["attrs"], entry["doc"])
                 else:
                     sid = self._rc.supporting_documents.create(
-                        friendly_name=name, type=option.key, attributes=attrs
+                        friendly_name=name, type=key, attributes=entry["attrs"]
                     ).sid
                 refs["document_sids"].append(sid)
 
@@ -426,7 +542,22 @@ class TwilioVerificationProvider(VerificationProvider):
     # -- check / submit / status ------------------------------------------
 
     def _evaluate(self, refs: dict) -> list[Problem]:
-        ev = self._rc.bundles(refs["bundle_sid"]).evaluations.create()
+        bundle = self._rc.bundles(refs["bundle_sid"])
+        try:
+            ev = bundle.evaluations.create()
+        except TwilioRestException as exc:
+            if exc.status != 400:
+                raise
+            # A bundle already sent (a submit that timed out but went
+            # through) is not a refusal: let submit() settle it.
+            if bundle.fetch().status in _SENT_STATUSES:
+                return []
+            # Twilio refused to check the bundle: a refusal of the
+            # details, not an outage. Say so, and keep its reason. The
+            # log carries the code only: Twilio's text can quote the
+            # customer's personal data.
+            logger.warning("Twilio refused the bundle check (code %s)", exc.code)
+            return [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]
         if ev.status == "compliant":
             return []
         slots: dict[str, str] = refs.get("slots", {})
@@ -468,7 +599,7 @@ class TwilioVerificationProvider(VerificationProvider):
             if exc.status != 400:
                 raise
             sent = await asyncio.to_thread(bundle.fetch)
-            if sent.status in ("pending-review", "in-review", "twilio-approved"):
+            if sent.status in _SENT_STATUSES:
                 return
             raise SubmitRefused(
                 [Problem(field="", message=NOT_ACCEPTED, raw=exc.msg)]

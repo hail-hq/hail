@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hail.so/costs/schema/voice.json",
+  "title": "Call Rates",
+  "description": "Carrier call rates in USD per minute. Outbound rows are rated by destination prefix; some apply only to calls from certain caller ID prefixes (origination_prefixes: [\"ALL\"] for any caller ID, [\"ROW\"] for caller IDs that no other row of that destination lists). Inbound rows are rated by the type of number that receives the call.",
+  "type": "object",
+  "required": ["version", "license", "rates"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "license": { "const": "CC-BY-4.0" },
+    "rates": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rate" }
+    }
+  },
+  "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,8})?$"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "prefixes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^(ALL|ROW|[0-9]+)$" }
+    },
+    "rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "country_code",
+        "direction",
+        "usd_per_minute",
+        "last_verified",
+        "last_changed_at",
+        "verification_method",
+        "verified_by",
+        "source_url"
+      ],
+      "properties": {
+        "provider": { "enum": ["twilio", "telnyx", "didww"] },
+        "country_code": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "direction": { "enum": ["inbound", "outbound"] },
+        "number_type": { "enum": ["local", "mobile", "toll_free", "national"] },
+        "name": { "type": "string", "minLength": 1 },
+        "line_type": {
+          "enum": ["landline", "mobile", "toll_free", "special", "other"]
+        },
+        "destination_prefixes": { "$ref": "#/$defs/prefixes" },
+        "origination_prefixes": { "$ref": "#/$defs/prefixes" },
+        "usd_per_minute": { "$ref": "#/$defs/decimal" },
+        "last_verified": { "$ref": "#/$defs/date" },
+        "last_changed_at": { "$ref": "#/$defs/date" },
+        "verification_method": { "enum": ["carrier-sync", "manual-confirmed"] },
+        "verified_by": { "type": "string", "minLength": 1 },
+        "source_url": { "type": "string", "format": "uri" },
+        "notes": { "type": "string" }
+      },
+      "if": { "properties": { "direction": { "const": "outbound" } } },
+      "then": {
+        "required": [
+          "name",
+          "line_type",
+          "destination_prefixes",
+          "origination_prefixes"
+        ],
+        "not": { "required": ["number_type"] }
+      },
+      "else": {
+        "required": ["number_type"],
+        "not": {
+          "anyOf": [
+            { "required": ["line_type"] },
+            { "required": ["destination_prefixes"] },
+            { "required": ["origination_prefixes"] }
+          ]
+        }
+      }
+    }
+  }
+}
