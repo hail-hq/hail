@@ -3605,6 +3605,33 @@ async def test_the_oldest_registration_gets_the_credit_first(
     assert sms_carrier.campaigns_created == 1
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="cancelled",
+            # No submission owed, so only the bad time is in play.
+            provider_refs={"campaign_filed_at": "not a time", "brand_reused": True},
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:

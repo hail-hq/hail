@@ -86,7 +86,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import DateTime, String, cast, func, select, text, update
+from sqlalchemy import DateTime, String, case, cast, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
@@ -327,10 +327,16 @@ async def _uncharged_sms_steps(
         ]
     else:
         filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
-        happened = [
-            cast(func.nullif(filed_at, ""), DateTime(timezone=True))
-            > func.now() - text("interval '1 day'")
-        ]
+        # Cast only a value that starts as an ISO date (the API writes
+        # isoformat()); anything else is not a time and must not fail the read.
+        filed = case(
+            (
+                filed_at.op("~")(r"^\d{4}-\d{2}-\d{2}"),
+                cast(filed_at, DateTime(timezone=True)),
+            ),
+            else_=None,
+        )
+        happened = [filed > func.now() - text("interval '1 day'")]
     ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
     found = await db.execute(
         select(CarrierVerification.provider, CarrierVerification.subject_type).where(
@@ -657,6 +663,19 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     )
 
 
+# What _campaign_gated and _campaign_unfunded read of a row.
+_GATE_COLUMNS = (
+    CarrierVerification.id,
+    CarrierVerification.organization_id,
+    CarrierVerification.purpose,
+    CarrierVerification.state,
+    CarrierVerification.provider,
+    CarrierVerification.subject_type,
+    CarrierVerification.provider_refs,
+    CarrierVerification.created_at,
+)
+
+
 async def _campaign_unfunded(
     db: AsyncSession, rows: list[CarrierVerification], registry: Registry
 ) -> set[UUID]:
@@ -676,16 +695,7 @@ async def _campaign_unfunded(
     for org in orgs:
         # Columns only, so the rows the caller holds are not reloaded.
         found = await db.execute(
-            select(
-                CarrierVerification.id,
-                CarrierVerification.organization_id,
-                CarrierVerification.purpose,
-                CarrierVerification.state,
-                CarrierVerification.provider,
-                CarrierVerification.subject_type,
-                CarrierVerification.provider_refs,
-                CarrierVerification.created_at,
-            ).where(
+            select(*_GATE_COLUMNS).where(
                 CarrierVerification.organization_id == org,
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.state.in_(_BEFORE_CAMPAIGN_STATES),
@@ -713,26 +723,25 @@ async def _campaign_unfunded(
     return unfunded & given.keys()
 
 
-async def _lock_org_before_campaign(db: AsyncSession, verification_id: UUID) -> None:
-    """Take the organization's lock (``org_lock``) for a billed US texting
-    row, before the row lock: cancel_verification takes them in this order.
-    The campaign credit check (``_campaign_unfunded``) then runs under the
-    same lock as the filing check. Reads two columns only, so the locked
-    read that follows loads the row fresh."""
+async def _unfunded_by_id(
+    db: AsyncSession, verification_id: UUID, registry: Registry
+) -> bool:
+    """``_campaign_unfunded`` for one row, for the retry and the approve:
+    read under the organization's lock (``org_lock``), as the filing check,
+    then the lock is released (a commit) before the row lock and the
+    carrier calls that follow. Reads columns only, so the locked read that
+    follows loads the row fresh."""
     found = (
         await db.execute(
-            select(
-                CarrierVerification.organization_id,
-                CarrierVerification.purpose,
-            ).where(CarrierVerification.id == verification_id)
+            select(*_GATE_COLUMNS).where(CarrierVerification.id == verification_id)
         )
     ).one_or_none()
-    if (
-        found is not None
-        and found.purpose == "sms"
-        and found.organization_id != SELF_HOSTED_ORG_ID
-    ):
-        await org_lock(db, found.organization_id)
+    if found is None or not _campaign_gated(found, registry):
+        return False
+    await org_lock(db, found.organization_id)
+    unfunded = bool(await _campaign_unfunded(db, [found], registry))
+    await db.commit()  # ends the org lock
+    return unfunded
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -897,7 +906,11 @@ async def _lock_for_poll(db: AsyncSession, row: CarrierVerification) -> bool:
 
 
 async def _refresh(
-    db: AsyncSession, row: CarrierVerification, registry: Registry
+    db: AsyncSession,
+    row: CarrierVerification,
+    registry: Registry,
+    *,
+    wait_for_org_lock: bool = False,
 ) -> None:
     """Pull a submitted verification's outcome from the carrier.
 
@@ -914,7 +927,11 @@ async def _refresh(
         # or a billing write holds it: skip, the next poll asks) and not
         # held through the carrier call, which can take seconds: the
         # website's rater and other billing writes take the same lock.
-        locked = await try_org_lock(db, row.organization_id)
+        if wait_for_org_lock:
+            await org_lock(db, row.organization_id)
+            locked = True
+        else:
+            locked = await try_org_lock(db, row.organization_id)
         unfunded = locked and bool(await _campaign_unfunded(db, [row], registry))
         await db.commit()  # ends the org lock
         if not locked or unfunded:
@@ -1870,17 +1887,14 @@ async def _retry_submit(
     customer sees why and can start over; it is not retried again. A US
     texting draft whose campaign fee the credit does not cover waits: the
     campaign is filed right after the submit."""
-    await _lock_org_before_campaign(db, verification_id)
+    if await _unfunded_by_id(db, verification_id, registry):
+        return False  # nothing changed
     row = await _lock_waiting(db, verification_id)
     if row is None:
-        await db.commit()  # ends the org lock
         return False
     provider = registry(row.provider, row.purpose)
     if provider is None:
         await db.rollback()
-        return False
-    if await _campaign_unfunded(db, [row], registry):
-        await db.commit()  # ends both locks; nothing changed
         return False
     before = _billing_view(row)
     try:
@@ -2355,7 +2369,7 @@ async def amend_sms_application(
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
-    return _out(row, registry)
+    return await _out_checked(db, row, registry)
 
 
 def _can_cancel(row: CarrierVerification) -> bool:
@@ -2556,7 +2570,7 @@ async def confirm_verification(
     if problems:
         raise _problems_422(problems, row.organization_id, row.provider, row.id)
     # File the campaign now rather than on the next poll.
-    await _refresh(db, row, registry)
+    await _refresh(db, row, registry, wait_for_org_lock=True)
     return await _out_checked(db, row, registry)
 
 
@@ -2642,11 +2656,11 @@ async def admin_approve(
     whose campaign fee the organization's credit does not cover is left
     waiting (`waiting_for_credit`); the background pass sends it after a
     top-up."""
-    await _lock_org_before_campaign(db, verification_id)
+    unfunded = await _unfunded_by_id(db, verification_id, registry)
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
-    if await _campaign_unfunded(db, [row], registry):
-        await db.commit()  # ends both locks; nothing changed
+    if unfunded:
+        await db.commit()  # ends the row lock; nothing changed
         return _out(row, registry, AdminVerification, waiting_for_credit=True)
     before = _billing_view(row)
     try:
