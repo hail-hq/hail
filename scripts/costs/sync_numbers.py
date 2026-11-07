@@ -534,6 +534,10 @@ _TELNYX_ITEM = re.compile(
 # every other country the "Local" line is the one the API matches.
 TELNYX_DID_IS_LOCAL = frozenset({"US", "CA"})
 _TELNYX_NO_STOCK = "no numbers in stock"
+_HAND_PAGE_CHECK = re.compile(
+    r"Re-verified \d{4}-\d{2}-\d{2}: price read on telnyx\.com/pricing\.md, "
+    r"because the sync has no stock to observe for this row\.$"
+)
 
 
 class PricingPageUnusable(ValueError):
@@ -610,7 +614,7 @@ def confirm_from_telnyx_page(
     skipped: list[str],
     page_prices: dict[tuple[str, str], tuple[str, str]],
     today: str,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], dict[str, str]]:
     """Check rows Telnyx has no numbers in stock for against its pricing page.
 
     The page only confirms: Hail pays the price the API shows, and the page
@@ -620,9 +624,10 @@ def confirm_from_telnyx_page(
     A row that had vanished stays exactly as it vanished: only its check
     date moves, as in merge().
     Edits ``numbers`` in place. Returns (confirmed, differs): the keys
-    confirmed, and one line per key whose page price differs."""
+    confirmed, and a summary line for each key whose page price differs."""
     no_stock = telnyx_no_stock_keys(skipped)
-    confirmed, differs = [], []
+    confirmed: list[str] = []
+    differs: dict[str, str] = {}
     for i, row in enumerate(numbers):
         key = f"{row['country_code']}:{row['number_type']}"
         page = page_prices.get((row["country_code"], row["number_type"]))
@@ -631,13 +636,16 @@ def confirm_from_telnyx_page(
         if row.get("verification_method") == "manual-confirmed":
             continue
         ours = (row["usd_per_month"], row.get("setup_usd", "0.00"))
+        hidden = not row.get("available", True)
         if ours != page:
-            differs.append(
-                f"{key}: catalog {ours[0]} a month + {ours[1]} setup, "
-                f"page {page[0]} + {page[1]}"
-            )
+            # An off-sale row needs no one's time: it stays as it vanished.
+            if not hidden:
+                differs[key] = (
+                    f"{key}: catalog {ours[0]} a month + {ours[1]} setup, "
+                    f"page {page[0]} + {page[1]}"
+                )
             continue
-        if not row.get("available", True):
+        if hidden:
             numbers[i] = {**row, "last_verified": today}
             confirmed.append(key)
             continue
@@ -647,12 +655,11 @@ def confirm_from_telnyx_page(
             "verification_method": "carrier-sync",
             "verified_by": "telnyx-pricing-page",
             "source_url": TELNYX_PRICING_URL,
-            # The same note DIDWW out-of-stock rows get; a hand check's
-            # "Re-verified" note is replaced by this newer check.
+            # The same note DIDWW out-of-stock rows get. The note a hand
+            # page check writes (docs 4b) is replaced by this newer check;
+            # any other note stays.
             "notes": _rebuild_notes(
-                row.get("notes"),
-                _NO_STOCK_NOTE,
-                drop=lambda part: part.startswith("Re-verified "),
+                row.get("notes"), _NO_STOCK_NOTE, drop=_HAND_PAGE_CHECK.match
             ),
         }
         confirmed.append(key)
@@ -1589,13 +1596,15 @@ def run_provider(
         unobserved=unobserved_keys(existing, skipped, observed),
         kept_rows=kept_rows,
     )
-    confirmed, differs = confirm_from_telnyx_page(numbers, skipped, page_prices, today)
-    # Each key in one section only.
-    report["unobserved"] = [
-        k
-        for k in report["unobserved"]
-        if k not in confirmed and k not in {d.split(": ", 1)[0] for d in differs}
-    ]
+    confirmed: list[str] = []
+    differs: dict[str, str] = {}
+    if provider == "telnyx":
+        confirmed, differs = confirm_from_telnyx_page(
+            numbers, skipped, page_prices, today
+        )
+        # Each key in one section only.
+        listed = {*confirmed, *differs}
+        report["unobserved"] = [k for k in report["unobserved"] if k not in listed]
     write_catalog(path, provider, numbers)
     summary.append(
         f"## {provider}: {len(numbers)} rows, {len(countries)} countries"
@@ -1612,7 +1621,7 @@ def run_provider(
     _section(
         summary,
         "No numbers in stock, telnyx.com/pricing.md shows another price (check by hand)",
-        differs,
+        list(differs.values()),
         cap=len(differs),
     )
     _section(summary, "Requirements not refreshed", requirement_errors)

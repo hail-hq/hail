@@ -1977,7 +1977,11 @@ def test_telnyx_page_confirms_a_price_but_never_changes_one():
         "national",
         "7.00",
         "8.00",
-        notes="hand note; Re-verified 2026-11-06: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.",
+        notes=(
+            "Re-verified 2026-10-01 with Telnyx support: account price; "
+            "Re-verified 2026-11-06: price read on telnyx.com/pricing.md, "
+            "because the sync has no stock to observe for this row."
+        ),
     )
     no_setup = _telnyx_row("MD", "local", "30.00", verification_method="carrier-sync")
     other = _telnyx_row("SG", "local", "4.00", "5.00")
@@ -2000,7 +2004,9 @@ def test_telnyx_page_confirms_a_price_but_never_changes_one():
     )
 
     assert confirmed == ["SG:national", "MD:local", "GH:mobile"]
-    assert differs == ["SG:local: catalog 4.00 a month + 5.00 setup, page 5.00 + 5.00"]
+    assert differs == {
+        "SG:local": "SG:local: catalog 4.00 a month + 5.00 setup, page 5.00 + 5.00"
+    }
     checked = {
         "last_verified": "2026-11-14",
         "verification_method": "carrier-sync",
@@ -2010,7 +2016,11 @@ def test_telnyx_page_confirms_a_price_but_never_changes_one():
     assert numbers[0] == {
         **before[0],
         **checked,
-        "notes": f"hand note; {sync._NO_STOCK_NOTE}",
+        # Only the hand page-check note is replaced; a support note stays.
+        "notes": (
+            "Re-verified 2026-10-01 with Telnyx support: account price; "
+            f"{sync._NO_STOCK_NOTE}"
+        ),
     }
     assert numbers[1] == {**before[1], **checked, "notes": sync._NO_STOCK_NOTE}
     # Hidden: stays exactly as it vanished; only the check date moves.
@@ -2126,3 +2136,16 @@ def test_telnyx_page_is_not_read_when_every_type_has_stock(tmp_path, monkeypatch
     sync.run_provider(
         "telnyx", {"TELNYX_API_KEY": "k"}, tmp_path, "2026-11-14", [], not_synced=[]
     )
+
+
+def test_telnyx_page_ignores_an_off_sale_row_with_another_price():
+    hidden = _telnyx_row("GH", "mobile", "40.00", "40.00", available=False)
+    numbers = [dict(hidden)]
+    confirmed, differs = sync.confirm_from_telnyx_page(
+        numbers,
+        ["GH:mobile: no numbers in stock"],
+        {("GH", "mobile"): ("45.00", "40.00")},
+        "2026-11-14",
+    )
+    assert (confirmed, differs) == ([], {})
+    assert numbers == [hidden]
