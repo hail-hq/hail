@@ -125,6 +125,19 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     )
 
 
+async def _reply_sent(db: AsyncSession, sms: Sms) -> bool:
+    """True when an agent reply row to ``sms`` exists (the reply-sms
+    idempotency lookup)."""
+    stmt = select(Sms.id).where(
+        Sms.organization_id == sms.organization_id,
+        Sms.direction == "outbound",
+        Sms.agent_id.is_not(None),
+        Sms.to_e164 == sms.from_e164,
+        Sms.metadata_["reply_to_sms_id"].astext == str(sms.id),
+    )
+    return (await db.execute(stmt.limit(1))).first() is not None
+
+
 async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     """Claim the oldest answerable inbound text that still has an agent, or None.
 
@@ -134,9 +147,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     crashed worker's lease runs out and the row is claimed again, up to
     ``MAX_ATTEMPTS`` claims. Texts older than
     ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
-    On its first claim, a text whose org has no funds (``has_funds``, the
-    same rule as ``POST /internal/agent/reply-sms``) is skipped before any
-    model call. Retries skip this check and leave it to reply-sms.
+    A text whose org has no funds (``has_funds``, the same rule as
+    ``POST /internal/agent/reply-sms``) is skipped before any model call,
+    unless an earlier attempt already sent its reply.
     """
     now = datetime.now(timezone.utc)
     await _expire_unclaimable(db, now)
@@ -185,10 +198,10 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             await finish_reply(db, sms, "skipped")
             continue
         org = sms.organization_id
-        # First claim only: a retried text may already have been sent (POST
-        # timed out after the send), and reply-sms must record that as done.
-        if sms.agent_reply_attempts == 0 and (
-            org in unfunded or not await has_funds(db, org)
+        # A retry may follow a reply that was sent but whose POST timed out:
+        # reply-sms records that one as done, so it is not skipped here.
+        if (org in unfunded or not await has_funds(db, org)) and (
+            sms.agent_reply_attempts == 0 or not await _reply_sent(db, sms)
         ):
             # reply-sms would refuse the send: skip before the model runs.
             unfunded.add(org)

@@ -259,18 +259,39 @@ async def test_claim_skips_unfunded_org_and_takes_the_next_row(
     assert poor_row2.metadata_["skipped_reason"] == "insufficient_funds"
 
 
-async def test_retried_text_of_unfunded_org_is_still_claimed(async_session) -> None:
-    """A retry may follow a send whose POST timed out; reply-sms, not the
-    claim, decides it (its idempotency check runs before its funds gate)."""
-    await _seed(async_session, credits=0)
-    result = await _ingest(async_session, "hi", "SM23")
-    row = await async_session.get(Sms, result.sms_id)
-    row.agent_reply_attempts = 1
+async def test_retried_text_of_unfunded_org(async_session) -> None:
+    """A retry with no reply sent yet is skipped like a first claim. A retry
+    whose reply was sent (POST timed out after the send) is claimed, so
+    reply-sms records it as done."""
+    org, agent, number = await _seed(async_session, credits=0)
+    unsent = await _ingest(async_session, "hi", "SM23")
+    sent = await _ingest(async_session, "hello", "SM24")
+    unsent_row = await async_session.get(Sms, unsent.sms_id)
+    unsent_row.agent_reply_attempts = 1
+    unsent_row.requested_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    sent_row = await async_session.get(Sms, sent.sms_id)
+    sent_row.agent_reply_attempts = 1
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="Yes.",
+            metadata_={"reply_to_sms_id": str(sent.sms_id)},
+        )
+    )
     await async_session.commit()
 
     claimed = await text_agent.claim_pending_reply(async_session)
-    assert claimed is not None and claimed.sms.id == result.sms_id
+    assert claimed is not None and claimed.sms.id == sent.sms_id
     assert claimed.attempt == 2
+    await async_session.refresh(unsent_row)
+    assert unsent_row.agent_reply_state == "skipped"
+    assert unsent_row.metadata_["skipped_reason"] == "insufficient_funds"
 
 
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
