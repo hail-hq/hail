@@ -3,9 +3,10 @@
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and
 keys as calls: ``build_llm(None, org_llm)`` (org BYO with optional fallback,
-else the house chain). The DB side lives in ``hailhq.core.text_agent``; the
-send goes through ``POST /internal/agent/reply-sms`` where the thread cap,
-funds, suppression, billing and delivery live.
+else the house chain). The DB side lives in ``hailhq.core.text_agent``; its
+claim skips texts of an org with no funds, so the model never runs for them.
+The send goes through ``POST /internal/agent/reply-sms`` where the thread
+cap, funds (checked again), suppression, billing and delivery live.
 
 Process model: this thread is the only DB user in the worker's main process
 (call jobs run in child processes that LiveKit starts with ``spawn`` or a

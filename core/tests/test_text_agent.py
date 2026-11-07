@@ -6,17 +6,37 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent, threads
-from hailhq.core.models import Agent, Call, CallEvent, PhoneNumber, Sms
+from hailhq.core.models import AccountCredit, Agent, Call, CallEvent, PhoneNumber, Sms
 from hailhq.core.prompts import THREAD_TOOL_HINT_TEXT
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import select
 
 ORG_NUMBER = "+14155550100"
+OTHER_NUMBER = "+14155550101"
 PERSON = "+33612345678"
 
 
-async def _seed(session, *, sms_enabled=True, status="live", route=True):
+async def _seed(
+    session,
+    *,
+    sms_enabled=True,
+    status="live",
+    route=True,
+    credits=10_000,
+    e164=ORG_NUMBER,
+):
     org = uuid.uuid4()
+    if credits:
+        session.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=credits,
+                source="test",
+                ref="test",
+            )
+        )
     agent = Agent(
         organization_id=org,
         name="Front desk",
@@ -28,7 +48,7 @@ async def _seed(session, *, sms_enabled=True, status="live", route=True):
     await session.flush()
     number = PhoneNumber(
         organization_id=org,
-        e164=ORG_NUMBER,
+        e164=e164,
         country_code="US",
         number_type="local",
         provisioning_state="active",
@@ -40,11 +60,11 @@ async def _seed(session, *, sms_enabled=True, status="live", route=True):
     return org, agent, number
 
 
-async def _ingest(session, body: str, sid: str, opt_out_type=None):
+async def _ingest(session, body: str, sid: str, opt_out_type=None, to_e164=ORG_NUMBER):
     return await ingest_inbound_sms(
         session,
         from_e164=PERSON,
-        to_e164=ORG_NUMBER,
+        to_e164=to_e164,
         body=body,
         provider_message_sid=sid,
         opt_out_type=opt_out_type,
@@ -214,6 +234,107 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
     assert "skipped_reason" not in row.metadata_  # not an active-call skip
+
+
+async def test_claim_skips_unfunded_org_and_takes_the_next_row(
+    async_session,
+) -> None:
+    """Same funds rule as POST /internal/agent/reply-sms, checked at claim so
+    no model call runs for a reply that cannot be sent."""
+    poor_org, _agent, _poor_number = await _seed(async_session, credits=0)
+    poor = await _ingest(async_session, "hi", "SM20")
+    poor2 = await _ingest(async_session, "still there?", "SM22")
+    poor_row = await async_session.get(Sms, poor.sms_id)
+    poor_row.requested_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    poor_row2 = await async_session.get(Sms, poor2.sms_id)
+    poor_row2.requested_at = datetime.now(timezone.utc) - timedelta(minutes=4)
+    await async_session.commit()
+    await _seed(async_session, e164=OTHER_NUMBER)
+    funded = await _ingest(async_session, "hello", "SM21", to_e164=OTHER_NUMBER)
+
+    claimed = await text_agent.claim_pending_reply(async_session)
+    assert claimed is not None
+    assert claimed.sms.id == funded.sms_id
+    await async_session.refresh(poor_row)
+    assert poor_row.organization_id == poor_org
+    assert poor_row.agent_reply_state == "skipped"
+    assert poor_row.agent_reply_attempts == 0
+    assert poor_row.metadata_["skipped_reason"] == "insufficient_funds"
+    await async_session.refresh(poor_row2)
+    assert poor_row2.agent_reply_state == "skipped"
+    assert poor_row2.metadata_["skipped_reason"] == "insufficient_funds"
+
+
+async def test_retried_text_of_unfunded_org(async_session) -> None:
+    """A retry with no reply sent yet is skipped like a first claim, and so
+    is an expired lease. A retry whose reply was sent (POST timed out after
+    the send) is marked done at claim. No model call for any of them."""
+    org, agent, number = await _seed(async_session, credits=0)
+    unsent = await _ingest(async_session, "hi", "SM23")
+    sent = await _ingest(async_session, "hello", "SM24")
+    leased = await _ingest(async_session, "there?", "SM25")
+    now = datetime.now(timezone.utc)
+    unsent_row = await async_session.get(Sms, unsent.sms_id)
+    unsent_row.agent_reply_attempts = 1
+    unsent_row.requested_at = now - timedelta(minutes=6)
+    sent_row = await async_session.get(Sms, sent.sms_id)
+    sent_row.agent_reply_attempts = 1
+    sent_row.requested_at = now - timedelta(minutes=5)
+    leased_row = await async_session.get(Sms, leased.sms_id)
+    leased_row.agent_reply_state = "processing"
+    leased_row.agent_reply_attempts = 1
+    leased_row.agent_reply_available_at = now - timedelta(seconds=1)
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="Yes.",
+            metadata_={"reply_to_sms_id": str(sent.sms_id)},
+        )
+    )
+    await async_session.commit()
+
+    assert await text_agent.claim_pending_reply(async_session) is None
+    for row in (unsent_row, leased_row):
+        await async_session.refresh(row)
+        assert row.agent_reply_state == "skipped"
+        assert row.metadata_["skipped_reason"] == "insufficient_funds"
+    await async_session.refresh(sent_row)
+    assert sent_row.agent_reply_state == "done"
+
+
+async def test_retried_text_with_a_sent_reply_is_done_at_claim(
+    async_session,
+) -> None:
+    """A funded org's retry whose reply row exists is not handed to the
+    model again: the POST timed out after the send."""
+    org, agent, number = await _seed(async_session)
+    result = await _ingest(async_session, "hi", "SM26")
+    row = await async_session.get(Sms, result.sms_id)
+    row.agent_reply_attempts = 1
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_number_id=number.id,
+            agent_id=agent.id,
+            from_e164=ORG_NUMBER,
+            to_e164=PERSON,
+            direction="outbound",
+            status="sent",
+            body="Yes.",
+            metadata_={"reply_to_sms_id": str(result.sms_id)},
+        )
+    )
+    await async_session.commit()
+
+    assert await text_agent.claim_pending_reply(async_session) is None
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "done"
 
 
 async def test_claim_moves_past_dropped_texts_to_the_next_row(async_session) -> None:
