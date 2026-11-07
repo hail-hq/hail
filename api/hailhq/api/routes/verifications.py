@@ -578,24 +578,15 @@ def _campaign_gated(row: CarrierVerification, registry: Registry) -> bool:
     )
 
 
-def _campaign_fee(provider: str, subject_type: str) -> int | None:
-    """``sms_registration_fees.campaign_fee_cents``; None for a carrier with
-    no SMS registration fees."""
+def _carrier_fee(
+    fee: Callable[[str, str], int], provider: str, subject_type: str
+) -> int | None:
+    """``fee(provider, subject_type)`` from ``sms_registration_fees``; None
+    for a carrier with no SMS registration fees."""
     try:
-        return sms_registration_fees.campaign_fee_cents(provider, subject_type)
+        return fee(provider, subject_type)
     except KeyError:
         return None
-
-
-def _brand_fee(provider: str, subject_type: str) -> int:
-    """The carrier's brand cost (the submission), or 0 for a carrier with no
-    SMS registration fees."""
-    try:
-        full = sms_registration_fees.filing_fee_cents(provider, subject_type)
-        campaign = sms_registration_fees.campaign_fee_cents(provider, subject_type)
-    except KeyError:
-        return 0
-    return full - campaign
 
 
 async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
@@ -605,8 +596,10 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     does not pay for two steps."""
     brands = await _uncharged_sms_steps(db, organization_id, "submission")
     campaigns = await _uncharged_sms_steps(db, organization_id, "review")
-    return sum(_brand_fee(p, t) for p, t in brands) + sum(
-        _campaign_fee(p, t) or 0 for p, t in campaigns
+    brand = sms_registration_fees.brand_fee_cents
+    campaign = sms_registration_fees.campaign_fee_cents
+    return sum(_carrier_fee(brand, p, t) or 0 for p, t in brands) + sum(
+        _carrier_fee(campaign, p, t) or 0 for p, t in campaigns
     )
 
 
@@ -619,25 +612,51 @@ async def _campaign_unfunded(
     carrier's cost is the floor, as for the filing.
 
     The credit is the balance less the steps not yet charged
-    (``_uncharged_cents``). Each row in ``rows`` that it covers uses up its
-    fee, oldest first, so one credit never pays for two campaigns."""
-    left: dict[UUID, int] = {}
+    (``_uncharged_cents``). It goes to the organization's registrations
+    still before their campaign, oldest first, each using up its fee, so
+    one credit never pays for two campaigns. All of them count, not only
+    ``rows``, so every path gives the credit to the same registration."""
+    given = {row.id: row for row in rows}
+    orgs = {row.organization_id for row in rows if _campaign_gated(row, registry)}
     unfunded: set[UUID] = set()
-    for row in sorted(rows, key=lambda r: r.created_at):
-        if not _campaign_gated(row, registry):
-            continue
-        fee = _campaign_fee(row.provider, row.subject_type)
-        if fee is None:
-            continue
-        org = row.organization_id
-        if org not in left:
-            balance = await get_balance_cents(db, org)
-            left[org] = balance - await _uncharged_cents(db, org)
-        if left[org] < fee:
-            unfunded.add(row.id)
-        else:
-            left[org] -= fee
-    return unfunded
+    for org in orgs:
+        # Columns only, so the rows the caller holds are not reloaded.
+        found = await db.execute(
+            select(
+                CarrierVerification.id,
+                CarrierVerification.organization_id,
+                CarrierVerification.purpose,
+                CarrierVerification.state,
+                CarrierVerification.provider,
+                CarrierVerification.subject_type,
+                CarrierVerification.provider_refs,
+                CarrierVerification.created_at,
+            ).where(
+                CarrierVerification.organization_id == org,
+                CarrierVerification.purpose == "sms",
+                CarrierVerification.state.in_(_BEFORE_CAMPAIGN_STATES),
+            )
+        )
+        # The caller's copy of a row wins: it can be newer than the database.
+        candidates = {r.id: r for r in found} | {
+            i: r for i, r in given.items() if r.organization_id == org
+        }
+        left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
+        for row in sorted(candidates.values(), key=lambda r: (r.created_at, r.id)):
+            if not _campaign_gated(row, registry):
+                continue
+            fee = _carrier_fee(
+                sms_registration_fees.campaign_fee_cents,
+                row.provider,
+                row.subject_type,
+            )
+            if fee is None:
+                continue
+            if left < fee:
+                unfunded.add(row.id)
+            else:
+                left -= fee
+    return unfunded & given.keys()
 
 
 async def _lock_org_before_campaign(db: AsyncSession, verification_id: UUID) -> None:
@@ -835,25 +854,22 @@ async def _refresh(
     was_submitting = row.state == "submitting"
     if not _pollable(row):
         return
-    gated = _campaign_gated(row, registry)
-    # Before the row lock (cancel_verification's order). Held through the
-    # carrier call that files the campaign, as for the filing. Not waited
-    # for, like the row lock: when another poll (or a billing write) holds
-    # it, this poll skips the row and the next one asks.
-    if gated and not await try_org_lock(db, row.organization_id):
-        await db.commit()
-        return
+    if _campaign_gated(row, registry):
+        # The credit check reads the balance under the org lock, after the
+        # billing writes in flight. The lock is not waited for (another poll
+        # or a billing write holds it: skip, the next poll asks) and not
+        # held through the carrier call, which can take seconds: the
+        # website's rater and other billing writes take the same lock.
+        locked = await try_org_lock(db, row.organization_id)
+        unfunded = locked and bool(await _campaign_unfunded(db, [row], registry))
+        await db.commit()  # ends the org lock
+        if not locked or unfunded:
+            # Not covered: no carrier call, the row as it is.
+            return
     if not await _lock_for_poll(db, row):
-        if gated:
-            await db.commit()  # ends the org lock
         return
     if not _pollable(row):  # another poll settled it before the lock
         await db.commit()
-        return
-    if gated and await _campaign_unfunded(db, [row], registry):
-        # The campaign fee is not covered: no carrier call, the row as it
-        # is. The next poll tries again.
-        await db.commit()  # ends both locks
         return
     before = copy.deepcopy(row.provider_refs)
     status = await _fetch_status(row, registry)
@@ -2154,7 +2170,11 @@ async def admin_list(
         .scalars()
         .all()
     )
-    return [_out(r, registry, AdminVerification) for r in rows]
+    waiting = await _campaign_unfunded(db, rows, registry)
+    return [
+        _out(r, registry, AdminVerification, waiting_for_credit=r.id in waiting)
+        for r in rows
+    ]
 
 
 async def _admin_row(db: AsyncSession, verification_id: UUID) -> CarrierVerification:

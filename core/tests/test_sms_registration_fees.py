@@ -34,3 +34,8 @@ def test_campaign_fee_is_the_campaign_vetting() -> None:
     assert fees.campaign_fee_cents("telnyx", "person") == 1500
     with pytest.raises(KeyError):
         fees.campaign_fee_cents("didww", "person")
+
+
+def test_brand_fee_is_the_brand() -> None:
+    assert fees.brand_fee_cents("twilio", "business") == 4600
+    assert fees.brand_fee_cents("telnyx", "person") == 450

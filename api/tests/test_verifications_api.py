@@ -3570,6 +3570,40 @@ async def test_one_credit_files_one_campaign(
     assert sms_carrier.campaigns_created == 2
 
 
+async def test_the_oldest_registration_gets_the_credit_first(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A poll of the newer registration alone leaves the credit to the older
+    # one, as the list does.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{number_type}"},
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age in (("local", 3), ("toll_free", 2))
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.status_calls == 0
+    resp = await client.get(f"/verifications/{older.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:

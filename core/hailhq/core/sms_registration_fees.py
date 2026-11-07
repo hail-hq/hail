@@ -39,6 +39,13 @@ def filing_fee_cents(provider: str, subject_type: str, brand_kept: bool = False)
     return vetting if brand_kept else _cents(row["brand_usd"]) + vetting
 
 
+def brand_fee_cents(provider: str, subject_type: str) -> int:
+    """The carrier's one-time cost of a new brand (the submission; for a
+    company it includes the brand's vetting). Raises KeyError for a carrier
+    with no SMS registration."""
+    return _cents(_load()[provider][subject_type]["brand_usd"])
+
+
 def campaign_fee_cents(provider: str, subject_type: str) -> int:
     """The carrier's one-time cost of filing the campaign (its vetting), the
     step after the brand. Raises KeyError for a carrier with no SMS
