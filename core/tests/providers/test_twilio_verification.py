@@ -26,6 +26,7 @@ from hailhq.core.providers.verification.base import (
     SubmitRefused,
 )
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
+from twilio.base.exceptions import TwilioRestException
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -379,6 +380,108 @@ async def test_create_draft_carrier_problems_are_returned_and_draft_is_deleted(
     ]
     deletes = [c.request.url for c in responses.calls if c.request.method == "DELETE"]
     assert len(deletes) == 5  # bundle, two documents, end user, address
+
+
+@responses.activate
+async def test_create_draft_evaluation_400_becomes_a_problem(provider) -> None:
+    req = await _person_requirements(provider)
+    _register_draft_calls({})
+    responses.replace(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is missing items", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": "draft"},
+        status=200,
+    )
+    for path in (
+        f"Bundles/BU{'1' * 32}",
+        f"SupportingDocuments/RD{'1' * 32}",
+        f"SupportingDocuments/RD{'2' * 32}",
+        f"EndUsers/IT{'1' * 32}",
+    ):
+        responses.add(responses.DELETE, f"{NUMBERS}/{path}", status=204)
+    responses.add(
+        responses.DELETE,
+        f"https://api.twilio.com/2010-04-01/Accounts/{ACCOUNT_SID}/Addresses/AD{'1' * 32}.json",
+        status=204,
+    )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields=PERSON_FIELDS,
+        address=ADDRESS,
+        documents=_passport(),
+    )
+
+    assert result.refs == {}
+    assert [(p.field, p.message, p.raw) for p in result.problems] == [
+        ("", NOT_ACCEPTED, "Unable to create record: Bundle is missing items")
+    ]
+    deletes = [c.request.url for c in responses.calls if c.request.method == "DELETE"]
+    assert len(deletes) == 5  # bundle, two documents, end user, address
+
+
+@responses.activate
+async def test_check_evaluation_400_becomes_a_problem(provider) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is missing items", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": "draft"},
+        status=200,
+    )
+
+    problems = await provider.check({"bundle_sid": f"BU{'1' * 32}"})
+
+    assert [(p.field, p.message, p.raw) for p in problems] == [
+        ("", NOT_ACCEPTED, "Unable to create record: Bundle is missing items")
+    ]
+
+
+@responses.activate
+@pytest.mark.parametrize("bundle_status", ["pending-review", "provisionally-approved"])
+async def test_check_evaluation_400_of_a_sent_bundle_is_no_problem(
+    provider, bundle_status
+) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is not in draft", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": bundle_status},
+        status=200,
+    )
+
+    assert await provider.check({"bundle_sid": f"BU{'1' * 32}"}) == []
+
+
+@responses.activate
+async def test_check_evaluation_500_raises(provider) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 20500, "message": "Internal error", "status": 500},
+        status=500,
+    )
+
+    with pytest.raises(TwilioRestException):
+        await provider.check({"bundle_sid": f"BU{'1' * 32}"})
 
 
 @responses.activate
