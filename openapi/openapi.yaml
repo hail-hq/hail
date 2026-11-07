@@ -4906,6 +4906,21 @@ paths:
         A 409 comes before your files are checked and before anything is filed.
 
 
+        A number verification needs credit for the offer''s setup and first month
+
+        (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+
+        nothing is filed. That amount is set aside from your balance while the
+
+        carrier checks your papers. It pays for setup and the first month when
+
+        you buy the number with this verification, and comes back if the
+
+        verification is rejected or cancelled, or if no number is bought with it
+
+        within 30 days of approval. A by-request offer sets nothing aside.
+
+
         The carrier checks the details right away. Problems come back as 422 with
 
         the field named, and nothing is kept. When it passes, the verification is
@@ -4951,6 +4966,12 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description:
+            Not enough credit. A number verification needs the offer's
+            setup and first month (`setup_cents` + `monthly_cents` of the quote) and
+            sets that amount aside until you buy the number. A US SMS registration
+            needs its filing fee. Nothing is filed.
         "422":
           description: Validation Error
           content:

@@ -40,7 +40,7 @@ from hailhq.api.sms_registration import (
     reconcile_approved_registrations,
 )
 from hailhq.api.superadmin import require_superadmin
-from hailhq.core import sms_registration_fees, sms_setup
+from hailhq.core import sms_registration_fees, sms_setup, verification_hold
 from hailhq.core.billing import get_balance_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import settings
@@ -112,6 +112,17 @@ def get_verification_registry() -> Registry:
     return get_verification_provider
 
 
+def _hold_402(cents: int) -> HTTPException:
+    """402 for a number verification the balance cannot set aside."""
+    return HTTPException(
+        status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+        detail=(
+            "not enough credit to start verification; setup and the first "
+            f"month cost ${cents / 100:.2f}; add credit first"
+        ),
+    )
+
+
 def _quote_required(where: str) -> HTTPException:
     """422 for a number verification sent without the offer's quote_id."""
     return unprocessable(
@@ -121,17 +132,18 @@ def _quote_required(where: str) -> HTTPException:
     )
 
 
-async def _quote_provider_name(
+async def _quote_offer(
     db: AsyncSession,
     organization_id: UUID,
     quote_id: UUID,
     country_code: str,
     number_type: str,
     where: str,
-) -> str:
-    """The carrier of a number quote, so a client can verify for an offer
-    without knowing which carrier backs it. The quote must be for the same
-    country and number type as the request."""
+) -> dict:
+    """The stored offer of a number quote. Its ``provider`` is the carrier,
+    so a client can verify for an offer without knowing which carrier backs
+    it. The quote must be for the same country and number type as the
+    request."""
     offer = (
         await db.execute(
             select(NumberOffer.offer).where(
@@ -153,7 +165,7 @@ async def _quote_provider_name(
             "quote_id is for a different country_code or number_type",
             loc=[where, "quote_id"],
         )
-    return offer["provider"]
+    return offer
 
 
 async def _sms_carriers(
@@ -951,14 +963,16 @@ async def get_requirements(
             db, principal.organization_id, number_id, "query"
         )
     elif quote_id is not None:
-        name = await _quote_provider_name(
-            db,
-            principal.organization_id,
-            quote_id,
-            country_code,
-            number_type,
-            "query",
-        )
+        name = (
+            await _quote_offer(
+                db,
+                principal.organization_id,
+                quote_id,
+                country_code,
+                number_type,
+                "query",
+            )
+        )["provider"]
     else:
         raise _quote_required("query")
     requirements = await _requirements(
@@ -1085,6 +1099,16 @@ async def _read_file(upload) -> UploadedFile:
     response_model=VerificationResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="create_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit. A number verification needs the offer's "
+                "setup and first month (`setup_cents` + `monthly_cents` of the "
+                "quote) and sets that amount aside until you buy the number. "
+                "A US SMS registration needs its filing fee. Nothing is filed."
+            ),
+        },
+    },
 )
 async def create_verification(
     request: Request,
@@ -1116,6 +1140,14 @@ async def create_verification(
     one of the same subject type and the same name is a 409, and so is a
     second live one of the same subject type when the form holds no name.
     A 409 comes before your files are checked and before anything is filed.
+
+    A number verification needs credit for the offer's setup and first month
+    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+    nothing is filed. That amount is set aside from your balance while the
+    carrier checks your papers. It pays for setup and the first month when
+    you buy the number with this verification, and comes back if the
+    verification is rejected or cancelled, or if no number is bought with it
+    within 30 days of approval. A by-request offer sets nothing aside.
 
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
@@ -1166,12 +1198,13 @@ async def create_verification(
         raise unprocessable(
             "number_id is only for purpose=sms", loc=["body", "number_id"]
         )
+    offer: dict = {}
     if sub.purpose == "sms":
         provider_name = await _sms_provider_name(
             db, principal.organization_id, sub.number_id, "body"
         )
     elif sub.quote_id is not None:
-        provider_name = await _quote_provider_name(
+        offer = await _quote_offer(
             db,
             principal.organization_id,
             sub.quote_id,
@@ -1179,9 +1212,24 @@ async def create_verification(
             sub.number_type,
             "body",
         )
+        provider_name = offer["provider"]
     else:
         raise _quote_required("body")
     provider = _provider_or_404(registry, provider_name, sub.purpose)
+
+    # A billed number verification sets aside setup and the first month
+    # until the number is bought (a by-request offer is ordered by hand, so
+    # no purchase would give it back). Checked here first, before any
+    # carrier call, and again under the lock when the row is saved.
+    hold_cents = 0
+    if (
+        sub.purpose == "number"
+        and principal.auth_kind != "shared"
+        and not offer.get("by_request")
+    ):
+        hold_cents = offer["setup_cents"] + offer["monthly_cents"]
+        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+            raise _hold_402(hold_cents)
 
     if sub.purpose == "sms":
         # Held until the row is saved: a second filing at the same time
@@ -1360,8 +1408,28 @@ async def create_verification(
         provider_refs=draft.refs,
         requirements_version=requirements.version,
     )
+    if hold_cents:
+        # Not held across the carrier calls above: a top-up must not wait.
+        await org_lock(db, principal.organization_id)
+        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+            await db.rollback()
+            # Nothing of the customer's is left at the carrier.
+            try:
+                await provider.discard(draft.refs)
+            except Exception:
+                logger.exception("verification draft discard failed")
+            raise _hold_402(hold_cents)
     db.add(row)
     try:
+        if hold_cents:
+            await db.flush()
+            await verification_hold.place_hold(
+                db,
+                principal.organization_id,
+                row.id,
+                hold_cents,
+                channel="voice" if "voice" in offer["capabilities"] else "sms",
+            )
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it

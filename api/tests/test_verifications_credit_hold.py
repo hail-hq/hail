@@ -1,0 +1,251 @@
+"""A number verification needs setup plus the first month in credit. The
+amount is set aside when it starts and comes back when it is rejected,
+cancelled or left unused (core/verification_hold.py)."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from hailhq.api.main import app
+from hailhq.api.routes import verifications as verifications_routes
+from hailhq.api.routes.verifications import get_verification_registry
+from hailhq.core import verification_hold
+from hailhq.core.billing import get_balance_cents
+from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
+from hailhq.core.db import session_scope
+from hailhq.core.models import AccountCredit, CarrierVerification, NumberOffer
+from sqlalchemy import delete, select
+
+from .conftest import insert_org_and_key
+from .test_verifications_api import (
+    FakeCarrier,
+    _auth,
+    _passport,
+)
+
+SETUP, MONTHLY = 1500, 800
+NEEDED = SETUP + MONTHLY
+
+
+async def _quote(session, org, *, by_request=False) -> str:
+    quote = NumberOffer(
+        organization_id=org,
+        offer={
+            "provider": "fake",
+            "e164": None if by_request else "+447700900001",
+            "country_code": "GB",
+            "number_type": "mobile",
+            "capabilities": ["voice", "sms"],
+            "monthly_cents": MONTHLY,
+            "setup_cents": SETUP,
+            "by_request": by_request,
+        },
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    session.add(quote)
+    await session.commit()
+    return str(quote.id)
+
+
+@pytest.fixture()
+def carrier():
+    fake = FakeCarrier()
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": (
+            fake if name == "fake" and purpose == "number" else None
+        )
+    )
+    verifications_routes._last_polled.clear()
+    yield fake
+    app.dependency_overrides.pop(get_verification_registry, None)
+
+
+async def _org(session, balance: int):
+    org, _, key = await insert_org_and_key(session, initial_credit_cents=balance)
+    return org, key
+
+
+async def _create(client, key, quote_id, first="Ada", last="Lovelace"):
+    import json
+
+    return await client.post(
+        "/verifications",
+        data={
+            "quote_id": quote_id,
+            "country_code": "GB",
+            "number_type": "mobile",
+            "subject_type": "person",
+            "fields": json.dumps({"first_name": first, "last_name": last}),
+            "documents": json.dumps({"proof_of_identity": {"option": "passport"}}),
+        },
+        files=_passport(),
+        headers=_auth(key),
+    )
+
+
+async def _ledger(session, org, ref) -> list[AccountCredit]:
+    session.expire_all()
+    return (
+        (
+            await session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.organization_id == org, AccountCredit.ref == ref
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _rows(session, org) -> list[CarrierVerification]:
+    session.expire_all()
+    return (
+        (
+            await session.execute(
+                select(CarrierVerification).where(
+                    CarrierVerification.organization_id == org
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+# -- the gate and the hold ------------------------------------------------
+
+
+async def test_number_verification_402_below_needed(
+    client, async_session, carrier
+) -> None:
+    org, key = await _org(async_session, NEEDED - 1)
+    resp = await _create(client, key, await _quote(async_session, org))
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["detail"] == (
+        "not enough credit to start verification; setup and the first month "
+        "cost $23.00; add credit first"
+    )
+    assert carrier.drafts == []
+    assert await _rows(async_session, org) == []
+
+
+async def test_number_verification_holds_needed(client, async_session, carrier) -> None:
+    org, key = await _org(async_session, NEEDED)
+    resp = await _create(client, key, await _quote(async_session, org))
+    assert resp.status_code == 201, resp.text
+    vid = uuid.UUID(resp.json()["id"])
+    (hold,) = await _ledger(async_session, org, verification_hold.hold_ref(vid))
+    assert (int(hold.amount_cents), hold.kind, hold.source, hold.channel) == (
+        -NEEDED,
+        "debit",
+        "verification_hold",
+        "voice",
+    )
+    assert await get_balance_cents(async_session, org) == 0
+
+
+async def test_shared_key_no_hold(client, async_session, carrier, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "hail_api_key", "hail-test-shared-secret")
+    # Below the amount: the shared key is not billed.
+    await async_session.execute(
+        delete(AccountCredit).where(AccountCredit.organization_id == SELF_HOSTED_ORG_ID)
+    )
+    await async_session.commit()
+    quote_id = await _quote(async_session, SELF_HOSTED_ORG_ID)
+    resp = await _create(client, "hail-test-shared-secret", quote_id)
+    assert resp.status_code == 201, resp.text
+    vid = uuid.UUID(resp.json()["id"])
+    assert (
+        await _ledger(
+            async_session, SELF_HOSTED_ORG_ID, verification_hold.hold_ref(vid)
+        )
+        == []
+    )
+
+
+async def test_by_request_offer_no_hold(client, async_session, carrier) -> None:
+    org, key = await _org(async_session, 0)
+    resp = await _create(client, key, await _quote(async_session, org, by_request=True))
+    assert resp.status_code == 201, resp.text
+    vid = uuid.UUID(resp.json()["id"])
+    assert await _ledger(async_session, org, verification_hold.hold_ref(vid)) == []
+
+
+class _SpendingCarrier(FakeCarrier):
+    """Spends the credit while the carrier builds the draft: the balance
+    read before the draft passes, the one at save time does not."""
+
+    def __init__(self, org) -> None:
+        super().__init__()
+        self.org = org
+
+    async def create_draft(self, **kwargs):
+        async with session_scope() as other:
+            other.add(
+                AccountCredit(
+                    organization_id=self.org,
+                    kind="debit",
+                    channel="voice",
+                    amount_cents=-100,
+                    qty=1,
+                    ref=f"test-spend:{uuid.uuid4()}",
+                    source="test",
+                )
+            )
+            await other.commit()
+        return await super().create_draft(**kwargs)
+
+
+async def test_late_402_discards_draft(client, async_session) -> None:
+    org, key = await _org(async_session, NEEDED)
+    fake = _SpendingCarrier(org)
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": fake if name == "fake" else None
+    )
+    try:
+        resp = await _create(client, key, await _quote(async_session, org))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+    assert resp.status_code == 402, resp.text
+    assert len(fake.drafts) == 1
+    assert fake.discarded == [{"bundle_sid": "B1"}]
+    assert await _rows(async_session, org) == []
+    holds = (
+        (
+            await async_session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.organization_id == org,
+                    AccountCredit.source == "verification_hold",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert holds == []
+
+
+async def test_retry_one_hold(client, async_session, carrier) -> None:
+    org, key = await _org(async_session, 3 * NEEDED)
+    quote_id = await _quote(async_session, org)
+    first = await _create(client, key, quote_id)
+    again = await _create(client, key, quote_id)
+    assert first.status_code == 201, first.text
+    assert again.status_code == 409, again.text
+    holds = (
+        (
+            await async_session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.organization_id == org,
+                    AccountCredit.source == "verification_hold",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(holds) == 1
+    assert await get_balance_cents(async_session, org) == 2 * NEEDED
