@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core.inbound_calls import Accepted, Rejected, SipAttributes
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
-from hailhq.core.prompts import THREAD_TOOL_HINT_VOICE
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import parse_metadata
 from livekit import rtc
@@ -313,6 +312,7 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
 def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     """The outbound preamble tells the model it placed the call and must say it
     is "calling on someone's behalf"; an inbound caller must not hear that."""
+    from hailhq.core.prompts import PRIVACY_REMINDER
     from hailhq.voicebot.agent import (
         VOICE_PREAMBLE,
         VOICE_PREAMBLE_INBOUND,
@@ -327,7 +327,9 @@ def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     assert build_instructions("Book it.", "inbound").startswith(VOICE_PREAMBLE_INBOUND)
     assert build_instructions("Book it.", "outbound").startswith(VOICE_PREAMBLE)
     assert build_instructions("Book it.").startswith(VOICE_PREAMBLE)
-    assert build_instructions(None, "inbound") == VOICE_PREAMBLE_INBOUND
+    assert build_instructions(None, "inbound") == (
+        f"{VOICE_PREAMBLE_INBOUND}\n\n{PRIVACY_REMINDER}"
+    )
 
 
 async def test_inbound_without_first_message_waits_for_the_caller() -> None:
@@ -391,23 +393,6 @@ async def _call_row(session, caller="+33612345678", with_agent=True):
     )
     await session.commit()
     return call, agent, number
-
-
-def test_thread_hint_follows_the_tools_actually_built() -> None:
-    def tool(name: str) -> SimpleNamespace:
-        return SimpleNamespace(info=SimpleNamespace(name=name))
-
-    for tools, expected in (
-        ([tool("thread_history"), tool("hangup")], True),
-        ([tool("hangup")], False),
-        ([], False),
-    ):
-        assert agent_mod.has_thread_tool(tools) is expected
-        out = agent_mod.build_instructions(
-            "x", None, thread_tool=agent_mod.has_thread_tool(tools)
-        )
-        assert ("thread_history tool" in out) is expected
-        assert out.endswith(THREAD_TOOL_HINT_VOICE) is expected
 
 
 def test_the_prompt_loader_for_history_is_gone() -> None:
