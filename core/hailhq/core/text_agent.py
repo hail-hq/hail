@@ -6,15 +6,19 @@ voicebot's text worker (``hailhq.voicebot.textbot``) claims pending rows,
 builds the chat from the agent's instructions plus the recent texts, asks
 the LLM for one reply (it may read older texts and calls with the
 ``thread_history`` tool), and sends it through ``POST /internal/agent/reply-sms``.
-This module holds the DB side so the worker stays LLM-only.
+This module holds the DB side so the worker stays LLM-only. The claim skips
+texts of an org with no funds, so no model call runs for a reply the API
+would refuse.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
+from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
@@ -26,6 +30,7 @@ __all__ = [
     "CHAT_LIMIT",
     "CHAT_WINDOW",
     "CLAIM_LEASE",
+    "INSUFFICIENT_FUNDS_SKIP",
     "MAX_ATTEMPTS",
     "MAX_REPLIES_PER_THREAD",
     "MAX_REPLY_CHARS",
@@ -43,6 +48,8 @@ __all__ = [
     "thread_history_for_reply",
 ]
 
+logger = logging.getLogger(__name__)
+
 MAX_REPLY_CHARS = 480  # same cap as the voice send_sms tool (about 3 segments)
 # The chat holds at most this many texts (the new one included) from this
 # long ago. Calls are not in it: the model reads them with thread_history.
@@ -59,6 +66,9 @@ CLAIM_LEASE = timedelta(minutes=2)
 # Claims per text (the first try included) before it is marked failed.
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF = timedelta(seconds=30)  # doubled after each failed attempt
+# ``sms.metadata_["skipped_reason"]`` for a text skipped at claim because the
+# org has no funds. Never requeued (only ``threads.ACTIVE_CALL_SKIP`` is).
+INSUFFICIENT_FUNDS_SKIP = "insufficient_funds"
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -123,6 +133,8 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
     crashed worker's lease runs out and the row is claimed again, up to
     ``MAX_ATTEMPTS`` claims. Texts older than
     ``HAIL_TEXT_REPLY_MAX_AGE_SECONDS`` are skipped, not answered late.
+    A text whose org has no funds (``has_funds``, the same rule as
+    ``POST /internal/agent/reply-sms``) is skipped before any model call.
     """
     now = datetime.now(timezone.utc)
     await _expire_unclaimable(db, now)
@@ -161,16 +173,28 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             if number is not None and number.sms_agent_id
             else None
         )
-        if number is not None and agent is not None and answers_texts(agent):
-            sms.agent_reply_state = "processing"
-            sms.agent_reply_attempts += 1
-            sms.agent_reply_available_at = now + CLAIM_LEASE
-            attempt = sms.agent_reply_attempts
+        if number is None or agent is None or not answers_texts(agent):
+            # Routing changed between ingest and now: drop it quietly and take
+            # the next row, so a backlog of dropped texts does not cost a poll
+            # each.
+            await finish_reply(db, sms, "skipped")
+            continue
+        if not await has_funds(db, sms.organization_id):
+            # reply-sms would refuse the send: skip before the model runs.
+            logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
+            sms.agent_reply_state = "skipped"
+            sms.metadata_ = {
+                **(sms.metadata_ or {}),
+                "skipped_reason": INSUFFICIENT_FUNDS_SKIP,
+            }
             await db.commit()
-            return ClaimedReply(sms=sms, agent=agent, number=number, attempt=attempt)
-        # Routing changed between ingest and now: drop it quietly and take the
-        # next row, so a backlog of dropped texts does not cost a poll each.
-        await finish_reply(db, sms, "skipped")
+            continue
+        sms.agent_reply_state = "processing"
+        sms.agent_reply_attempts += 1
+        sms.agent_reply_available_at = now + CLAIM_LEASE
+        attempt = sms.agent_reply_attempts
+        await db.commit()
+        return ClaimedReply(sms=sms, agent=agent, number=number, attempt=attempt)
 
 
 def _thread_filter(a: str, b: str):
