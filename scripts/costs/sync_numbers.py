@@ -9,7 +9,8 @@ requests, no purchases, no account changes.
 
 Rules the merge follows, in this order:
 - A row someone verified by hand (verification_method "manual-confirmed") is
-  never overwritten and never marked unavailable. Disagreements are printed.
+  never marked unavailable, and only its requirements block (with
+  last_changed_at) is refreshed. Disagreements are printed.
 - A row that vanished from the carrier is kept with available=false, a note
   and the date. A held number must stay billable; the picker hides it.
 - A row DIDWW lists with no numbers in stock takes the price DIDWW shows
