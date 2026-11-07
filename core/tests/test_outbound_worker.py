@@ -707,3 +707,39 @@ async def test_system_mail_skips_funds_check(async_session):
         await async_session.execute(select(Email).where(Email.id == row.id))
     ).scalar_one()
     assert refreshed.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_unfunded_record_failure_does_not_block_queue(async_session, monkeypatch):
+    """If the webhook insert fails, the forward is still failed and the next
+    row is still processed."""
+    from hailhq.core import outbound_worker
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("fanout down")
+
+    monkeypatch.setattr(outbound_worker, "fanout_email_event", boom)
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    first, second = _inbound(org_id, dom.id), _inbound(org_id, dom.id)
+    async_session.add_all([first, second])
+    await async_session.flush()
+    ids = [first.id, second.id]
+    rows = [_queued_forward(org_id, dom.id, i) for i in ids]
+    async_session.add_all(rows)
+    await async_session.commit()
+    row_ids = [r.id for r in rows]
+
+    processed = await _worker(async_session, AsyncMock(), funds_check=has_funds).tick()
+
+    assert processed == 2
+    async_session.expire_all()
+    fwds = (
+        (await async_session.execute(select(Email).where(Email.id.in_(row_ids))))
+        .scalars()
+        .all()
+    )
+    assert {f.status for f in fwds} == {"failed"}
+    assert {f.end_reason for f in fwds} == {"insufficient_funds"}

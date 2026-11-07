@@ -40,8 +40,8 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from hailhq.core.agent_caps import agent_outbound_halted
+from hailhq.core.billing import INSUFFICIENT_FUNDS, FundsCheck
 from hailhq.core.email_delivery_events import record_sent_event
-from hailhq.core.email_ingest import INSUFFICIENT_FUNDS, FundsCheck
 from hailhq.core.models import Email, EmailAttachment, EmailDomain
 from hailhq.core.providers.email.base import EmailProvider, ProviderAttachment
 from hailhq.core.s3_mail import S3MailClient
@@ -51,7 +51,10 @@ from hailhq.core.telemetry_identity import (
     resolve_identity,
     tag_outbound_email,
 )
-from hailhq.core.webhook_fanout import fanout_email_event
+from hailhq.core.webhook_fanout import (
+    build_suppressed_event_data,
+    fanout_email_event,
+)
 from sqlalchemy import cast, func, literal_column, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,7 +275,7 @@ class OutboundForwardWorker:
             row.end_reason = INSUFFICIENT_FUNDS
             row.failed_at = now
             if inbound_uuid is not None:
-                await _stamp_insufficient_funds(
+                await _record_insufficient_funds(
                     session, inbound_uuid, row.organization_id
                 )
             return "failed"
@@ -359,6 +362,26 @@ class OutboundForwardWorker:
         return out
 
 
+async def _record_insufficient_funds(
+    session: AsyncSession, inbound_id: UUID, organization_id: UUID
+) -> None:
+    """Stamp and announce the send-time ``insufficient_funds``, best effort.
+
+    Runs in a savepoint: if the stamp or the webhook insert fails, it rolls
+    back alone and the forward row is still failed, so one bad row never
+    blocks the queue behind it.
+    """
+    try:
+        async with session.begin_nested():
+            await _stamp_insufficient_funds(session, inbound_id, organization_id)
+    except Exception:
+        logger.warning(
+            "insufficient_funds stamp failed for inbound email_id=%s",
+            inbound_id,
+            exc_info=True,
+        )
+
+
 async def _stamp_insufficient_funds(
     session: AsyncSession, inbound_id: UUID, organization_id: UUID
 ) -> None:
@@ -388,35 +411,39 @@ async def _stamp_insufficient_funds(
                     )
                 )
             )
-            .returning(Email.email_domain_id)
+            .returning(
+                Email.email_domain_id,
+                Email.from_address,
+                Email.to_addresses,
+                Email.subject,
+                Email.message_id,
+            )
         )
     ).first()
     if stamped is None:
         return
-    inbound = (
-        await session.execute(select(Email).where(Email.id == inbound_id))
-    ).scalar_one()
-    domain = (
-        await session.get(EmailDomain, inbound.email_domain_id)
-        if inbound.email_domain_id
+    domain_name = (
+        await session.scalar(
+            select(EmailDomain.domain).where(EmailDomain.id == stamped.email_domain_id)
+        )
+        if stamped.email_domain_id
         else None
     )
     await fanout_email_event(
         session,
         organization_id=organization_id,
-        email_domain_id=inbound.email_domain_id,
+        email_domain_id=stamped.email_domain_id,
         event_type="email.received.suppressed",
         event_id=inbound_id,
-        data={
-            "id": str(inbound_id),
-            "direction": "inbound",
-            "email_domain": domain.domain if domain else None,
-            "from_address": inbound.from_address,
-            "to_addresses": list(inbound.to_addresses or []),
-            "subject": inbound.subject or "",
-            "message_id": inbound.message_id,
-            "reason": INSUFFICIENT_FUNDS,
-        },
+        data=build_suppressed_event_data(
+            email_id=str(inbound_id),
+            email_domain=domain_name,
+            from_address=stamped.from_address,
+            to_addresses=list(stamped.to_addresses or []),
+            subject=stamped.subject or "",
+            message_id=stamped.message_id,
+            reason=INSUFFICIENT_FUNDS,
+        ),
     )
 
 
