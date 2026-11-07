@@ -29,7 +29,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -61,7 +61,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -93,7 +93,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -125,7 +125,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -143,7 +143,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -163,7 +163,7 @@
       "setup_usd": "50.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -198,7 +198,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -232,7 +232,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -252,7 +252,7 @@
       "setup_usd": "20.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -285,7 +285,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -320,7 +320,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -355,7 +355,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -391,7 +391,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -426,7 +426,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -458,7 +458,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -493,7 +493,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -510,11 +510,6 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "didww-api-sync",
-      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html",
       "requirements": {
         "person": {
           "accepted": true,
@@ -533,7 +528,12 @@
             "company_name"
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-06",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "didww-api-sync",
+      "source_url": "https://doc.didww.com/api3/2026-04-16/coverage-resources/did-group/get-did-groups.html"
     },
     {
       "country_code": "BE",
@@ -564,7 +564,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -602,7 +602,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -638,7 +638,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -673,7 +673,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -692,7 +692,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -709,9 +709,9 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 86 areas",
+      "notes": "monthly price varies by area: 3.50 to 6.00 USD across 85 areas",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -729,7 +729,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -763,7 +763,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -795,7 +795,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -814,7 +814,7 @@
       "available": true,
       "notes": "monthly price varies by area: 1.20 to 20.00 USD across 354 areas",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -833,7 +833,7 @@
       "available": true,
       "setup_usd": "5.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -869,7 +869,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -903,7 +903,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -940,7 +940,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -976,7 +976,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1013,7 +1013,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1051,7 +1051,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1070,7 +1070,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1088,7 +1088,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1108,7 +1108,8 @@
       "setup_usd": "30.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1140,7 +1141,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1172,7 +1173,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1207,7 +1208,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1243,7 +1244,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1263,7 +1264,7 @@
       "setup_usd": "11.50",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1296,7 +1297,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1316,7 +1317,7 @@
       "setup_usd": "50.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1352,7 +1353,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1388,7 +1389,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1425,7 +1426,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1443,7 +1444,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1477,7 +1478,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1512,7 +1513,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1544,7 +1545,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1563,7 +1564,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1583,7 +1584,7 @@
       "setup_usd": "12.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1615,7 +1616,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1650,7 +1651,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1686,7 +1687,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1716,7 +1717,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1736,7 +1737,7 @@
       "setup_usd": "55.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1774,7 +1775,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1806,7 +1807,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1844,7 +1845,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1878,7 +1879,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1912,7 +1913,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1945,7 +1946,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -1980,7 +1981,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2011,7 +2012,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2030,7 +2031,7 @@
       "available": true,
       "by_request": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2049,7 +2050,7 @@
       "available": true,
       "by_request": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2068,7 +2069,7 @@
       "available": true,
       "by_request": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2088,7 +2089,7 @@
       "setup_usd": "5.00",
       "by_request": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2120,7 +2121,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2155,7 +2156,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2190,7 +2191,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2227,7 +2228,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2245,7 +2246,9 @@
       "verification_required": false,
       "available": true,
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2277,7 +2280,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2310,7 +2313,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2329,7 +2332,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2361,7 +2364,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2396,7 +2399,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2432,7 +2435,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2469,7 +2472,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2507,7 +2510,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2543,7 +2546,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2578,7 +2581,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2598,7 +2601,7 @@
       "setup_usd": "18.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2634,7 +2637,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2652,7 +2655,7 @@
       "verification_required": true,
       "available": false,
       "setup_usd": "35.00",
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2686,7 +2689,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2719,7 +2722,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2753,7 +2756,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2771,7 +2774,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2789,7 +2792,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2807,7 +2810,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2827,7 +2830,7 @@
       "setup_usd": "20.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2864,7 +2867,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2899,7 +2902,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2917,7 +2920,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2952,7 +2955,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -2990,7 +2993,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3030,7 +3033,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3062,7 +3065,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3095,7 +3098,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3113,7 +3116,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3133,7 +3136,7 @@
       "setup_usd": "43.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3153,7 +3156,7 @@
       "setup_usd": "43.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3185,7 +3188,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3218,7 +3221,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3253,7 +3256,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3271,7 +3274,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3290,7 +3293,7 @@
       "available": true,
       "setup_usd": "50.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3326,7 +3329,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3363,7 +3366,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3394,7 +3397,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3426,7 +3429,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3446,7 +3449,7 @@
       "setup_usd": "45.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3481,7 +3484,8 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3512,7 +3516,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3548,7 +3552,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3566,7 +3570,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3601,7 +3605,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3620,7 +3624,8 @@
       "available": true,
       "setup_usd": "8.00",
       "receive_only": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3652,7 +3657,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3689,7 +3694,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3723,7 +3728,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3740,7 +3745,8 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-11-02",
+      "requirements": null,
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-05",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3773,7 +3779,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3791,7 +3797,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3824,7 +3830,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3857,7 +3863,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3894,7 +3900,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3933,7 +3939,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3966,7 +3972,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -3986,7 +3992,7 @@
       "setup_usd": "38.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4004,7 +4010,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4039,7 +4045,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4071,7 +4077,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4090,7 +4096,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4123,7 +4129,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4159,7 +4165,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4194,7 +4200,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4229,7 +4235,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4266,7 +4272,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4284,7 +4290,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4315,7 +4321,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4347,7 +4353,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4364,7 +4370,9 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "last_verified": "2026-10-07",
+      "requirements": null,
+      "notes": "carrier lists this type but had no numbers in stock at the last check",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-05",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4395,7 +4403,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4429,7 +4437,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4464,7 +4472,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4483,7 +4491,8 @@
       "available": true,
       "setup_usd": "38.00",
       "receive_only": true,
-      "last_verified": "2026-10-19",
+      "requirements": null,
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4517,7 +4526,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4552,7 +4561,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4587,7 +4596,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4622,7 +4631,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4658,7 +4667,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4695,7 +4704,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4730,7 +4739,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4760,7 +4769,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4780,7 +4789,7 @@
       "setup_usd": "5.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4816,7 +4825,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4853,7 +4862,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4891,7 +4900,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4910,7 +4919,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4943,7 +4952,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -4976,7 +4985,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5009,7 +5018,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5044,7 +5053,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5076,7 +5085,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5111,7 +5120,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5147,7 +5156,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5183,7 +5192,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5203,7 +5212,7 @@
       "setup_usd": "43.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5239,7 +5248,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5259,7 +5268,7 @@
       "setup_usd": "50.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5276,9 +5285,9 @@
       "mms": false,
       "verification_required": false,
       "available": true,
-      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2169 areas",
+      "notes": "monthly price varies by area: 1.20 to 20.00 USD across 2168 areas",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5297,7 +5306,7 @@
       "available": true,
       "setup_usd": "5.00",
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-09-26",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5332,7 +5341,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5364,7 +5373,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5383,7 +5392,7 @@
       "available": true,
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5403,7 +5412,7 @@
       "setup_usd": "38.00",
       "receive_only": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-10-07",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5438,7 +5447,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5473,7 +5482,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5508,7 +5517,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5545,7 +5554,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
@@ -5581,7 +5590,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-06",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "didww-api-sync",
