@@ -743,3 +743,13 @@ async def test_unfunded_record_failure_does_not_block_queue(async_session, monke
     )
     assert {f.status for f in fwds} == {"failed"}
     assert {f.end_reason for f in fwds} == {"insufficient_funds"}
+    # The webhook failure does not undo the stamp.
+    srcs = (
+        (await async_session.execute(select(Email).where(Email.id.in_(ids))))
+        .scalars()
+        .all()
+    )
+    assert [s.metadata_["suppressed_reasons"] for s in srcs] == [
+        ["insufficient_funds"],
+        ["insufficient_funds"],
+    ]

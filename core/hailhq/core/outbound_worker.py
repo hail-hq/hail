@@ -55,7 +55,7 @@ from hailhq.core.webhook_fanout import (
     build_suppressed_event_data,
     fanout_email_event,
 )
-from sqlalchemy import cast, func, literal_column, not_, or_, select, update
+from sqlalchemy import Row, cast, func, literal_column, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -367,16 +367,33 @@ async def _record_insufficient_funds(
 ) -> None:
     """Stamp and announce the send-time ``insufficient_funds``, best effort.
 
-    Runs in a savepoint: if the stamp or the webhook insert fails, it rolls
-    back alone and the forward row is still failed, so one bad row never
-    blocks the queue behind it.
+    The stamp and the webhook each run in their own savepoint: if one fails,
+    only it rolls back (logged), and the forward row is still failed, so one
+    bad row never blocks the queue behind it.
     """
     try:
         async with session.begin_nested():
-            await _stamp_insufficient_funds(session, inbound_id, organization_id)
+            stamped = await _stamp_insufficient_funds(
+                session, inbound_id, organization_id
+            )
     except Exception:
         logger.warning(
             "insufficient_funds stamp failed for inbound email_id=%s",
+            inbound_id,
+            exc_info=True,
+        )
+        return
+    if stamped is None:
+        # Already stamped by another forward row of this mail (or no row).
+        return
+    try:
+        async with session.begin_nested():
+            await _fanout_insufficient_funds(
+                session, inbound_id, organization_id, stamped
+            )
+    except Exception:
+        logger.warning(
+            "insufficient_funds webhook failed for inbound email_id=%s",
             inbound_id,
             exc_info=True,
         )
@@ -384,20 +401,19 @@ async def _record_insufficient_funds(
 
 async def _stamp_insufficient_funds(
     session: AsyncSession, inbound_id: UUID, organization_id: UUID
-) -> None:
-    """Record ``insufficient_funds`` on the inbound row, as the ingest does.
+) -> Row[Any] | None:
+    """Add ``insufficient_funds`` to the inbound row's ``suppressed_reasons``.
 
-    Adds the reason to ``metadata.suppressed_reasons`` in SQL, so reasons the
-    ingest already wrote stay, then fires one ``email.received.suppressed``
-    event. Two forward rows of one mail list the reason once and fire one
-    event: the second update matches no row.
+    Appends in SQL, so reasons the ingest already wrote stay. Returns the
+    inbound row's event fields, or None when nothing changed: two forward
+    rows of one mail list the reason once and fire one event.
     """
     # A JSON null in the key reads as "no reasons yet".
     current = func.nullif(
         Email.metadata_["suppressed_reasons"], literal_column("'null'::jsonb")
     )
     reasons = func.coalesce(current, cast([], JSONB))
-    stamped = (
+    return (
         await session.execute(
             update(Email)
             .where(Email.id == inbound_id)
@@ -420,8 +436,15 @@ async def _stamp_insufficient_funds(
             )
         )
     ).first()
-    if stamped is None:
-        return
+
+
+async def _fanout_insufficient_funds(
+    session: AsyncSession,
+    inbound_id: UUID,
+    organization_id: UUID,
+    stamped: Row[Any],
+) -> None:
+    """Fire the ``email.received.suppressed`` event the ingest check fires."""
     domain_name = (
         await session.scalar(
             select(EmailDomain.domain).where(EmailDomain.id == stamped.email_domain_id)
