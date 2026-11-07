@@ -105,7 +105,7 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 4. If the price actually changed, also update `last_changed_at` to today's date. Otherwise leave it alone.
    If the price is promotional, set `promo_ends_at` to its last day. When the promotion ends, record the list price and remove the field.
 5. Set `verified_by` to your GitHub handle.
-6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source).
+6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source). Number catalogs (`twilio.json`, `telnyx.json`, `didww.json`): use `community-pr` for a price you saw. `manual-confirmed` pins the row: the weekly sync stops updating it, even when the carrier changes the price ([docs](../docs/operations/number-catalog-sync.md)).
 7. Update `source_url` if it has changed.
 8. **Two-source rule**: any price change must include two independent links in the PR description (vendor pricing page + a secondary source — vendor announcement, third-party aggregator, doc page). If a second source is genuinely unavailable, set `confidence: medium` on the affected row and call it out in the PR.
 9. Open a pull request. CI validates the schema and runs alias-uniqueness + `replaced_by_model_id` resolution checks.

@@ -4788,7 +4788,7 @@
           ]
         }
       },
-      "notes": "Price changed 2026-11-07: 5.00 a month and 5.00 setup, confirmed by hand in the Telnyx portal number search; this is also the last price the API showed (2026-09-28). telnyx.com/pricing.md lists 7.00 and 8.00. Was 7.00 a month and 8.00 setup.; carrier lists this type but had no numbers in stock at the last check"
+      "notes": "Price changed 2026-11-07: 5.00 a month and 5.00 setup, confirmed by hand in a Telnyx number search; this is also the last price the API showed (2026-09-28). Was 7.00 a month and 8.00 setup; carrier lists this type but had no numbers in stock at the last check"
     },
     {
       "country_code": "SI",

@@ -634,6 +634,8 @@ def confirm_from_telnyx_page(
         page = page_prices.get((row["country_code"], row["number_type"]))
         if key not in candidates or page is None:
             continue
+        if row.get("verification_method") == "manual-confirmed":
+            continue  # also filtered by telnyx_page_candidates
         ours = (row["usd_per_month"], row.get("setup_usd") or "0.00")
         hidden = not row.get("available", True)
         if tuple(map(_decimal, ours)) != tuple(map(_decimal, page)):

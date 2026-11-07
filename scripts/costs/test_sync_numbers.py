@@ -1884,6 +1884,14 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Toll-Free Monthly Recurring Cost. | $1 | number | mrc | — | — |
 | Toll-Free One Time Cost. | $1 | number | otc | — | — |
 
+### Global Numbers Extra (`global-numbers-extra`, 1 rate)
+
+#### DE
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Germany Mobile Monthly Recurring Cost | $77 | number | mrc | — | — |
+
 ## Other
 
 #### DE
@@ -1920,7 +1928,9 @@ def test_telnyx_pricing_page_is_read_by_country_heading(monkeypatch):
     # Left out: Direct Inward Dial outside the US and Canada, Shared-Cost, usage, number ranges, the
     # "#### Global" table, a one-time cost with no monthly price (MD
     # mobile), two different prices (CY local), rate tiers (US toll-free),
-    # and number lines outside the number sections (Sms Api, Voice Api).
+    # and number lines outside the number sections (Sms Api, Voice Api, a
+    # section whose title only starts with "Global Numbers", and a table
+    # after a higher "## " heading).
 
 
 def test_telnyx_pricing_page_with_too_few_prices_is_not_used(monkeypatch):
@@ -2045,7 +2055,7 @@ def test_telnyx_run_checks_out_of_stock_rows_against_the_page(tmp_path, monkeypa
     prev = _telnyx_row("SG", "national", "7.00", "8.00", dial_code="65")
     (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
     monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
-    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    stocked = _telnyx_row("SG", "local", "5.00", "5.00")
     for k in (
         "last_verified",
         "last_changed_at",
@@ -2107,7 +2117,7 @@ def test_telnyx_run_lists_a_differing_row_once(tmp_path, monkeypatch):
     prev = _telnyx_row("SG", "national", "7.00", "8.00")
     (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
     monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
-    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    stocked = _telnyx_row("SG", "local", "5.00", "5.00")
     monkeypatch.setattr(
         sync,
         "fetch_telnyx",
@@ -2135,7 +2145,7 @@ def test_telnyx_run_lists_a_differing_row_once(tmp_path, monkeypatch):
 
 def test_telnyx_page_is_not_read_when_every_type_has_stock(tmp_path, monkeypatch):
     (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
-    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    stocked = _telnyx_row("SG", "local", "5.00", "5.00")
     monkeypatch.setattr(sync, "fetch_telnyx", lambda *a, **k: ([stocked], []))
 
     def no_page(http):
@@ -2174,7 +2184,7 @@ def test_telnyx_page_compares_prices_as_numbers():
 
 def test_telnyx_page_is_not_read_for_types_new_to_the_catalog(tmp_path, monkeypatch):
     (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
-    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    stocked = _telnyx_row("SG", "local", "5.00", "5.00")
     monkeypatch.setattr(
         sync,
         "fetch_telnyx",
@@ -2193,7 +2203,7 @@ def test_telnyx_page_is_not_read_for_types_new_to_the_catalog(tmp_path, monkeypa
 def _run_telnyx_out_of_stock(tmp_path, monkeypatch, prev, page):
     (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
     monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
-    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    stocked = _telnyx_row("SG", "local", "5.00", "5.00")
     monkeypatch.setattr(
         sync,
         "fetch_telnyx",
@@ -2240,3 +2250,14 @@ def test_telnyx_page_is_not_read_for_hand_verified_rows(tmp_path, monkeypatch):
     sg = next(n for n in out if n["number_type"] == "national")
     assert sg["last_verified"] == "2026-10-01"
     assert sg["verification_method"] == "manual-confirmed"
+
+
+def test_telnyx_page_never_touches_a_hand_verified_row():
+    row = _telnyx_row(
+        "SG", "national", "7.00", "8.00", verification_method="manual-confirmed"
+    )
+    numbers = [dict(row)]
+    confirmed, differs = sync.confirm_from_telnyx_page(
+        numbers, {"SG:national"}, {("SG", "national"): ("7.00", "8.00")}, "2026-11-14"
+    )
+    assert (confirmed, differs, numbers) == ([], {}, [row])
