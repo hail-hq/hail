@@ -4769,9 +4769,9 @@
       "setup_usd": "5.00",
       "last_verified": "2026-11-07",
       "last_changed_at": "2026-11-07",
-      "verification_method": "community-pr",
+      "verification_method": "manual-confirmed",
       "verified_by": "r13i",
-      "source_url": "https://portal.telnyx.com/",
+      "source_url": "https://developers.telnyx.com/api/numbers/list-available-phone-numbers",
       "requirements": {
         "person": {
           "accepted": false,
@@ -4788,7 +4788,7 @@
           ]
         }
       },
-      "notes": "Price changed 2026-11-07: the owner confirmed in the Telnyx portal that the account pays 5.00 a month and 5.00 setup, the last price the API showed (2026-09-28). telnyx.com/pricing.md lists 7.00 and 8.00, which is not the account price. Was 7.00 a month and 8.00 setup; carrier lists this type but had no numbers in stock at the last check"
+      "notes": "Price changed 2026-11-07: 5.00 a month and 5.00 setup, confirmed by hand in the Telnyx portal number search; this is also the last price the API showed (2026-09-28). telnyx.com/pricing.md lists 7.00 and 8.00. Was 7.00 a month and 8.00 setup."
     },
     {
       "country_code": "SI",

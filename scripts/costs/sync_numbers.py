@@ -20,7 +20,8 @@ Rules the merge follows, in this order:
   carrier dropping the type. Telnyx shows no price without a number, so
   such a row is checked against telnyx.com/pricing.md: the same price there
   marks it checked today; another price leaves it as it was and lists it
-  in the summary (a row that had vanished is not listed). The page never
+  in the summary (a row that had vanished stays under "not observed"). The
+  page never
   changes a price: Hail pays what the API shows.
   Twilio only: a catalog country outside the account listing is asked the
   Pricing API; no prices at all means Twilio sells nothing there through the
@@ -626,15 +627,13 @@ def confirm_from_telnyx_page(
     date moves, as in merge().
     Edits ``numbers`` in place. Returns (confirmed, differs): the keys
     confirmed, and a summary line for each key whose page price differs."""
-    no_stock = telnyx_no_stock_keys(skipped)
+    candidates = telnyx_page_candidates(numbers, skipped)
     confirmed: list[str] = []
     differs: dict[str, str] = {}
     for i, row in enumerate(numbers):
         key = f"{row['country_code']}:{row['number_type']}"
         page = page_prices.get((row["country_code"], row["number_type"]))
-        if key not in no_stock or page is None:
-            continue
-        if row.get("verification_method") == "manual-confirmed":
+        if key not in candidates or page is None:
             continue
         ours = (row["usd_per_month"], row.get("setup_usd") or "0.00")
         hidden = not row.get("available", True)
@@ -665,6 +664,18 @@ def confirm_from_telnyx_page(
         }
         confirmed.append(key)
     return confirmed, differs
+
+
+def telnyx_page_candidates(numbers: list[dict], skipped: list[str]) -> set[str]:
+    """Keys the page may confirm: rows skipped for having no number on sale,
+    except hand-verified ones."""
+    no_stock = telnyx_no_stock_keys(skipped)
+    return {
+        key
+        for n in numbers
+        if (key := f"{n['country_code']}:{n['number_type']}") in no_stock
+        and n.get("verification_method") != "manual-confirmed"
+    }
 
 
 def telnyx_no_stock_keys(skipped: list[str]) -> set[str]:
@@ -1592,13 +1603,7 @@ def run_provider(
     differs: dict[str, str] = {}
     # Read the page only when a row it could confirm exists. A session of
     # its own: the API key is not sent to the website.
-    no_stock = telnyx_no_stock_keys(skipped) if provider == "telnyx" else set()
-    checkable = any(
-        f"{n['country_code']}:{n['number_type']}" in no_stock
-        and n.get("verification_method") != "manual-confirmed"
-        for n in numbers
-    )
-    if checkable:
+    if provider == "telnyx" and telnyx_page_candidates(numbers, skipped):
         page_prices, page_problem = fetch_telnyx_pricing(
             http_factory(requests.Session())
         )
@@ -1607,7 +1612,7 @@ def run_provider(
         confirmed, differs = confirm_from_telnyx_page(
             numbers, skipped, page_prices, today
         )
-        # Each key in one section only.
+        # Not also under "Not observed" or "Skipped".
         listed = {*confirmed, *differs}
         report["unobserved"] = [k for k in report["unobserved"] if k not in listed]
         skipped = [line for line in skipped if line.partition(": ")[0] not in listed]
@@ -1626,7 +1631,7 @@ def run_provider(
     )
     _section(
         summary,
-        "No numbers in stock, telnyx.com/pricing.md shows another price (check by hand)",
+        "No numbers in stock, telnyx.com/pricing.md shows another price (catalog kept)",
         list(differs.values()),
         cap=len(differs),
     )

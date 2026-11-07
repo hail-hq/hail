@@ -2180,3 +2180,50 @@ def test_telnyx_page_is_not_read_for_types_new_to_the_catalog(tmp_path, monkeypa
     sync.run_provider(
         "telnyx", {"TELNYX_API_KEY": "k"}, tmp_path, "2026-11-14", [], not_synced=[]
     )
+
+
+def _run_telnyx_out_of_stock(tmp_path, monkeypatch, prev, page):
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    monkeypatch.setattr(
+        sync,
+        "fetch_telnyx",
+        lambda *a, **k: ([stocked], ["SG:national: no numbers in stock"]),
+    )
+    monkeypatch.setattr(sync, "fetch_telnyx_pricing", page)
+    summary: list[str] = []
+    sync.run_provider(
+        "telnyx",
+        {"TELNYX_API_KEY": "k"},
+        tmp_path,
+        "2026-11-14",
+        summary,
+        not_synced=[],
+    )
+    return "\n".join(summary)
+
+
+def test_telnyx_page_read_failure_is_listed(tmp_path, monkeypatch):
+    text = _run_telnyx_out_of_stock(
+        tmp_path,
+        monkeypatch,
+        _telnyx_row("SG", "national", "5.00", "5.00"),
+        lambda http: ({}, "https://telnyx.com/pricing.md: not read (down)"),
+    )
+    assert "- https://telnyx.com/pricing.md: not read (down)" in text
+    assert "- SG:national: no numbers in stock" in text
+
+
+def test_telnyx_page_is_not_read_for_hand_verified_rows(tmp_path, monkeypatch):
+    def no_page(http):
+        raise AssertionError("page read")
+
+    _run_telnyx_out_of_stock(
+        tmp_path,
+        monkeypatch,
+        _telnyx_row(
+            "SG", "national", "5.00", "5.00", verification_method="manual-confirmed"
+        ),
+        no_page,
+    )
