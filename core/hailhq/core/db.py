@@ -134,3 +134,16 @@ async def org_lock(db: AsyncSession, org: UUID) -> None:
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": str(org)},
     )
+
+
+async def try_org_lock(db: AsyncSession, org: UUID) -> bool:
+    """``org_lock`` without waiting: False when another transaction holds
+    it. For work that can skip a turn and try again later."""
+    return bool(
+        (
+            await db.execute(
+                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": str(org)},
+            )
+        ).scalar_one()
+    )
