@@ -1325,7 +1325,7 @@ async def test_amend_sms_application_field_errors_strip_private_input(
             json={
                 "detail": [
                     {
-                        "loc": ["body", "fields", "opt_in_message"],
+                        "loc": ["body", "opt_in_message"],
                         "msg": "Include message frequency",
                         "input": _FIELD_VALUE,
                         "ctx": {"private": _NAME},
@@ -1342,10 +1342,7 @@ async def test_amend_sms_application_field_errors_strip_private_input(
         attest_authorized=True,
     )
     assert result["problems"] == [
-        {
-            "loc": ["body", "fields", "opt_in_message"],
-            "msg": "Include message frequency",
-        }
+        {"loc": ["body", "opt_in_message"], "msg": "Include message frequency"}
     ]
     assert _FIELD_VALUE not in json.dumps(result) and _NAME not in json.dumps(result)
     assert "same verification_id" in result["error"]
@@ -1480,6 +1477,7 @@ async def test_preview_sms_application_field_errors_strip_private_input(
     [
         (404, "Number not found among your active US local numbers that can text."),
         (422, [{"loc": ["body", "number_id"], "msg": "Pass number_id."}]),
+        (422, "Buy a US number first, then register it for texting."),
     ],
 )
 async def test_preview_sms_application_passes_the_api_sentence_for_non_field_errors(
@@ -1495,6 +1493,7 @@ async def test_preview_sms_application_passes_the_api_sentence_for_non_field_err
     assert result["error"] in (
         "Number not found among your active US local numbers that can text.",
         "Pass number_id.",
+        "Buy a US number first, then register it for texting.",
     )
 
 
@@ -1539,15 +1538,69 @@ async def test_preview_sms_application_counts_utf8_bytes_not_escapes(
 
 
 @respx.mock
-async def test_preview_sms_application_keeps_only_campaign_text_keys(
+async def test_preview_sms_application_refuses_a_partial_reply(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(200, json={"description": "Reminders."})
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert "error" in result and "description" not in result
+
+
+@respx.mock
+async def test_preview_sms_application_keeps_the_fix_with_mixed_problems(
     client: HailClient,
 ) -> None:
     respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
         return_value=httpx.Response(
-            200, json={"description": "Reminders.", "provider_refs": {"t": "x"}}
+            422,
+            json={
+                "detail": [
+                    {"loc": ["body", "number_id"], "msg": "Pass number_id."},
+                    {"loc": ["body", "terms_url"], "msg": "Required."},
+                ]
+            },
         )
     )
     result = await tools.preview_sms_application(
         client=client, subject_type="person", fields={"program_name": "Acme"}
     )
-    assert result == {"description": "Reminders."}
+    assert result["error"].startswith("Pass number_id. Correct the listed fields")
+
+
+@respx.mock
+async def test_preview_sms_application_never_echoes_a_raw_detail(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(
+            422, json={"detail": [{"loc": ["body"], "input": _FIELD_VALUE}]}
+        )
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert result == {"error": "the API refused the request (422)"}
+
+
+@respx.mock
+async def test_amend_sms_application_non_field_refusal_says_what_the_api_said(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.patch(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        return_value=httpx.Response(
+            422, json={"detail": "Changing the legal sender requires support."}
+        )
+    )
+    result = await tools.amend_sms_application(
+        client=client,
+        verification_id=vid,
+        fields={"program_name": "Acme"},
+        address=_kwargs(client)["address"],
+        attest_authorized=True,
+    )
+    assert result == {"error": "Changing the legal sender requires support."}

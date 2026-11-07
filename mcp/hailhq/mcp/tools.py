@@ -1082,23 +1082,23 @@ _NOT_ANSWERS = {"number_id", "subject_type", "purpose", "country_code", "number_
 
 def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
     """The reply to a 404 or 422 about an application. Problems on the
-    user's answers get `fix`; anything else (pick a number, contact support)
-    gets the API's own messages, read from the stripped problems only, so no
-    submitted value is echoed."""
+    user's answers get `fix`. Other problems (pick a number, contact support)
+    add the API's own messages, read from the stripped problems or the API's
+    plain sentence only, so no submitted value or proxy page is echoed."""
     problems = exc.problems or []
-    answers = [
-        p
+    others = [
+        p["msg"]
         for p in problems
-        if len(p.get("loc", [])) >= 2 and str(p["loc"][1]) not in _NOT_ANSWERS
+        if len(p.get("loc", [])) < 2 or str(p["loc"][1]) in _NOT_ANSWERS
     ]
-    if problems and len(answers) == len(problems):
-        return {"error": fix, "problems": problems}
     if problems:
-        return {"error": " ".join(p["msg"] for p in problems), "problems": problems}
-    detail = exc.detail
-    if isinstance(detail, str) and detail and len(detail) <= 300 and "<" not in detail:
-        return {"error": detail}
-    return _format_api_error(exc)
+        parts = [*others, fix] if len(others) < len(problems) else others
+        return {"error": " ".join(parts), "problems": problems}
+    if exc.message:
+        return {"error": exc.message}
+    if exc.status == 404:
+        return _format_api_error(exc)
+    return {"error": f"the API refused the request ({exc.status})"}
 
 
 async def amend_sms_application(
@@ -1227,7 +1227,9 @@ async def submit_verification(
         }
     details_bytes = _details_bytes(fields, address or {}, documents)
     if details_bytes is None:
-        return {"error": "fields, address and documents must be JSON values"}
+        return {
+            "error": "fields, address and documents must be valid JSON text. Nothing was sent."
+        }
     if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
         return {
             "error": f"fields, address and documents total {details_bytes} "

@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from dataclasses import fields as dataclass_fields
+from dataclasses import asdict
 from typing import Any
 from urllib.parse import quote
 
@@ -65,6 +65,7 @@ from hailhq.core.schemas import (
     VerificationResponse,
     WhoamiResponse,
 )
+from pydantic import TypeAdapter
 from typing_extensions import Self
 
 
@@ -85,14 +86,22 @@ class HailAPIError(Exception):
         detail: str,
         retry_after: str | None = None,
         problems: list[dict[str, Any]] | None = None,
+        message: str | None = None,
     ) -> None:
         super().__init__(f"hail api error {status}: {detail}")
         self.status = status
         self.detail = detail
+        # The API's own sentence: set only when the JSON body's ``detail`` is
+        # a plain string. Never a proxy page or a list holding submitted input.
+        self.message = message
         self.retry_after = retry_after
         # Carrier problems from a 422 on POST /verifications, reduced to
         # ``loc`` and ``msg`` only. See ``HailClient.submit_verification``.
         self.problems = problems
+
+
+# The preview's reply shape, built once.
+_CAMPAIGN_TEXT = TypeAdapter(CampaignText)
 
 
 class HailClient:
@@ -617,15 +626,9 @@ class HailClient:
         if number_id is not None:
             body["number_id"] = number_id
         resp = await self._client.post("/verifications/sms/preview", json=body)
-        data = _decode(resp, problems=True)
-        # Only the core CampaignText keys reach the agent. A key the API adds
-        # or drops later does not break the tool.
-        keys = {f.name for f in dataclass_fields(CampaignText)}
-        return (
-            {k: v for k, v in data.items() if k in keys}
-            if isinstance(data, dict)
-            else {}
-        )
+        # Checked against the core shape: extra keys are dropped, and a
+        # missing or wrong key fails, so the agent never shows partial text.
+        return asdict(_CAMPAIGN_TEXT.validate_python(_decode(resp, problems=True)))
 
     async def amend_sms_application(
         self,
@@ -907,7 +910,8 @@ def _path_id(value: str, *, name: str = "id") -> str:
 
 def _decode(resp: httpx.Response, *, problems: bool = False) -> Any:
     """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise.
-    With ``problems``, a 422 carries its field problems (without the input)."""
+    With ``problems``, a 422 carries its field problems (without the input)
+    and the error carries the API's own sentence when there is one."""
     if 200 <= resp.status_code < 300:
         return resp.json()
     raise HailAPIError(
@@ -915,7 +919,18 @@ def _decode(resp: httpx.Response, *, problems: bool = False) -> Any:
         detail=_error_detail(resp),
         retry_after=resp.headers.get("retry-after"),
         problems=_problems(resp) if problems and resp.status_code == 422 else None,
+        message=_api_message(resp) if problems else None,
     )
+
+
+def _api_message(resp: httpx.Response) -> str | None:
+    """The JSON body's ``detail`` when it is a plain string, else None."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) and detail.strip() else None
 
 
 def _decode_empty(resp: httpx.Response) -> None:
