@@ -114,6 +114,23 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 8. **Two-source rule**: any price change must include two independent links in the PR description (vendor pricing page + a secondary source — vendor announcement, third-party aggregator, doc page). If a second source is genuinely unavailable, set `confidence: medium` on the affected row and call it out in the PR.
 9. Open a pull request. CI validates the schema and runs alias-uniqueness + `replaced_by_model_id` resolution checks.
 
+## Weekly jobs, in order
+
+Every Monday these jobs run in this order (UTC). Each one writes its own files, so two jobs never edit the same file.
+
+| Time  | Workflow             | Writes                                         | Output                          |
+| ----- | -------------------- | ---------------------------------------------- | ------------------------------- |
+| 05:00 | `costs-refresh`      | `llm.json`, `stt.json`, `tts.json`, `sms.json` | PR `costs/weekly-refresh`       |
+| 08:00 | `costs-sync-numbers` | `twilio.json`, `telnyx.json`, `didww.json`     | PR `costs/numbers-sync`         |
+| 08:30 | `costs-sync-voice`   | `voice.json`                                   | PR `costs/voice-sync`           |
+| 09:00 | `costs-stale`        | nothing (reads `main`)                         | issue "Model costs: stale rows" |
+
+Rules:
+
+1. The stale check runs last. It reads `main` only, so a row refreshed in a sync PR that is not merged yet still shows as stale. Merge the Monday sync PRs, then rerun **Actions → costs-stale → Run workflow** if the issue lists rows those PRs fixed.
+2. A new job gets its own time slot and its own files. Never let two jobs write the same file: their PRs would conflict.
+3. Moving a job's time? Update this table and the `cron` comment in each workflow file in the same PR.
+
 ## Refresh cadence
 
 A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old, and rows whose `promo_ends_at` has passed. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.

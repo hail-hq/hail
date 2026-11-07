@@ -26,9 +26,13 @@ jq '.rates[] | select(.provider=="twilio" and .country_code=="ES" and .line_type
 
 A carrier that is not synced keeps any rows it already has. Nothing reads this file for billing yet: calls are still billed at one rate per minute.
 
+## Build order
+
+This file is step 1 of per-destination call pricing. The steps after it ship in a fixed order: see "Order of work" in [CLAUDE.md](../../CLAUDE.md#order-of-work).
+
 ## Weekly refresh
 
-[`.github/workflows/costs-sync-voice.yml`](../../.github/workflows/costs-sync-voice.yml) runs every Monday 08:30 UTC (and on **Actions → costs-sync-voice → Run workflow**). It runs the sync, validates the file against the schema, and opens a pull request on branch `costs/voice-sync` labelled `costs-sync`. The PR body is the sync summary. No change, no PR.
+[`.github/workflows/costs-sync-voice.yml`](../../.github/workflows/costs-sync-voice.yml) runs every Monday 08:30 UTC, after the number sync and before the stale check ([order of the Monday jobs](../../costs/README.md#weekly-jobs-in-order)) (and on **Actions → costs-sync-voice → Run workflow**). It runs the sync, validates the file against the schema, and opens a pull request on branch `costs/voice-sync` labelled `costs-sync`. The PR body is the sync summary. No change, no PR.
 
 It uses the `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` repository secrets, the same ones as the number sync ([number-catalog-sync.md](number-catalog-sync.md)). The "Allow GitHub Actions to create and approve pull requests" setting described there applies here too.
 

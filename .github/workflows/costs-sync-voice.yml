@@ -7,7 +7,7 @@ name: costs-sync-voice
 # uv run python scripts/costs/sync_voice.py --env-file .env
 on:
   schedule:
-    - cron: "30 8 * * 1" # Mondays 08:30 UTC, after the number sync
+    - cron: "30 8 * * 1" # Mondays 08:30 UTC. Order of the Monday jobs: costs/README.md, "Weekly jobs, in order"
   workflow_dispatch: {}
 
 permissions:

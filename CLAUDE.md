@@ -84,6 +84,21 @@ Internal runbooks (not published) live in `docs/operations/`:
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
 
+## Order of work
+
+Some changes only work when they ship in a fixed order. Follow these every time.
+
+1. **Monday cost jobs.** They run in a fixed order, each writing its own files. The table and rules are in [costs/README.md](costs/README.md#weekly-jobs-in-order).
+2. **hail before hail-website.** A change that spans both repos merges and deploys in hail first: migrations, API fields, endpoints, `costs/*.json` (hail-website reads them from `main`). Merge the hail-website PR only after the hail deploy finishes. The hail-website code must never call something hail does not serve yet.
+3. **Per-destination call pricing.** The PRs merge in this order, each after the one before is deployed:
+   1. hail: carrier call rates in `costs/voice.json` and the weekly sync.
+   2. hail: the real carrier cost of each call leg.
+   3. hail-website: the rater that charges from those costs.
+   4. hail, then hail-website: plain call forwarding (no agent).
+   5. hail-website: the pricing copy ("from" a price per minute).
+
+   The copy (step 5) never ships before the rater (step 3) is live. Otherwise the site shows prices Hail does not charge.
+
 ## Agent prompt maintenance
 
 Shared runtime instructions live in `core/hailhq/core/prompts.py`. Keep them out of customer APIs and the console.
