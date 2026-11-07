@@ -281,7 +281,9 @@ def classify(
         found.update(cats)
 
     for slot in req.documents:
-        add(slot.name, slot.label, "document")
+        # A merged slot is classified by the requirements it stands for.
+        for name, label in slot.also or ((slot.name, slot.label),):
+            add(name, label, "document")
     for field in req.fields:
         add(field.name, field.label, "textual")
     for rule in rules or []:

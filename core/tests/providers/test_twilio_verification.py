@@ -20,6 +20,7 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
+from hailhq.core.providers.verification import twilio as twilio_mod
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
@@ -648,7 +649,7 @@ async def test_choice_fields_become_options(provider) -> None:
 async def test_create_draft_merges_slots_of_one_document_type(provider) -> None:
     """South Africa: name and ID number both take a government-issued
     document. Twilio refuses to evaluate a bundle with two documents of one
-    type, so the two slots become one document with both slots' values."""
+    type, so the form asks once and one document carries both values."""
     _regs_response("ZA-mobile-individual")
     req = await provider.requirements("ZA", "mobile", "person")
     responses.reset()
@@ -668,9 +669,6 @@ async def test_create_draft_merges_slots_of_one_document_type(provider) -> None:
         documents={
             "address_proof_info": DocumentInput(option="bank_statement", file=file()),
             "name_info": DocumentInput(
-                option="government_issued_document", file=file()
-            ),
-            "identity_doc_no_info": DocumentInput(
                 option="government_issued_document",
                 fields={"document_number": "9001015009087"},
                 file=file(),
@@ -694,10 +692,12 @@ async def test_create_draft_merges_slots_of_one_document_type(provider) -> None:
 
 @responses.activate
 async def test_create_draft_refuses_two_different_documents_of_one_type(
-    provider,
+    provider, monkeypatch
 ) -> None:
     """Twilio takes one government-issued document per check: a second,
-    different one is refused before anything is sent, not silently dropped."""
+    different one is refused before anything is sent, not silently dropped.
+    The form merges such slots; this covers a client that sends both."""
+    monkeypatch.setattr(twilio_mod, "_one_slot_per_type", tuple)
     _regs_response("ZA-mobile-individual")
     req = await provider.requirements("ZA", "mobile", "person")
     responses.reset()
@@ -731,3 +731,21 @@ async def test_create_draft_refuses_two_different_documents_of_one_type(
     assert result.refs == {}
     assert [p.field for p in result.problems] == ["identity_doc_no_info"]
     assert len(responses.calls) == 0
+
+
+@responses.activate
+async def test_requirements_ask_once_for_slots_of_one_document_type(provider) -> None:
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    assert [s.name for s in req.documents] == ["address_proof_info", "name_info"]
+    gov = req.documents[1]
+    assert gov.label == "Government-issued photo ID"
+    assert gov.help == (
+        "Used for: Proof of Authorized Representative Name, Proof of Identity Number."
+    )
+    (option,) = gov.options
+    assert [f.name for f in option.fields] == ["document_number"]
+    assert option.copies == ("first_name", "last_name")
+    assert [name for name, _ in gov.also] == ["name_info", "identity_doc_no_info"]
+    # The public form has no trace of the merge.
+    assert "also" not in json.dumps(req.model_dump(mode="json"))
