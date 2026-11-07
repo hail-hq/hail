@@ -515,7 +515,6 @@ TELNYX_PRICING_URL = "https://telnyx.com/pricing.md"
 # table per country.
 TELNYX_PRICING_SECTIONS = ("Global Numbers", "Toll Free Numbers")
 TELNYX_PRICING_TYPE = {
-    "Local": "local",
     "Mobile": "mobile",
     "National": "national",
     "Toll-Free": "toll_free",
@@ -525,10 +524,15 @@ TELNYX_PRICING_FLOOR = 100
 _TELNYX_RATE = re.compile(
     r"^\| (?P<item>[^|]+?) \| \$(?P<rate>[0-9]+(?:\.[0-9]+)?) \| number \| (?P<kind>mrc|otc) \|"
 )
+# The country name in front is optional: the US toll-free line has none.
 _TELNYX_ITEM = re.compile(
-    r"^.+? (?P<type>Local|Mobile|National|Toll-Free)(?: number)? "
-    r"(?:Monthly Recurring|One Time) Cost\.?$"
+    r"^(?:.+? )?(?P<type>Local|Mobile|National|Toll-Free|Direct Inward Dial)"
+    r"(?: number)? (?:Monthly Recurring|One Time) Cost\.?$"
 )
+# In these countries the API's "local" number is the page's Direct Inward
+# Dial line; their "Local number" line is another product (US: $50). In
+# every other country the "Local" line is the one the API matches.
+TELNYX_DID_IS_LOCAL = frozenset({"US", "CA"})
 _TELNYX_NO_STOCK = "no numbers in stock"
 
 
@@ -538,7 +542,7 @@ class PricingPageUnusable(ValueError):
 
 def parse_telnyx_pricing(text: str) -> dict[tuple[str, str], tuple[str, str]]:
     """(ISO, type) -> (monthly, setup) as money() strings, from
-    telnyx.com/pricing.md.
+    telnyx.com/pricing.md. Only used to confirm a price, never to set one.
 
     Rows look like ``| Singapore National One Time Cost | $8 | number | otc |``
     under a ``#### SG`` heading. The heading gives the country, so country
@@ -566,8 +570,14 @@ def parse_telnyx_pricing(text: str) -> dict[tuple[str, str], tuple[str, str]]:
         rate = _TELNYX_RATE.match(line)
         item = rate and _TELNYX_ITEM.match(rate["item"])
         if not item:
-            continue  # Direct Inward Dial, Shared-Cost, rate tiers, usage
-        number_type = TELNYX_PRICING_TYPE[item["type"]]
+            continue  # Shared-Cost, vanity and rate tiers, usage
+        did = item["type"] == "Direct Inward Dial"
+        if item["type"] == "Local" or did:
+            if did != (iso in TELNYX_DID_IS_LOCAL):
+                continue
+            number_type = "local"
+        else:
+            number_type = TELNYX_PRICING_TYPE[item["type"]]
         found[(iso, number_type, rate["kind"])].add(Decimal(rate["rate"]))
     prices = {}
     for (iso, number_type, kind), monthly in found.items():
@@ -607,12 +617,11 @@ def confirm_from_telnyx_page(
     is not tied to billing. Same monthly and setup price: the row is marked
     checked today, with the page as source. Another price: the row is left
     as it is and listed for a person. Hand-verified rows are not touched.
-    Edits ``numbers`` in place. Returns (confirmed, differs) summary lines."""
-    no_stock = {
-        line.split(": ", 1)[0]
-        for line in skipped
-        if line.split(": ", 1)[-1] == _TELNYX_NO_STOCK
-    }
+    A row that had vanished stays exactly as it vanished: only its check
+    date moves, as in merge().
+    Edits ``numbers`` in place. Returns (confirmed, differs): the keys
+    confirmed, and one line per key whose page price differs."""
+    no_stock = telnyx_no_stock_keys(skipped)
     confirmed, differs = [], []
     for i, row in enumerate(numbers):
         key = f"{row['country_code']}:{row['number_type']}"
@@ -628,31 +637,35 @@ def confirm_from_telnyx_page(
                 f"page {page[0]} + {page[1]}"
             )
             continue
-        checked = {
+        if not row.get("available", True):
+            numbers[i] = {**row, "last_verified": today}
+            confirmed.append(key)
+            continue
+        numbers[i] = {
             **row,
             "last_verified": today,
             "verification_method": "carrier-sync",
             "verified_by": "telnyx-pricing-page",
             "source_url": TELNYX_PRICING_URL,
-        }
-        if checked.get("available", True):
             # The same note DIDWW out-of-stock rows get; a hand check's
             # "Re-verified" note is replaced by this newer check.
-            checked["notes"] = "; ".join(
-                [
-                    *(
-                        part
-                        for part in (row.get("notes") or "").split("; ")
-                        if part
-                        and part != _NO_STOCK_NOTE
-                        and not part.startswith("Re-verified ")
-                    ),
-                    _NO_STOCK_NOTE,
-                ]
-            )
-        numbers[i] = checked
+            "notes": _rebuild_notes(
+                row.get("notes"),
+                _NO_STOCK_NOTE,
+                drop=lambda part: part.startswith("Re-verified "),
+            ),
+        }
         confirmed.append(key)
     return confirmed, differs
+
+
+def telnyx_no_stock_keys(skipped: list[str]) -> set[str]:
+    """The "ISO:type" keys map_telnyx skipped for having no number on sale."""
+    return {
+        key
+        for key, _, reason in (line.partition(": ") for line in skipped)
+        if reason == _TELNYX_NO_STOCK
+    }
 
 
 # -- DIDWW --------------------------------------------------------------------
@@ -1077,16 +1090,9 @@ def merge(
             kept["last_changed_at"] = today
             # Appended, not written over: a hand-verified row's notes say why
             # a human confirmed it and must outlive the carrier's feed.
-            kept["notes"] = "; ".join(
-                [
-                    # A no-stock note no longer holds once the type is gone.
-                    *(
-                        part
-                        for part in (kept.get("notes") or "").split("; ")
-                        if part and part != _NO_STOCK_NOTE
-                    ),
-                    _VANISHED_NOTE.format(today=today),
-                ]
+            # A no-stock note no longer holds once the type is gone.
+            kept["notes"] = _rebuild_notes(
+                kept.get("notes"), _VANISHED_NOTE.format(today=today)
             )
         report["vanished"].append(key)
         numbers.append(kept)
@@ -1098,6 +1104,19 @@ _VANISHED_NOTE = (
     "not offered by the carrier as of {today}; kept so held numbers stay billable"
 )
 _NO_STOCK_NOTE = "carrier lists this type but had no numbers in stock at the last check"
+
+
+def _rebuild_notes(
+    notes: str | None, add: str, drop: Callable[[str], bool] = lambda part: False
+) -> str:
+    """``notes`` without the no-stock note and the parts ``drop`` picks,
+    then ``add``."""
+    kept = [
+        part
+        for part in (notes or "").split("; ")
+        if part and part != _NO_STOCK_NOTE and not drop(part)
+    ]
+    return "; ".join([*kept, add])
 
 
 def _no_stock_unused(prev: dict | None) -> bool:
@@ -1502,12 +1521,14 @@ def run_provider(
             return False
         session.headers["Authorization"] = f"Bearer {key}"
         rows, skipped = fetch_telnyx(http_factory(session), dial_codes)
-        # A session of its own: the API key is not sent to the website.
-        page_prices, page_problem = fetch_telnyx_pricing(
-            http_factory(requests.Session())
-        )
-        if page_problem:
-            skipped.append(page_problem)
+        # Read only when a type had no stock. A session of its own: the API
+        # key is not sent to the website.
+        if telnyx_no_stock_keys(skipped):
+            page_prices, page_problem = fetch_telnyx_pricing(
+                http_factory(requests.Session())
+            )
+            if page_problem:
+                skipped.append(page_problem)
     else:
         key = config.get("DIDWW_API_KEY")
         if not key:
@@ -1569,23 +1590,31 @@ def run_provider(
         kept_rows=kept_rows,
     )
     confirmed, differs = confirm_from_telnyx_page(numbers, skipped, page_prices, today)
-    report["unobserved"] = [k for k in report["unobserved"] if k not in confirmed]
+    # Each key in one section only.
+    report["unobserved"] = [
+        k
+        for k in report["unobserved"]
+        if k not in confirmed and k not in {d.split(": ", 1)[0] for d in differs}
+    ]
     write_catalog(path, provider, numbers)
     summary.append(
         f"## {provider}: {len(numbers)} rows, {len(countries)} countries"
         + (f" ({len(stocked)} with stock)" if stocked != countries else "")
     )
     _row_sections(summary, report)
-    for label, lines in (
-        ("No numbers in stock, price confirmed on telnyx.com/pricing.md", confirmed),
-        (
-            "No numbers in stock, telnyx.com/pricing.md shows another price (check by hand)",
-            differs,
-        ),
-    ):
-        if lines:
-            summary.append(f"### {label} ({len(lines)})")
-            summary.extend(f"- {line}" for line in lines)
+    # Uncapped, like the row sections: the reviewer must see them all.
+    _section(
+        summary,
+        "No numbers in stock, price confirmed on telnyx.com/pricing.md",
+        confirmed,
+        cap=len(confirmed),
+    )
+    _section(
+        summary,
+        "No numbers in stock, telnyx.com/pricing.md shows another price (check by hand)",
+        differs,
+        cap=len(differs),
+    )
     _section(summary, "Requirements not refreshed", requirement_errors)
     _section(summary, "Skipped by the sync", skipped)
     return True

@@ -1841,6 +1841,15 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Singapore Shared-Cost Monthly Recurring Cost | $26.67 | number | mrc | — | — |
 | Singapore Inbound Local from Landline per minute | $0.008 | minute | usage | — | — |
 
+#### US
+
+| Item | Rate | Unit | Type | Direction | Volume tiers |
+|---|---:|---|---|---|---|
+| Direct Inward Dial Vanity Tier 1 Monthly Recurring Cost. | $2 | number | mrc | — | — |
+| Direct Inward Dial Monthly Recurring Cost. | $1 | number | mrc | — | 0-50: $1 |
+| Direct Inward Dial One Time Cost. | $1 | number | otc | — | 0-50: $1 |
+| United States Local number Monthly Recurring Cost | $50 | number | mrc | — | — |
+
 #### MD
 
 | Item | Rate | Unit | Type | Direction | Volume tiers |
@@ -1872,6 +1881,8 @@ _TELNYX_PAGE = """# Telnyx Pricing
 | Item | Rate | Unit | Type | Direction | Volume tiers |
 |---|---:|---|---|---|---|
 | US Toll-Free Rate 3 Monthly Recurring Cost. | $9 | number | mrc | — | — |
+| Toll-Free Monthly Recurring Cost. | $1 | number | mrc | — | — |
+| Toll-Free One Time Cost. | $1 | number | otc | — | — |
 
 ### Voice Api (`voice-api`, 1 rate)
 
@@ -1893,8 +1904,12 @@ def test_telnyx_pricing_page_is_read_by_country_heading(monkeypatch):
         # The same price written twice is one price.
         ("CY", "national"): ("5.50", "0.00"),
         ("DE", "toll_free"): ("30.00", "40.00"),
+        # US local is the Direct Inward Dial line, not "Local number" ($50).
+        ("US", "local"): ("1.00", "1.00"),
+        # A line with no country name in front.
+        ("US", "toll_free"): ("1.00", "1.00"),
     }
-    # Left out: Direct Inward Dial, Shared-Cost, usage, number ranges, the
+    # Left out: Direct Inward Dial outside the US and Canada, Shared-Cost, usage, number ranges, the
     # "#### Global" table, a one-time cost with no monthly price (MD
     # mobile), two different prices (CY local), rate tiers (US toll-free),
     # and number lines outside the number sections (Sms Api, Voice Api).
@@ -1909,7 +1924,7 @@ def test_telnyx_pricing_page_with_too_few_prices_is_not_used(monkeypatch):
     prices, problem = sync.fetch_telnyx_pricing(Page())
     assert prices == {}
     assert problem == (
-        "https://telnyx.com/pricing.md: not read (only 5 number prices found "
+        "https://telnyx.com/pricing.md: not read (only 7 number prices found "
         "(< 100)); out-of-stock rows not checked"
     )
 
@@ -1998,8 +2013,8 @@ def test_telnyx_page_confirms_a_price_but_never_changes_one():
         "notes": f"hand note; {sync._NO_STOCK_NOTE}",
     }
     assert numbers[1] == {**before[1], **checked, "notes": sync._NO_STOCK_NOTE}
-    # Hidden: checked, but its vanished note stays as it was.
-    assert numbers[4] == {**before[4], **checked}
+    # Hidden: stays exactly as it vanished; only the check date moves.
+    assert numbers[4] == {**before[4], "last_verified": "2026-11-14"}
     # Another price, hand-verified, or not skipped for stock: untouched.
     assert numbers[2] == before[2]
     assert numbers[3] == before[3]
@@ -2067,3 +2082,47 @@ def test_telnyx_run_checks_out_of_stock_rows_against_the_page(tmp_path, monkeypa
         "- SG:national"
     ) in text
     assert "Not observed this run" not in text
+
+
+def test_telnyx_run_lists_a_differing_row_once(tmp_path, monkeypatch):
+    prev = _telnyx_row("SG", "national", "7.00", "8.00")
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [prev]}))
+    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 1)
+    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    monkeypatch.setattr(
+        sync,
+        "fetch_telnyx",
+        lambda *a, **k: ([stocked], ["SG:national: no numbers in stock"]),
+    )
+    monkeypatch.setattr(
+        sync,
+        "fetch_telnyx_pricing",
+        lambda http: ({("SG", "national"): ("9.00", "8.00")}, None),
+    )
+    summary: list[str] = []
+    sync.run_provider(
+        "telnyx",
+        {"TELNYX_API_KEY": "k"},
+        tmp_path,
+        "2026-11-14",
+        summary,
+        not_synced=[],
+    )
+    text = "\n".join(summary)
+    # In the "another price" section, not also under "Not observed".
+    assert "Not observed this run" not in text
+    assert "- SG:national: catalog 7.00 a month + 8.00 setup, page 9.00 + 8.00" in text
+
+
+def test_telnyx_page_is_not_read_when_every_type_has_stock(tmp_path, monkeypatch):
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": []}))
+    stocked = {**_telnyx_row("SG", "local", "5.00", "5.00")}
+    monkeypatch.setattr(sync, "fetch_telnyx", lambda *a, **k: ([stocked], []))
+
+    def no_page(http):
+        raise AssertionError("page read")
+
+    monkeypatch.setattr(sync, "fetch_telnyx_pricing", no_page)
+    sync.run_provider(
+        "telnyx", {"TELNYX_API_KEY": "k"}, tmp_path, "2026-11-14", [], not_synced=[]
+    )
