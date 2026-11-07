@@ -269,6 +269,10 @@ NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
+# The carrier takes one document of each type per check (Twilio).
+SAME_DOCUMENT = (
+    "This needs the same document as another item. Use one document for both."
+)
 DETAILS_REJECTED = "The carrier rejected the details. Start again."
 # US texting (10DLC): the registry checks the business or person, then the
 # US mobile networks review what will be sent.

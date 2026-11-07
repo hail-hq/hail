@@ -642,3 +642,92 @@ async def test_choice_fields_become_options(provider) -> None:
     assert by_name["email"].options is None and by_name["email"].pattern
     assert by_name["phone_number"].options is None
     assert by_name["phone_number"].kind == "phone"
+
+
+@responses.activate
+async def test_create_draft_merges_slots_of_one_document_type(provider) -> None:
+    """South Africa: name and ID number both take a government-issued
+    document. Twilio refuses to evaluate a bundle with two documents of one
+    type, so the two slots become one document with both slots' values."""
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    responses.reset()
+    _register_draft_calls({"status": "compliant", "results": []})
+
+    def file() -> UploadedFile:
+        return UploadedFile(
+            filename="passport.pdf", content_type="application/pdf", data=b"%PDF"
+        )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields={"first_name": "Ada", "last_name": "Lovelace", "nationality": "ZA"},
+        address=ADDRESS,
+        documents={
+            "address_proof_info": DocumentInput(option="bank_statement", file=file()),
+            "name_info": DocumentInput(
+                option="government_issued_document", file=file()
+            ),
+            "identity_doc_no_info": DocumentInput(
+                option="government_issued_document",
+                fields={"document_number": "9001015009087"},
+                file=file(),
+            ),
+        },
+    )
+
+    assert result.problems == []
+    uploads = [c.request.body for c in responses.calls if c.request.url == UPLOAD]
+    types = sorted(_form_value(b, b"Type").decode() for b in uploads)
+    assert types == ["bank_statement", "government_issued_document"]
+    gov = next(b for b in uploads if b"government_issued_document" in b)
+    assert json.loads(_form_value(gov, b"Attributes")) == {
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "document_number": "9001015009087",
+    }
+    assigned = [c for c in responses.calls if c.request.url.endswith("ItemAssignments")]
+    assert len(assigned) == 3  # end user and the two documents
+
+
+@responses.activate
+async def test_create_draft_refuses_two_different_documents_of_one_type(
+    provider,
+) -> None:
+    """Twilio takes one government-issued document per check: a second,
+    different one is refused before anything is sent, not silently dropped."""
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    responses.reset()
+
+    def file(data: bytes) -> UploadedFile:
+        return UploadedFile(
+            filename="id.pdf", content_type="application/pdf", data=data
+        )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields={"first_name": "Ada", "last_name": "Lovelace", "nationality": "ZA"},
+        address=ADDRESS,
+        documents={
+            "address_proof_info": DocumentInput(
+                option="bank_statement", file=file(b"%PDF bank")
+            ),
+            "name_info": DocumentInput(
+                option="government_issued_document", file=file(b"%PDF passport")
+            ),
+            "identity_doc_no_info": DocumentInput(
+                option="government_issued_document",
+                fields={"document_number": "9001015009087"},
+                file=file(b"%PDF id card"),
+            ),
+        },
+    )
+
+    assert result.refs == {}
+    assert [p.field for p in result.problems] == ["identity_doc_no_info"]
+    assert len(responses.calls) == 0
