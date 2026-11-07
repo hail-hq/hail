@@ -966,7 +966,7 @@ async def test_cancel_is_refused_while_under_review(
     _, _, key = org_and_key
     vid = (await _create(client, key)).json()["id"]
     got = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
-    assert got["state"] == "submitted"
+    assert got["state"] == "submitted" and got["cancellable"] is False
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 409 and "under review" in resp.json()["detail"]
     assert carrier.discarded == []
@@ -1979,7 +1979,8 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0} and carrier.submitted == []
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert carrier.submitted == []
     await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
     carrier.remote_status = ProviderStatus(state="approved")
     counts = await sweep_verifications(
@@ -2072,7 +2073,7 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
@@ -3941,7 +3942,9 @@ async def test_a_cancel_rates_the_campaign_before_its_id_is_wiped(
     # Then the wipe, and the usual ping for the new state.
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "cancelled" and row.provider_refs == {}
+    assert row.state == "cancelled" and not any(
+        key != "application" for key in row.provider_refs
+    )
     assert pinged == [vid]
 
 
@@ -4022,7 +4025,9 @@ async def test_a_refusal_leaves_a_row_cancelled_while_it_was_rated(
     )
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "cancelled" and row.provider_refs == {}
+    assert row.state == "cancelled" and not any(
+        key != "application" for key in row.provider_refs
+    )
     assert discarded == []
 
 
@@ -4370,11 +4375,35 @@ async def test_a_cancel_without_a_campaign_does_not_wait_for_the_rater(
 # -- Telnyx outage after the brand ----------------------------------------
 
 _TELNYX_BUSINESS = {
+    "sender_country": "US",
+    "has_tax_id": "YES",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -4384,11 +4413,34 @@ _TELNYX_BUSINESS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 _TELNYX_PERSON = {
+    "sender_country": "US",
+    "has_tax_id": "NO",
+    "program_name": "Ada",
+    "opt_in_message": "Ada: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "first_name": "Ada",
     "last_name": "Lovelace",
     "email": "ada@example.com",
@@ -4398,9 +4450,8 @@ _TELNYX_PERSON = {
     "sample_2": "Ada: thanks for booking. Reply STOP to opt out.",
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://ada.example/privacy",
-    "terms_url": "https://ada.example/terms",
+    "privacy_policy_url": "https://ada.org/privacy",
+    "terms_url": "https://ada.org/terms",
 }
 
 
@@ -5642,6 +5693,666 @@ async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
     await async_session.refresh(row)
     assert row.provider_refs["campaign_id"] == "C1"
     assert row.provider_refs["campaign_filed_at"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_saved_sms_application_is_private_and_survives_repair(
+    client, org_and_key, sms_carrier, async_session
+):
+    _, _, key = org_and_key
+    response = await _post_sms(
+        client,
+        key,
+        fields=json.dumps(
+            {
+                "legal_name": "Acme",
+                "campaign_description": "Appointment reminders",
+                "unrecognized_secret": "must not be stored",
+            }
+        ),
+    )
+    assert response.status_code == 201, response.text
+    vid = response.json()["id"]
+    assert "fields" not in response.json() and "application" not in response.text
+    path = f"/verifications/{vid}/application"
+    saved = await client.get(path, headers=_auth(key))
+    assert saved.status_code == 200
+    assert saved.headers["cache-control"] == "no-store"
+    assert saved.json()["fields"] == {
+        "legal_name": "Acme",
+        "campaign_description": "Appointment reminders",
+    }
+    assert saved.json()["address"]["country_code"] == "US"
+    _, _, other_key = await insert_org_and_key(async_session)
+    assert (await client.get(path, headers=_auth(other_key))).status_code == 404
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "rejected"
+    await async_session.commit()
+    cancelled = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert cancelled.status_code == 200, cancelled.text
+    repaired = await client.get(path, headers=_auth(key))
+    assert repaired.json() == saved.json()
+    # Reading a saved application performs no submission or provider poll.
+    assert len(sms_carrier.drafts) == 1 and sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_legacy_application_has_actionable_missing_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    _, _, key = org_and_key
+    response = await _post_sms(client, key)
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {"brand_sid": "BN1"}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404
+    assert "Complete the current registration form" in saved.json()["detail"]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_expired_answers_are_not_rebuilt_from_the_carrier(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    from datetime import datetime, timedelta, timezone
+
+    _, _, key = org_and_key
+    asked = []
+
+    async def identity(refs, subject_type):
+        asked.append(refs)
+        return {"fields": {}, "address": {}}
+
+    monkeypatch.setattr(sms_carrier, "application_identity", identity)
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "rejected"
+    row.updated_at = datetime.now(timezone.utc) - timedelta(days=31)
+    row.provider_refs = {"brand_sid": "BN1"}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404 and asked == []
+    # Stored answers past the limit are gone before the background pass runs.
+    row.provider_refs = {"brand_sid": "BN1", "application": {"fields": {}}}
+    await async_session.commit()
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404 and asked == []
+    # Dismissing it later does not make the expired answers readable again.
+    cancelled = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert cancelled.status_code == 200, cancelled.text
+    await async_session.refresh(row)
+    assert "application" not in row.provider_refs
+    saved = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert saved.status_code == 404
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_rejecting_a_long_waiting_application_keeps_its_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    from datetime import datetime, timedelta, timezone
+
+    _, _, key = org_and_key
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.state = "awaiting_review"
+    row.updated_at = datetime.now(timezone.utc) - timedelta(days=31)
+    row.provider_refs = {**(row.provider_refs or {}), "application": {"fields": {}}}
+    await async_session.commit()
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    resp = await client.post(
+        f"/admin/verifications/{vid}/reject",
+        json={"reason": "Website unreachable"},
+        headers=_auth(key),
+    )
+    app.dependency_overrides.pop(require_superadmin)
+    assert resp.status_code == 200, resp.text
+    await async_session.refresh(row)
+    # The 30 days start at the rejection, not at the last change before it.
+    assert "application" in row.provider_refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_old_ended_applications_lose_their_saved_answers(
+    client, org_and_key, sms_carrier, async_session
+):
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.api.routes.verifications import forget_old_applications
+
+    _, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    rows = {}
+    for name, state, age in (
+        ("old_cancelled", "cancelled", 31),
+        ("old_rejected", "rejected", 31),
+        ("new_cancelled", "cancelled", 29),
+        ("old_submitted", "submitted", 31),
+    ):
+        vid = (await _post_sms(client, key)).json()["id"]
+        row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+        row.state = state
+        row.cancelled_at = now - timedelta(days=age) if state == "cancelled" else None
+        row.updated_at = now - timedelta(days=age)
+        row.provider_refs = {"brand_reused": True, "application": {"fields": {}}}
+        rows[name] = row
+        await async_session.commit()
+    assert await forget_old_applications(async_session, now) == 2
+    for name, row in rows.items():
+        await async_session.refresh(row)
+        kept = "application" in row.provider_refs
+        assert kept is (name in ("new_cancelled", "old_submitted")), name
+        # Only the answers go: the billing mark stays.
+        assert row.provider_refs["brand_reused"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_campaign_acceptance_is_distinct_from_runtime_readiness(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    response = await _post_sms(client, key)
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+    monkeypatch.setattr(sms_carrier, "step", lambda refs: "runtime_setup")
+    response = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200
+    assert response.json()["state"] == "submitted"
+    assert response.json()["step"] == "runtime_setup"
+    assert response.json()["campaign_accepted"] is True
+    assert response.json()["runtime_ready"] is False
+    # The console shows Cancel from this flag, not its own copy of the rule.
+    assert response.json()["cancellable"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_sms_preview_is_exact_and_has_no_carrier_writes(
+    client, org_and_key, sms_carrier, monkeypatch
+):
+    from dataclasses import asdict
+
+    from hailhq.core.providers.verification.sms_form import (
+        campaign_text,
+        sms_requirements,
+    )
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements(sms_carrier, subject_type)
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    _, _, key = org_and_key
+    response = await client.post(
+        "/verifications/sms/preview",
+        headers=_auth(key),
+        json={
+            "subject_type": "business",
+            "fields": _TELNYX_BUSINESS,
+            "address": json.loads(_sms_submission()["address"]),
+        },
+    )
+    assert response.status_code == 200, response.text
+    expected = json.loads(
+        json.dumps(asdict(campaign_text(_TELNYX_BUSINESS, "business")))
+    )
+    assert response.json() == expected
+    assert not sms_carrier.drafts and not sms_carrier.submitted
+    invalid = await client.post(
+        "/verifications/sms/preview",
+        headers=_auth(key),
+        json={
+            "subject_type": "business",
+            "fields": {**_TELNYX_BUSINESS, "consent_methods": ""},
+            "address": json.loads(_sms_submission()["address"]),
+        },
+    )
+    assert invalid.status_code == 422
+    assert any(
+        item["loc"] == ["body", "consent_methods"] for item in invalid.json()["detail"]
+    )
+    assert not sms_carrier.drafts
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_person_identity_mobile_cannot_be_a_hail_number(
+    client, org_and_key, sms_carrier, async_session
+):
+    org_id, _, key = org_and_key
+    number = (
+        (
+            await async_session.execute(
+                select(PhoneNumber).where(PhoneNumber.organization_id == org_id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    # Normalize formatting before comparing with allocated numbers.
+    response = await _post_sms(
+        client,
+        key,
+        subject_type="person",
+        fields=json.dumps(
+            {
+                "legal_name": "Ada",
+                "mobile_phone_number": number.e164[:2] + " " + number.e164[2:],
+            }
+        ),
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "mobile_phone_number"]
+    assert not sms_carrier.drafts
+
+
+async def _needs_information_application(
+    client, key, sms_carrier, async_session, monkeypatch, subject="business", saved=True
+):
+    from hailhq.core.providers.verification.sms_form import sms_requirements
+
+    fields = dict(_TELNYX_PERSON if subject == "person" else _TELNYX_BUSINESS)
+    address = json.loads(_sms_submission()["address"])
+
+    async def requirements(country_code, number_type, subject_type):
+        return sms_requirements(sms_carrier, subject_type)
+
+    async def recover(refs):
+        return False
+
+    async def identity(refs, subject_type):
+        return {"fields": fields, "address": address}
+
+    monkeypatch.setattr(sms_carrier, "requirements", requirements)
+    monkeypatch.setattr(sms_carrier, "recover_campaign", recover)
+    monkeypatch.setattr(sms_carrier, "application_identity", identity)
+    sms_carrier.campaign_key = "campaign_id"
+    response = await _post_sms(
+        client, key, subject_type=subject, fields=json.dumps(fields)
+    )
+    assert response.status_code == 201, response.text
+    vid = response.json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    refs = {
+        **row.provider_refs,
+        "needs_information": True,
+        "identity_verified": True,
+        "campaign": {},
+    }
+    if not saved:
+        refs.pop("application", None)
+    row.provider_refs = refs
+    await async_session.commit()
+    return vid, {"fields": fields, "address": address}
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("subject", ["person", "business"])
+@pytest.mark.parametrize("saved", [True, False])
+async def test_amendment_keeps_same_row_brand_and_original_charge(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, subject, saved
+):
+    org_id, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, subject, saved
+    )
+    initial = await _balance(async_session, org_id)
+    # Reading/list polling an incomplete application does not file anything.
+    waiting = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert (
+        waiting.json()["state"] == "submitted"
+        and waiting.json()["step"] == "needs_information"
+    )
+    assert sms_carrier.status_calls == 0
+    first = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["id"] == vid and first.json()["state"] == "submitted"
+    assert first.json()["step"] == "filing"
+    assert sms_carrier.status_calls == 0 and len(sms_carrier.drafts) == 1
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert (
+        row.provider_refs["brand_sid"] == "BN1"
+        and "needs_information" not in row.provider_refs
+    )
+    assert await _balance(async_session, org_id) == initial
+    # The later normal poll creates a campaign once; identical PATCH stays safe.
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    repeat = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert repeat.status_code == 200 and repeat.json()["id"] == vid
+    assert sms_carrier.campaigns_created == 1 and len(sms_carrier.drafts) == 1
+    # One audit row for the change, none for the identical retry, no answers.
+    audits = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(AuditLog.action == "verification.amend")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audits) == 1 and str(audits[0].resource_id) == vid
+    assert set(audits[0].payload) == {"requirements_version"}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_same_answers_lift_a_new_hold_after_an_amendment(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    first = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert first.status_code == 200, first.text
+    # The carrier refuses the amended campaign (say, a policy page was down).
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    row.provider_refs = {
+        **row.provider_refs,
+        "needs_information": True,
+        "campaign_needs_repair": True,
+    }
+    row.rejection_reason = "Review your privacy policy."
+    await async_session.commit()
+    again = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert again.status_code == 200 and again.json()["step"] == "filing"
+    await async_session.refresh(row)
+    assert "needs_information" not in row.provider_refs
+    assert row.rejection_reason is None
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_concurrent_retries_are_idempotent(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, session_factory
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    restore = _per_request_sessions(session_factory)
+    try:
+        responses = await asyncio.gather(
+            *(
+                client.patch(
+                    f"/verifications/{vid}/application",
+                    headers=_auth(key),
+                    json=answers,
+                )
+                for _ in range(2)
+            )
+        )
+    finally:
+        restore()
+    assert [response.status_code for response in responses] == [200, 200]
+    assert len(sms_carrier.drafts) == 1 and sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"legal_name": "Different Company"},
+        {"ein": "99-9999999"},
+        {"rep_email": "different@acme.org"},
+    ],
+)
+async def test_amendment_cannot_replace_original_sender(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, change
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    answers["fields"] = {**answers["fields"], **change}
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409, response.text
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "submitted" and row.provider_refs["needs_information"]
+    assert row.provider_refs["brand_sid"] == "BN1" and len(sms_carrier.drafts) == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_unverifiable_identity_requires_support_and_retains_brand(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+
+    async def missing(refs, subject):
+        return None
+
+    monkeypatch.setattr(sms_carrier, "application_identity", missing)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409 and "support" in response.json()["detail"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.provider_refs["brand_sid"] == "BN1" and row.state == "submitted"
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_is_org_scoped_and_validates_before_any_filing(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    _, _, other_key = await insert_org_and_key(async_session)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(other_key), json=answers
+    )
+    assert response.status_code == 404
+    bad = {**answers, "fields": {**answers["fields"], "consent_methods": ""}}
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=bad
+    )
+    assert response.status_code == 422 and len(sms_carrier.drafts) == 1
+    assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_recovers_lost_campaign_before_changing_answers(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+
+    async def found(refs):
+        refs["campaign_id"] = "Cexisting"
+        refs.pop("needs_information", None)
+        return True
+
+    monkeypatch.setattr(sms_carrier, "recover_campaign", found)
+    response = await client.patch(
+        f"/verifications/{vid}/application", headers=_auth(key), json=answers
+    )
+    assert response.status_code == 409 and "recovered" in response.json()["detail"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert (
+        row.provider_refs["campaign_id"] == "Cexisting"
+        and row.provider_refs["campaign"] == {}
+    )
+    assert row.provider_refs["brand_sid"] == "BN1" and len(sms_carrier.drafts) == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_saved_legacy_identity_recovery_does_not_submit(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+    response = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["fields"]["ein"] == answers["fields"]["ein"]
+    assert (
+        response.headers["cache-control"] == "no-store" and len(sms_carrier.drafts) == 1
+    )
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_accepted_runtime_setup_can_cancel_and_rates_before_discard(
+    client, org_and_key, sms_carrier, async_session, rated
+):
+    _, _, key = org_and_key
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_id": "C1",
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+    response = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "cancelled"
+    assert rated[0][1]["campaign_id"] == "C1" and sms_carrier.discarded
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_runtime_cancellation_rechecks_after_billing_and_detaches_racing_approval(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    org_id, _, key = org_and_key
+    sms_carrier.campaign_key = "campaign_id"
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {
+        **row.provider_refs,
+        "campaign_id": "C1",
+        "campaign_accepted": True,
+        "runtime_ready": False,
+    }
+    await async_session.commit()
+
+    async def approve_while_rated(_):
+        await async_session.refresh(row)
+        row.state = "approved"
+        number = (
+            (
+                await async_session.execute(
+                    select(PhoneNumber).where(PhoneNumber.organization_id == org_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        number.sms_registration_id = row.id
+        await async_session.commit()
+
+    monkeypatch.setattr(
+        verifications_routes, "rate_sms_registration", approve_while_rated
+    )
+    response = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "cancelled" and sms_carrier.detached
+    number = (
+        (
+            await async_session.execute(
+                select(PhoneNumber)
+                .where(PhoneNumber.organization_id == org_id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert number.sms_registration_id is None
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_incomplete_legacy_provider_address_returns_support_guidance(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    _, _, key = org_and_key
+    vid, _ = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch, saved=False
+    )
+
+    async def incomplete(refs, subject):
+        return {
+            "fields": {"legal_name": "Acme"},
+            "address": {"country_code": "US", "street": None},
+        }
+
+    monkeypatch.setattr(sms_carrier, "application_identity", incomplete)
+    response = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert response.status_code == 404 and "support" in response.json()["detail"]
+
+
+def test_a_hold_found_while_submitting_keeps_its_repair_guidance() -> None:
+    from datetime import datetime, timezone
+
+    row = CarrierVerification(
+        state="submitting",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={"needs_information": True, "campaign_needs_repair": True},
+    )
+    status = ProviderStatus(state="pending", reason="Review the terms.", raw_reason="x")
+    assert verifications_routes._apply_status(row, status) is True
+    assert row.state == "submitted" and row.rejection_reason == "Review the terms."
+
+
+async def test_a_legacy_evidence_hold_is_not_audited_as_a_refusal(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    written: list = []
+
+    async def fake_audit(*args, **kwargs):
+        written.append(args[2])
+
+    monkeypatch.setattr(verifications_routes, "write_audit_log", fake_audit)
+    row = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={"needs_information": True},
+    )
+    legacy = ProviderStatus(state="pending", reason="Complete the evidence.")
+    refs = dict(row.provider_refs)
+    assert await verifications_routes._poll_and_apply(
+        None, row, legacy, lambda *a: None, refs
+    )
+    assert row.rejection_reason == "Complete the evidence." and written == []
+    row.provider_refs = {**refs, "campaign_needs_repair": True}
+    refused = ProviderStatus(
+        state="pending", reason="Review the terms.", raw_reason="x"
+    )
+    assert await verifications_routes._poll_and_apply(
+        None, row, refused, lambda *a: None, dict(row.provider_refs)
+    )
+    assert written == ["verification.campaign_refused"]
 
 
 async def test_refusal_audit_is_dropped_on_rollback(async_session):
