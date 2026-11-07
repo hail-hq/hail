@@ -62,17 +62,17 @@ Flags: `--provider {didww,telnyx,twilio,all}`, `--env-file` (reads the keys from
 3. A row the carrier lists again is rebuilt from the carrier: `available: true`, and its notes are only the ones the sync writes. Older notes, hand-written ones included, are dropped.
 4. A row is marked gone only when the carrier's list covered that country and number type and the row was missing from it. When the carrier lists the type but has no numbers for sale, rule 4a applies. In every other case the row is left exactly as it was and listed under **unobserved**: no price, no dial code, Twilio stock the account cannot see (`no numbers offered to this account`), or a country the sync account cannot see. Not seeing stock is not the same as the carrier dropping the type.
    4a. DIDWW out of stock. DIDWW still shows the price and features of its empty areas, so the type is read from them, as rule 7 reads areas with stock. The row is merged like any synced row (rule 6), with these differences. Listed under **Listed with no numbers in stock**.
-   - Its notes are rebuilt as for any synced row (rule 3), plus the note `carrier lists this type but had no numbers in stock at the last check`.
-   - A type new to the catalog is not added until it is in stock.
-   - These rows do not count toward the 40-country floor (rule 5).
-   - A row that had vanished stays exactly as it vanished. Only `last_verified` moves, and its papers are not fetched.
-   - The next run that sees stock rebuilds the row without the note.
-   - A type with no price on any group (`listed, no price on any group`), or with areas on sale that all lack a price (`listed, an area on sale has no price`), stays **unobserved**.
-     4b. Telnyx out of stock (`no numbers in stock`) stays **unobserved**: Telnyx shows a price only on a number for sale. The row goes stale after 30 days. To check it by hand:
-   1. Read its monthly and one-time price on https://telnyx.com/pricing.md.
-   2. Set `last_verified` to that day, `source_url` to `https://telnyx.com/pricing.md`, `verification_method` to `community-pr` and `verified_by` to `telnyx-pricing-page`.
-   3. Same price: set the note `Re-verified YYYY-MM-DD: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.`
-   4. New price: set `usd_per_month`, `setup_usd` and `last_changed_at`. Start the note with `Price changed YYYY-MM-DD:` instead, and end it with the old values (`Was 5.00 a month and 5.00 setup.`).
+      - Its notes are rebuilt as for any synced row (rule 3), plus the note `carrier lists this type but had no numbers in stock at the last check`.
+      - A type new to the catalog is not added until it is in stock.
+      - These rows do not count toward the 40-country floor (rule 5).
+      - A row that had vanished stays exactly as it vanished. Only `last_verified` moves, and its papers are not fetched.
+      - The next run that sees stock rebuilds the row without the note.
+      - A type with no price on any group (`listed, no price on any group`), or with areas on sale that all lack a price (`listed, an area on sale has no price`), stays **unobserved**.
+   4b. Telnyx out of stock (`no numbers in stock`) stays **unobserved**: Telnyx shows a price only on a number for sale. The row goes stale after 30 days. To check it by hand:
+      1. Read its monthly and one-time price on https://telnyx.com/pricing.md.
+      2. Set `last_verified` to that day, `source_url` to `https://telnyx.com/pricing.md`, `verification_method` to `community-pr` and `verified_by` to `telnyx-pricing-page`.
+      3. Same price: set the note `Re-verified YYYY-MM-DD: price read on telnyx.com/pricing.md, because the sync has no stock to observe for this row.`
+      4. New price: set `usd_per_month`, `setup_usd` and `last_changed_at`. Start the note with `Price changed YYYY-MM-DD:` instead, and end it with the old values (`Was 5.00 a month and 5.00 setup.`).
 5. A run that returns fewer than 40 countries for a carrier that already has a catalog does not write that file (`CatalogShrunk`). The summary says so; the other carriers still run.
 6. Every synced row gets `last_verified` = today, `verification_method: "carrier-sync"`, `verified_by: "<carrier>-api-sync"`. `last_changed_at` moves only when a watched field changed (`usd_per_month`, `voice`, `sms`, `mms`, `verification_required`, `setup_usd`, `available`, `receive_only`, `by_request`).
 7. DIDWW only: `by_request: true` when every area of the type that can place calls has `available_dids_enabled: false` (DIDWW picks the number at order time). `receive_only: true` when no area of the type can place calls (`voice_out` missing). Both are written only when true, and both are watched fields. The row price comes from the areas Hail can sell. The API and the console never offer a marked row; see [didww.md](../public/self-host/didww.md#numbers-hail-cannot-sell).
