@@ -307,6 +307,13 @@ async def _kept_brand(
     return (row.provider_refs or {}).get("kept_brand_id")
 
 
+# An ISO 8601 time as the API writes it (``isoformat()``).
+_ISO_TIME = (
+    r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
+    r"[T ]([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)?$"
+)
+
+
 async def _uncharged_sms_steps(
     db: AsyncSession, organization_id: UUID, step: str
 ) -> list[tuple[str, str]]:
@@ -331,7 +338,7 @@ async def _uncharged_sms_steps(
         # isoformat()); anything else is not a time and must not fail the read.
         filed = case(
             (
-                filed_at.op("~")(r"^\d{4}-\d{2}-\d{2}"),
+                filed_at.op("~")(_ISO_TIME),
                 cast(filed_at, DateTime(timezone=True)),
             ),
             else_=None,
@@ -723,25 +730,43 @@ async def _campaign_unfunded(
     return unfunded & given.keys()
 
 
+async def _check_credit(
+    db: AsyncSession, row, registry: Registry, *, wait: bool = True
+) -> bool | None:
+    """The campaign credit check of one row before a step that leads to
+    filing its campaign. False: go on (covered, or no check applies).
+    True: not covered. None: the org lock is busy (only with ``wait``
+    False).
+
+    Reads the balance under the organization's lock (``org_lock``), after
+    the billing writes in flight, as the filing check does, then commits to
+    release it: it is not held through the row lock and the carrier calls
+    that follow, which can take seconds while the website's rater and other
+    billing writes wait for the same lock. Polls do not wait for it, like
+    the row lock."""
+    if not _campaign_gated(row, registry):
+        return False
+    if wait:
+        await org_lock(db, row.organization_id)
+    elif not await try_org_lock(db, row.organization_id):
+        await db.commit()
+        return None
+    unfunded = bool(await _campaign_unfunded(db, [row], registry))
+    await db.commit()  # ends the org lock
+    return unfunded
+
+
 async def _unfunded_by_id(
     db: AsyncSession, verification_id: UUID, registry: Registry
 ) -> bool:
-    """``_campaign_unfunded`` for one row, for the retry and the approve:
-    read under the organization's lock (``org_lock``), as the filing check,
-    then the lock is released (a commit) before the row lock and the
-    carrier calls that follow. Reads columns only, so the locked read that
-    follows loads the row fresh."""
+    """``_check_credit`` for the retry and the approve, by id. Reads columns
+    only, so the locked read that follows loads the row fresh."""
     found = (
         await db.execute(
             select(*_GATE_COLUMNS).where(CarrierVerification.id == verification_id)
         )
     ).one_or_none()
-    if found is None or not _campaign_gated(found, registry):
-        return False
-    await org_lock(db, found.organization_id)
-    unfunded = bool(await _campaign_unfunded(db, [found], registry))
-    await db.commit()  # ends the org lock
-    return unfunded
+    return found is not None and bool(await _check_credit(db, found, registry))
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -921,22 +946,10 @@ async def _refresh(
     was_submitting = row.state == "submitting"
     if not _pollable(row):
         return
-    if _campaign_gated(row, registry):
-        # The credit check reads the balance under the org lock, after the
-        # billing writes in flight. The lock is not waited for (another poll
-        # or a billing write holds it: skip, the next poll asks) and not
-        # held through the carrier call, which can take seconds: the
-        # website's rater and other billing writes take the same lock.
-        if wait_for_org_lock:
-            await org_lock(db, row.organization_id)
-            locked = True
-        else:
-            locked = await try_org_lock(db, row.organization_id)
-        unfunded = locked and bool(await _campaign_unfunded(db, [row], registry))
-        await db.commit()  # ends the org lock
-        if not locked or unfunded:
-            # Not covered: no carrier call, the row as it is.
-            return
+    # Not covered, or the org lock is busy (another poll or a billing
+    # write: the next poll asks): no carrier call, the row as it is.
+    if await _check_credit(db, row, registry, wait=wait_for_org_lock) is not False:
+        return
     if not await _lock_for_poll(db, row):
         return
     if not _pollable(row):  # another poll settled it before the lock
@@ -2299,7 +2312,7 @@ async def amend_sms_application(
         and row.state in ("submitted", "approved")
         and not refs.get("needs_information")
     ):
-        return _out(row, registry)
+        return await _out_checked(db, row, registry)
     if (
         row.state != "submitted"
         or not refs.get("needs_information")

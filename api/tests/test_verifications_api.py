@@ -6314,6 +6314,27 @@ async def _needs_information_application(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_amendment_says_when_the_campaign_waits_for_credit(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    # The repaired row is next to file its campaign: the amend reply, and
+    # its identical retry, say whether the credit covers it.
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    await _charge_submission(async_session, org_id, vid)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    path = f"/verifications/{vid}/application"
+    for _ in range(2):
+        resp = await client.patch(path, headers=_auth(key), json=answers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+
+
+@pytest.mark.usefixtures("us_number")
 @pytest.mark.parametrize("subject", ["person", "business"])
 @pytest.mark.parametrize("saved", [True, False])
 async def test_amendment_keeps_same_row_brand_and_original_charge(
