@@ -310,9 +310,9 @@ async def _kept_brand(
 # An ISO 8601 date, or date and time, that Postgres casts to timestamptz:
 # the API writes isoformat(). Month, day, hour and offset are in range.
 _ISO_TIME = (
-    r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
-    r"([T ]([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?"
-    r"(Z|[+-](0\d|1[0-4])(:?[0-5]\d)?)?)?$"
+    r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
+    r"([T ]([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]+)?)?"
+    r"(Z|[+-](0[0-9]|1[0-5])(:?[0-5][0-9])?)?)?$"
 )
 
 
@@ -630,7 +630,7 @@ def _campaign_filed(provider: object, refs: dict | None) -> bool:
 _BEFORE_CAMPAIGN_STATES = ("awaiting_review", "submitting", "submitted")
 
 
-def _campaign_gated(row: CarrierVerification, registry: Registry) -> bool:
+def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
     """True when the next billed step of this US texting registration is
     filing its campaign, and its organization pays for it: the self-hosted
     organization (the shared key's) is not billed. The filing itself was
@@ -763,18 +763,18 @@ async def _campaign_may_go(
     return not unfunded
 
 
-async def _unfunded_by_id(
+async def _campaign_may_go_by_id(
     db: AsyncSession, verification_id: UUID, registry: Registry
 ) -> bool:
-    """Not ``_campaign_may_go``, for the retry and the approve, by id.
-    Reads columns only, so the locked read that follows loads the row
-    fresh."""
+    """``_campaign_may_go`` for the retry and the approve, by id (True for
+    a row that is gone: the locked read that follows finds nothing). Reads
+    columns only, so that locked read loads the row fresh."""
     found = (
         await db.execute(
             select(*_GATE_COLUMNS).where(CarrierVerification.id == verification_id)
         )
     ).one_or_none()
-    return found is not None and not await _campaign_may_go(db, found, registry)
+    return found is None or await _campaign_may_go(db, found, registry)
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -1908,8 +1908,8 @@ async def _retry_submit(
     customer sees why and can start over; it is not retried again. A US
     texting draft whose campaign fee the credit does not cover waits: the
     campaign is filed right after the submit."""
-    if await _unfunded_by_id(db, verification_id, registry):
-        return False  # nothing changed
+    if not await _campaign_may_go_by_id(db, verification_id, registry):
+        return False  # not covered: nothing changed
     row = await _lock_waiting(db, verification_id)
     if row is None:
         return False
@@ -2677,7 +2677,7 @@ async def admin_approve(
     whose campaign fee the organization's credit does not cover is left
     waiting (`waiting_for_credit`); the background pass sends it after a
     top-up."""
-    unfunded = await _unfunded_by_id(db, verification_id, registry)
+    unfunded = not await _campaign_may_go_by_id(db, verification_id, registry)
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
     if unfunded:

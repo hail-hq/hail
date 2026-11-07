@@ -3642,6 +3642,41 @@ async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
     assert sms_carrier.campaigns_created == 1
 
 
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "filed_at", ["2026-11-07", "2026-11-07T10:00+00:00", "2026-11-07T10:00:00Z"]
+)
+async def test_an_uncharged_campaign_in_any_iso_form_counts(
+    client, org_and_key, sms_carrier, async_session, filed_at
+) -> None:
+    # Another registration's campaign, filed today and not charged yet,
+    # still holds the credit, however its time is written.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="cancelled",
+            provider_refs={
+                "campaign_filed_at": datetime.now(timezone.utc).date().isoformat()
+                + filed_at[10:],
+                "brand_reused": True,
+            },
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
