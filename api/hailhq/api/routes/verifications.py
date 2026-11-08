@@ -639,6 +639,8 @@ def _campaign_filed(provider: object, refs: dict | None) -> bool:
 
 # A US texting registration in these states has its campaign still to file.
 _BEFORE_CAMPAIGN_STATES = ("awaiting_review", "submitting", "submitted")
+# States a registration never leaves for one before its campaign.
+_SETTLED_STATES = ("approved", "rejected", "cancelled")
 # A poll the credit check lets file a campaign marks its row with
 # ``provider_refs.campaign_reserved_at`` (database statement time) and clears
 # it when its carrier call returns. While set, and for at most this long
@@ -703,9 +705,9 @@ def _billed_sms(row: CarrierVerification | Row) -> bool:
 
 def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
     """True when the next billed step of this US texting registration is
-    filing its campaign, and its organization pays for it: the self-hosted
-    organization (the shared key's) is not billed. The filing itself was
-    paid for at creation (create_verification checks the credit)."""
+    filing its campaign, and its organization pays for it (``_billed_sms``).
+    The filing itself was paid for at creation (create_verification checks
+    the credit)."""
     if not _billed_sms(row) or row.state not in _BEFORE_CAMPAIGN_STATES:
         return False
     if (row.provider_refs or {}).get("needs_information"):
@@ -774,7 +776,7 @@ async def _campaign_unfunded(
     orgs = {
         row.organization_id
         for row in rows
-        if _billed_sms(row) and row.state in _BEFORE_CAMPAIGN_STATES
+        if _billed_sms(row) and row.state not in _SETTLED_STATES
     }
     unfunded: set[UUID] = set()
     for org in orgs:
@@ -827,37 +829,44 @@ async def _campaign_may_go(
     wait: bool = True,
 ) -> _CreditCheck:
     """The campaign credit check of one row, before a poll that may file
-    its campaign: ``(may_file, reserved_at)``. ``may_file`` True: the poll
-    may file it (covered, or no check applies). False: the poll skips only
-    that paid filing, and runs every other step (brand reads, rejections,
-    code resends): not covered, or (``wait`` False) the org lock is busy,
-    so the next poll asks. ``reserved_at``: the row's reservation this poll
-    holds (``_CAMPAIGN_RESERVED_FOR``), to drop when it makes no call.
-    ``gated``: the stored row needed the check (the caller's copy can be
-    stale, so it decides nothing); a row gone from the database files
-    nothing.
+    its campaign. ``may_file`` True: the poll may file it (covered, or no
+    check applies). False: the poll skips only that paid filing and runs
+    every other step (brand reads, rejections, code resends, adopting a
+    campaign whose answer was lost): not covered, the org lock is busy
+    (``wait`` False), the row is held, or the row already carries a
+    running reservation (``_CAMPAIGN_RESERVED_FOR``) another poll made.
+    ``reserved_at``: the reservation this poll wrote (only with
+    ``may_file``), the one value it may drop. ``gated``: the stored row
+    needed the check (the caller's copy can be stale); a row gone from the
+    database files nothing.
 
-    Reads the balance under the organization's lock (``org_lock``), after
-    the billing writes in flight, as the filing check does, then commits to
-    release it: it is not held through the row lock and the carrier call
-    that follows, which can take seconds while the website's rater and other
-    billing writes wait for the same lock. Background and GET polls do not
-    wait for it (like the row lock); a confirmed code does, so its campaign
-    is filed at once."""
-    stored = (
-        await db.execute(select(*_GATE_COLUMNS).where(CarrierVerification.id == row.id))
-    ).one_or_none()
-    if stored is None:
-        return _CreditCheck(False, None, False)
-    if not _campaign_gated(stored, registry):
+    Reads the stored row and the balance under the organization's lock
+    (``org_lock``), after the billing writes in flight, as the filing check
+    does, then commits to release it: it is not held through the row lock
+    and the carrier call that follows, which can take seconds while the
+    website's rater and other billing writes wait for the same lock.
+    Background and GET polls do not wait for it (like the row lock); a
+    confirmed code does, so its campaign is filed at once."""
+    if not _billed_sms(row):  # purpose and organization never change
         return _CreditCheck(True, None, False)
-    row = stored
     if wait:
         await org_lock(db, row.organization_id)
     elif not await try_org_lock(db, row.organization_id):
         await db.commit()
         return _CreditCheck(False, None, True)
-    if await _campaign_unfunded(db, [row], registry):
+    stored = (
+        await db.execute(
+            select(*_GATE_COLUMNS, _campaign_reserved_sql().label("reserved")).where(
+                CarrierVerification.id == row.id
+            )
+        )
+    ).one_or_none()
+    if stored is None or not _campaign_gated(stored, registry):
+        await db.commit()  # ends the org lock
+        return _CreditCheck(stored is not None, None, False)
+    if stored.reserved or await _campaign_unfunded(db, [stored], registry):
+        # A running reservation is another poll's: its call is in flight,
+        # or failed and may have filed a campaign the next answer shows.
         await db.commit()  # ends the org lock
         return _CreditCheck(False, None, True)
     # Funded: reserve the credit before the lock is released. Not when
@@ -882,15 +891,10 @@ async def _campaign_may_go(
                 update(CarrierVerification)
                 .where(CarrierVerification.id == row.id)
                 .values(
-                    # A reservation still running (kept after a failed call)
-                    # is not renewed, so it runs out on time.
-                    provider_refs=case(
-                        (_campaign_reserved_sql(), CarrierVerification.provider_refs),
-                        else_=refs.op("||")(
-                            func.jsonb_build_object(
-                                "campaign_reserved_at", func.statement_timestamp()
-                            )
-                        ),
+                    provider_refs=refs.op("||")(
+                        func.jsonb_build_object(
+                            "campaign_reserved_at", func.statement_timestamp()
+                        )
                     )
                 )
                 .returning(
@@ -1100,6 +1104,11 @@ async def _refresh(
             await _drop_reservation(db, row.id)
         await db.commit()
         return
+    reserved_now = (row.provider_refs or {}).get("campaign_reserved_at")
+    if may_file and check.gated and reserved_now != reserved:
+        # The reservation this poll made is gone (another poll's call
+        # returned and dropped it): no claim, so no campaign this poll.
+        may_file = False
     if not check.gated and _campaign_gated(row, registry):
         # It changed after it was read and got no credit check: fail closed,
         # no campaign on this poll; the next one checks.

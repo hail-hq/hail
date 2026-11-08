@@ -3904,9 +3904,14 @@ async def test_a_kept_claim_is_not_renewed_and_runs_out(
     first = (await _stored_refs(async_session, vid))["campaign_reserved_at"]
     await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert (await _stored_refs(async_session, vid))["campaign_reserved_at"] == first
+    # The kept claim is another poll's: the next poll files nothing (the
+    # carrier's answer shows no campaign) and drops it; the one after files.
     sms_carrier.status = real
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 200, resp.text
+    refs = await _stored_refs(async_session, vid)
+    assert "campaign_reserved_at" not in refs and "campaign_id" not in refs
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
     refs = await _stored_refs(async_session, vid)
     assert "campaign_reserved_at" not in refs and refs["campaign_id"] == "QE1"
 
@@ -3992,6 +3997,69 @@ async def test_a_row_no_longer_pollable_drops_any_claim(
     await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert await _reserved(async_session, vid) is None
     assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_that_loses_the_row_keeps_a_kept_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The row carries a claim another poll kept after a failed call. This
+    # poll files nothing on it, and losing the row it drops nothing.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    kept = datetime.now(timezone.utc).isoformat()
+    refs = await _stored_refs(async_session, vid)
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(provider_refs={**refs, "campaign_reserved_at": kept})
+    )
+    await async_session.commit()
+
+    async def lost(db, row):
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) == kept
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_claim_older_than_its_time_holds_nothing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A claim left past _CAMPAIGN_RESERVED_FOR (a process that died) does
+    # not keep the credit from the row that is next.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    old = (
+        datetime.now(timezone.utc)
+        - verifications_routes._CAMPAIGN_RESERVED_FOR
+        - timedelta(minutes=1)
+    ).isoformat()
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": "BN-old",
+                "brand_reused": True,
+                "campaign_reserved_at": old,
+            },
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
 
 
 async def test_overlapping_polls_email_the_owners_once(
