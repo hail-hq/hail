@@ -21,10 +21,9 @@ from typing import Annotated
 from urllib.parse import urlparse
 from uuid import UUID
 
-from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi import status as http_status
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.multipart import parse_capped_form
@@ -44,6 +43,7 @@ router = APIRouter(
 
 # The link is its own credential, like an unsubscribe link. Reviewers share
 # the proxy's IP with all anonymous traffic, so the public GET is not limited.
+# It only signs a redirect: no storage call and no file bytes per request.
 exempt_prefix("/verifications/sms/evidence/")
 
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
@@ -58,13 +58,6 @@ _SIGNATURES = (
     (b"\xff\xd8\xff", "image/jpeg"),
     (b"%PDF-", "application/pdf"),
 )
-# Browsers do not open their PDF viewer in a sandboxed document, so a PDF
-# gets no sandbox. Images keep it.
-_CSP = {
-    "image/png": {"Content-Security-Policy": "default-src 'none'; sandbox"},
-    "image/jpeg": {"Content-Security-Policy": "default-src 'none'; sandbox"},
-    "application/pdf": {},
-}
 _UPLOAD_BODY = {
     "requestBody": {
         "required": True,
@@ -187,52 +180,35 @@ async def upload_sms_evidence(
 
 @router.get(
     "/{organization_id}/{token}",
-    response_class=Response,
+    response_class=RedirectResponse,
+    status_code=http_status.HTTP_302_FOUND,
     operation_id="get_sms_evidence",
     responses={
-        200: {
-            "content": {
-                "image/png": {},
-                "image/jpeg": {},
-                "application/pdf": {},
-            },
-            "description": "The uploaded file.",
-        },
-        404: {"description": "No file has this link."},
+        302: {"description": "Redirect to a short-lived link to the file."},
+        404: {"description": "The link is malformed."},
     },
 )
 async def get_sms_evidence(
     organization_id: UUID,
     token: str,
     store: Annotated[S3MailClient | None, Depends(get_evidence_store)],
-) -> Response:
+) -> RedirectResponse:
     """Public: the file behind a link from `POST /verifications/sms/evidence`.
 
-    No sign-in. Carrier reviewers open this link.
+    No sign-in. Carrier reviewers open this link. It redirects to a link that
+    works for 10 minutes; open this link again for a new one.
     """
     if store is None or not _TOKEN.fullmatch(token):
         raise HTTPException(status_code=404, detail="Not found")
-    try:
-        data = await store.fetch_raw(f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}")
-    except ClientError as exc:
-        # The API may list sms-evidence/, so a missing key is NoSuchKey. An
-        # AccessDenied is a real permission fault and must stay a 500.
-        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
-            raise HTTPException(status_code=404, detail="Not found") from exc
-        raise
-    content_type = _sniff(data)
-    if content_type is None:
-        raise HTTPException(status_code=404, detail="Not found")
-    return Response(
-        content=data,
-        media_type=content_type,
-        headers={
-            "Content-Disposition": "inline",
-            "X-Content-Type-Options": "nosniff",
-            **_CSP[content_type],
-            "Cache-Control": "public, max-age=86400",
-            "X-Robots-Tag": "noindex",
-        },
+    # The file is served from storage, never from the API's origin, and the
+    # API never streams it. Signing is local: no storage call per view.
+    url = await store.presign_get(
+        f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}", ttl_seconds=600
+    )
+    return RedirectResponse(
+        url,
+        status_code=http_status.HTTP_302_FOUND,
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
     )
 
 

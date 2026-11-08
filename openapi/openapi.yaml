@@ -4733,7 +4733,9 @@ paths:
         "Public: the file behind a link from `POST /verifications/sms/evidence`.
 
 
-        No sign-in. Carrier reviewers open this link."
+        No sign-in. Carrier reviewers open this link. It redirects to a link that
+
+        works for 10 minutes; open this link again for a new one."
       operationId: get_sms_evidence
       parameters:
         - name: organization_id
@@ -4750,12 +4752,8 @@ paths:
             type: string
             title: Token
       responses:
-        "200":
-          description: The uploaded file.
-          content:
-            image/png: {}
-            image/jpeg: {}
-            application/pdf: {}
+        "302":
+          description: Redirect to a short-lived link to the file.
         "429":
           description:
             Rate limited. This caller exceeded the general request-rate
@@ -4778,7 +4776,7 @@ paths:
               schema:
                 type: integer
         "404":
-          description: No file has this link.
+          description: The link is malformed.
         "422":
           description: Validation Error
           content:

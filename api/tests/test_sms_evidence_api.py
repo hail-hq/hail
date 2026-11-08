@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from botocore.exceptions import ClientError
 from hailhq.api.main import app
 from hailhq.api.routes.sms_evidence import MAX_EVIDENCE_BYTES, get_evidence_store
 
@@ -162,25 +161,20 @@ async def test_upload_without_storage_says_paste_a_link(
     assert "public link" in resp.json()["detail"]
 
 
-async def test_link_opens_without_sign_in(client: httpx.AsyncClient, store) -> None:
-    store.fetch_raw.return_value = PNG
-    token = "a" * 32
-    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{token}")
-    assert resp.status_code == 200
-    assert resp.content == PNG
-    assert resp.headers["content-type"] == "image/png"
-    assert resp.headers["x-content-type-options"] == "nosniff"
-    assert resp.headers["content-disposition"] == "inline"
-    assert "sandbox" in resp.headers["content-security-policy"]
-    store.fetch_raw.assert_awaited_once_with(f"sms-evidence/{ORG}/{token}")
-
-
-async def test_link_never_serves_a_stored_file_of_another_type(
+async def test_link_redirects_to_a_short_lived_link(
     client: httpx.AsyncClient, store
 ) -> None:
-    store.fetch_raw.return_value = b"<html></html>"
-    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
-    assert resp.status_code == 404
+    store.presign_get.return_value = "https://storage.example/signed"
+    token = "a" * 32
+    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{token}")
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://storage.example/signed"
+    assert resp.headers["cache-control"] == "no-store"
+    # No sign-in, no storage read, no file bytes through the API.
+    store.presign_get.assert_awaited_once_with(
+        f"sms-evidence/{ORG}/{token}", ttl_seconds=600
+    )
+    store.fetch_raw.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -192,41 +186,12 @@ async def test_link_never_serves_a_stored_file_of_another_type(
         f"not-a-uuid/{'a' * 32}",
     ],
 )
-async def test_bad_links_are_refused_without_a_read(
+async def test_bad_links_are_refused_without_signing(
     client: httpx.AsyncClient, store, path
 ) -> None:
     resp = await client.get(f"/v1/verifications/sms/evidence/{path}")
     assert resp.status_code in (404, 422)
-    store.fetch_raw.assert_not_awaited()
-
-
-async def test_unknown_link_is_404(client: httpx.AsyncClient, store) -> None:
-    store.fetch_raw.side_effect = ClientError(
-        {"Error": {"Code": "NoSuchKey"}}, "GetObject"
-    )
-    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'b' * 32}")
-    assert resp.status_code == 404
-
-
-async def test_a_permission_fault_is_not_hidden_as_404(
-    client: httpx.AsyncClient, store
-) -> None:
-    store.fetch_raw.side_effect = ClientError(
-        {"Error": {"Code": "AccessDenied"}}, "GetObject"
-    )
-    with pytest.raises(ClientError):
-        await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'b' * 32}")
-
-
-async def test_a_pdf_opens_in_the_browser_viewer(
-    client: httpx.AsyncClient, store
-) -> None:
-    store.fetch_raw.return_value = PDF
-    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/pdf"
-    assert "content-security-policy" not in resp.headers
-    assert resp.headers["x-content-type-options"] == "nosniff"
+    store.presign_get.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

@@ -114,8 +114,8 @@ must not be uploaded as evidence. URL syntax checks do not establish reachabilit
 Carriers take evidence only as a public link inside the campaign text; the Telnyx campaign API
 has no upload field. A customer with no link uploads a PNG, JPG or PDF (10 MB or less) with
 `POST /v1/verifications/sms/evidence` and puts the returned `url` in the `*_evidence_url` field.
-Hail keeps the file in the mail bucket under `sms-evidence/<organization_id>/<token>` and serves
-it without sign-in at `GET /v1/verifications/sms/evidence/<organization_id>/<token>`. The
+Hail keeps the file in the mail bucket under `sms-evidence/<organization_id>/<token>` and `GET /v1/verifications/sms/evidence/<organization_id>/<token>` (no sign-in) redirects to a
+storage link that works for 10 minutes. The API never streams the file. The
 32-character random token is the only credential. The type comes from the file's first bytes;
 nothing else is stored or served. Files stay while the account is open, because reviewers can
 open the link again on a resubmission. The retention sweep (`python -m hailhq.core.retention`)
