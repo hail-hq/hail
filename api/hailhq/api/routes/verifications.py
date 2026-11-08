@@ -316,6 +316,18 @@ _ISO_TIME = (
 )
 
 
+def _refs_time(key: str):
+    """``provider_refs[key]`` as a timestamptz, or NULL. Cast only an ISO
+    8601 date or time (``_ISO_TIME``; the API writes isoformat() or the
+    database's own now()): anything else is not a time and must not fail
+    the read."""
+    value = CarrierVerification.provider_refs[key].astext
+    return case(
+        (value.op("~")(_ISO_TIME), cast(value, DateTime(timezone=True))),
+        else_=None,
+    )
+
+
 async def _uncharged_sms_steps(
     db: AsyncSession, organization_id: UUID, step: str
 ) -> list[tuple[str, str]]:
@@ -335,16 +347,7 @@ async def _uncharged_sms_steps(
             ),
         ]
     else:
-        filed_at = CarrierVerification.provider_refs["campaign_filed_at"].astext
-        # Cast only an ISO 8601 date or time (_ISO_TIME; the API writes
-        # isoformat()); anything else is not a time and must not fail the read.
-        filed = case(
-            (
-                filed_at.op("~")(_ISO_TIME),
-                cast(filed_at, DateTime(timezone=True)),
-            ),
-            else_=None,
-        )
+        filed = _refs_time("campaign_filed_at")
         happened = [filed > func.now() - text("interval '1 day'")]
     ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
     found = await db.execute(
@@ -636,21 +639,24 @@ def _campaign_filed(provider: object, refs: dict | None) -> bool:
 
 # A US texting registration in these states has its campaign still to file.
 _BEFORE_CAMPAIGN_STATES = ("awaiting_review", "submitting", "submitted")
-# A poll the credit check let file a campaign marks its row with
-# ``provider_refs.campaign_reserved_at``. For this long the row keeps first
-# claim on the credit, so another check while the carrier call runs (the
-# org lock is released by then) cannot hand the same credit to another row.
+# A poll the credit check lets file a campaign marks its row with
+# ``provider_refs.campaign_reserved_at`` (the database's now()) and clears
+# it when its carrier call returns. While set, and for at most this long
+# (a process that died in the call), the row keeps first claim on the
+# credit: another check during the call (the org lock is released by then)
+# cannot hand the same credit to another row.
 _CAMPAIGN_RESERVED_FOR = timedelta(minutes=5)
 
 
-def _campaign_reserved(row: CarrierVerification | Row) -> bool:
-    """True while the row's campaign reservation holds (``_CAMPAIGN_RESERVED_FOR``)."""
-    at = (row.provider_refs or {}).get("campaign_reserved_at")
-    try:
-        since = datetime.now(timezone.utc) - datetime.fromisoformat(at)
-    except (TypeError, ValueError):
-        return False
-    return timedelta(0) <= since < _CAMPAIGN_RESERVED_FOR
+def _campaign_reserved_sql():
+    """SQL: the row's campaign reservation still holds, by the database's
+    clock (one clock for every API process and worker)."""
+    return func.coalesce(
+        _refs_time("campaign_reserved_at")
+        > func.now()
+        - text(f"interval '{int(_CAMPAIGN_RESERVED_FOR.total_seconds())} seconds'"),
+        False,
+    )
 
 
 def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
@@ -718,39 +724,27 @@ async def _campaign_unfunded(
 
     The credit is the balance less the steps not yet charged
     (``_uncharged_cents``). It goes to the organization's registrations
-    still before their campaign, reserved ones first (``_campaign_reserved``)
+    still before their campaign, reserved ones first (``_campaign_reserved_sql``)
     then oldest first, each using up its fee, so
     one credit never pays for two campaigns. All of them count, not only
     ``rows``, so every path gives the credit to the same registration."""
-    given = {row.id: row for row in rows}
+    given = {row.id for row in rows}
     orgs = {row.organization_id for row in rows if _campaign_gated(row, registry)}
     unfunded: set[UUID] = set()
     for org in orgs:
-        # Columns only, so the rows the caller holds are not reloaded.
+        # The stored rows, not the caller's copies: a copy can be stale (the
+        # sweeper reads all rows first). Columns only, so the rows the caller
+        # holds are not reloaded.
         found = await db.execute(
-            select(*_GATE_COLUMNS).where(
+            select(*_GATE_COLUMNS, _campaign_reserved_sql().label("reserved")).where(
                 CarrierVerification.organization_id == org,
                 CarrierVerification.purpose == "sms",
                 CarrierVerification.state.in_(_BEFORE_CAMPAIGN_STATES),
             )
         )
-        stored = {r.id: r for r in found}
-        # The caller's copy of a row wins: it can be newer than the database.
-        candidates = stored | {
-            i: r for i, r in given.items() if r.organization_id == org
-        }
         left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
-
-        # A reserved row (its campaign may be in flight) keeps its claim. The
-        # stored copy says: another poll may have reserved it since.
-        order = sorted(
-            candidates.values(),
-            key=lambda r, stored=stored: (
-                not _campaign_reserved(stored.get(r.id, r)),
-                r.created_at,
-                r.id,
-            ),
-        )
+        # A reserved row (its campaign may be in flight) keeps its claim.
+        order = sorted(found, key=lambda r: (not r.reserved, r.created_at, r.id))
         for row in order:
             if not _campaign_gated(row, registry):
                 continue
@@ -765,7 +759,7 @@ async def _campaign_unfunded(
                 unfunded.add(row.id)
             else:
                 left -= fee
-    return unfunded & given.keys()
+    return unfunded & given
 
 
 async def _campaign_may_go(
@@ -814,11 +808,12 @@ async def _campaign_may_go(
             update(CarrierVerification)
             .where(CarrierVerification.id == row.id)
             .values(
-                provider_refs=CarrierVerification.provider_refs.op("||")(
-                    func.jsonb_build_object(
-                        "campaign_reserved_at", datetime.now(timezone.utc).isoformat()
-                    )
-                )
+                provider_refs=func.coalesce(
+                    func.nullif(
+                        CarrierVerification.provider_refs, text("'null'::jsonb")
+                    ),
+                    text("'{}'::jsonb"),
+                ).op("||")(func.jsonb_build_object("campaign_reserved_at", func.now()))
             )
             .execution_options(synchronize_session=False)
         )
@@ -1016,8 +1011,28 @@ async def _refresh(
         # It changed after it was read and got no credit check: fail closed,
         # no campaign on this poll; the next one checks.
         may_file = False
+    # Not the plug-in's, and not a billed change: kept out of the refs it
+    # sees and the change check (``before``).
+    reserved_at = (row.provider_refs or {}).pop("campaign_reserved_at", None)
     before = copy.deepcopy(row.provider_refs)
     status = await _fetch_status(row, registry, may_file_campaign=may_file)
+    if reserved_at is not None:
+        if status is None:
+            # The call failed: a campaign it filed may come to light on the
+            # next poll. The reservation holds until then (or runs out).
+            row.provider_refs["campaign_reserved_at"] = reserved_at
+            before["campaign_reserved_at"] = reserved_at
+        else:
+            await db.execute(
+                update(CarrierVerification)
+                .where(CarrierVerification.id == row.id)
+                .values(
+                    provider_refs=CarrierVerification.provider_refs.op("-")(
+                        "campaign_reserved_at"
+                    )
+                )
+                .execution_options(synchronize_session=False)
+            )
     changed = await _poll_and_apply(db, row, status, registry, before)
     await db.commit()  # also ends the row lock
     if not changed:

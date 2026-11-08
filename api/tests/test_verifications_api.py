@@ -3808,6 +3808,60 @@ async def test_a_row_that_needs_the_check_only_after_the_reread_files_nothing(
     assert "campaign_id" not in await _stored_refs(async_session, vid)
 
 
+async def test_a_poll_that_files_nothing_gives_up_its_claim(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Credit for one fee. The newer row X is polled while funded, but its
+    # brand is not ready (no campaign filed): the poll clears its
+    # reservation, so the older row Y, ready later, gets the credit.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": f"BN-{number_type}",
+                "brand_reused": True,
+                **extra,
+            },
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age, extra in (
+            ("local", 3, {"needs_information": True}),
+            ("toll_free", 2, {}),
+        )
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    # No campaign_key: the fake files no campaign (its brand is pending).
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.status_calls == 1
+    assert "campaign_reserved_at" not in await _stored_refs(
+        async_session, str(newer.id)
+    )
+    refs = dict(older.provider_refs)
+    refs.pop("needs_information")
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == older.id)
+        .values(provider_refs=refs)
+    )
+    await async_session.commit()
+    resp = await client.get(f"/verifications/{older.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
