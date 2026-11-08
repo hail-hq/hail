@@ -209,8 +209,29 @@ def test_every_consent_method_requires_its_own_complete_evidence(method):
         assert value in text.message_flow
         missing = {**data}
         del missing[name]
+        if name == "verbal_evidence_url":
+            continue
         assert name in error_fields(missing)
     assert text.schema_version == 2
+
+
+def test_verbal_consent_needs_no_screenshot():
+    """Carriers ask for the script and the confirmation text, not a picture."""
+    data = {**GOOD, "consent_methods": "VERBAL", **METHODS["VERBAL"]}
+    del data["verbal_evidence_url"]
+    assert errors(data) == []
+    assert "evidence url" not in campaign_text(data, "person").message_flow
+
+
+def test_evidence_help_names_the_upload_route():
+    from hailhq.core.providers.verification.sms_form import _method_spec
+
+    assert (
+        "POST /verifications/sms/evidence"
+        in _method_spec("WEBSITE", "website_evidence_url").help
+    )
+    assert "Optional" in _method_spec("VERBAL", "verbal_evidence_url").help
+    assert "Optional" not in _method_spec("PAPER", "paper_evidence_url").help
 
 
 def test_every_selected_method_is_validated():

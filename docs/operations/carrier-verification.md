@@ -112,6 +112,22 @@ its own evidence. Website, private-form, paper, verbal, keyword, QR and inbound 
 different required fields. Evidence must be public and redacted; private recipient records
 must not be uploaded as evidence. URL syntax checks do not establish reachability or approval.
 
+Carriers take evidence only as a public link inside the campaign text; the Telnyx campaign API
+has no upload field. A customer with no link uploads a PNG, JPG or PDF (10 MB or less) with
+`POST /v1/verifications/sms/evidence` and puts the returned `url` in the `*_evidence_url` field.
+Hail keeps the file in the mail bucket under `sms-evidence/<organization_id>/<token>` and `GET /v1/verifications/sms/evidence/<organization_id>/<token>` (no sign-in) redirects to a
+storage link that works for 10 minutes. The API never streams the file. The
+32-character random token is the only credential. The type comes from the file's first bytes;
+nothing else is stored or served. Files stay while the account is open, because reviewers can
+open the link again on a resubmission. The retention sweep (`python -m hailhq.core.retention`)
+deletes an organization's folder 12 months after the account closes. Uploads need a mail
+bucket and a public https `HAIL_API_URL`; without them the route returns 503 and the customer
+pastes a public link. The public link is exempt from the general rate limit, like unsubscribe.
+`DELETE /v1/verifications/sms/evidence/<organization_id>/<token>` (signed in, own organization
+only) removes a file at once; its link then leads to a storage error page. An organization keeps at most 100 files; the 101st upload returns
+409 until one is deleted.
+Verbal consent needs the script and action only; its evidence link is optional.
+
 The application compiler uses the applicant's actual disclosures, recording process, evidence
 and policy links. It never pads a short answer with a consent assertion. Short answers and
 inconsistent content flags return field errors before a paid filing. Content flags and

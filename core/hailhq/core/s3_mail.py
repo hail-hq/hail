@@ -54,6 +54,44 @@ class S3MailClient:
             self._client.delete_object, Bucket=self._bucket, Key=key
         )
 
+    async def count_prefix(self, prefix: str, *, up_to: int) -> int:
+        """How many objects are under ``prefix``, counting at most ``up_to``."""
+
+        def _do() -> int:
+            resp = self._client.list_objects_v2(
+                Bucket=self._bucket, Prefix=prefix, MaxKeys=up_to
+            )
+            return int(resp.get("KeyCount", 0))
+
+        return await asyncio.to_thread(_do)
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Delete every object under ``prefix``; returns how many."""
+
+        def _do() -> int:
+            deleted = 0
+            pages = self._client.get_paginator("list_objects_v2").paginate(
+                Bucket=self._bucket, Prefix=prefix
+            )
+            for page in pages:
+                keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+                if keys:
+                    resp = self._client.delete_objects(
+                        Bucket=self._bucket, Delete={"Objects": keys, "Quiet": True}
+                    )
+                    # A 200 can still carry per-key failures; never count
+                    # (or silently keep) a file S3 did not delete.
+                    errors = resp.get("Errors") or []
+                    if errors:
+                        raise RuntimeError(
+                            f"S3 could not delete {len(errors)} object(s) under "
+                            f"{prefix}: {errors[0].get('Code')}"
+                        )
+                    deleted += len(keys)
+            return deleted
+
+        return await asyncio.to_thread(_do)
+
     async def presign_get(self, key: str, *, ttl_seconds: int = 300) -> str:
         def _do() -> str:
             return self._client.generate_presigned_url(

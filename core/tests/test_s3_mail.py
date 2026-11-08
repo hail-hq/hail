@@ -51,3 +51,53 @@ def test_presign_returns_url():
         Params={"Bucket": "hail-inbound", "Key": "raw/abc"},
         ExpiresIn=300,
     )
+
+
+def test_delete_prefix_deletes_every_page():
+    stub = MagicMock()
+    stub.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "sms-evidence/o/a"}, {"Key": "sms-evidence/o/b"}]},
+        {"Contents": [{"Key": "sms-evidence/o/c"}]},
+        {},
+    ]
+    stub.delete_objects.return_value = {}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    assert asyncio.run(client.delete_prefix("sms-evidence/o/")) == 3
+    stub.get_paginator.return_value.paginate.assert_called_once_with(
+        Bucket="hail-inbound", Prefix="sms-evidence/o/"
+    )
+    assert stub.delete_objects.call_count == 2
+
+
+def test_delete_prefix_raises_when_s3_keeps_a_file():
+    stub = MagicMock()
+    stub.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "sms-evidence/o/a"}]},
+    ]
+    stub.delete_objects.return_value = {
+        "Errors": [{"Key": "sms-evidence/o/a", "Code": "AccessDenied"}]
+    }
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        asyncio.run(client.delete_prefix("sms-evidence/o/"))
+
+
+def test_delete_org_evidence_without_a_bucket_does_nothing(monkeypatch):
+    from hailhq.core import sms_evidence
+
+    monkeypatch.setattr(
+        type(sms_evidence.settings), "hail_mail_bucket", property(lambda s: "")
+    )
+    assert (
+        asyncio.run(sms_evidence.delete_org_evidence(__import__("uuid").uuid4())) == 0
+    )
+
+
+def test_count_prefix_reads_key_count():
+    stub = MagicMock()
+    stub.list_objects_v2.return_value = {"KeyCount": 7}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    assert asyncio.run(client.count_prefix("sms-evidence/o/", up_to=100)) == 7
+    stub.list_objects_v2.assert_called_once_with(
+        Bucket="hail-inbound", Prefix="sms-evidence/o/", MaxKeys=100
+    )

@@ -47,6 +47,7 @@ from uuid import UUID
 
 from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
 from hailhq.core.recordings import delete_recording
+from hailhq.core.sms_evidence import delete_org_evidence
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +69,7 @@ class PurgeSummary:
     sms_scrubbed: int = 0
     emails_scrubbed: int = 0
     contacts_deleted: int = 0
+    evidence_files_deleted: int = 0
     # Compatibility counter for older operator consumers. Audio is now optional.
     calls_with_unexpected_recording: int = 0
 
@@ -89,6 +91,8 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
       CHECK constraint requires at least one of ``body_text``/
       ``body_html`` to be non-NULL; an empty string satisfies the
       constraint while still clearing the actual content.
+    * SMS registration evidence files (public consent screenshots) are
+      deleted from the mail bucket.
     * ``Contact`` rows scoped to the org are deleted outright — see module
       docstring; this is the explicit replacement for the FK cascade that
       isn't possible across the two databases.
@@ -179,7 +183,38 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     summary.contacts_deleted = contact_result.rowcount or 0
 
     await session.commit()
+
+    # Public links must stop working once the account's data is gone. After
+    # the commit, so an S3 failure never blocks the database scrub; every
+    # sweep retries it, since closed orgs stay past the cutoff. One org's
+    # failure never stops the others.
+    failed: list[UUID] = []
+    for org_id in org_ids:
+        try:
+            summary.evidence_files_deleted += await delete_org_evidence(org_id)
+        except Exception:
+            logger.exception("could not delete evidence for org %s", org_id)
+            failed.append(org_id)
+    if failed:
+        # The database scrub is committed; log what was done before failing.
+        _log_summary(summary)
+        raise RuntimeError(f"evidence delete failed for {len(failed)} org(s)")
     return summary
+
+
+def _log_summary(summary: PurgeSummary) -> None:
+    logger.info(
+        "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
+        "%d sms scrubbed, %d email(s) scrubbed, %d contact(s) deleted, "
+        "%d evidence file(s) deleted, %d unexpected recording anomaly(ies)",
+        len(summary.organizations_purged),
+        summary.calls_scrubbed,
+        summary.sms_scrubbed,
+        summary.emails_scrubbed,
+        summary.contacts_deleted,
+        summary.evidence_files_deleted,
+        summary.calls_with_unexpected_recording,
+    )
 
 
 async def _main() -> None:
@@ -189,17 +224,7 @@ async def _main() -> None:
     async with session_scope() as session:
         summary = await purge_expired_data(session, datetime.now(timezone.utc))
 
-    logger.info(
-        "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
-        "%d sms scrubbed, %d email(s) scrubbed, %d contact(s) deleted, "
-        "%d unexpected recording anomaly(ies)",
-        len(summary.organizations_purged),
-        summary.calls_scrubbed,
-        summary.sms_scrubbed,
-        summary.emails_scrubbed,
-        summary.contacts_deleted,
-        summary.calls_with_unexpected_recording,
-    )
+    _log_summary(summary)
 
 
 if __name__ == "__main__":

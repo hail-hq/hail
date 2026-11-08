@@ -38,6 +38,7 @@ from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
+from hailhq.api.multipart import parse_capped_form
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.sms_registration import (
     attach_org_numbers,
@@ -90,7 +91,6 @@ from sqlalchemy import DateTime, Row, String, case, cast, func, select, text, up
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
-from starlette.formparsers import MultiPartException, MultiPartParser
 
 logger = logging.getLogger(__name__)
 
@@ -1591,36 +1591,10 @@ def _json_part(form, name: str, default):
         raise unprocessable(f"{name} must be valid JSON", loc=["body", name]) from exc
 
 
-class _InMemoryMultiPartParser(MultiPartParser):
-    """Starlette spools any file part over 1 MB to a temporary file on disk.
-    The body is capped at MAX_REQUEST_BYTES (below), so with this limit no part
-    can reach the spool size and every byte stays in memory."""
-
-    spool_max_size = MAX_REQUEST_BYTES + 1
-
-
-async def _capped_body(request: Request) -> AsyncIterator[bytes]:
-    total = 0
-    async for chunk in request.stream():
-        total += len(chunk)
-        if total > MAX_REQUEST_BYTES:
-            raise unprocessable("request is too large", loc=["body"])
-        yield chunk
-
-
 async def _parse_form(request: Request):
-    length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > MAX_REQUEST_BYTES:
-        raise unprocessable("request is too large", loc=["body"])
-    content_type = request.headers.get("content-type", "")
-    if not content_type.lower().startswith("multipart/form-data"):
-        raise unprocessable("send multipart/form-data", loc=["body"])
-    try:
-        return await _InMemoryMultiPartParser(
-            request.headers, _capped_body(request), max_files=20, max_fields=20
-        ).parse()
-    except MultiPartException as exc:
-        raise unprocessable(exc.message, loc=["body"]) from exc
+    return await parse_capped_form(
+        request, max_bytes=MAX_REQUEST_BYTES, max_files=20, max_fields=20
+    )
 
 
 async def _read_file(upload) -> UploadedFile:

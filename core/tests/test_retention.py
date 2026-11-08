@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from hailhq.core.models import (
     AuditLog,
     Call,
@@ -284,3 +285,66 @@ async def test_purge_expired_data_deletes_optional_recording(
     assert call.recording_s3_key is None
     storage.delete_object.assert_called_once()
     assert call.transcript is None
+
+
+async def test_purge_expired_data_deletes_closed_org_evidence_only(
+    async_session, monkeypatch
+):
+    """Public consent screenshots stop working once the account's data goes."""
+    closed, open_org = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        OrgClosure(
+            organization_id=closed,
+            closed_at=now - timedelta(days=400),
+            source="hail_website",
+        )
+    )
+    async_session.add(
+        OrgClosure(
+            organization_id=open_org,
+            closed_at=now - timedelta(days=10),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+    deleted: list[uuid.UUID] = []
+
+    async def fake_delete(org_id):
+        deleted.append(org_id)
+        return 2
+
+    monkeypatch.setattr("hailhq.core.retention.delete_org_evidence", fake_delete)
+    summary = await purge_expired_data(async_session, now)
+    assert deleted == [closed]
+    assert summary.evidence_files_deleted == 2
+
+
+async def test_purge_expired_data_keeps_deleting_evidence_after_one_org_fails(
+    async_session, monkeypatch
+):
+    """One org's S3 failure never leaves the other orgs' links public."""
+
+    first, second = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    for org in (first, second):
+        async_session.add(
+            OrgClosure(
+                organization_id=org,
+                closed_at=now - timedelta(days=400),
+                source="hail_website",
+            )
+        )
+    await async_session.commit()
+    tried: list[uuid.UUID] = []
+
+    async def fake_delete(org_id):
+        tried.append(org_id)
+        if len(tried) == 1:
+            raise RuntimeError("AccessDenied")
+        return 1
+
+    monkeypatch.setattr("hailhq.core.retention.delete_org_evidence", fake_delete)
+    with pytest.raises(RuntimeError, match="1 org"):
+        await purge_expired_data(async_session, now)
+    assert sorted(tried) == sorted([first, second])

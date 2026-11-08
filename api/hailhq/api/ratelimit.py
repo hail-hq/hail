@@ -117,12 +117,25 @@ _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/re
 _EXEMPT_PATHS = {"/unsubscribe", "/webhooks/event-types"}
 
 
+# Unprefixed path prefixes, for public GET routes with an id in the path.
+# Other methods under the same prefix (a signed-in DELETE) stay limited.
+_EXEMPT_PREFIXES: set[str] = set()
+_READ_METHODS = frozenset({"GET", "HEAD"})
+
+
 def exempt_path(path: str) -> None:
     """Exempt one unprefixed path, at both mounts, from the rate limit."""
     _EXEMPT_PATHS.add(path)
 
 
-def _is_exempt(path: str) -> bool:
+def exempt_prefix(prefix: str) -> None:
+    """Exempt GET and HEAD on every unprefixed path under ``prefix``."""
+    if not prefix.endswith("/"):
+        raise ValueError("an exempt prefix ends with /")
+    _EXEMPT_PREFIXES.add(prefix)
+
+
+def _is_exempt(path: str, method: str = "GET") -> bool:
     if (
         path == _HEALTHZ_PATH
         or path in _DOCS_PATHS
@@ -130,7 +143,11 @@ def _is_exempt(path: str) -> bool:
     ):
         return True
     unprefixed = path[len(_V1_PREFIX) - 1 :] if path.startswith(_V1_PREFIX) else path
-    return unprefixed in _EXEMPT_PATHS
+    if unprefixed in _EXEMPT_PATHS:
+        return True
+    return method.upper() in _READ_METHODS and any(
+        unprefixed.startswith(p) for p in _EXEMPT_PREFIXES
+    )
 
 
 class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
@@ -145,7 +162,7 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if _is_exempt(request.url.path):
+        if _is_exempt(request.url.path, request.method):
             return await call_next(request)
 
         key = _rate_limit_key(request)

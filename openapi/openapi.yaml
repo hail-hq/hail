@@ -4652,6 +4652,210 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/evidence:
+    post:
+      tags:
+        - verifications
+      summary: Upload Sms Evidence
+      description: "Upload a consent screenshot and get back a public link.
+
+
+        Put the returned `url` in an SMS registration field that asks for an
+
+        evidence URL (for example `website_evidence_url`). Carrier reviewers open
+
+        it without signing in, so anyone with the link can see the file. Remove
+
+        personal information first. Pasting your own public link still works."
+      operationId: upload_sms_evidence
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceUploadResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "409":
+          description: The account keeps the most files allowed.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A PNG, JPG or PDF of 10 MB or less.
+  /v1/verifications/sms/evidence/{organization_id}/{token}:
+    get:
+      tags:
+        - verifications
+      summary: Get Sms Evidence
+      description:
+        "Public: the file behind a link from `POST /verifications/sms/evidence`.
+
+
+        No sign-in. Carrier reviewers open this link. It redirects to a link that
+
+        works for 10 minutes; open this link again for a new one."
+      operationId: get_sms_evidence
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Organization Id
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        "302":
+          description: Redirect to a short-lived link to the file.
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: The link is malformed.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - verifications
+      summary: Delete Sms Evidence
+      description:
+        "Delete an uploaded file. Its link then leads to a storage error
+        page.
+
+
+        A registration that already names the link keeps the link in its text,
+
+        and carrier reviewers can no longer see the file. Upload a new file and
+
+        amend the registration if it is still under review."
+      operationId: delete_sms_evidence
+      parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Organization Id
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: No file of yours has this link.
+        "503":
+          description: This server does not store files.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/requirements:
     get:
       tags:
@@ -7938,6 +8142,28 @@ components:
       required:
         - items
       title: EventStreamResponse
+    EvidenceUploadResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Public link to the file. Put it in an `*_evidence_url` field.
+        content_type:
+          type: string
+          title: Content Type
+          description:
+            "`image/png`, `image/jpeg` or `application/pdf`, read from
+            the file."
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: File size in bytes.
+      type: object
+      required:
+        - url
+        - content_type
+        - size_bytes
+      title: EvidenceUploadResponse
     FieldOption:
       properties:
         key:
