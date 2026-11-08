@@ -760,6 +760,18 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     )
 
 
+async def _ledger_floor_cents(db: AsyncSession, organization_id: UUID) -> int:
+    """The organization's ledger sum rounded down to a whole cent (below
+    zero, one cent below ``get_balance_cents`` when the sum has a
+    fraction)."""
+    total = await db.execute(
+        select(
+            func.floor(func.coalesce(func.sum(AccountCredit.amount_cents), 0))
+        ).where(AccountCredit.organization_id == organization_id)
+    )
+    return int(total.scalar_one())
+
+
 # What _campaign_gated and _campaign_unfunded read of a row.
 _GATE_COLUMNS = (
     CarrierVerification.id,
@@ -817,7 +829,8 @@ async def _campaign_unfunded(
         found = found.all()
         if not any(_campaign_gated(r, registry) for r in found):
             continue
-        left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
+        balance = await get_balance_cents(db, org)
+        left = balance - await _uncharged_cents(db, org)
         # A reserved row (its campaign may be in flight) keeps its claim.
         order = sorted(found, key=lambda r: (not r.reserved, r.created_at, r.id))
         waiting: list[tuple[UUID, int]] = []
@@ -835,10 +848,16 @@ async def _campaign_unfunded(
                 waiting.append((row.id, fee))
             else:
                 left -= fee
+        if waiting and balance <= 0:
+            # The balance is the ledger's sum truncated toward zero, and a
+            # top-up adds whole cents: below zero, a fraction of a cent
+            # costs one more cent.
+            left -= balance - await _ledger_floor_cents(db, org)
         # ``left`` only falls, so it is below each waiting row's fee: the
-        # first one needs more than zero.
-        for i, (row_id, fee) in enumerate(waiting):
-            unfunded[row_id] = fee - left if i == 0 else fee
+        # first one needs more than zero, the later ones their whole fee.
+        for row_id, fee in waiting:
+            unfunded[row_id] = fee - left
+            left = 0
     return {row_id: need for row_id, need in unfunded.items() if row_id in given}
 
 
