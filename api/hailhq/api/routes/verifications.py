@@ -2719,8 +2719,9 @@ async def confirm_verification(
     registration. Use it when the verification shows `confirmation: "code"`.
     On success the campaign is usually filed at once. It waits when your
     credit does not cover its fee (`waiting_for_credit` is true until you
-    add credit). It also waits, up to 15 minutes, while another check of
-    it is running or has just failed. Poll GET /verifications/{id} until
+    add credit). It also waits when a recent check of it failed (a later
+    check files it once the carrier answers) or another process holds it.
+    Poll GET /verifications/{id} until
     `approved`. A wrong or expired code is 422 on `code`; after five wrong
     codes, 429 until the carrier sends a new code (once a day). 409 when
     there is nothing to confirm."""

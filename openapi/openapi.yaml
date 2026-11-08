@@ -5330,9 +5330,11 @@ paths:
 
         credit does not cover its fee (`waiting_for_credit` is true until you
 
-        add credit). It also waits, up to 15 minutes, while another check of
+        add credit). It also waits when a recent check of it failed (a later
 
-        it is running or has just failed. Poll GET /verifications/{id} until
+        check files it once the carrier answers) or another process holds it.
+
+        Poll GET /verifications/{id} until
 
         `approved`. A wrong or expired code is 422 on `code`; after five wrong
 

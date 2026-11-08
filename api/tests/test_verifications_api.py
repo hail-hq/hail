@@ -4108,7 +4108,14 @@ async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_bus
     assert resp.status_code == 200, resp.text
     assert locks == [org_id]
     assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_skipped == 1  # status() ran with the flag off
     assert sms_carrier.campaigns_created == 0
+    assert resp.json()["waiting_for_credit"] is False  # funded, just busy
+    assert await _reserved(async_session, vid) is None
+    # Lock free again: the same funded row files.
+    monkeypatch.undo()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert sms_carrier.campaigns_created == 1
 
 
 async def test_overlapping_polls_email_the_owners_once(
