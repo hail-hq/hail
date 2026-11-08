@@ -3769,6 +3769,45 @@ async def test_a_campaign_in_flight_keeps_its_credit_when_the_order_flips(
     assert "campaign_id" not in await _stored_refs(async_session, str(older.id))
 
 
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list"])
+async def test_a_row_that_needs_the_check_only_after_the_reread_files_nothing(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, via
+) -> None:
+    # Read with a campaign stamp (no check needed), then re-read under the
+    # row lock without it: it got no credit check, so no campaign (fail
+    # closed), although the balance is 0.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    refs = await _stored_refs(async_session, vid)
+    stamped = {**refs, "campaign_filed_at": datetime.now(timezone.utc).isoformat()}
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(provider_refs=stamped)
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, 0)
+    real = verifications_routes._lock_for_poll
+
+    async def lock_after_a_change(db, row):
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(provider_refs=refs)
+        )
+        return await real(db, row)
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lock_after_a_change)
+    verifications_routes._last_polled.clear()
+    url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    resp = await client.get(url, headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_created == 0
+    assert "campaign_id" not in await _stored_refs(async_session, vid)
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:

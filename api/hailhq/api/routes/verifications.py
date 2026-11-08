@@ -1005,12 +1005,17 @@ async def _refresh(
         return
     # Not covered, or the org lock is busy (another poll or a billing
     # write: the next poll asks): the poll runs, without the campaign filing.
+    checked = _campaign_gated(row, registry)
     may_file = await _campaign_may_go(db, row, registry, wait=wait_for_org_lock)
     if not await _lock_for_poll(db, row):
         return
     if not _pollable(row):  # another poll settled it before the lock
         await db.commit()
         return
+    if not checked and _campaign_gated(row, registry):
+        # It changed after it was read and got no credit check: fail closed,
+        # no campaign on this poll; the next one checks.
+        may_file = False
     before = copy.deepcopy(row.provider_refs)
     status = await _fetch_status(row, registry, may_file_campaign=may_file)
     changed = await _poll_and_apply(db, row, status, registry, before)
@@ -1184,8 +1189,14 @@ async def refresh_number_verifications(
     # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
+    # Fail closed: a row that needs the credit check got none here.
     statuses = await asyncio.gather(
-        *(_fetch_status(r, registry, may_file_campaign=True) for r in due)
+        *(
+            _fetch_status(
+                r, registry, may_file_campaign=not _campaign_gated(r, registry)
+            )
+            for r in due
+        )
     )
     changed = [
         r
@@ -2232,9 +2243,16 @@ async def list_verifications(
     # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
-    # Gated rows are not in this batch: _refresh checks their credit.
+    # Gated rows go through _refresh, which checks their credit. A row that
+    # became gated after it was read (re-read under the lock) got no check:
+    # fail closed, no campaign on this poll.
     statuses = await asyncio.gather(
-        *(_fetch_status(r, registry, may_file_campaign=True) for r in due)
+        *(
+            _fetch_status(
+                r, registry, may_file_campaign=not _campaign_gated(r, registry)
+            )
+            for r in due
+        )
     )
     changed = [
         r
