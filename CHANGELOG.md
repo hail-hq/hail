@@ -6,14 +6,26 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
+- Hail records what the carrier charged for each call, from Twilio, Telnyx and DIDWW.
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
+- Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 - Email: Hail pauses an organization's email when its hard bounce rate or spam complaint rate gets too high, so one sender cannot get email paused for every organization.
 
 ### Fixed
 
+- Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
+- Verification: when several Twilio requirements accept only the same document, the form asks for it once.
+- Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
+- Voice replies start sooner: the call's instructions are cached after the first turn.
+- `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.
+- Verification: when Twilio refuses to check the submitted details, the customer sees that the details were not accepted, instead of "carrier unavailable; try again later".
 - Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
+- Numbers: a number you can buy online now ranks above one only support can order, even when that one needs no papers.
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
+- US texting: a number the carrier refuses for a registration now gets an audit row with the reason (a new one when the reason changes), and Hail retries it less often.
+- US texting: when the carrier refuses a person's number, Hail now tries their next number.
 
 ## [0.32.0] (2026-10-30)
 

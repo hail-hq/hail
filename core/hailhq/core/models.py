@@ -874,6 +874,89 @@ class CallEvent(Base):
     )
 
 
+class CallLeg(Base):
+    """One carrier leg of a call, and what the carrier charged for it.
+
+    A call has one leg per phone line it used: the caller's (or the person
+    Hail dialed), plus one per handover dial. The voicebot writes the rows
+    when the call ends; ``hailhq.core.call_legs.fetch_leg_costs`` fills in
+    the cost from the carrier's call record later. Internal only: carrier
+    costs never reach a customer API.
+
+    ``cost_status``: ``pending`` until the carrier's record is read,
+    ``found`` with the cost, or ``missing`` when no record turned up within
+    ``call_legs.GIVE_UP_AFTER``.
+    """
+
+    __tablename__ = "call_legs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    call_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), nullable=False
+    )
+    # ``call``: the caller's leg, or the person Hail dialed. ``handover``:
+    # a leg the agent dialed to hand the call to a person.
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    # Seen from the carrier: ``inbound`` reached Hail, ``outbound`` Hail placed.
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    # The trunk provider's SIP Call-ID (LiveKit ``sip.callIDFull``).
+    sip_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Twilio's CallSid (LiveKit ``sip.twilio.callSid``); NULL elsewhere.
+    carrier_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Joined: the leg entered the LiveKit room (an outbound leg joins while
+    # it rings). Answered: NULL for a leg nobody picked up.
+    joined_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    answered_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    left_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    cost_status: Mapped[str] = mapped_column(
+        Text, server_default="pending", nullable=False
+    )
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)
+    billed_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usd_per_minute: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 6), nullable=True
+    )
+    cost_checked_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("role IN ('call','handover')", name="call_legs_role_check"),
+        CheckConstraint(
+            "direction IN ('inbound','outbound')", name="call_legs_direction_check"
+        ),
+        CheckConstraint(
+            "provider IN ('twilio','telnyx','didww')", name="call_legs_provider_check"
+        ),
+        CheckConstraint(
+            "cost_status IN ('pending','found','missing')",
+            name="call_legs_cost_status_check",
+        ),
+        CheckConstraint(
+            "(cost_status = 'found') = (cost_usd IS NOT NULL)",
+            name="call_legs_cost_when_found",
+        ),
+        Index(
+            "call_legs_call_sip_uq",
+            "call_id",
+            "sip_call_id",
+            unique=True,
+            postgresql_where=text("sip_call_id IS NOT NULL"),
+        ),
+        Index(
+            "call_legs_pending_idx",
+            text("cost_checked_at NULLS FIRST"),
+            "joined_at",
+            postgresql_where=text("cost_status = 'pending'"),
+        ),
+    )
+
+
 class Sms(Base):
     __tablename__ = "sms"
 
@@ -1927,7 +2010,9 @@ class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
     in some countries. Holds state, opaque carrier IDs and the name of the
     person or company it is for (``subject_name``). No addresses or
-    document data are stored here (see the design spec)."""
+    document data are stored for number verification. SMS provider_refs also
+    retains the submitted application text/address for organization-scoped repair;
+    document files are never stored here."""
 
     __tablename__ = "carrier_verifications"
 

@@ -605,16 +605,16 @@ func (e NumberAcquireRequestSubjectType) Valid() bool {
 
 // Defines values for NumberQuoteRequestCapabilities.
 const (
-	Sms   NumberQuoteRequestCapabilities = "sms"
-	Voice NumberQuoteRequestCapabilities = "voice"
+	NumberQuoteRequestCapabilitiesSms   NumberQuoteRequestCapabilities = "sms"
+	NumberQuoteRequestCapabilitiesVoice NumberQuoteRequestCapabilities = "voice"
 )
 
 // Valid indicates whether the value is a known member of the NumberQuoteRequestCapabilities enum.
 func (e NumberQuoteRequestCapabilities) Valid() bool {
 	switch e {
-	case Sms:
+	case NumberQuoteRequestCapabilitiesSms:
 		return true
-	case Voice:
+	case NumberQuoteRequestCapabilitiesVoice:
 		return true
 	default:
 		return false
@@ -639,6 +639,24 @@ func (e NumberQuoteRequestNumberType) Valid() bool {
 	case NumberQuoteRequestNumberTypeNational:
 		return true
 	case NumberQuoteRequestNumberTypeTollFree:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NumberQuoteRequestSubjectType.
+const (
+	NumberQuoteRequestSubjectTypeBusiness NumberQuoteRequestSubjectType = "business"
+	NumberQuoteRequestSubjectTypePerson   NumberQuoteRequestSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the NumberQuoteRequestSubjectType enum.
+func (e NumberQuoteRequestSubjectType) Valid() bool {
+	switch e {
+	case NumberQuoteRequestSubjectTypeBusiness:
+		return true
+	case NumberQuoteRequestSubjectTypePerson:
 		return true
 	default:
 		return false
@@ -678,6 +696,24 @@ func (e OfferVerificationSubjectType) Valid() bool {
 	case OfferVerificationSubjectTypeBusiness:
 		return true
 	case OfferVerificationSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OptionVerificationSubjectType.
+const (
+	OptionVerificationSubjectTypeBusiness OptionVerificationSubjectType = "business"
+	OptionVerificationSubjectTypePerson   OptionVerificationSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the OptionVerificationSubjectType enum.
+func (e OptionVerificationSubjectType) Valid() bool {
+	switch e {
+	case OptionVerificationSubjectTypeBusiness:
+		return true
+	case OptionVerificationSubjectTypePerson:
 		return true
 	default:
 		return false
@@ -749,16 +785,16 @@ func (e QuoteOfferNumberType) Valid() bool {
 
 // Defines values for QuoteOfferReadiness.
 const (
-	Ready                QuoteOfferReadiness = "ready"
-	VerificationRequired QuoteOfferReadiness = "verification_required"
+	QuoteOfferReadinessReady                QuoteOfferReadiness = "ready"
+	QuoteOfferReadinessVerificationRequired QuoteOfferReadiness = "verification_required"
 )
 
 // Valid indicates whether the value is a known member of the QuoteOfferReadiness enum.
 func (e QuoteOfferReadiness) Valid() bool {
 	switch e {
-	case Ready:
+	case QuoteOfferReadinessReady:
 		return true
-	case VerificationRequired:
+	case QuoteOfferReadinessVerificationRequired:
 		return true
 	default:
 		return false
@@ -807,6 +843,24 @@ func (e QuoteOfferSubjectTypes) Valid() bool {
 	}
 }
 
+// Defines values for SmsApplicationResponseSubjectType.
+const (
+	SmsApplicationResponseSubjectTypeBusiness SmsApplicationResponseSubjectType = "business"
+	SmsApplicationResponseSubjectTypePerson   SmsApplicationResponseSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the SmsApplicationResponseSubjectType enum.
+func (e SmsApplicationResponseSubjectType) Valid() bool {
+	switch e {
+	case SmsApplicationResponseSubjectTypeBusiness:
+		return true
+	case SmsApplicationResponseSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SmsCreateMessageType.
 const (
 	Informational SmsCreateMessageType = "informational"
@@ -819,6 +873,24 @@ func (e SmsCreateMessageType) Valid() bool {
 	case Informational:
 		return true
 	case Marketing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SmsPreviewRequestSubjectType.
+const (
+	SmsPreviewRequestSubjectTypeBusiness SmsPreviewRequestSubjectType = "business"
+	SmsPreviewRequestSubjectTypePerson   SmsPreviewRequestSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the SmsPreviewRequestSubjectType enum.
+func (e SmsPreviewRequestSubjectType) Valid() bool {
+	switch e {
+	case SmsPreviewRequestSubjectTypeBusiness:
+		return true
+	case SmsPreviewRequestSubjectTypePerson:
 		return true
 	default:
 		return false
@@ -873,6 +945,81 @@ func (e SmsResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for SubjectOptionCapabilities.
+const (
+	SubjectOptionCapabilitiesSms   SubjectOptionCapabilities = "sms"
+	SubjectOptionCapabilitiesVoice SubjectOptionCapabilities = "voice"
+)
+
+// Valid indicates whether the value is a known member of the SubjectOptionCapabilities enum.
+func (e SubjectOptionCapabilities) Valid() bool {
+	switch e {
+	case SubjectOptionCapabilitiesSms:
+		return true
+	case SubjectOptionCapabilitiesVoice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubjectOptionHow.
+const (
+	Buy       SubjectOptionHow = "buy"
+	ByRequest SubjectOptionHow = "by_request"
+)
+
+// Valid indicates whether the value is a known member of the SubjectOptionHow enum.
+func (e SubjectOptionHow) Valid() bool {
+	switch e {
+	case Buy:
+		return true
+	case ByRequest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubjectOptionReason.
+const (
+	CompanyOnly SubjectOptionReason = "company_only"
+	PersonOnly  SubjectOptionReason = "person_only"
+)
+
+// Valid indicates whether the value is a known member of the SubjectOptionReason enum.
+func (e SubjectOptionReason) Valid() bool {
+	switch e {
+	case CompanyOnly:
+		return true
+	case PersonOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SubjectOptionStatus.
+const (
+	SubjectOptionStatusInReview   SubjectOptionStatus = "in_review"
+	SubjectOptionStatusNeedsCheck SubjectOptionStatus = "needs_check"
+	SubjectOptionStatusReady      SubjectOptionStatus = "ready"
+)
+
+// Valid indicates whether the value is a known member of the SubjectOptionStatus enum.
+func (e SubjectOptionStatus) Valid() bool {
+	switch e {
+	case SubjectOptionStatusInReview:
+		return true
+	case SubjectOptionStatusNeedsCheck:
+		return true
+	case SubjectOptionStatusReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VerificationRequirementsSubjectType.
 const (
 	VerificationRequirementsSubjectTypeBusiness VerificationRequirementsSubjectType = "business"
@@ -911,9 +1058,11 @@ func (e VerificationRequirementsSubjectTypes) Valid() bool {
 
 // Defines values for VerificationResponseStep.
 const (
-	CarrierReview   VerificationResponseStep = "carrier_review"
-	ConfirmIdentity VerificationResponseStep = "confirm_identity"
-	Filing          VerificationResponseStep = "filing"
+	CarrierReview    VerificationResponseStep = "carrier_review"
+	ConfirmIdentity  VerificationResponseStep = "confirm_identity"
+	Filing           VerificationResponseStep = "filing"
+	NeedsInformation VerificationResponseStep = "needs_information"
+	RuntimeSetup     VerificationResponseStep = "runtime_setup"
 )
 
 // Valid indicates whether the value is a known member of the VerificationResponseStep enum.
@@ -924,6 +1073,10 @@ func (e VerificationResponseStep) Valid() bool {
 	case ConfirmIdentity:
 		return true
 	case Filing:
+		return true
+	case NeedsInformation:
+		return true
+	case RuntimeSetup:
 		return true
 	default:
 		return false
@@ -1320,6 +1473,24 @@ func (e GetEmailStatsV1EmailsStatsGetParamsBucket) Valid() bool {
 	}
 }
 
+// Defines values for GetNumberOptionsV1NumbersOptionsGetParamsCapabilities.
+const (
+	Sms   GetNumberOptionsV1NumbersOptionsGetParamsCapabilities = "sms"
+	Voice GetNumberOptionsV1NumbersOptionsGetParamsCapabilities = "voice"
+)
+
+// Valid indicates whether the value is a known member of the GetNumberOptionsV1NumbersOptionsGetParamsCapabilities enum.
+func (e GetNumberOptionsV1NumbersOptionsGetParamsCapabilities) Valid() bool {
+	switch e {
+	case Sms:
+		return true
+	case Voice:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListSmsV1SmsGetParamsStatus.
 const (
 	ListSmsV1SmsGetParamsStatusDelivered   ListSmsV1SmsGetParamsStatus = "delivered"
@@ -1383,6 +1554,27 @@ func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
 	}
 }
 
+// Address defines model for Address.
+type Address struct {
+	// City City or locality.
+	City string `json:"city"`
+
+	// CountryCode ISO alpha-2 address country.
+	CountryCode string `json:"country_code"`
+
+	// CustomerName Name associated with the address.
+	CustomerName string `json:"customer_name"`
+
+	// PostalCode Postal or ZIP code.
+	PostalCode string `json:"postal_code"`
+
+	// Region State, province or region.
+	Region string `json:"region"`
+
+	// Street Street address.
+	Street string `json:"street"`
+}
+
 // AgentCreate A saved agent: what a number answers with, and what POST /calls can
 // place calls with via “agent_id“.
 type AgentCreate struct {
@@ -1434,23 +1626,6 @@ type AgentCreateStatus string
 type AgentListResponse struct {
 	// Items Agents, newest first.
 	Items []AgentResponse `json:"items"`
-}
-
-// AgentPromptTemplates What the model is told on each channel, read-only. Hail's framing leads
-// and cannot be edited; “instructions_placeholder“ marks where the agent's
-// own instructions go.
-type AgentPromptTemplates struct {
-	// CallsIn Full prompt for a call the agent answers.
-	CallsIn string `json:"calls_in"`
-
-	// CallsOut Full prompt for a call the agent places.
-	CallsOut string `json:"calls_out"`
-
-	// InstructionsPlaceholder The marker inside each template where the agent's instructions go.
-	InstructionsPlaceholder string `json:"instructions_placeholder"`
-
-	// Texts Full prompt for a text reply.
-	Texts string `json:"texts"`
 }
 
 // AgentResponse defines model for AgentResponse.
@@ -2651,6 +2826,18 @@ type NumberAcquireRequestNumberType string
 // NumberAcquireRequestSubjectType Buy with an approved verification of this kind only: 'person' (you) or 'business' (your company). With `verification_id` it must match that verification. Ignored when the number needs no verification.
 type NumberAcquireRequestSubjectType string
 
+// NumberOptionsResponse defines model for NumberOptionsResponse.
+type NumberOptionsResponse struct {
+	// CountryCode ISO alpha-2 country code.
+	CountryCode string `json:"country_code"`
+
+	// NeedsPaperwork False when no type needs papers for anyone.
+	NeedsPaperwork bool `json:"needs_paperwork"`
+
+	// Types One row per number type.
+	Types []TypeOptions `json:"types"`
+}
+
 // NumberQuoteRequest defines model for NumberQuoteRequest.
 type NumberQuoteRequest struct {
 	// AreaCode Area code or first digits of the number, as dialed inside the country: 020 or 20 (London), 480 (Arizona). Any country; every returned offer starts with these digits.
@@ -2674,6 +2861,9 @@ type NumberQuoteRequest struct {
 
 	// Region Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.
 	Region *string `json:"region,omitempty"`
+
+	// SubjectType Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.
+	SubjectType *NumberQuoteRequestSubjectType `json:"subject_type,omitempty"`
 }
 
 // NumberQuoteRequestCapabilities defines model for NumberQuoteRequest.Capabilities.
@@ -2681,6 +2871,9 @@ type NumberQuoteRequestCapabilities string
 
 // NumberQuoteRequestNumberType Restrict number type; omit to compare all supported types.
 type NumberQuoteRequestNumberType string
+
+// NumberQuoteRequestSubjectType Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.
+type NumberQuoteRequestSubjectType string
 
 // NumberQuotesResponse defines model for NumberQuotesResponse.
 type NumberQuotesResponse struct {
@@ -2754,6 +2947,33 @@ type OfferVerification struct {
 
 // OfferVerificationSubjectType Who that verification is for: 'person' (you) or 'business' (your company).
 type OfferVerificationSubjectType string
+
+// OptionVerification defines model for OptionVerification.
+type OptionVerification struct {
+	// Id Hail verification id.
+	Id openapi_types.UUID `json:"id"`
+
+	// State State of that verification.
+	State string `json:"state"`
+
+	// SubjectName Name of the person or company, when known.
+	SubjectName *string `json:"subject_name,omitempty"`
+
+	// SubjectType Who that verification is for. A by-request option can be ready through the other subject's verification, so this can differ from the subject of the option.
+	SubjectType OptionVerificationSubjectType `json:"subject_type"`
+}
+
+// OptionVerificationSubjectType Who that verification is for. A by-request option can be ready through the other subject's verification, so this can differ from the subject of the option.
+type OptionVerificationSubjectType string
+
+// PaperworkItem defines model for PaperworkItem.
+type PaperworkItem struct {
+	// Key Fixed paper category key, such as id_document.
+	Key string `json:"key"`
+
+	// Label Short text to show for that category.
+	Label string `json:"label"`
+}
 
 // PhoneNumberListResponse defines model for PhoneNumberListResponse.
 type PhoneNumberListResponse struct {
@@ -2944,6 +3164,9 @@ type QuoteOffer struct {
 	// NumberType Local, mobile, national, or toll-free number type.
 	NumberType QuoteOfferNumberType `json:"number_type"`
 
+	// Paperwork The papers the chosen `subject_type` must give for this offer, from the catalog. Null when the request had no `subject_type`. An empty list means no papers are needed.
+	Paperwork *[]PaperworkItem `json:"paperwork,omitempty"`
+
 	// QuoteId Organization-bound quote identifier to pass to POST /numbers before expiry.
 	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
 
@@ -2999,6 +3222,33 @@ type SenderIdResponse struct {
 	EffectiveDefault *string `json:"effective_default,omitempty"`
 }
 
+// SmsApplicationAmendRequest Complete replacement answers for an existing sender's missing evidence.
+type SmsApplicationAmendRequest struct {
+	// Address Original sender address; changing it requires support.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Complete current form answers. The legal sender must remain unchanged.
+	Fields map[string]string `json:"fields"`
+}
+
+// SmsApplicationResponse Private submitted SMS answers, or verified sender details for an old filing.
+type SmsApplicationResponse struct {
+	// Address Original sender address, when available.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Saved application answers; legacy responses may contain only verified sender details.
+	Fields map[string]string `json:"fields"`
+
+	// SchemaVersion Version of this saved-answer response format.
+	SchemaVersion *int `json:"schema_version,omitempty"`
+
+	// SubjectType Original sender route: person or business.
+	SubjectType SmsApplicationResponseSubjectType `json:"subject_type"`
+}
+
+// SmsApplicationResponseSubjectType Original sender route: person or business.
+type SmsApplicationResponseSubjectType string
+
 // SmsCreate defines model for SmsCreate.
 type SmsCreate struct {
 	// Body Message text. Long bodies are split into multiple carrier segments.
@@ -3037,6 +3287,24 @@ type SmsListResponse struct {
 	// NextCursor Opaque cursor for the next page. Null when there are no more results.
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
+
+// SmsPreviewRequest defines model for SmsPreviewRequest.
+type SmsPreviewRequest struct {
+	// Address Sender address required by the registration form.
+	Address *Address `json:"address,omitempty"`
+
+	// Fields Current registration form answers.
+	Fields map[string]string `json:"fields"`
+
+	// NumberId Owned US local number selecting the carrier, required when ambiguous.
+	NumberId *openapi_types.UUID `json:"number_id,omitempty"`
+
+	// SubjectType Sender route to preview: person or business.
+	SubjectType SmsPreviewRequestSubjectType `json:"subject_type"`
+}
+
+// SmsPreviewRequestSubjectType Sender route to preview: person or business.
+type SmsPreviewRequestSubjectType string
 
 // SmsResponse defines model for SmsResponse.
 type SmsResponse struct {
@@ -3086,6 +3354,54 @@ type SmsResponseDirection string
 // SmsResponseStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'undelivered', or 'received' (inbound messages).
 type SmsResponseStatus string
 
+// SubjectOption The best way for one subject (person or business) to get one type.
+type SubjectOption struct {
+	// Allowed False when no option lets this subject have this number type. The other fields then describe the other subject's best option.
+	Allowed bool `json:"allowed"`
+
+	// Capabilities What this option can do.
+	Capabilities []SubjectOptionCapabilities `json:"capabilities"`
+
+	// How 'buy' in the console, or 'by_request' (support orders it).
+	How SubjectOptionHow `json:"how"`
+
+	// MonthlyCents Catalog monthly price in USD cents.
+	MonthlyCents int `json:"monthly_cents"`
+
+	// MoreOptions How many other options this subject has for this type.
+	MoreOptions int `json:"more_options"`
+
+	// Paperwork Paper categories this subject needs. Empty when none, or when unknown.
+	Paperwork []PaperworkItem `json:"paperwork"`
+
+	// PaperworkKnown False when the list is not known yet. The list is then empty.
+	PaperworkKnown bool `json:"paperwork_known"`
+
+	// Reason Why allowed is false, else null.
+	Reason *SubjectOptionReason `json:"reason,omitempty"`
+
+	// SetupCents Catalog one-time setup price in USD cents.
+	SetupCents int `json:"setup_cents"`
+
+	// Status ready: no papers needed, or a verification covers it. in_review: a verification is under review. needs_check: papers are needed.
+	Status SubjectOptionStatus `json:"status"`
+
+	// Verification The verification behind ready or in_review, else null.
+	Verification *OptionVerification `json:"verification,omitempty"`
+}
+
+// SubjectOptionCapabilities defines model for SubjectOption.Capabilities.
+type SubjectOptionCapabilities string
+
+// SubjectOptionHow 'buy' in the console, or 'by_request' (support orders it).
+type SubjectOptionHow string
+
+// SubjectOptionReason Why allowed is false, else null.
+type SubjectOptionReason string
+
+// SubjectOptionStatus ready: no papers needed, or a verification covers it. in_review: a verification is under review. needs_check: papers are needed.
+type SubjectOptionStatus string
+
 // SuppressionListResponse defines model for SuppressionListResponse.
 type SuppressionListResponse struct {
 	// Items Suppressed recipients in this page.
@@ -3114,6 +3430,15 @@ type SuppressionResponse struct {
 
 	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
+}
+
+// TypeOptions defines model for TypeOptions.
+type TypeOptions struct {
+	// For The best option for each subject.
+	For map[string]SubjectOption `json:"for"`
+
+	// NumberType local, mobile, national or toll_free.
+	NumberType string `json:"number_type"`
 }
 
 // ValidationError defines model for ValidationError.
@@ -3185,6 +3510,12 @@ type VerificationResponse struct {
 	// ApprovedAt When the carrier approved it.
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
+	// CampaignAccepted The carrier accepted the SMS campaign; this alone does not mean a number is ready to send.
+	CampaignAccepted *bool `json:"campaign_accepted,omitempty"`
+
+	// Cancellable True when `DELETE /v1/verifications/{id}` accepts this verification now.
+	Cancellable *bool `json:"cancellable,omitempty"`
+
 	// Confirmation For a person's US texting registration: 'code' when you must enter the code the carrier texted (POST /verifications/{id}/confirm), 'reply' when you must answer the carrier's text, null when nothing is pending.
 	Confirmation *string `json:"confirmation,omitempty"`
 
@@ -3209,10 +3540,13 @@ type VerificationResponse struct {
 	// RejectionReason Why it was rejected. Null unless rejected.
 	RejectionReason *string `json:"rejection_reason,omitempty"`
 
+	// RuntimeReady True when required runtime configuration was verified, false while setup retries, null when not independently tracked.
+	RuntimeReady *bool `json:"runtime_ready,omitempty"`
+
 	// State 'awaiting_review', 'submitting', 'submitted', 'approved', 'rejected', or 'cancelled'.
 	State string `json:"state"`
 
-	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+	// Step For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration; needs_information when the existing sender needs current campaign evidence before filing. Null otherwise.
 	Step *VerificationResponseStep `json:"step,omitempty"`
 
 	// SubjectName Name of the person or company this verification is for, taken from the form (for example the business name, or the first and last name). Null when unknown.
@@ -3228,7 +3562,7 @@ type VerificationResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days). Null otherwise.
+// VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration; needs_information when the existing sender needs current campaign evidence before filing. Null otherwise.
 type VerificationResponseStep string
 
 // VoiceConfig defines model for VoiceConfig.
@@ -3433,11 +3767,6 @@ type ListAgentsV1AgentsGetParams struct {
 
 // CreateAgentV1AgentsPostParams defines parameters for CreateAgentV1AgentsPost.
 type CreateAgentV1AgentsPostParams struct {
-	Authorization *string `json:"authorization,omitempty"`
-}
-
-// GetPromptTemplatesV1AgentsPromptTemplatesGetParams defines parameters for GetPromptTemplatesV1AgentsPromptTemplatesGet.
-type GetPromptTemplatesV1AgentsPromptTemplatesGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -3663,6 +3992,19 @@ type AcquireNumberV1NumbersPostParams struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+// GetNumberOptionsV1NumbersOptionsGetParams defines parameters for GetNumberOptionsV1NumbersOptionsGet.
+type GetNumberOptionsV1NumbersOptionsGetParams struct {
+	// CountryCode ISO alpha-2 country code, such as CH.
+	CountryCode string `form:"country_code" json:"country_code"`
+
+	// Capabilities Optional. Keep only options that do all these jobs. Without it, each number type shows its best option in this order: buy now before order by hand, then ready now, then options that do every job the type offers (even when a number that does fewer jobs costs less), then lower price, then fewer papers.
+	Capabilities  *[]GetNumberOptionsV1NumbersOptionsGetParamsCapabilities `form:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Authorization *string                                                  `json:"authorization,omitempty"`
+}
+
+// GetNumberOptionsV1NumbersOptionsGetParamsCapabilities defines parameters for GetNumberOptionsV1NumbersOptionsGet.
+type GetNumberOptionsV1NumbersOptionsGetParamsCapabilities string
+
 // QuoteNumbersV1NumbersQuotesPostParams defines parameters for QuoteNumbersV1NumbersQuotesPost.
 type QuoteNumbersV1NumbersQuotesPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -3815,6 +4157,11 @@ type GetVerificationRequirementsParams struct {
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParamsSubjectType string
 
+// PreviewSmsApplicationParams defines parameters for PreviewSmsApplication.
+type PreviewSmsApplicationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // CancelVerificationParams defines parameters for CancelVerification.
 type CancelVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -3822,6 +4169,16 @@ type CancelVerificationParams struct {
 
 // GetVerificationParams defines parameters for GetVerification.
 type GetVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetVerificationApplicationParams defines parameters for GetVerificationApplication.
+type GetVerificationApplicationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// AmendSmsApplicationParams defines parameters for AmendSmsApplication.
+type AmendSmsApplicationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -3935,6 +4292,12 @@ type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
 
 // UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
+
+// PreviewSmsApplicationJSONRequestBody defines body for PreviewSmsApplication for application/json ContentType.
+type PreviewSmsApplicationJSONRequestBody = SmsPreviewRequest
+
+// AmendSmsApplicationJSONRequestBody defines body for AmendSmsApplication for application/json ContentType.
+type AmendSmsApplicationJSONRequestBody = SmsApplicationAmendRequest
 
 // ConfirmVerificationJSONRequestBody defines body for ConfirmVerification for application/json ContentType.
 type ConfirmVerificationJSONRequestBody = ConfirmRequest
@@ -4322,9 +4685,6 @@ type ClientInterface interface {
 
 	CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetPromptTemplatesV1AgentsPromptTemplatesGet request
-	GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// DeleteAgentV1AgentsAgentIdDelete request
 	DeleteAgentV1AgentsAgentIdDelete(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4451,6 +4811,9 @@ type ClientInterface interface {
 
 	AcquireNumberV1NumbersPost(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetNumberOptionsV1NumbersOptionsGet request
+	GetNumberOptionsV1NumbersOptionsGet(ctx context.Context, params *GetNumberOptionsV1NumbersOptionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// QuoteNumbersV1NumbersQuotesPostWithBody request with any body
 	QuoteNumbersV1NumbersQuotesPostWithBody(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4536,11 +4899,24 @@ type ClientInterface interface {
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PreviewSmsApplicationWithBody request with any body
+	PreviewSmsApplicationWithBody(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PreviewSmsApplication(ctx context.Context, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CancelVerification request
 	CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVerification request
 	GetVerification(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVerificationApplication request
+	GetVerificationApplication(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AmendSmsApplicationWithBody request with any body
+	AmendSmsApplicationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AmendSmsApplication(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ConfirmVerificationWithBody request with any body
 	ConfirmVerificationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4620,18 +4996,6 @@ func (c *Client) CreateAgentV1AgentsPostWithBody(ctx context.Context, params *Cr
 
 func (c *Client) CreateAgentV1AgentsPost(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateAgentV1AgentsPostRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5182,6 +5546,18 @@ func (c *Client) AcquireNumberV1NumbersPost(ctx context.Context, params *Acquire
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetNumberOptionsV1NumbersOptionsGet(ctx context.Context, params *GetNumberOptionsV1NumbersOptionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetNumberOptionsV1NumbersOptionsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) QuoteNumbersV1NumbersQuotesPostWithBody(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewQuoteNumbersV1NumbersQuotesPostRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
@@ -5554,6 +5930,30 @@ func (c *Client) GetVerificationRequirements(ctx context.Context, params *GetVer
 	return c.Client.Do(req)
 }
 
+func (c *Client) PreviewSmsApplicationWithBody(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPreviewSmsApplicationRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PreviewSmsApplication(ctx context.Context, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPreviewSmsApplicationRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) CancelVerification(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCancelVerificationRequest(c.Server, verificationId, params)
 	if err != nil {
@@ -5568,6 +5968,42 @@ func (c *Client) CancelVerification(ctx context.Context, verificationId openapi_
 
 func (c *Client) GetVerification(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVerificationRequest(c.Server, verificationId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetVerificationApplication(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVerificationApplicationRequest(c.Server, verificationId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AmendSmsApplicationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAmendSmsApplicationRequestWithBody(c.Server, verificationId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AmendSmsApplication(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAmendSmsApplicationRequest(c.Server, verificationId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5851,48 +6287,6 @@ func NewCreateAgentV1AgentsPostRequestWithBody(server string, params *CreateAgen
 	}
 
 	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.Authorization != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("authorization", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
-// NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest generates requests for GetPromptTemplatesV1AgentsPromptTemplatesGet
-func NewGetPromptTemplatesV1AgentsPromptTemplatesGetRequest(server string, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/agents/prompt-templates")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
 
 	if params != nil {
 
@@ -8211,6 +8605,82 @@ func NewAcquireNumberV1NumbersPostRequestWithBody(server string, params *Acquire
 	return req, nil
 }
 
+// NewGetNumberOptionsV1NumbersOptionsGetRequest generates requests for GetNumberOptionsV1NumbersOptionsGet
+func NewGetNumberOptionsV1NumbersOptionsGetRequest(server string, params *GetNumberOptionsV1NumbersOptionsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/numbers/options")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "country_code", params.CountryCode, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.Capabilities != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "capabilities", *params.Capabilities, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewQuoteNumbersV1NumbersQuotesPostRequest calls the generic QuoteNumbersV1NumbersQuotesPost builder with application/json body
 func NewQuoteNumbersV1NumbersQuotesPostRequest(server string, params *QuoteNumbersV1NumbersQuotesPostParams, body QuoteNumbersV1NumbersQuotesPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -9611,6 +10081,61 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 	return req, nil
 }
 
+// NewPreviewSmsApplicationRequest calls the generic PreviewSmsApplication builder with application/json body
+func NewPreviewSmsApplicationRequest(server string, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPreviewSmsApplicationRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewPreviewSmsApplicationRequestWithBody generates requests for PreviewSmsApplication with any type of body
+func NewPreviewSmsApplicationRequestWithBody(server string, params *PreviewSmsApplicationParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/sms/preview")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewCancelVerificationRequest generates requests for CancelVerification
 func NewCancelVerificationRequest(server string, verificationId openapi_types.UUID, params *CancelVerificationParams) (*http.Request, error) {
 	var err error
@@ -9690,6 +10215,117 @@ func NewGetVerificationRequest(server string, verificationId openapi_types.UUID,
 	if err != nil {
 		return nil, err
 	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetVerificationApplicationRequest generates requests for GetVerificationApplication
+func NewGetVerificationApplicationRequest(server string, verificationId openapi_types.UUID, params *GetVerificationApplicationParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s/application", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewAmendSmsApplicationRequest calls the generic AmendSmsApplication builder with application/json body
+func NewAmendSmsApplicationRequest(server string, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAmendSmsApplicationRequestWithBody(server, verificationId, params, "application/json", bodyReader)
+}
+
+// NewAmendSmsApplicationRequestWithBody generates requests for AmendSmsApplication with any type of body
+func NewAmendSmsApplicationRequestWithBody(server string, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s/application", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	if params != nil {
 
@@ -10381,9 +11017,6 @@ type ClientWithResponsesInterface interface {
 
 	CreateAgentV1AgentsPostWithResponse(ctx context.Context, params *CreateAgentV1AgentsPostParams, body CreateAgentV1AgentsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAgentV1AgentsPostResponse, error)
 
-	// GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse request
-	GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error)
-
 	// DeleteAgentV1AgentsAgentIdDeleteWithResponse request
 	DeleteAgentV1AgentsAgentIdDeleteWithResponse(ctx context.Context, agentId openapi_types.UUID, params *DeleteAgentV1AgentsAgentIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteAgentV1AgentsAgentIdDeleteResponse, error)
 
@@ -10510,6 +11143,9 @@ type ClientWithResponsesInterface interface {
 
 	AcquireNumberV1NumbersPostWithResponse(ctx context.Context, params *AcquireNumberV1NumbersPostParams, body AcquireNumberV1NumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireNumberV1NumbersPostResponse, error)
 
+	// GetNumberOptionsV1NumbersOptionsGetWithResponse request
+	GetNumberOptionsV1NumbersOptionsGetWithResponse(ctx context.Context, params *GetNumberOptionsV1NumbersOptionsGetParams, reqEditors ...RequestEditorFn) (*GetNumberOptionsV1NumbersOptionsGetResponse, error)
+
 	// QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse request with any body
 	QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error)
 
@@ -10595,11 +11231,24 @@ type ClientWithResponsesInterface interface {
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
 
+	// PreviewSmsApplicationWithBodyWithResponse request with any body
+	PreviewSmsApplicationWithBodyWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error)
+
+	PreviewSmsApplicationWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error)
+
 	// CancelVerificationWithResponse request
 	CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error)
 
 	// GetVerificationWithResponse request
 	GetVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationParams, reqEditors ...RequestEditorFn) (*GetVerificationResponse, error)
+
+	// GetVerificationApplicationWithResponse request
+	GetVerificationApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*GetVerificationApplicationResponse, error)
+
+	// AmendSmsApplicationWithBodyWithResponse request with any body
+	AmendSmsApplicationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error)
+
+	AmendSmsApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error)
 
 	// ConfirmVerificationWithBodyWithResponse request with any body
 	ConfirmVerificationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmVerificationResponse, error)
@@ -10703,29 +11352,6 @@ func (r CreateAgentV1AgentsPostResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateAgentV1AgentsPostResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type GetPromptTemplatesV1AgentsPromptTemplatesGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *AgentPromptTemplates
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r GetPromptTemplatesV1AgentsPromptTemplatesGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetPromptTemplatesV1AgentsPromptTemplatesGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -11553,6 +12179,29 @@ func (r AcquireNumberV1NumbersPostResponse) StatusCode() int {
 	return 0
 }
 
+type GetNumberOptionsV1NumbersOptionsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *NumberOptionsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetNumberOptionsV1NumbersOptionsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetNumberOptionsV1NumbersOptionsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type QuoteNumbersV1NumbersQuotesPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12076,6 +12725,29 @@ func (r GetVerificationRequirementsResponse) StatusCode() int {
 	return 0
 }
 
+type PreviewSmsApplicationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *map[string]interface{}
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PreviewSmsApplicationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PreviewSmsApplicationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type CancelVerificationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12116,6 +12788,52 @@ func (r GetVerificationResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetVerificationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetVerificationApplicationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsApplicationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVerificationApplicationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVerificationApplicationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AmendSmsApplicationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r AmendSmsApplicationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AmendSmsApplicationResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -12406,15 +13124,6 @@ func (c *ClientWithResponses) CreateAgentV1AgentsPostWithResponse(ctx context.Co
 		return nil, err
 	}
 	return ParseCreateAgentV1AgentsPostResponse(rsp)
-}
-
-// GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse request returning *GetPromptTemplatesV1AgentsPromptTemplatesGetResponse
-func (c *ClientWithResponses) GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse(ctx context.Context, params *GetPromptTemplatesV1AgentsPromptTemplatesGetParams, reqEditors ...RequestEditorFn) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error) {
-	rsp, err := c.GetPromptTemplatesV1AgentsPromptTemplatesGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse(rsp)
 }
 
 // DeleteAgentV1AgentsAgentIdDeleteWithResponse request returning *DeleteAgentV1AgentsAgentIdDeleteResponse
@@ -12813,6 +13522,15 @@ func (c *ClientWithResponses) AcquireNumberV1NumbersPostWithResponse(ctx context
 	return ParseAcquireNumberV1NumbersPostResponse(rsp)
 }
 
+// GetNumberOptionsV1NumbersOptionsGetWithResponse request returning *GetNumberOptionsV1NumbersOptionsGetResponse
+func (c *ClientWithResponses) GetNumberOptionsV1NumbersOptionsGetWithResponse(ctx context.Context, params *GetNumberOptionsV1NumbersOptionsGetParams, reqEditors ...RequestEditorFn) (*GetNumberOptionsV1NumbersOptionsGetResponse, error) {
+	rsp, err := c.GetNumberOptionsV1NumbersOptionsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetNumberOptionsV1NumbersOptionsGetResponse(rsp)
+}
+
 // QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse request with arbitrary body returning *QuoteNumbersV1NumbersQuotesPostResponse
 func (c *ClientWithResponses) QuoteNumbersV1NumbersQuotesPostWithBodyWithResponse(ctx context.Context, params *QuoteNumbersV1NumbersQuotesPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteNumbersV1NumbersQuotesPostResponse, error) {
 	rsp, err := c.QuoteNumbersV1NumbersQuotesPostWithBody(ctx, params, contentType, body, reqEditors...)
@@ -13084,6 +13802,23 @@ func (c *ClientWithResponses) GetVerificationRequirementsWithResponse(ctx contex
 	return ParseGetVerificationRequirementsResponse(rsp)
 }
 
+// PreviewSmsApplicationWithBodyWithResponse request with arbitrary body returning *PreviewSmsApplicationResponse
+func (c *ClientWithResponses) PreviewSmsApplicationWithBodyWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error) {
+	rsp, err := c.PreviewSmsApplicationWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePreviewSmsApplicationResponse(rsp)
+}
+
+func (c *ClientWithResponses) PreviewSmsApplicationWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error) {
+	rsp, err := c.PreviewSmsApplication(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePreviewSmsApplicationResponse(rsp)
+}
+
 // CancelVerificationWithResponse request returning *CancelVerificationResponse
 func (c *ClientWithResponses) CancelVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *CancelVerificationParams, reqEditors ...RequestEditorFn) (*CancelVerificationResponse, error) {
 	rsp, err := c.CancelVerification(ctx, verificationId, params, reqEditors...)
@@ -13100,6 +13835,32 @@ func (c *ClientWithResponses) GetVerificationWithResponse(ctx context.Context, v
 		return nil, err
 	}
 	return ParseGetVerificationResponse(rsp)
+}
+
+// GetVerificationApplicationWithResponse request returning *GetVerificationApplicationResponse
+func (c *ClientWithResponses) GetVerificationApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *GetVerificationApplicationParams, reqEditors ...RequestEditorFn) (*GetVerificationApplicationResponse, error) {
+	rsp, err := c.GetVerificationApplication(ctx, verificationId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVerificationApplicationResponse(rsp)
+}
+
+// AmendSmsApplicationWithBodyWithResponse request with arbitrary body returning *AmendSmsApplicationResponse
+func (c *ClientWithResponses) AmendSmsApplicationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error) {
+	rsp, err := c.AmendSmsApplicationWithBody(ctx, verificationId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAmendSmsApplicationResponse(rsp)
+}
+
+func (c *ClientWithResponses) AmendSmsApplicationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *AmendSmsApplicationParams, body AmendSmsApplicationJSONRequestBody, reqEditors ...RequestEditorFn) (*AmendSmsApplicationResponse, error) {
+	rsp, err := c.AmendSmsApplication(ctx, verificationId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAmendSmsApplicationResponse(rsp)
 }
 
 // ConfirmVerificationWithBodyWithResponse request with arbitrary body returning *ConfirmVerificationResponse
@@ -13304,39 +14065,6 @@ func ParseCreateAgentV1AgentsPostResponse(rsp *http.Response) (*CreateAgentV1Age
 			return nil, err
 		}
 		response.JSON201 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse parses an HTTP response from a GetPromptTemplatesV1AgentsPromptTemplatesGetWithResponse call
-func ParseGetPromptTemplatesV1AgentsPromptTemplatesGetResponse(rsp *http.Response) (*GetPromptTemplatesV1AgentsPromptTemplatesGetResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetPromptTemplatesV1AgentsPromptTemplatesGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest AgentPromptTemplates
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
@@ -14489,6 +15217,39 @@ func ParseAcquireNumberV1NumbersPostResponse(rsp *http.Response) (*AcquireNumber
 	return response, nil
 }
 
+// ParseGetNumberOptionsV1NumbersOptionsGetResponse parses an HTTP response from a GetNumberOptionsV1NumbersOptionsGetWithResponse call
+func ParseGetNumberOptionsV1NumbersOptionsGetResponse(rsp *http.Response) (*GetNumberOptionsV1NumbersOptionsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetNumberOptionsV1NumbersOptionsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NumberOptionsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseQuoteNumbersV1NumbersQuotesPostResponse parses an HTTP response from a QuoteNumbersV1NumbersQuotesPostWithResponse call
 func ParseQuoteNumbersV1NumbersQuotesPostResponse(rsp *http.Response) (*QuoteNumbersV1NumbersQuotesPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -15206,6 +15967,39 @@ func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificat
 	return response, nil
 }
 
+// ParsePreviewSmsApplicationResponse parses an HTTP response from a PreviewSmsApplicationWithResponse call
+func ParsePreviewSmsApplicationResponse(rsp *http.Response) (*PreviewSmsApplicationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PreviewSmsApplicationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseCancelVerificationResponse parses an HTTP response from a CancelVerificationWithResponse call
 func ParseCancelVerificationResponse(rsp *http.Response) (*CancelVerificationResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -15248,6 +16042,72 @@ func ParseGetVerificationResponse(rsp *http.Response) (*GetVerificationResponse,
 	}
 
 	response := &GetVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVerificationApplicationResponse parses an HTTP response from a GetVerificationApplicationWithResponse call
+func ParseGetVerificationApplicationResponse(rsp *http.Response) (*GetVerificationApplicationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVerificationApplicationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsApplicationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAmendSmsApplicationResponse parses an HTTP response from a AmendSmsApplicationWithResponse call
+func ParseAmendSmsApplicationResponse(rsp *http.Response) (*AmendSmsApplicationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AmendSmsApplicationResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

@@ -1,4 +1,4 @@
-"""DIDWW carrier: offers, orders, registration outcome, release.
+"""DIDWW carrier: offers, orders, registration outcome, release, call costs.
 
 All HTTP goes through the ``didww`` SDK's low-level client with plain
 JSON:API dicts, so tests mock at the ``requests`` boundary (``responses``)
@@ -9,7 +9,13 @@ function here is ``async`` and runs its call in ``asyncio.to_thread``.
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
+import os
+import tempfile
+import time
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 from uuid import UUID
@@ -24,6 +30,8 @@ from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierPreOrderError,
     CarrierRequestError,
+    LegCost,
+    LegRef,
     OrderState,
 )
 from hailhq.core.regions import REGIONS
@@ -721,5 +729,104 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 
     try:
         await asyncio.to_thread(detach)
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc
+
+
+# --- call costs: DIDWW has no per-call lookup, so one outbound CDR export
+# covers every leg asked about. Voice IN legs are not in it: they stay
+# unpriced. The export is ready within seconds; one that is not ready after
+# EXPORT_WAIT_SECONDS raises, so its legs are asked about again next pass.
+
+EXPORT_WAIT_SECONDS = 60
+EXPORT_MARGIN = timedelta(minutes=10)
+
+
+def _iso(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ExportNotReady(Exception):
+    """DIDWW did not finish the CDR export in time; ask again next pass."""
+
+
+def _cdr_rows(client: DidwwClient, start: datetime, end: datetime) -> list[dict]:
+    body = client.post(
+        "exports",
+        {
+            "data": {
+                "type": "exports",
+                "attributes": {
+                    "export_type": "cdr_out",
+                    "filters": {"from": _iso(start), "to": _iso(end)},
+                },
+            }
+        },
+    )
+    export_id = body["data"]["id"]
+    deadline = time.monotonic() + EXPORT_WAIT_SECONDS
+    while True:
+        attrs = client.get(f"exports/{export_id}")["data"]["attributes"]
+        if attrs.get("status") == "completed" and attrs.get("url"):
+            break
+        if time.monotonic() > deadline:
+            raise ExportNotReady(export_id)
+        time.sleep(3)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "cdr.csv")
+        client.download_and_decompress_export(attrs["url"], path)
+        with open(path, newline="") as f:
+            return list(csv.DictReader(f))
+
+
+def _leg_costs_sync(legs: list[LegRef]) -> dict[UUID, LegCost]:
+    wanted = {
+        leg.sip_call_id: leg
+        for leg in legs
+        if leg.direction == "outbound" and leg.sip_call_id
+    }
+    if not wanted:
+        return {}
+    start = min(leg.joined_at for leg in wanted.values()) - EXPORT_MARGIN
+    end = max(leg.left_at or leg.joined_at for leg in wanted.values()) + EXPORT_MARGIN
+    # DIDWW refuses an export that ends in the future.
+    end = min(end, datetime.now(timezone.utc) - timedelta(seconds=5))
+    found: dict[UUID, LegCost] = {}
+    for row in _cdr_rows(didww_client(), start, end):
+        leg = wanted.get(row.get("Call ID") or "")
+        charged = row.get("Charged (USD)")
+        if leg is None or charged in (None, ""):
+            continue
+        seconds = row.get("Billing Duration (sec)")
+        rate = row.get("Rate (USD)")
+        # One odd row must not fail the whole export for every leg.
+        try:
+            row_cost = LegCost(
+                Decimal(charged),
+                int(Decimal(seconds)) if seconds else None,
+                Decimal(rate) if rate else None,
+            )
+        except (ArithmeticError, ValueError):
+            logger.warning("didww cdr row for %s is not a number", leg.sip_call_id)
+            continue
+        # A leg with several rows (a reroute) costs the sum of them.
+        if (seen := found.get(leg.id)) is not None:
+            row_cost = LegCost(
+                seen.usd + row_cost.usd,
+                (
+                    (seen.billed_seconds or 0) + (row_cost.billed_seconds or 0)
+                    if seen.billed_seconds is not None
+                    or row_cost.billed_seconds is not None
+                    else None
+                ),
+                seen.usd_per_minute,
+            )
+        found[leg.id] = row_cost
+    return found
+
+
+async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
+    try:
+        return await asyncio.to_thread(_leg_costs_sync, legs)
     except DidwwApiError as exc:
         raise CarrierRequestError(carrier_status(exc)) from exc

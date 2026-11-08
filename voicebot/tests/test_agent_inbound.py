@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core.inbound_calls import Accepted, Rejected, SipAttributes
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
-from hailhq.core.prompts import THREAD_TOOL_HINT_VOICE
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import parse_metadata
 from livekit import rtc
@@ -243,8 +242,11 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
     async_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Inbound: the room is empty once the Call row exists → the row is
-    closed as canceled and no session starts."""
-    from hailhq.core.models import Call, PhoneNumber
+    closed as canceled and no session starts. The carrier billed the
+    caller's leg, so it is still recorded."""
+    from hailhq.core.models import Call, CallLeg, PhoneNumber
+    from livekit import rtc
+    from sqlalchemy import select
 
     org = uuid.uuid4()
     pn = PhoneNumber(
@@ -263,22 +265,31 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
         to_e164=pn.e164,
         direction="inbound",
         status="ringing",
+        provider="twilio",
         voice_config={},
     )
     async_session.add(call)
     await async_session.commit()
     call_id = call.id
 
+    caller = SimpleNamespace(
+        identity="sip_+33612345678",
+        kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+        attributes={"sip.callIDFull": "c89b2bfa", "sip.twilio.callSid": "CA1"},
+    )
+
+    async def fake_open(_ctx, on_caller=None):
+        on_caller(caller)  # the caller then hangs up
+        return {
+            "call_id": call_id,
+            "direction": "inbound",
+            "organization_id": str(org),
+        }
+
     monkeypatch.setattr(
         agent_mod,
         "open_inbound_from_room",
-        AsyncMock(
-            return_value={
-                "call_id": call_id,
-                "direction": "inbound",
-                "organization_id": str(org),
-            }
-        ),
+        fake_open,
     )
     started = AsyncMock()
     monkeypatch.setattr(agent_mod, "resolve_org_configs", started)
@@ -308,11 +319,14 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
     row = await async_session.get(Call, call_id)
     assert row.status == "canceled"
     assert row.end_reason == "normal_hangup"
+    (leg,) = (await async_session.execute(select(CallLeg))).scalars()
+    assert (leg.role, leg.direction, leg.carrier_call_id) == ("call", "inbound", "CA1")
 
 
 def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     """The outbound preamble tells the model it placed the call and must say it
     is "calling on someone's behalf"; an inbound caller must not hear that."""
+    from hailhq.core.prompts import PRIVACY_REMINDER
     from hailhq.voicebot.agent import (
         VOICE_PREAMBLE,
         VOICE_PREAMBLE_INBOUND,
@@ -327,7 +341,9 @@ def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     assert build_instructions("Book it.", "inbound").startswith(VOICE_PREAMBLE_INBOUND)
     assert build_instructions("Book it.", "outbound").startswith(VOICE_PREAMBLE)
     assert build_instructions("Book it.").startswith(VOICE_PREAMBLE)
-    assert build_instructions(None, "inbound") == VOICE_PREAMBLE_INBOUND
+    assert build_instructions(None, "inbound") == (
+        f"{VOICE_PREAMBLE_INBOUND}\n\n{PRIVACY_REMINDER}"
+    )
 
 
 async def test_inbound_without_first_message_waits_for_the_caller() -> None:
@@ -391,23 +407,6 @@ async def _call_row(session, caller="+33612345678", with_agent=True):
     )
     await session.commit()
     return call, agent, number
-
-
-def test_thread_hint_follows_the_tools_actually_built() -> None:
-    def tool(name: str) -> SimpleNamespace:
-        return SimpleNamespace(info=SimpleNamespace(name=name))
-
-    for tools, expected in (
-        ([tool("thread_history"), tool("hangup")], True),
-        ([tool("hangup")], False),
-        ([], False),
-    ):
-        assert agent_mod.has_thread_tool(tools) is expected
-        out = agent_mod.build_instructions(
-            "x", None, thread_tool=agent_mod.has_thread_tool(tools)
-        )
-        assert ("thread_history tool" in out) is expected
-        assert out.endswith(THREAD_TOOL_HINT_VOICE) is expected
 
 
 def test_the_prompt_loader_for_history_is_gone() -> None:

@@ -123,62 +123,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /v1/agents/prompt-templates:
-    get:
-      tags:
-        - agents
-      summary: Get Prompt Templates
-      description:
-        "The full prompt the model gets on each channel, with a marker
-        where the
-
-        agent's own instructions go. Hail's framing is fixed; only the
-
-        instructions are the agent's."
-      operationId: get_prompt_templates_v1_agents_prompt_templates_get
-      parameters:
-        - name: authorization
-          in: header
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: "null"
-            title: Authorization
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentPromptTemplates"
-        "429":
-          description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-            RateLimit-Limit:
-              description: The request ceiling for the current window.
-              schema:
-                type: integer
-            RateLimit-Remaining:
-              description: Requests remaining in the current window.
-              schema:
-                type: integer
-            RateLimit-Reset:
-              description: Seconds until the current window resets.
-              schema:
-                type: integer
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
   /v1/agents/{agent_id}:
     get:
       tags:
@@ -2581,17 +2525,17 @@ paths:
               - type: "null"
             description:
               "Optional. Keep only options that do all these jobs. Without
-              it, each number type shows its best option in this order: ready now, then
-              buy now before order by hand, then options that do every job the type
-              offers (even when a number that does fewer jobs costs less), then fewer
-              papers, then lower price."
+              it, each number type shows its best option in this order: buy now before
+              order by hand, then ready now, then options that do every job the type
+              offers (even when a number that does fewer jobs costs less), then lower
+              price, then fewer papers."
             title: Capabilities
           description:
             "Optional. Keep only options that do all these jobs. Without
-            it, each number type shows its best option in this order: ready now, then
-            buy now before order by hand, then options that do every job the type offers
-            (even when a number that does fewer jobs costs less), then fewer papers,
-            then lower price."
+            it, each number type shows its best option in this order: buy now before
+            order by hand, then ready now, then options that do every job the type offers
+            (even when a number that does fewer jobs costs less), then lower price,
+            then fewer papers."
         - name: authorization
           in: header
           required: false
@@ -4854,6 +4798,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/preview:
+    post:
+      tags:
+        - verifications
+      summary: Preview Sms Application
+      description:
+        "Compile the exact campaign text without creating or charging a
+        filing.
+
+
+        Checks answers locally. This does not establish policy accessibility,
+
+        carrier acceptance, identity ownership or runtime messaging readiness."
+      operationId: preview_sms_application
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsPreviewRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Preview Sms Application
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications:
     post:
       tags:
@@ -5098,7 +5107,9 @@ paths:
         cancelled: wait for the result; if it is rejected, dismiss it.
 
 
-        An approved US SMS registration (`purpose=sms`) can be cancelled too:
+        An accepted campaign waiting on runtime setup can be cancelled, as can
+
+        an approved US SMS registration (`purpose=sms`):
 
         its numbers leave the campaign, the campaign is deleted at the carrier,
 
@@ -5128,6 +5139,149 @@ paths:
               - type: string
               - type: "null"
             title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}/application:
+    get:
+      tags:
+        - verifications
+      summary: Get Verification Application
+      description:
+        "Read your organization's saved SMS answers, including after rejection.
+
+        Answers of a cancelled or rejected registration are kept for 30 days
+
+        after it ended; after that this returns 404.
+
+
+        Older applications may recover their verified sender identity through
+
+        read-only provider calls; a 404 asks for original details and support when
+
+        these cannot be recovered. The ordinary list never contains application
+
+        fields or addresses. No records are filed or charged here."
+      operationId: get_verification_application
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsApplicationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - verifications
+      summary: Amend Sms Application
+      description:
+        "Repair missing evidence on the same sender, brand and registration.
+
+
+        No paid provider action occurs here. Only the campaign answers change;
+
+        carrier review resumes on a later poll. Original sender identity/address
+
+        must match stored or authoritative provider details. An identical retry
+
+        is safe even after the campaign has subsequently been filed."
+      operationId: amend_sms_application
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsApplicationAmendRequest"
       responses:
         "200":
           description: Successful Response
@@ -5253,6 +5407,41 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    Address:
+      properties:
+        customer_name:
+          type: string
+          title: Customer Name
+          description: Name associated with the address.
+        street:
+          type: string
+          title: Street
+          description: Street address.
+        city:
+          type: string
+          title: City
+          description: City or locality.
+        region:
+          type: string
+          title: Region
+          description: State, province or region.
+        postal_code:
+          type: string
+          title: Postal Code
+          description: Postal or ZIP code.
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 address country.
+      type: object
+      required:
+        - customer_name
+        - street
+        - city
+        - region
+        - postal_code
+        - country_code
+      title: Address
     AgentCreate:
       properties:
         name:
@@ -5387,40 +5576,6 @@ components:
       required:
         - items
       title: AgentListResponse
-    AgentPromptTemplates:
-      properties:
-        instructions_placeholder:
-          type: string
-          title: Instructions Placeholder
-          description:
-            The marker inside each template where the agent's instructions
-            go.
-        calls_in:
-          type: string
-          title: Calls In
-          description: Full prompt for a call the agent answers.
-        calls_out:
-          type: string
-          title: Calls Out
-          description: Full prompt for a call the agent places.
-        texts:
-          type: string
-          title: Texts
-          description: Full prompt for a text reply.
-      type: object
-      required:
-        - instructions_placeholder
-        - calls_in
-        - calls_out
-        - texts
-      title: AgentPromptTemplates
-      description:
-        "What the model is told on each channel, read-only. Hail's framing
-        leads
-
-        and cannot be edited; ``instructions_placeholder`` marks where the agent's
-
-        own instructions go."
     AgentResponse:
       properties:
         id:
@@ -8965,6 +9120,62 @@ components:
       required:
         - custom_sender_id
       title: SenderIdResponse
+    SmsApplicationAmendRequest:
+      properties:
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Complete current form answers. The legal sender must remain
+            unchanged.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Original sender address; changing it requires support.
+      additionalProperties: false
+      type: object
+      required:
+        - fields
+      title: SmsApplicationAmendRequest
+      description: Complete replacement answers for an existing sender's missing evidence.
+    SmsApplicationResponse:
+      properties:
+        schema_version:
+          type: integer
+          title: Schema Version
+          description: Version of this saved-answer response format.
+          default: 1
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "Original sender route: person or business."
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Saved application answers; legacy responses may contain only
+            verified sender details.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Original sender address, when available.
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsApplicationResponse
+      description:
+        Private submitted SMS answers, or verified sender details for an
+        old filing.
     SmsCreate:
       properties:
         recipient_consent:
@@ -9060,6 +9271,40 @@ components:
       required:
         - items
       title: SmsListResponse
+    SmsPreviewRequest:
+      properties:
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "Sender route to preview: person or business."
+        number_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Number Id
+          description:
+            Owned US local number selecting the carrier, required when
+            ambiguous.
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: Current registration form answers.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Sender address required by the registration form.
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsPreviewRequest
     SmsResponse:
       properties:
         id:
@@ -9521,13 +9766,40 @@ components:
                 - confirm_identity
                 - filing
                 - carrier_review
+                - runtime_setup
+                - needs_information
             - type: "null"
           title: Step
           description:
             "For a US texting registration that is not yet approved or
             rejected: 'confirm_identity' while the person must confirm (see `confirmation`),
             'filing' while Hail files the details with the carriers, 'carrier_review'
-            once the carriers are reviewing them (1 to 7 business days). Null otherwise."
+            once the carriers are reviewing them (1 to 7 business days), or runtime_setup
+            when accepted but required messaging responses still need configuration;
+            needs_information when the existing sender needs current campaign evidence
+            before filing. Null otherwise."
+        campaign_accepted:
+          type: boolean
+          title: Campaign Accepted
+          description:
+            The carrier accepted the SMS campaign; this alone does not
+            mean a number is ready to send.
+          default: false
+        runtime_ready:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Runtime Ready
+          description:
+            True when required runtime configuration was verified, false
+            while setup retries, null when not independently tracked.
+        cancellable:
+          type: boolean
+          title: Cancellable
+          description:
+            True when `DELETE /v1/verifications/{id}` accepts this verification
+            now.
+          default: false
         identity_confirmed:
           type: boolean
           title: Identity Confirmed

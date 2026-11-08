@@ -5,12 +5,8 @@ from hailhq.core.providers.verification.sms_form import (
     field_problems,
     sms_requirements,
 )
-from hailhq.core.providers.verification.telnyx_sms import (
-    TelnyxSmsRegistrationProvider,
-)
-from hailhq.core.providers.verification.twilio_sms import (
-    TwilioSmsRegistrationProvider,
-)
+from hailhq.core.providers.verification.telnyx_sms import TelnyxSmsRegistrationProvider
+from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 
 TELNYX = TelnyxSmsRegistrationProvider(api_key="k")
 TWILIO = TwilioSmsRegistrationProvider(
@@ -21,374 +17,410 @@ TWILIO = TwilioSmsRegistrationProvider(
     sms_provider=object(),
 )
 
-
-def _too_long(data: dict, subject: str = "person") -> list[tuple[str, str]]:
-    """The API's length check of this form (``forms.length_problems``)."""
-    problems = length_problems(sms_requirements(TELNYX, subject), data, {})
-    return [(p.field, p.message) for p in problems]
-
-
-def test_business_form_lists_company_and_campaign_fields() -> None:
-    req = sms_requirements(TWILIO, "business")
-    names = [f.name for f in req.fields]
-    assert names[:4] == ["legal_name", "business_type", "ein", "industry"]
-    assert "campaign_description" in names and "sample_2" in names
-    assert req.address_required is True
-    assert req.documents == ()
-    assert req.subject_types == ("person", "business")
-
-
-def test_person_form_asks_for_mobile_not_ein() -> None:
-    req = sms_requirements(TELNYX, "person")
-    names = [f.name for f in req.fields]
-    assert "mobile_phone_number" in names and "ein" not in names
-    mobile = next(f for f in req.fields if f.name == "mobile_phone_number")
-    assert "not a Hail number" in mobile.help
-
-
-def test_campaign_text_pads_short_values_to_carrier_minimums() -> None:
-    text = campaign_text(
-        {
-            "campaign_description": "Order updates",
-            "sample_1": "Hi",
-            "sample_2": "Bye",
-            "opt_in_description": "Web form",
-            "has_links": "NO",
-            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
-        },
-        "business",
-    )
-    assert len(text.description) >= 40
-    assert len(text.message_flow) >= 40
-    assert all(len(s) >= 20 for s in text.samples)
-    assert text.use_case == "MIXED" and text.has_links is False
-
-
-def test_form_asks_for_privacy_and_terms_links_for_both_subjects() -> None:
-    for subject in ("person", "business"):
-        fields = {f.name: f for f in sms_requirements(TWILIO, subject).fields}
-        assert fields["privacy_policy_url"].kind == "url"
-        assert fields["privacy_policy_url"].required is True
-        assert fields["terms_url"].kind == "url"
-        assert fields["terms_url"].required is True
-        assert "not shared" in fields["privacy_policy_url"].help
-        assert "unchecked" in fields["opt_in_description"].help
-
-
-def test_message_flow_carries_links_and_consent_disclosures() -> None:
-    text = campaign_text(
-        {
-            "campaign_description": "Order updates",
-            "sample_1": "Hi",
-            "sample_2": "Bye",
-            "opt_in_description": "Customers tick an unchecked SMS box at checkout.",
-            "has_links": "NO",
-            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
-        },
-        "business",
-    )
-    flow = text.message_flow
-    assert flow.startswith("Customers tick an unchecked SMS box at checkout.")
-    for line in (
-        "Consent is not a condition of purchase.",
-        "Message frequency varies.",
-        "Message and data rates may apply.",
-        "Reply STOP to opt out, HELP for help.",
-        "Privacy policy: https://acme.example/privacy",
-        "Terms: https://acme.example/terms",
-    ):
-        assert line in flow
-    assert text.privacy_policy_url == "https://acme.example/privacy"
-    assert text.terms_url == "https://acme.example/terms"
-    assert len(flow) <= 2048
-
-
-def test_message_flow_never_exceeds_carrier_maximum() -> None:
-    text = campaign_text(
-        {
-            "campaign_description": "x",
-            "sample_1": "x",
-            "sample_2": "x",
-            "opt_in_description": "word " * 600,
-            "has_links": "NO",
-            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
-        },
-        "business",
-    )
-    assert len(text.message_flow) <= 2048
-    assert "Privacy policy: https://acme.example/privacy" in text.message_flow
-
-
-def test_person_use_case() -> None:
-    assert (
-        campaign_text(
-            {
-                "campaign_description": "x",
-                "sample_1": "x",
-                "sample_2": "x",
-                "opt_in_description": "x",
-                "has_links": "YES",
-                "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-                "privacy_policy_url": "https://ada.example/privacy",
-                "terms_url": "https://ada.example/terms",
-            },
-            "person",
-        ).use_case
-        == "SOLE_PROPRIETOR"
-    )
-
-
-@pytest.mark.parametrize(
-    "field", ["sample_1", "campaign_description", "privacy_policy_url", "terms_url"]
-)
-def test_missing_required_field_raises(field) -> None:
-    data = {
-        "campaign_description": "x",
-        "sample_1": "x",
-        "sample_2": "x",
-        "opt_in_description": "x",
-        "has_links": "NO",
-        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-        "privacy_policy_url": "https://acme.example/privacy",
-        "terms_url": "https://acme.example/terms",
-    }
-    data.pop(field)
-    with pytest.raises(KeyError):
-        campaign_text(data, "business")
-
-
 GOOD = {
-    "campaign_description": "x",
-    "sample_1": "x",
-    "sample_2": "x",
-    "opt_in_description": "x",
-    "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "sender_country": "US",
+    "has_tax_id": "NO",
     "first_name": "Ada",
     "last_name": "Lovelace",
-    "email": "ada@example.com",
+    "email": "ada@acme.org",
     "mobile_phone_number": "+15125550199",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "campaign_description": "Acme sends appointment reminders and replies to customer support questions.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE",
+    "sample_1": "Acme: Your appointment is tomorrow at 2pm. Reply STOP to opt out.",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2": "Acme: We can reschedule your appointment to Friday. Reply STOP to opt out.",
+    "sample_2_type": "CUSTOMER_CARE",
+    "consent_methods": "WEBSITE",
+    "opt_in_description": "Customers visit our booking page and select the separate optional SMS reminder checkbox before submitting.",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
+    "policies_confirmed": "YES",
+    "has_links": "NO",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+}
+BUSINESS = {
+    **GOOD,
+    "has_tax_id": "YES",
+    "registration_country": "US",
+    "legal_name": "Acme Ltd",
+    "business_type": "PRIVATE_PROFIT",
+    "ein": "12-3456789",
+    "industry": "PROFESSIONAL",
+    "website": "https://acme.org",
+    "rep_name": "Ada Lovelace",
+    "rep_email": "ada@acme.org",
+    "rep_phone": "+15125550199",
+    "rep_title": "Owner",
 }
 
 
-def test_field_problems_accepts_a_complete_form() -> None:
-    assert field_problems(TELNYX, GOOD, "person") == []
+def errors(data, subject="person", provider=TELNYX):
+    return [(p.field, p.message) for p in field_problems(provider, data, subject)]
 
 
-def test_field_problems_names_missing_required_fields() -> None:
-    data = {**GOOD, "terms_url": " "}
-    data.pop("sample_1")
-    assert [(p.field, p.message) for p in field_problems(TELNYX, data, "person")] == [
-        ("sample_1", "This is required."),
-        ("terms_url", "This is required."),
-    ]
+def error_fields(data, subject="person", provider=TELNYX):
+    return {field for field, _ in errors(data, subject, provider)}
 
 
-@pytest.mark.parametrize(
-    "value",
-    ["acme.example/privacy", "ftp://acme.example/privacy", "https://", "n/a"],
-)
-def test_field_problems_rejects_a_link_without_scheme_or_host(value) -> None:
-    problems = field_problems(TELNYX, {**GOOD, "privacy_policy_url": value}, "person")
-    assert [p.field for p in problems] == ["privacy_policy_url"]
-    assert problems[0].message.startswith("Enter the full link")
+@pytest.mark.parametrize("provider", [TELNYX, TWILIO])
+@pytest.mark.parametrize("subject,data", [("person", GOOD), ("business", BUSINESS)])
+def test_complete_form_passes(provider, subject, data):
+    assert errors(data, subject, provider) == []
+    assert length_problems(sms_requirements(provider, subject), data, {}) == []
 
 
-def test_a_link_over_the_cap_is_too_long() -> None:
-    long = "https://acme.example/" + "a" * 500
-    assert _too_long({**GOOD, "terms_url": long}) == [
-        ("terms_url", "Use at most 512 characters.")
-    ]
-    assert field_problems(TELNYX, {**GOOD, "terms_url": long}, "person") == []
-
-
-def test_message_flow_keeps_own_text_with_links_under_the_cap() -> None:
-    link = "https://acme.example/" + "a" * 491
-    text = campaign_text(
-        {
-            "campaign_description": "x",
-            "sample_1": "x",
-            "sample_2": "x",
-            "opt_in_description": "own text " * 95,
-            "has_links": "NO",
-            "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-            "privacy_policy_url": link,
-            "terms_url": link,
-        },
-        "business",
-    )
-    assert len(text.message_flow) <= 2048
-    assert text.message_flow.startswith("own text own text")
-    assert text.message_flow.endswith(f"Terms: {link}")
-
-
-def test_text_types_are_a_choice_of_one_to_five_for_a_person() -> None:
-    for subject, least in (("person", 1), ("business", 2)):
-        fields = {f.name: f for f in sms_requirements(TELNYX, subject).fields}
-        spec = fields["text_types"]
-        assert spec.kind == "choices" and spec.required
-        assert (spec.min_choices, spec.max_choices) == (least, 5)
-        assert len(spec.options) == 10
-        assert "CUSTOMER_CARE" in {o.key for o in spec.options}
+def test_form_supports_eligibility_policies_and_all_purposes_on_both_providers():
+    for provider in (TELNYX, TWILIO):
+        for subject in ("person", "business"):
+            req = sms_requirements(provider, subject)
+            specs = {f.name: f for f in req.fields}
+            assert len(specs) == len(req.fields)
+            assert specs["sender_country"].required and specs["has_tax_id"].required
+            assert specs["text_types"].min_choices == 1
+            assert specs["text_types"].max_choices == 5
+            assert all(f"sample_{i}_type" in specs for i in range(1, 6))
+            assert specs["sample_2"].required and not specs["sample_3"].required
+            assert req.address_required and req.documents == ()
+            assert specs["privacy_policy_url"].required
+            assert "not shared" in specs["privacy_policy_url"].help
+            assert "unchecked" in specs["opt_in_description"].help
+            assert ("ein" in specs) == (subject == "business")
+            if subject == "person":
+                assert "not a Hail number" in specs["mobile_phone_number"].help
 
 
 @pytest.mark.parametrize(
-    "value,message",
+    "field",
     [
-        ("CUSTOMER_CARE,NOT_A_TYPE", "Pick from the list."),
-        (
-            "2FA,MARKETING,FRAUD_ALERT,SECURITY_ALERT,POLLING_VOTING,CUSTOMER_CARE",
-            "Pick at most 5.",
-        ),
+        "sender_country",
+        "has_tax_id",
+        "consent_methods",
+        "consent_records",
+        "policies_confirmed",
+        "has_phone",
+        "age_gated",
+        "direct_lending",
+        "sample_1",
+        "terms_url",
     ],
 )
-def test_field_problems_checks_text_types(value, message) -> None:
-    problems = field_problems(TELNYX, {**GOOD, "text_types": value}, "person")
-    assert [(p.field, p.message) for p in problems] == [("text_types", message)]
+def test_new_submissions_require_explicit_facts(field):
+    data = {**GOOD}
+    del data[field]
+    assert field in error_fields(data)
 
 
-def test_a_company_picks_at_least_two_text_types() -> None:
-    problems = field_problems(
-        TELNYX, {**GOOD, "text_types": "CUSTOMER_CARE"}, "business"
+@pytest.mark.parametrize("country", ["GB", "DE", "AU"])
+def test_individuals_outside_us_canada_are_ineligible(country):
+    assert "sender_country" in error_fields({**GOOD, "sender_country": country})
+
+
+def test_individual_tax_id_holders_must_use_business():
+    assert "has_tax_id" in error_fields({**GOOD, "has_tax_id": "YES"})
+    assert not errors({**GOOD, "sender_country": "CA"})
+
+
+def test_business_requires_supported_registration_but_can_operate_abroad():
+    assert not errors({**BUSINESS, "sender_country": "GB"}, "business")
+    assert not errors(
+        {**BUSINESS, "registration_country": "CA", "ein": "123456789"}, "business"
     )
-    assert ("text_types", "Pick at least 2.") in [
-        (p.field, p.message) for p in problems
-    ]
+    assert "registration_country" in error_fields(
+        {**BUSINESS, "registration_country": "GB"}, "business"
+    )
+    assert "has_tax_id" in error_fields({**BUSINESS, "has_tax_id": "NO"}, "business")
+    assert "ein" in error_fields({**BUSINESS, "ein": "made up"}, "business")
 
 
-def test_campaign_text_keeps_the_picked_text_types_without_repeats() -> None:
-    text = campaign_text({**GOOD, "text_types": " 2FA, MARKETING,2FA "}, "person")
-    assert text.text_types == ["2FA", "MARKETING"]
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("has_phone", "maybe"),
+        ("has_links", "yes"),
+        ("business_type", "FAKE"),
+        ("industry", "FAKE"),
+    ],
+)
+def test_single_choices_are_validated(field, value):
+    assert field in error_fields({**BUSINESS, field: value}, "business")
 
 
-def test_long_fields_carry_their_carrier_limits() -> None:
-    fields = {f.name: f for f in sms_requirements(TELNYX, "person").fields}
-    assert fields["campaign_description"].max_length == 4096
-    assert fields["sample_1"].max_length == fields["sample_2"].max_length == 1024
-    assert fields["opt_in_description"].max_length == 861
-    assert fields["mobile_phone_number"].max_length is None
+METHODS = {
+    "WEBSITE": {
+        "website_url": "https://acme.org/book",
+        "website_evidence_url": "https://acme.org/evidence",
+        "website_action": "Check the optional SMS box.",
+    },
+    "PRIVATE_FORM": {
+        "private_form_url": "https://acme.org/account/book",
+        "private_form_evidence_url": "https://acme.org/evidence",
+        "private_form_action": "Sign in, select SMS reminders, then save.",
+    },
+    "VERBAL": {
+        "verbal_script": "May Acme send your requested reminder? "
+        + GOOD["consent_disclosure"],
+        "verbal_evidence_url": "https://acme.org/script",
+        "verbal_action": "Staff read the script and record an affirmative yes.",
+    },
+    "PAPER": {
+        "paper_evidence_url": "https://acme.org/blank-form.pdf",
+        "paper_action": "Sign the separate SMS consent box on the blank appointment form.",
+    },
+    "KEYWORD": {
+        "keyword_keyword": "REMIND",
+        "keyword_number": "+12125550123",
+        "keyword_evidence_url": "https://acme.org/poster",
+        "keyword_advertisement": "Reception poster: text REMIND for appointment reminders.",
+    },
+    "QR": {
+        "qr_url": "https://acme.org/book",
+        "qr_evidence_url": "https://acme.org/qr-poster",
+        "qr_advertisement": "Reception poster links to the optional SMS enrollment form.",
+    },
+    "INBOUND": {
+        "inbound_number": "+12125550123",
+        "inbound_evidence_url": "https://acme.org/contact",
+        "inbound_advertisement": "Text our support team for replies to your appointment question only.",
+    },
+}
 
 
-def test_telnyx_caps_brand_fields_at_100() -> None:
-    for subject, names in (
-        ("person", {"first_name", "last_name", "email"}),
-        ("business", {"legal_name", "website", "rep_email"}),
-    ):
-        telnyx = {
-            f.name: f.max_length for f in sms_requirements(TELNYX, subject).fields
-        }
-        twilio = {
-            f.name: f.max_length for f in sms_requirements(TWILIO, subject).fields
-        }
-        assert {n: telnyx[n] for n in names} == dict.fromkeys(names, 100)
-        assert all(twilio[n] != 100 for n in names)
+@pytest.mark.parametrize("method", list(METHODS))
+def test_every_consent_method_requires_its_own_complete_evidence(method):
+    data = {**GOOD, "consent_methods": method, **METHODS[method]}
+    assert errors(data) == []
+    text = campaign_text(data, "person")
+    for name, value in METHODS[method].items():
+        assert value in text.message_flow
+        missing = {**data}
+        del missing[name]
+        assert name in error_fields(missing)
+    assert text.schema_version == 2
 
 
-def test_the_opt_in_limit_leaves_room_for_the_fixed_text() -> None:
-    # The longest links and the consent lines still fit in the carrier's 2048.
-    long = "https://acme.example/" + "a" * (512 - len("https://acme.example/"))
+def test_every_selected_method_is_validated():
+    data = {**GOOD, "consent_methods": "WEBSITE,PAPER"}
+    assert {"paper_evidence_url", "paper_action"} <= error_fields(data)
+    data.update(METHODS["PAPER"])
+    assert not errors(data)
+    assert "WEBSITE:" in campaign_text(data, "person").message_flow
+    assert "PAPER:" in campaign_text(data, "person").message_flow
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "acme.org/privacy",
+        "http://acme.org/privacy",
+        "ftp://acme.org/privacy",
+        "https://",
+        "https://localhost/x",
+        "https://127.0.0.1/x",
+        "https://10.1.2.3/x",
+        "https://[::1]/x",
+        "https://alice:secret@acme.org/x",
+        "https://example.com/x",
+        "https://assets.example.com/x",
+        "https://invalid_host.org/x",
+        "https://2130706433/x",
+        "https://acme.example/x",
+        "https://acme.org:bad/x",
+        "https://acme.org:8080/x",
+        "https://acme.org/<placeholder>",
+    ],
+)
+def test_public_links_reject_private_credentials_and_placeholders(url):
+    assert "website_evidence_url" in error_fields({**GOOD, "website_evidence_url": url})
+    assert "privacy_policy_url" in error_fields({**GOOD, "privacy_policy_url": url})
+
+
+@pytest.mark.parametrize(
+    "field", ["consent_optional", "evidence_redacted", "policies_confirmed"]
+)
+def test_negative_attestations_block_submission(field):
+    assert field in error_fields({**GOOD, field: "NO"})
+
+
+def test_marketing_requires_written_scope_and_rejects_inquiry_or_verbal_enrollment():
     data = {
         **GOOD,
-        "opt_in_description": "x" * 861,
-        "privacy_policy_url": long,
-        "terms_url": long,
+        "text_types": "MARKETING",
+        "sample_1_type": "MARKETING",
+        "sample_2_type": "MARKETING",
     }
-    assert field_problems(TELNYX, data, "person") == []
-    assert _too_long(data) == []
-    text = campaign_text(data, "person")
-    # Nothing is cut: the opt-in text and both links fill the 2048 exactly.
-    assert text.message_flow.startswith("x" * 861)
-    assert len(text.message_flow) == 2048
-
-
-def test_text_over_the_limit_is_too_long() -> None:
-    assert _too_long({**GOOD, "sample_1": "s" * 1025}) == [
-        ("sample_1", "Use at most 1024 characters.")
-    ]
-
-
-def _with_links(opt_in: str) -> dict:
-    link = "https://acme.example/" + "a" * 491
-    return {
-        **GOOD,
-        "opt_in_description": opt_in,
-        "privacy_policy_url": link,
-        "terms_url": link,
-    }
-
-
-def test_an_unchecked_opt_in_text_is_cut_to_the_carrier_limit() -> None:
-    # A caller that skipped the length check: the opt-in text is cut so the
-    # whole flow fits the carrier's 2048, and the fixed text stays whole.
-    data = _with_links("own text " * 300)
-    assert _too_long(data) == [("opt_in_description", "Use at most 861 characters.")]
-    text = campaign_text(data, "business")
-    assert text_length(text.message_flow) <= 2048
-    assert text.message_flow.startswith("own text own text")
-    assert text.message_flow.endswith(f"Terms: {data['terms_url']}")
-
-
-def test_the_opt_in_cut_counts_utf16_units_and_keeps_emoji_whole() -> None:
-    # 1100 emoji are 2200 UTF-16 units: counted by code points they would
-    # look short enough, and the flow would pass the carrier's 2048.
-    data = _with_links("\U0001f600" * 1100)
-    text = campaign_text(data, "business")
-    assert text_length(text.message_flow) <= 2048
-    own = text.message_flow.split(" Consent is not")[0]
-    assert own and set(own) == {"\U0001f600"}  # no half emoji
-    assert text.message_flow.endswith(f"Terms: {data['terms_url']}")
-
-
-def test_only_the_telnyx_form_asks_for_text_types() -> None:
-    for subject in ("person", "business"):
-        twilio = [f.name for f in sms_requirements(TWILIO, subject).fields]
-        telnyx = [f.name for f in sms_requirements(TELNYX, subject).fields]
-        assert "text_types" not in twilio and "text_types" in telnyx
-        assert [n for n in telnyx if n != "text_types"] == twilio
-
-
-def test_a_twilio_form_without_text_types_passes() -> None:
-    data = {k: v for k, v in GOOD.items() if k != "text_types"}
-    assert field_problems(TWILIO, data, "person") == []
-    assert [p.field for p in field_problems(TELNYX, data, "person")] == ["text_types"]
-
-
-def test_campaign_text_keeps_the_contact_email() -> None:
-    person = campaign_text({**GOOD, "email": " ada@example.com "}, "person")
-    assert person.contact_email == "ada@example.com"
-    company = campaign_text({**GOOD, "rep_email": "ops@acme.example"}, "business")
-    assert company.contact_email == "ops@acme.example"
-
-
-def test_length_counts_characters_as_the_carrier_does() -> None:
-    # An emoji is 2 UTF-16 code units, as the carrier and the browser count.
-    assert _too_long({**GOOD, "sample_1": "s" * 1022 + "\U0001f600"}) == []
-    assert _too_long({**GOOD, "sample_1": "s" * 1023 + "\U0001f600"}) == [
-        ("sample_1", "Use at most 1024 characters.")
-    ]
-
-
-def test_links_carry_their_limit() -> None:
-    for subject in ("person", "business"):
-        fields = sms_requirements(TELNYX, subject).fields
-        assert {f.name: f.max_length for f in fields if f.kind == "url"} == {
-            **({"website": 100} if subject == "business" else {}),
-            "privacy_policy_url": 512,
-            "terms_url": 512,
+    assert "marketing_consent" in error_fields(data)
+    assert not errors({**data, "marketing_consent": "YES"})
+    assert "consent_methods" in error_fields(
+        {
+            **data,
+            "marketing_consent": "YES",
+            "consent_methods": "INBOUND",
+            **METHODS["INBOUND"],
         }
+    )
 
 
-def test_every_sms_carrier_names_its_campaign_key() -> None:
-    """The API marks a filing as sent for review (``campaign_filed_at``) by
-    ``campaign_ref``; a carrier without one would never be billed for it."""
+def test_restricted_content_cannot_be_made_eligible_by_age_gate():
+    assert "restricted_content" in error_fields(
+        {**GOOD, "restricted_content": "RESTRICTED", "age_gated": "YES"}
+    )
+
+
+def test_company_single_purpose_is_not_mixed():
+    assert campaign_text(BUSINESS, "business").use_case == "CUSTOMER_CARE"
+    assert campaign_text(GOOD, "person").use_case == "SOLE_PROPRIETOR"
+    assert (
+        campaign_text(
+            {**BUSINESS, "text_types": "CUSTOMER_CARE,MARKETING"}, "business"
+        ).use_case
+        == "MIXED"
+    )
+
+
+@pytest.mark.parametrize("count", range(1, 6))
+def test_samples_cover_one_to_five_purposes(count):
+    purposes = [
+        "CUSTOMER_CARE",
+        "ACCOUNT_NOTIFICATION",
+        "DELIVERY_NOTIFICATION",
+        "SECURITY_ALERT",
+        "2FA",
+    ][:count]
+    data = {**GOOD, "text_types": ",".join(purposes)}
+    for i, purpose in enumerate(purposes, 1):
+        data[f"sample_{i}"] = (
+            f"Acme: {purpose} example for your account. Reply STOP to opt out."
+        )
+        data[f"sample_{i}_type"] = purpose
+    assert not errors(data)
+    assert len(campaign_text(data, "person").samples) == max(2, count)
+    if count > 1:
+        data[f"sample_{count}_type"] = purposes[0]
+        assert "text_types" in error_fields(data)
+
+
+def test_unselected_and_missing_sample_mapping_are_rejected():
+    assert "sample_1_type" in error_fields({**GOOD, "sample_1_type": "MARKETING"})
+    assert "sample_3" in error_fields({**GOOD, "sample_3_type": "CUSTOMER_CARE"})
+    assert "sample_3_type" in error_fields({**GOOD, "sample_3": GOOD["sample_1"]})
+
+
+def test_sample_identity_and_stop_must_be_real():
+    assert "sample_1" in error_fields(
+        {**GOOD, "sample_1": "Wrong brand: Your appointment is tomorrow. Reply STOP."}
+    )
+    assert "sample_1" in error_fields(
+        {**GOOD, "sample_1": "Acme: Your appointment is tomorrow at 2pm."}
+    )
+
+
+def test_sample_link_and_phone_must_match_answers():
+    sample = (
+        "Acme: Visit https://acme.org or call +1 (212) 555-0123. Reply STOP to opt out."
+    )
+    data = {**GOOD, "sample_1": sample}
+    assert {"has_links", "has_phone"} <= error_fields(data)
+    data.update(has_links="YES", has_phone="YES")
+    assert not errors(data)
+    text = campaign_text(data, "person")
+    assert text.has_links and text.has_phone
+    assert not text.age_gated and not text.direct_lending
+
+
+def test_description_samples_and_disclosure_are_not_fabricated():
+    data = {
+        **GOOD,
+        "campaign_description": "Short",
+        "sample_1": "Hi",
+        "consent_disclosure": "I agree",
+        "opt_in_message": "",
+    }
+    assert {"campaign_description", "sample_1", "consent_disclosure"} <= error_fields(
+        data
+    )
+    text = campaign_text(data, "person")
+    assert text.description == "Short" and text.samples[0] == "Hi"
+    assert "Consent is not a condition of purchase" not in text.message_flow
+    assert text.opt_in_message == ""
+    assert (
+        campaign_text(
+            {
+                **GOOD,
+                "opt_in_message": "Acme: You have enrolled for appointment reminders.",
+            },
+            "person",
+        ).opt_in_message
+        == "Acme: You have enrolled for appointment reminders."
+    )
+
+
+def test_full_flow_is_validated_without_truncating_evidence():
+    data = {**GOOD, "opt_in_description": "😀" * 1000}
+    assert "opt_in_description" in error_fields(data)
+    assert text_length(campaign_text(data, "person").message_flow) > 2048
+    assert GOOD["website_evidence_url"] in campaign_text(data, "person").message_flow
+
+
+def test_legacy_saved_application_compiles_without_invented_claims():
+    data = {
+        "campaign_description": "Order updates",
+        "sample_1": "Hi",
+        "sample_2": "Bye",
+        "opt_in_description": "Web form",
+        "has_links": "NO",
+        "privacy_policy_url": "https://acme.example/privacy",
+        "terms_url": "https://acme.example/terms",
+    }
+    text = campaign_text(data, "business")
+    assert text.schema_version == 1
+    assert text.description == "Order updates" and text.message_flow == "Web form"
+    assert text.samples == ["Hi", "Bye"] and text.use_case == "MIXED"
+    assert "sender_country" in error_fields(data, "business")
+
+
+def test_limits_count_utf16_and_preserve_provider_limits():
+    fields = {f.name: f for f in sms_requirements(TELNYX, "person").fields}
+    assert fields["campaign_description"].max_length == 4096
+    assert fields["sample_5"].max_length == 1024
+    assert fields["email"].max_length == 100
+    for suffix, expected in [("😀", []), ("a😀", ["sample_1"])]:
+        result = length_problems(
+            sms_requirements(TELNYX, "person"),
+            {**GOOD, "sample_1": "s" * 1022 + suffix},
+            {},
+        )
+        assert [p.field for p in result] == expected
+
+
+def test_purpose_choices_validate_allowlist_and_maximum():
+    assert "text_types" in error_fields({**GOOD, "text_types": "MADE_UP"})
+    assert "text_types" in error_fields(
+        {
+            **GOOD,
+            "text_types": "2FA,MARKETING,FRAUD_ALERT,SECURITY_ALERT,POLLING_VOTING,CUSTOMER_CARE",
+        }
+    )
+    assert campaign_text(
+        {**GOOD, "text_types": " 2FA, MARKETING,2FA "}, "person"
+    ).text_types == ["2FA", "MARKETING"]
+
+
+def test_every_sms_carrier_names_its_campaign_key():
     from hailhq.core.providers.verification import _FACTORIES
     from hailhq.core.providers.verification.base import SmsRegistrationProvider
 
@@ -399,3 +431,165 @@ def test_every_sms_carrier_names_its_campaign_key() -> None:
         assert issubclass(factory, SmsRegistrationProvider), name
         ref = getattr(factory, "campaign_ref", None)
         assert isinstance(ref, str) and ref, f"{name}: set campaign_ref as a string"
+
+
+def test_age_gating_needs_a_real_process_and_lending_needs_review():
+    data = {**GOOD, "age_gated": "YES"}
+    assert {
+        "age_verification_description",
+        "age_verification_evidence_url",
+    } <= error_fields(data)
+    data.update(
+        age_verification_description="Before enrollment staff verify the minimum age with an identity check; no identity documents are published.",
+        age_verification_evidence_url="https://acme.org/age-flow",
+    )
+    assert not errors(data)
+    assert campaign_text(data, "person").age_gated
+    assert "https://acme.org/age-flow" in campaign_text(data, "person").message_flow
+    assert "direct_lending" in error_fields({**GOOD, "direct_lending": "YES"})
+    assert campaign_text({**GOOD, "direct_lending": "YES"}, "person").direct_lending
+
+
+def test_dates_and_short_login_codes_are_not_treated_as_phone_numbers():
+    data = {
+        **GOOD,
+        "sample_1": "Acme: Your code is 12345678, valid on 2026-11-05. Reply STOP to opt out.",
+    }
+    assert "has_phone" not in error_fields(data)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"message_frequency": "20 promotional texts daily"},
+        {
+            "consent_disclosure": "Acme reminders. Message and data rates may apply. STOP HELP https://acme.org/privacy https://acme.org/terms"
+        },
+        {
+            "consent_disclosure": "Acme once per appointment. Our service rates are low. STOP HELP https://acme.org/privacy https://acme.org/terms"
+        },
+    ],
+)
+def test_disclosure_requires_actual_cadence_and_message_data_rates(change):
+    assert "consent_disclosure" in error_fields({**GOOD, **change})
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        "Message and data rates",
+        "Msg & data rates",
+        "Msg. & data charges",
+        "Message/data rates",
+    ],
+)
+def test_disclosure_accepts_equivalent_rate_wording(rates):
+    data = {
+        **GOOD,
+        "consent_disclosure": GOOD["consent_disclosure"].replace(
+            "Message and data rates", rates
+        ),
+    }
+    assert not errors(data)
+
+
+def test_disclosure_purpose_coverage_requires_affirmative_fact():
+    assert "disclosure_purposes_confirmed" in error_fields(
+        {**GOOD, "disclosure_purposes_confirmed": "NO"}
+    )
+    missing = {**GOOD}
+    del missing["disclosure_purposes_confirmed"]
+    assert "disclosure_purposes_confirmed" in error_fields(missing)
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    ["STOP", "stopall", "UNSUBSCRIBE", "Cancel", "END", "QUIT", "HELP", "INFO"],
+)
+def test_reserved_help_and_opt_out_keywords_cannot_enroll_recipients(keyword):
+    data = {
+        **GOOD,
+        "consent_methods": "KEYWORD",
+        **METHODS["KEYWORD"],
+        "keyword_keyword": keyword,
+    }
+    assert "keyword_keyword" in error_fields(data)
+
+
+def test_keyword_enrollment_requires_actual_confirmation_before_submission():
+    fields = {
+        **GOOD,
+        "consent_methods": "KEYWORD",
+        **METHODS["KEYWORD"],
+        "opt_in_message": "",
+    }
+    assert "opt_in_message" in error_fields(fields, provider=TWILIO)
+    fields["opt_in_message"] = GOOD["opt_in_message"]
+    assert not errors(fields, provider=TWILIO)
+    assert campaign_text(fields, "person").opt_in_keywords == [
+        fields["keyword_keyword"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "missing,replace",
+    [
+        ("sender", ("Acme", "Other sender")),
+        ("frequency", ("once per appointment", "regularly")),
+        ("rates", ("Msg and data rates may apply.", "Our service rates are low.")),
+        ("HELP", ("HELP for help", "helpful assistance")),
+        ("STOP", ("STOP to stop", "nonstop updates")),
+    ],
+)
+def test_confirmation_requires_real_sender_cadence_rates_and_help_stop(
+    missing, replace
+):
+    confirmation = GOOD["opt_in_message"].replace(*replace)
+    problems = errors({**GOOD, "opt_in_message": confirmation})
+    assert any(
+        field == "opt_in_message" and missing.casefold() in message.casefold()
+        for field, message in problems
+    )
+    # Validation must never repair the filed response by adding unsupported copy.
+    assert (
+        campaign_text({**GOOD, "opt_in_message": confirmation}, "person").opt_in_message
+        == confirmation
+    )
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        "Msg & data rates",
+        "Msg. & data charges",
+        "Message and data rates",
+        "Message/data rates",
+    ],
+)
+def test_confirmation_accepts_real_rate_abbreviations(rates):
+    confirmation = GOOD["opt_in_message"].replace("Msg and data rates", rates)
+    assert not errors({**GOOD, "opt_in_message": confirmation})
+
+
+@pytest.mark.parametrize(
+    "flag", ["has_links", "has_phone", "age_gated", "direct_lending"]
+)
+@pytest.mark.parametrize("answer", ["YES", "NO"])
+def test_content_flag_whitespace_is_identical_in_validation_and_filing(flag, answer):
+    plain = {**GOOD, flag: answer}
+    padded = {**GOOD, flag: f"  {answer}\n"}
+    assert errors(padded) == errors(plain)
+    assert getattr(campaign_text(padded, "person"), flag) is (answer == "YES")
+
+
+def test_attestation_whitespace_does_not_change_compiled_flow():
+    data = {**GOOD, "consent_optional": " YES ", "marketing_consent": " YES "}
+    assert errors(data) == errors(
+        {**data, "consent_optional": "YES", "marketing_consent": "YES"}
+    )
+    assert (
+        campaign_text(data, "person").message_flow
+        == campaign_text(
+            {**data, "consent_optional": "YES", "marketing_consent": "YES"}, "person"
+        ).message_flow
+    )

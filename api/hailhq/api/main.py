@@ -45,10 +45,12 @@ from hailhq.api.routes.internal import org_closures as internal_org_closures
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.routes.internal import voices as internal_voices
+from hailhq.api.sms_registration import drain_audits as drain_sms_audits
 from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
 from hailhq.core.abuse_monitor import AbuseMonitorWorker
+from hailhq.core.call_legs import fetch_leg_costs
 from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
@@ -171,6 +173,23 @@ async def _sms_setup_loop() -> None:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
 
 
+LEG_COST_INTERVAL_SECONDS = 300
+
+
+async def _leg_cost_loop() -> None:
+    """Read what the carriers charged for finished call legs
+    (``hailhq.core.call_legs``). Its own loop: a slow carrier export must
+    not delay the other sweeps."""
+    while True:
+        try:
+            await fetch_leg_costs()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover — defensive; logged + retried
+            logger.exception("call leg cost pass failed; will retry")
+        await asyncio.sleep(LEG_COST_INTERVAL_SECONDS)
+
+
 async def _stop_worker(worker, task: asyncio.Task) -> None:
     """Graceful-stop a polling worker task, hard-cancelling after 5s."""
     await worker.stop()
@@ -203,6 +222,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _order_reconciler_loop(), name="number-order-reconciler"
     )
     sms_setup_task = asyncio.create_task(_sms_setup_loop(), name="sms-setup")
+    leg_cost_task = asyncio.create_task(_leg_cost_loop(), name="leg-costs")
 
     webhook_worker: WebhookWorker | None = None
     webhook_task: asyncio.Task | None = None
@@ -295,7 +315,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         sweeper_task.cancel()
         order_reconciler_task.cancel()
         sms_setup_task.cancel()
-        for task in (sweeper_task, order_reconciler_task, sms_setup_task):
+        leg_cost_task.cancel()
+        for task in (
+            sweeper_task,
+            order_reconciler_task,
+            sms_setup_task,
+            leg_cost_task,
+        ):
             try:
                 await task
             except (asyncio.CancelledError, Exception):
@@ -315,6 +341,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(verification_worker, verification_task)
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
+        # Refusal audits run after the request commits. Let them finish while
+        # the database engine is still open.
+        await drain_sms_audits()
         await dispose_engine()
         await asyncio.to_thread(flush_telemetry)
 

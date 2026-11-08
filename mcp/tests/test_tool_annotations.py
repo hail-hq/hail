@@ -37,9 +37,13 @@ _READ_ONLY = {
     "get_verification_requirements",
     "list_verifications",
     "get_verification",
+    "get_sms_application",
+    "preview_sms_application",
 }
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {
+    "get_sms_application",
+    "preview_sms_application",
     "quote_numbers",
     "get_verification_requirements",
     "list_verifications",
@@ -53,6 +57,7 @@ _DESTRUCTIVE = {
     "delete_agent",
     "acquire_number",
     "submit_verification",
+    "amend_sms_application",
     "cancel_verification",
 }
 
@@ -64,11 +69,12 @@ _OPEN_WORLD_WRITES = {
     "release_number",
     "acquire_number",
     "submit_verification",
+    "amend_sms_application",
     "cancel_verification",
     "confirm_verification",
 }
 
-_EXPECTED_COUNT = 38
+_EXPECTED_COUNT = 41
 
 
 @pytest.fixture()
