@@ -5330,17 +5330,17 @@ paths:
 
         credit does not cover its fee (`waiting_for_credit` is true until you
 
-        add credit). It also waits when a recent check of it failed (a later
+        add credit). It also waits while another check of it is running or
 
-        check files it once the carrier answers) or another process holds it.
+        recently failed, or another process holds it: a later check files it,
 
-        Poll GET /verifications/{id} until
+        within about 15 minutes once the carrier answers. Poll
 
-        `approved`. A wrong or expired code is 422 on `code`; after five wrong
+        GET /verifications/{id} until `approved`. A wrong or expired code is
 
-        codes, 429 until the carrier sends a new code (once a day). 409 when
+        422 on `code`; after five wrong codes, 429 until the carrier sends a
 
-        there is nothing to confirm.'
+        new code (once a day). 409 when there is nothing to confirm.'
       operationId: confirm_verification
       parameters:
         - name: verification_id

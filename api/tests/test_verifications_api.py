@@ -4098,6 +4098,7 @@ async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_bus
     vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
     await _set_balance(async_session, org_id, _campaign_fee())
     locks = []
+    real_try = verifications_routes.try_org_lock
 
     async def busy(db, org):
         locks.append(org)
@@ -4112,10 +4113,14 @@ async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_bus
     assert sms_carrier.campaigns_created == 0
     assert resp.json()["waiting_for_credit"] is False  # funded, just busy
     assert await _reserved(async_session, vid) is None
-    # Lock free again: the same funded row files.
-    monkeypatch.undo()
+    # Lock free again: the same funded row files. (Not monkeypatch.undo():
+    # that would also undo the fixtures' patches.)
+    monkeypatch.setattr(verifications_routes, "try_org_lock", real_try)
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["waiting_for_credit"] is False
     assert sms_carrier.campaigns_created == 1
+    assert await _reserved(async_session, vid) is None
 
 
 async def test_overlapping_polls_email_the_owners_once(
