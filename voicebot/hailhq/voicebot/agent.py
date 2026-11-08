@@ -42,6 +42,12 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
+from hailhq.core.call_limits import (
+    HANDOVER_RING_SECONDS,
+    HANDOVER_SETTLE_SECONDS,
+    HANDOVER_SILENCE_SECONDS,
+    handover_call_backstop,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
@@ -109,7 +115,10 @@ from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
 from livekit.api import (
     CreateSIPParticipantRequest,
+    DeleteRoomRequest,
     RoomParticipantIdentity,
+    ServerError,
+    ServerErrorCode,
     SipCallError,
 )
 from livekit.plugins import silero
@@ -454,17 +463,6 @@ def make_agent_send_dtmf(ctx: JobContext) -> Callable[[str], Awaitable[None]]:
     return _send_dtmf
 
 
-# How long the handover contact's phone rings before the dial gives up.
-HANDOVER_RING_SECONDS = 30
-# A contact leg that hangs up this soon after its first sound was a carrier
-# message or a phone menu, not a person: the agent takes the caller back.
-# The handover counts as answered only after it.
-HANDOVER_SETTLE_SECONDS = 10.0
-# How long nobody on the contact's side may stay silent after pickup before
-# the agent takes the caller back. A person speaks well within it (the
-# slowest seen spoke 7 s in); some mailboxes answer and never make a sound.
-HANDOVER_SILENCE_SECONDS = 15.0
-
 # SIP final responses that mean the person is there but declined / busy, and
 # the ones that mean nobody picked up. Anything else is a failed dial.
 _SIP_BUSY = frozenset({486, 600, 603})
@@ -495,8 +493,7 @@ async def _remove_or_end(
     stays on it. False when the call was ended."""
     if await _remove_handover_leg(ctx, identity, call_id):
         return True
-    bridge_state["ending"] = True
-    await _drop_room(ctx, call_id)
+    await _drop_call_room(ctx, bridge_state, call_id)
     ctx.shutdown(reason="handover_leg_stuck")
     return False
 
@@ -621,6 +618,7 @@ def make_agent_bridge(
                 outcome = "cancelled"
             return BridgeOutcome(outcome, code, _ring_ms())  # type: ignore[arg-type]
 
+        native_limit = handover_call_backstop(handover_seconds)
         dial = asyncio.ensure_future(
             ctx.api.sip.create_sip_participant(
                 CreateSIPParticipantRequest(
@@ -633,6 +631,11 @@ def make_agent_bridge(
                     headers=route.headers or {},
                     wait_until_answered=True,
                     ringing_timeout=Duration(seconds=HANDOVER_RING_SECONDS),
+                    max_call_duration=(
+                        Duration(seconds=native_limit)
+                        if native_limit is not None
+                        else None
+                    ),
                     play_dialtone=True,
                 )
             )
@@ -733,13 +736,10 @@ def make_agent_bridge(
         # handover limit counts from now. A cap that already fired
         # (announcing now) is left to finish.
         soft_cap = bridge_state.pop("soft_cap_task", None)
-        if (
-            soft_cap is not None
-            and not soft_cap.done()
-            and not bridge_state.get("soft_cap_fired")
-        ):
-            soft_cap.cancel()
-            await asyncio.gather(soft_cap, return_exceptions=True)
+        if not bridge_state.get("soft_cap_fired"):
+            if soft_cap is not None and not soft_cap.done():
+                soft_cap.cancel()
+                await asyncio.gather(soft_cap, return_exceptions=True)
             if handover_seconds > 0:
                 bridge_state["soft_cap_task"] = asyncio.create_task(
                     soft_cap_announce_and_hangup(
@@ -1333,11 +1333,79 @@ async def reconcile_sip_rejection(
     )
 
 
-async def _drop_room(ctx: JobContext, call_id: UUID) -> None:
-    try:
-        await ctx.delete_room()
-    except Exception:
-        logger.exception("call_id=%s delete_room failed after handover", call_id)
+_ROOM_DELETE_TIMEOUT_SECONDS = 2.0
+_SOFT_CAP_ANNOUNCEMENT_SECONDS = 10.0
+
+
+async def _drop_room(ctx: JobContext, call_id: UUID) -> bool:
+    """Bound room teardown, with SIP removal as a fallback.
+
+    Use RoomService directly: JobContext.delete_room in Agents 1.8.8
+    suppresses API errors, so awaiting it does not confirm disconnection.
+    A missing room/participant already satisfies the requested teardown.
+    """
+    for attempt in range(3):
+        try:
+            async with asyncio.timeout(_ROOM_DELETE_TIMEOUT_SECONDS):
+                await ctx.api.room.delete_room(DeleteRoomRequest(room=ctx.room.name))
+            return True
+        except ServerError as exc:
+            if exc.code == ServerErrorCode.NOT_FOUND:
+                return True
+        except Exception:
+            pass
+        logger.warning(
+            "call_id=%s room deletion attempt %d failed", call_id, attempt + 1
+        )
+
+    async def remove_sip(identity: str) -> bool:
+        try:
+            async with asyncio.timeout(_ROOM_DELETE_TIMEOUT_SECONDS):
+                await ctx.api.room.remove_participant(
+                    RoomParticipantIdentity(room=ctx.room.name, identity=identity)
+                )
+            return True
+        except ServerError as exc:
+            if exc.code == ServerErrorCode.NOT_FOUND:
+                return True
+        except Exception:
+            pass
+        return False
+
+    # Remove only this job's phone legs; leave non-phone participants alone.
+    identities = [
+        p.identity
+        for p in ctx.room.remote_participants.values()
+        if getattr(p, "kind", None) == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+    ]
+    if identities and all(await asyncio.gather(*(remove_sip(i) for i in identities))):
+        return True
+    logger.error(
+        "call_id=%s could not disconnect phone legs after room teardown", call_id
+    )
+    return False
+
+
+def _start_room_teardown(
+    ctx: JobContext, bridge_state: dict[str, Any], call_id: UUID
+) -> asyncio.Task[bool]:
+    """Publish the task before yielding or requesting job shutdown."""
+    task = bridge_state.get("room_delete_task")
+    if task is None:
+        bridge_state["ending"] = True
+        task = asyncio.create_task(_drop_room(ctx, call_id))
+        bridge_state["room_delete_task"] = task
+    return task
+
+
+async def _drop_call_room(
+    ctx: JobContext, bridge_state: dict[str, Any], call_id: UUID
+) -> None:
+    """Share teardown with shutdown, which can cancel the cap mid-request."""
+    if bridge_state.get("ending") and bridge_state.get("room_delete_task") is None:
+        return
+    task = _start_room_teardown(ctx, bridge_state, call_id)
+    bridge_state["room_disconnected"] = await asyncio.shield(task)
 
 
 async def drop_handover_leg(
@@ -1351,10 +1419,14 @@ async def drop_handover_leg(
     stops). Sets ``bridge_state["ending"]`` first, so it runs once and the
     disconnect handler ignores the legs leaving because of it.
     """
+    # Room deletion can disconnect the worker before its HTTP response
+    # arrives. Shutdown must join that request even for an ordinary call.
+    if bridge_state.get("room_delete_task") is not None:
+        await _drop_call_room(ctx, bridge_state, call_id)
+        return
     if not handover_leg_open(bridge_state) or bridge_state.get("ending"):
         return
-    bridge_state["ending"] = True
-    await _drop_room(ctx, call_id)
+    await _drop_call_room(ctx, bridge_state, call_id)
 
 
 def handle_sip_disconnect(
@@ -1404,8 +1476,7 @@ def handle_sip_disconnect(
         logger.info("call_id=%s handover contact hung up, ending call", call_id)
         if captured["end_reason"] is None:
             captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
-        bridge_state["ending"] = True
-        asyncio.ensure_future(_drop_room(ctx, call_id))
+        _start_room_teardown(ctx, bridge_state, call_id)
         ctx.shutdown(reason="handover_ended")
         return
     leg_open = handover_leg_open(bridge_state)
@@ -1434,8 +1505,7 @@ def handle_sip_disconnect(
         logger.info("call_id=%s caller left, ending call", call_id)
         if captured["end_reason"] is None:
             captured["end_reason"] = CallEndReason.NORMAL_HANGUP.value
-        bridge_state["ending"] = True
-        asyncio.ensure_future(_drop_room(ctx, call_id))
+        _start_room_teardown(ctx, bridge_state, call_id)
         ctx.shutdown(reason="caller_left")
         return
     if status is None:
@@ -1577,15 +1647,16 @@ async def soft_cap_announce_and_hangup(
     """Wait ``delay_seconds`` then politely end the call.
 
     Soft cap (not a hard cutoff): the agent speaks the announcement,
-    waits for playback to finish so the caller actually hears it, then
-    requests ``ctx.shutdown()``. The existing shutdown callback runs
+    allows up to ten seconds for goodbye playback, then
+    deletes the room to disconnect the phone leg before requesting
+    ``ctx.shutdown()``. The existing shutdown callback runs
     ``on_call_end`` → writes the ``usage_events`` row → fires the rater
     webhook. Same lifecycle as a natural call end.
 
     Cancellable: if the call ends naturally before the cap, the
     entrypoint cancels this task and the announcement never plays.
 
-    ``on_fire`` is called synchronously *just before* ``ctx.shutdown`` if
+    ``on_fire`` is called synchronously before room deletion if
     the cap actually fires (i.e. not cancelled). The entrypoint uses this
     hook to stamp ``end_reason='soft_cap_reached'`` in its captured-state
     dict so ``on_call_end`` writes the right value.
@@ -1595,9 +1666,9 @@ async def soft_cap_announce_and_hangup(
     once the wait is over, so a cap already announcing is not cut short).
     With a contact leg in the room (connected, or picked up and still in
     the silence check) the agent's output audio may be off, so it is turned back
-    on for the announcement (both people hear it). With a
-    contact leg ringing or connected the room is deleted before shutdown,
-    so no leg outlives the job.
+    on for the announcement (both people hear it). The room is deleted
+    with or without a handover. Failed deletion is retried and falls back
+    to removing this room's SIP participants.
     """
     try:
         await asyncio.sleep(delay_seconds)
@@ -1616,13 +1687,16 @@ async def soft_cap_announce_and_hangup(
         call_id,
         delay_seconds,
     )
-    if bridge_state is not None and (
-        bridge_state.get("connected") or bridge_state.get("human")
-    ):
-        session.output.set_audio_enabled(True)
     try:
-        handle = session.say(spoken_lines(language).soft_cap, allow_interruptions=False)
-        await handle.wait_for_playout()
+        async with asyncio.timeout(_SOFT_CAP_ANNOUNCEMENT_SECONDS):
+            if bridge_state is not None and (
+                bridge_state.get("connected") or bridge_state.get("human")
+            ):
+                session.output.set_audio_enabled(True)
+            handle = session.say(
+                spoken_lines(language).soft_cap, allow_interruptions=False
+            )
+            await handle.wait_for_playout()
     except Exception:  # pragma: no cover, best-effort; we still hang up
         logger.exception(
             "call_id=%s soft-cap announcement failed; proceeding to hangup",
@@ -1630,8 +1704,12 @@ async def soft_cap_announce_and_hangup(
         )
     if on_fire is not None:
         on_fire()
-    if bridge_state is not None:
-        await drop_handover_leg(ctx, bridge_state, call_id)
+    # Shutdown alone leaves the SIP participant connected. End ordinary
+    # calls too, and suppress disconnect/shutdown callbacks repeating a
+    # handover teardown once deletion starts.
+    await _drop_call_room(
+        ctx, bridge_state if bridge_state is not None else {}, call_id
+    )
     ctx.shutdown(reason=SOFT_CAP_END_REASON)
 
 
