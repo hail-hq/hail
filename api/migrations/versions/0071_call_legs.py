@@ -85,7 +85,7 @@ def upgrade() -> None:
     op.create_index(
         "call_legs_pending_idx",
         "call_legs",
-        ["joined_at"],
+        [sa.text("cost_checked_at NULLS FIRST"), "joined_at"],
         postgresql_where=sa.text("cost_status = 'pending'"),
     )
 

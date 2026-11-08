@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+import requests
 import responses
 from hailhq.core.config import settings
 from hailhq.core.providers import telnyx as telnyx_client
@@ -94,6 +95,19 @@ async def test_twilio_raises_when_every_lookup_fails(twilio_keys):
         await twilio.leg_costs([_leg(sid="CA1")])
 
 
+@responses.activate
+async def test_twilio_keeps_found_costs_when_one_lookup_times_out(twilio_keys):
+    _twilio_call("CA1", "-0.0068")
+    responses.add(
+        responses.GET,
+        f"{TWILIO_CALLS}/CA2.json",
+        body=requests.exceptions.ConnectTimeout(),
+    )
+    priced = _leg(sid="CA1")
+    found = await twilio.leg_costs([priced, _leg(sid="CA2")])
+    assert found == {priced.id: LegCost(Decimal("0.0068"))}
+
+
 async def test_twilio_needs_credentials(monkeypatch):
     monkeypatch.setattr(settings, "twilio_account_sid", "")
     with pytest.raises(CarrierNotConfigured):
@@ -133,6 +147,15 @@ async def test_telnyx_reads_the_detail_record(telnyx_records):
     assert found == {leg.id: LegCost(Decimal("0.0128"), 240, Decimal("0.00320"))}
     assert [a["filter[sip_call_id]"] for a in asked] == ["sip-1", "sip-2"]
     assert {a["filter[record_type]"] for a in asked} == {"sip-trunking"}
+
+
+async def test_telnyx_unknown_billed_time_stays_unknown(telnyx_records):
+    records, _ = telnyx_records
+    records["sip-1"] = [{"cost": "0.01", "rate": "0", "currency": "USD"}]
+    leg = _leg(sip="sip-1")
+    assert await telnyx.leg_costs([leg]) == {
+        leg.id: LegCost(Decimal("0.01"), None, Decimal(0))
+    }
 
 
 async def test_telnyx_skips_a_non_usd_record(telnyx_records):

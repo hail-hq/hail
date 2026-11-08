@@ -502,14 +502,14 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
 
     def lookup() -> dict[UUID, LegCost]:
         found = {}
-        failed: CarrierRequestError | None = None
+        failed: Exception | None = None
         for leg in legs:
             if not leg.carrier_call_id:
                 continue
             # One refused lookup must not discard the legs already priced.
             try:
                 cost = _leg_cost(client, leg.carrier_call_id)
-            except CarrierRequestError as exc:
+            except Exception as exc:  # refused, timed out or unreachable
                 logger.warning(
                     "twilio call %s lookup failed: %s", leg.carrier_call_id, exc
                 )

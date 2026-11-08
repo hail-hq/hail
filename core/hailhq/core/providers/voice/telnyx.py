@@ -523,7 +523,11 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
             continue
         found[leg.id] = LegCost(
             sum((Decimal(str(r["cost"])) for r in records), Decimal(0)),
-            sum(int(r.get("billed_sec") or 0) for r in records),
+            (
+                sum(int(r["billed_sec"]) for r in billed)
+                if (billed := [r for r in records if r.get("billed_sec") is not None])
+                else None
+            ),
             (
                 Decimal(str(records[0]["rate"]))
                 if records[0].get("rate") is not None

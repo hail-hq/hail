@@ -944,6 +944,7 @@ class CallLeg(Base):
         ),
         Index(
             "call_legs_pending_idx",
+            text("cost_checked_at NULLS FIRST"),
             "joined_at",
             postgresql_where=text("cost_status = 'pending'"),
         ),
