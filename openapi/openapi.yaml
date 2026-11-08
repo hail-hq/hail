@@ -2132,8 +2132,8 @@ paths:
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
-            Also returned when the balance doesn't cover this number's full monthly
-            price.
+            Also returned when the balance, plus the credit the verification you buy
+            with set aside, doesn't cover this number's setup and the first month.
         "409":
           description:
             The quote expired, the number is taken, the price changed,
@@ -4915,6 +4915,21 @@ paths:
         A 409 comes before your files are checked and before anything is filed.
 
 
+        A number verification needs credit for the offer''s setup and first month
+
+        (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+
+        nothing is filed. That amount is set aside from your balance while the
+
+        carrier checks your papers. It pays for setup and the first month when
+
+        you buy the number with this verification, and comes back if the
+
+        verification is rejected or cancelled, or if no number is bought with it
+
+        within 30 days of approval. A by-request offer sets nothing aside.
+
+
         The carrier checks the details right away. Problems come back as 422 with
 
         the field named, and nothing is kept. When it passes, the verification is
@@ -4960,6 +4975,12 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description:
+            Not enough credit. A number verification needs the offer's
+            setup and first month (`setup_cents` + `monthly_cents` of the quote) and
+            sets that amount aside until you buy the number. A US SMS registration
+            needs its filing fee. Nothing is filed.
         "422":
           description: Validation Error
           content:
@@ -8524,6 +8545,15 @@ components:
           description:
             Name of the person or company that verification is for, as
             typed in the verification form. Null when unknown.
+        held_cents:
+          type: integer
+          title: Held Cents
+          description:
+            "Credit, in USD cents, set aside from your balance for this
+            verification: setup and the first month of the offer it was started for.
+            A purchase with this verification counts it toward the price. 0 when nothing
+            is set aside."
+          default: 0
       type: object
       required:
         - id

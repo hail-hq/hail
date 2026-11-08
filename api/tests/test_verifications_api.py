@@ -1752,6 +1752,10 @@ async def _raw_quote(async_session, org_id, carrier_name: str) -> str:
             "e164": "+447700900001",
             "country_code": "GB",
             "number_type": "mobile",
+            "capabilities": ["voice", "sms"],
+            "monthly_cents": 250,
+            "setup_cents": 0,
+            "by_request": False,
         },
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
     )

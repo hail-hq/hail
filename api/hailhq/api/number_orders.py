@@ -15,7 +15,7 @@ from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.api.routes.verifications import approved_handles
-from hailhq.core import sms_setup, telephony_catalog
+from hailhq.core import sms_setup, telephony_catalog, verification_hold
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.carrier_routing import Outcome, carrier
@@ -544,9 +544,20 @@ async def acquire_offer(
         status_code=402,
         detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
     )
+
+    async def short_of_funds() -> bool:
+        """The balance plus the credit the chosen verification set aside
+        (it pays for this purchase) is below the total."""
+        held = (
+            await verification_hold.open_hold_cents(db, org, approval.row_id)
+            if approval is not None
+            else 0
+        )
+        return await get_balance_cents(db, org) + held < total
+
     # Cheap check first so an empty balance never costs a carrier round-trip.
     # Re-checked under the lock below, after the slow discovery.
-    if billed and await get_balance_cents(db, org) < total:
+    if billed and await short_of_funds():
         raise no_funds
     # Hail's rows decide which approvals exist now; the carrier re-check
     # below only confirms they are still valid.
@@ -602,7 +613,7 @@ async def acquire_offer(
     if row.number_id:
         # A concurrent request consumed this quote while we were checking.
         return await db.get(PhoneNumber, row.number_id)
-    if billed and await get_balance_cents(db, org) < total:
+    if billed and await short_of_funds():
         raise no_funds
     existing = (
         await db.execute(
@@ -616,6 +627,12 @@ async def acquire_offer(
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail=NUMBER_TAKEN_DETAIL)
+    if approval is not None:
+        # The verification's hold goes back in the same commit as the
+        # order's own hold below: the order now holds the money. If the
+        # order fails, its refund goes to the balance; this hold is not made
+        # again. Before the number is added: this read flushes the session.
+        await verification_hold.release_hold(db, org, approval.row_id)
     number = PhoneNumber(
         id=uuid4(),
         organization_id=org,

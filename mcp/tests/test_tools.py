@@ -1659,6 +1659,7 @@ async def test_quote_numbers_keeps_verification_and_incomplete(
         "state": "submitted",
         "subject_type": "person",
         "subject_name": "Ada Lovelace",
+        "held_cents": 0,
     }
     body["offers"][0]["verification"] = verification
     body["offers"][0]["verifications"] = [verification]

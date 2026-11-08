@@ -12,7 +12,7 @@ from hailhq.api.number_orders import (
     purge_expired_quotes,
     reconcile_order,
 )
-from hailhq.core import telephony_catalog
+from hailhq.core import telephony_catalog, verification_hold
 from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_routing import carrier
 from hailhq.core.models import (
@@ -845,6 +845,7 @@ async def test_quote_route_shows_the_live_verification(
         "state": "submitted",
         "subject_type": "business",
         "subject_name": None,
+        "held_cents": 0,
     }
     assert by_carrier["telnyx"]["verifications"] == [
         by_carrier["telnyx"]["verification"]
@@ -856,6 +857,25 @@ async def test_quote_route_shows_the_live_verification(
     row = await async_session.get(NumberOffer, UUID(by_carrier["telnyx"]["quote_id"]))
     stored = CarrierOffer.model_validate(row.offer)
     assert (stored.provider, stored.e164) == ("telnyx", offer.e164)
+
+
+async def test_quote_held_cents(client, async_session, org_and_key, monkeypatch):
+    org, _, key = org_and_key
+    _, offer = await seed_quote(async_session, org, readiness="verification_required")
+    offer = offer.model_copy(update={"subject_types": ["business"]})
+    held = _verification(org, "submitted", subject_name="Acme")
+    plain = _verification(org, "submitted", subject_name="Other Co")
+    async_session.add_all([held, plain])
+    await async_session.commit()
+    await verification_hold.place_hold(
+        async_session, org, held.id, 150, channel="voice"
+    )
+    await async_session.commit()
+
+    result = await _quote(client, key, monkeypatch, [offer])
+    (shown,) = result["offers"]
+    by_id = {v["id"]: v["held_cents"] for v in shown["verifications"]}
+    assert by_id == {str(held.id): 150, str(plain.id): 0}
 
 
 async def test_quote_route_lists_every_live_verification(

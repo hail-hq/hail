@@ -1317,7 +1317,8 @@ def _submit_error(exc: HailAPIError) -> dict[str, Any]:
             "same name already exists; nothing new was stored. Call "
             "list_verifications to see it."
         }
-    if exc.status in (401, 404, 409, 429, 503):
+    if exc.status in (401, 402, 404, 409, 429, 503):
+        # 402 says how much credit is needed; it never holds submitted data.
         return _format_api_error(exc)
     return {"error": f"hail api error {exc.status}"}
 
@@ -2868,6 +2869,15 @@ def register_tools(
         ``application/pdf``. Limits: 10 MiB per file, 29 MiB in total, at
         most 20 files and 100 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
+
+        Credit: for ``purpose='number'`` the balance must cover the offer's
+        setup and first month (``setup_cents`` + ``monthly_cents`` from
+        quote_numbers), or you get a 402 error and nothing is sent: ask the
+        user to add credit in the console first. That amount is set aside
+        while the carrier checks the papers. It pays for setup and the first
+        month when the number is bought with this verification, and comes
+        back if the verification is rejected or cancelled, or if no number
+        is bought with it within 30 days of approval.
 
         Returns the verification: ``id``, ``state`` and ``subject_name``.
         Review takes business days and nothing notifies you: poll
