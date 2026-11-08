@@ -119,7 +119,12 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
                             CallLeg.cost_checked_at < now - RECHECK_EVERY,
                         ),
                     )
-                    .order_by(CallLeg.joined_at)
+                    # Never-asked legs first: legs a carrier keeps failing
+                    # on must not fill every batch and starve new ones.
+                    .order_by(
+                        CallLeg.cost_checked_at.asc().nulls_first(),
+                        CallLeg.joined_at,
+                    )
                     .limit(BATCH)
                     .with_for_update(skip_locked=True)
                 )

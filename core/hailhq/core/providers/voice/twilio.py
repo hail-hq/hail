@@ -502,6 +502,7 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
 
     def lookup() -> dict[UUID, LegCost]:
         found = {}
+        failed: CarrierRequestError | None = None
         for leg in legs:
             if not leg.carrier_call_id:
                 continue
@@ -512,9 +513,14 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
                 logger.warning(
                     "twilio call %s lookup failed: %s", leg.carrier_call_id, exc
                 )
+                failed = exc
                 continue
             if cost:
                 found[leg.id] = cost
+        # Nothing priced and a lookup failed: an outage or a bad key, not
+        # "no record yet". Raise so the legs are not given up on.
+        if failed is not None and not found:
+            raise failed
         return found
 
     return await asyncio.to_thread(lookup)

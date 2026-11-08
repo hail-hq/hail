@@ -236,3 +236,29 @@ async def test_a_second_pass_skips_claimed_legs(async_session, lookups):
     await fetch_leg_costs(NOW)
     assert nested == [0]
     assert len(seen["telnyx"]) == 1
+
+
+async def test_new_legs_go_before_legs_already_asked(
+    async_session, lookups, monkeypatch
+):
+    # Legs a carrier keeps failing on must not fill every batch.
+    monkeypatch.setattr(call_legs, "BATCH", 1)
+    _, seen = lookups
+    old_call = await _call(async_session)
+    await record_call_legs(
+        old_call,
+        [
+            _leg(
+                sip_call_id="old",
+                joined_at=NOW - timedelta(hours=2),
+                left_at=NOW - timedelta(hours=1),
+            )
+        ],
+    )
+    await fetch_leg_costs(NOW - call_legs.RECHECK_EVERY * 2)
+    assert [ref.sip_call_id for ref in seen["telnyx"]] == ["old"]
+    new_call = await _call(async_session, e164="+14155550199")
+    await record_call_legs(new_call, [_leg(sip_call_id="new")])
+    seen.clear()
+    await fetch_leg_costs(NOW)
+    assert [ref.sip_call_id for ref in seen["telnyx"]] == ["new"]

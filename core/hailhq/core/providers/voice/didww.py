@@ -736,7 +736,7 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 # --- call costs: DIDWW has no per-call lookup, so one outbound CDR export
 # covers every leg asked about. Voice IN legs are not in it: they stay
 # unpriced. The export is ready within seconds; one that is not ready after
-# EXPORT_WAIT_SECONDS is asked again on the next pass.
+# EXPORT_WAIT_SECONDS raises, so its legs stay pending for the next pass.
 
 EXPORT_WAIT_SECONDS = 60
 EXPORT_MARGIN = timedelta(minutes=10)
@@ -744,6 +744,10 @@ EXPORT_MARGIN = timedelta(minutes=10)
 
 def _iso(when: datetime) -> str:
     return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ExportNotReady(Exception):
+    """DIDWW did not finish the CDR export in time; ask again next pass."""
 
 
 def _cdr_rows(client: DidwwClient, start: datetime, end: datetime) -> list[dict]:
@@ -766,7 +770,7 @@ def _cdr_rows(client: DidwwClient, start: datetime, end: datetime) -> list[dict]
         if attrs.get("status") == "completed" and attrs.get("url"):
             break
         if time.monotonic() > deadline:
-            return []
+            raise ExportNotReady(export_id)
         time.sleep(3)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "cdr.csv")
@@ -795,11 +799,15 @@ def _leg_costs_sync(legs: list[LegRef]) -> dict[UUID, LegCost]:
             continue
         seconds = row.get("Billing Duration (sec)")
         rate = row.get("Rate (USD)")
-        found[leg.id] = LegCost(
-            Decimal(charged),
-            int(seconds) if seconds else None,
-            Decimal(rate) if rate else None,
-        )
+        # One odd row must not fail the whole export for every leg.
+        try:
+            found[leg.id] = LegCost(
+                Decimal(charged),
+                int(Decimal(seconds)) if seconds else None,
+                Decimal(rate) if rate else None,
+            )
+        except (ArithmeticError, ValueError):
+            logger.warning("didww cdr row for %s is not a number", leg.sip_call_id)
     return found
 
 

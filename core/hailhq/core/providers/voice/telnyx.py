@@ -496,6 +496,7 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     except ValueError as exc:
         raise CarrierNotConfigured(str(exc)) from exc
     found: dict[UUID, LegCost] = {}
+    failed: httpx.HTTPError | None = None
     for leg in legs:
         if not leg.sip_call_id:
             continue
@@ -512,6 +513,7 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
             )
         except httpx.HTTPError as exc:
             logger.warning("telnyx leg %s lookup failed: %s", leg.sip_call_id, exc)
+            failed = exc
             continue
         records = [r for r in body.get("data") or [] if r.get("cost") is not None]
         if not records:
@@ -522,6 +524,14 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
         found[leg.id] = LegCost(
             sum((Decimal(str(r["cost"])) for r in records), Decimal(0)),
             sum(int(r.get("billed_sec") or 0) for r in records),
-            Decimal(str(records[0]["rate"])) if records[0].get("rate") else None,
+            (
+                Decimal(str(records[0]["rate"]))
+                if records[0].get("rate") is not None
+                else None
+            ),
         )
+    # Nothing priced and a lookup failed: an outage or a bad key, not
+    # "no record yet". Raise so the legs are not given up on.
+    if failed is not None and not found:
+        raise failed
     return found

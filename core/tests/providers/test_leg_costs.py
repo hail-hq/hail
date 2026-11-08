@@ -13,7 +13,12 @@ import responses
 from hailhq.core.config import settings
 from hailhq.core.providers import telnyx as telnyx_client
 from hailhq.core.providers.voice import didww, telnyx, twilio
-from hailhq.core.providers.voice.base import CarrierNotConfigured, LegCost, LegRef
+from hailhq.core.providers.voice.base import (
+    CarrierNotConfigured,
+    CarrierRequestError,
+    LegCost,
+    LegRef,
+)
 
 NOW = datetime.now(timezone.utc) - timedelta(hours=1)
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
@@ -76,6 +81,19 @@ async def test_twilio_skips_an_unknown_call(twilio_keys):
     assert await twilio.leg_costs([_leg(sid="CA9")]) == {}
 
 
+@responses.activate
+async def test_twilio_raises_when_every_lookup_fails(twilio_keys):
+    # A bad key or an outage is not "no record yet": the legs stay pending.
+    responses.add(
+        responses.GET,
+        f"{TWILIO_CALLS}/CA1.json",
+        json={"code": 20003, "message": "auth", "status": 401},
+        status=401,
+    )
+    with pytest.raises(CarrierRequestError):
+        await twilio.leg_costs([_leg(sid="CA1")])
+
+
 async def test_twilio_needs_credentials(monkeypatch):
     monkeypatch.setattr(settings, "twilio_account_sid", "")
     with pytest.raises(CarrierNotConfigured):
@@ -121,6 +139,16 @@ async def test_telnyx_skips_a_non_usd_record(telnyx_records):
     records, _ = telnyx_records
     records["sip-1"] = [{"cost": "0.01", "billed_sec": 60, "currency": "EUR"}]
     assert await telnyx.leg_costs([_leg(sip="sip-1")]) == {}
+
+
+async def test_telnyx_raises_when_every_lookup_fails(monkeypatch):
+    monkeypatch.setattr(settings, "telnyx_api_key", "key")
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(401, json={}))
+    )
+    monkeypatch.setattr(telnyx_client, "get_http_client", lambda: client)
+    with pytest.raises(httpx.HTTPError):
+        await telnyx.leg_costs([_leg(sip="sip-1")])
 
 
 async def test_telnyx_needs_a_key(monkeypatch):
@@ -207,4 +235,18 @@ async def test_didww_asks_nothing_for_inbound_legs(didww_keys):
 async def test_didww_export_not_ready_is_tried_next_pass(didww_keys, monkeypatch):
     monkeypatch.setattr(didww, "EXPORT_WAIT_SECONDS", -1)
     _export("", ready_after=1)
-    assert await didww.leg_costs([_leg(sip="sip-1")]) == {}
+    with pytest.raises(didww.ExportNotReady):
+        await didww.leg_costs([_leg(sip="sip-1")])
+
+
+@responses.activate
+async def test_didww_skips_a_row_it_cannot_read(didww_keys):
+    bad, good = _leg(sip="sip-1"), _leg(sip="sip-2")
+    _export(
+        "2026-11-08 10:00:00,,,success,,,,0,0,200,OK,hail,ES,mobile,X,"
+        "n/a,n/a,,sip-1\n"
+        "2026-11-08 10:00:00,,,success,,,,55,60,200,OK,hail,ES,mobile,X,"
+        "0.0450,0.0450,,sip-2\n",
+    )
+    found = await didww.leg_costs([bad, good])
+    assert found == {good.id: LegCost(Decimal("0.0450"), 60, Decimal("0.0450"))}
