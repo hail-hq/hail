@@ -846,8 +846,19 @@ async def _campaign_may_go(
     and the carrier call that follows, which can take seconds while the
     website's rater and other billing writes wait for the same lock.
     Background and GET polls do not wait for it (like the row lock); a
-    confirmed code does, so its campaign is filed at once."""
+    confirmed code does, so its campaign is filed at once unless another
+    poll's reservation is running on the row."""
     if not _billed_sms(row):  # purpose and organization never change
+        return _CreditCheck(True, None, False)
+    # A first read without the lock: most polls (a campaign already filed)
+    # need no check and must not compete for the lock. A row that becomes
+    # gated after this read is caught by _refresh's re-read (fail closed).
+    first = (
+        await db.execute(select(*_GATE_COLUMNS).where(CarrierVerification.id == row.id))
+    ).one_or_none()
+    if first is None:
+        return _CreditCheck(False, None, False)
+    if not _campaign_gated(first, registry):
         return _CreditCheck(True, None, False)
     if wait:
         await org_lock(db, row.organization_id)
@@ -1091,10 +1102,10 @@ async def _refresh(
     if not await _lock_for_poll(db, row):
         if reserved:
             # No carrier call here. The holder is usually another poll: it
-            # read this reservation as its own and clears it when its call
-            # returns. If the row is free again, drop it now; if a non-poll
-            # holds it, it runs out (_CAMPAIGN_RESERVED_FOR). Only the
-            # value this poll wrote.
+            # finds this reservation running, files nothing, and drops it
+            # when its call returns. If the row is free again, drop it now;
+            # if a non-poll holds it, it runs out (_CAMPAIGN_RESERVED_FOR).
+            # Only the value this poll wrote.
             await _drop_reservation(db, row.id, reserved, skip_locked=True)
             await db.commit()
         return
@@ -2705,8 +2716,9 @@ async def confirm_verification(
 ) -> VerificationResponse:
     """Enter the code the carrier texted to confirm a person's US texting
     registration. Use it when the verification shows `confirmation: "code"`.
-    On success the campaign is filed at once; poll GET /verifications/{id}
-    until `approved`. A wrong or expired code is 422 on `code`; after five
+    On success the campaign is filed at once, when your credit covers its
+    fee (else `waiting_for_credit` is true until you add credit); poll
+    GET /verifications/{id} until `approved`. A wrong or expired code is 422 on `code`; after five
     wrong codes, 429 until the carrier sends a new code (once a day). 409
     when there is nothing to confirm."""
     row = await _org_row_or_404(db, principal, verification_id)

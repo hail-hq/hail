@@ -5326,9 +5326,12 @@ paths:
 
         registration. Use it when the verification shows `confirmation: "code"`.
 
-        On success the campaign is filed at once; poll GET /verifications/{id}
+        On success the campaign is filed at once, when your credit covers its
 
-        until `approved`. A wrong or expired code is 422 on `code`; after five
+        fee (else `waiting_for_credit` is true until you add credit); poll
+
+        GET /verifications/{id} until `approved`. A wrong or expired code is 422 on
+        `code`; after five
 
         wrong codes, 429 until the carrier sends a new code (once a day). 409
 
