@@ -161,6 +161,9 @@ user reviews the corrections. Both preserve the existing ID and use authenticate
 After an uncertain timeout, check that same registration before retrying. Neither recovery
 client creates or cancels a registration as a fallback.
 
+Before a first filing, MCP clients call `preview_sms_application` with the answers they will submit.
+It returns the campaign text a carrier reviews. It files and charges nothing.
+
 Each organization registers its own US A2P 10DLC brand and campaign. Fees are priced and
 charged per step by the website's US texting rater. The console reviews the whole application
 before submission. `POST /verifications/sms/preview` validates the answers and returns the
