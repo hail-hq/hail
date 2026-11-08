@@ -3703,6 +3703,72 @@ async def test_an_uncharged_campaign_in_any_iso_form_counts(
     assert sms_carrier.campaigns_created == 0
 
 
+async def test_a_campaign_in_flight_keeps_its_credit_when_the_order_flips(
+    client, org_and_key, sms_carrier, async_session, session_factory
+) -> None:
+    # Credit for one fee. The newer row B is funded and its campaign call
+    # is in flight (the org lock is released by then). Meanwhile the older
+    # row A becomes ready (its hold is lifted), so by age A would come first.
+    # B's reservation keeps the credit: A files nothing, one campaign in all.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": f"BN-{number_type}",
+                "brand_reused": True,
+                **extra,
+            },
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age, extra in (
+            ("local", 3, {"needs_information": True}),
+            ("toll_free", 2, {}),
+        )
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    sms_carrier.campaign_key = "campaign_id"
+    sms_carrier.entered = asyncio.Event()
+    sms_carrier.release = asyncio.Event()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    restore = _per_request_sessions(session_factory)
+    try:
+        first = asyncio.create_task(
+            client.get(f"/verifications/{newer.id}", headers=_auth(key))
+        )
+        await asyncio.wait_for(sms_carrier.entered.wait(), 5)
+        refs = dict(older.provider_refs)
+        refs.pop("needs_information")
+        await async_session.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == older.id)
+            .values(provider_refs=refs)
+        )
+        await async_session.commit()
+        second = await asyncio.wait_for(
+            client.get(f"/verifications/{older.id}", headers=_auth(key)), 5
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["waiting_for_credit"] is True
+        sms_carrier.release.set()
+        assert (await first).status_code == 200
+    finally:
+        sms_carrier.release.set()
+        restore()
+    assert sms_carrier.campaigns_created == 1
+    assert "campaign_id" in await _stored_refs(async_session, str(newer.id))
+    assert "campaign_id" not in await _stored_refs(async_session, str(older.id))
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:

@@ -636,6 +636,21 @@ def _campaign_filed(provider: object, refs: dict | None) -> bool:
 
 # A US texting registration in these states has its campaign still to file.
 _BEFORE_CAMPAIGN_STATES = ("awaiting_review", "submitting", "submitted")
+# A poll the credit check let file a campaign marks its row with
+# ``provider_refs.campaign_reserved_at``. For this long the row keeps first
+# claim on the credit, so another check while the carrier call runs (the
+# org lock is released by then) cannot hand the same credit to another row.
+_CAMPAIGN_RESERVED_FOR = timedelta(minutes=5)
+
+
+def _campaign_reserved(row: CarrierVerification | Row) -> bool:
+    """True while the row's campaign reservation holds (``_CAMPAIGN_RESERVED_FOR``)."""
+    at = (row.provider_refs or {}).get("campaign_reserved_at")
+    try:
+        since = datetime.now(timezone.utc) - datetime.fromisoformat(at)
+    except (TypeError, ValueError):
+        return False
+    return timedelta(0) <= since < _CAMPAIGN_RESERVED_FOR
 
 
 def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
@@ -703,7 +718,8 @@ async def _campaign_unfunded(
 
     The credit is the balance less the steps not yet charged
     (``_uncharged_cents``). It goes to the organization's registrations
-    still before their campaign, oldest first, each using up its fee, so
+    still before their campaign, reserved ones first (``_campaign_reserved``)
+    then oldest first, each using up its fee, so
     one credit never pays for two campaigns. All of them count, not only
     ``rows``, so every path gives the credit to the same registration."""
     given = {row.id: row for row in rows}
@@ -718,12 +734,24 @@ async def _campaign_unfunded(
                 CarrierVerification.state.in_(_BEFORE_CAMPAIGN_STATES),
             )
         )
+        stored = {r.id: r for r in found}
         # The caller's copy of a row wins: it can be newer than the database.
-        candidates = {r.id: r for r in found} | {
+        candidates = stored | {
             i: r for i, r in given.items() if r.organization_id == org
         }
         left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
-        for row in sorted(candidates.values(), key=lambda r: (r.created_at, r.id)):
+
+        # A reserved row (its campaign may be in flight) keeps its claim. The
+        # stored copy says: another poll may have reserved it since.
+        order = sorted(
+            candidates.values(),
+            key=lambda r, stored=stored: (
+                not _campaign_reserved(stored.get(r.id, r)),
+                r.created_at,
+                r.id,
+            ),
+        )
+        for row in order:
             if not _campaign_gated(row, registry):
                 continue
             fee = _carrier_fee(
@@ -767,9 +795,35 @@ async def _campaign_may_go(
     elif not await try_org_lock(db, row.organization_id):
         await db.commit()
         return False
-    unfunded = bool(await _campaign_unfunded(db, [row], registry))
-    await db.commit()  # ends the org lock
-    return not unfunded
+    if await _campaign_unfunded(db, [row], registry):
+        await db.commit()  # ends the org lock
+        return False
+    # Funded: reserve the credit before the lock is released. Not when
+    # another poll holds the row (it is asking the carrier now): waiting
+    # here would hold the org lock through that call, and this poll would
+    # skip the row anyway.
+    held = (
+        await db.execute(
+            select(CarrierVerification.id)
+            .where(CarrierVerification.id == row.id)
+            .with_for_update(skip_locked=True)
+        )
+    ).scalar_one_or_none()
+    if held is not None:
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(
+                provider_refs=CarrierVerification.provider_refs.op("||")(
+                    func.jsonb_build_object(
+                        "campaign_reserved_at", datetime.now(timezone.utc).isoformat()
+                    )
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+    await db.commit()  # ends the org lock (and the row lock)
+    return held is not None
 
 
 def _added_only(before: dict, after: dict) -> dict:
