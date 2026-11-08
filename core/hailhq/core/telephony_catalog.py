@@ -14,7 +14,15 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-__all__ = ["by_request_row", "capabilities", "sells_in"]
+__all__ = [
+    "by_request_row",
+    "capabilities",
+    "effective_capabilities",
+    "monthly_price",
+    "requirements",
+    "rows",
+    "sells_in",
+]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
@@ -34,15 +42,39 @@ def _load(provider: str) -> dict[tuple[str, str], dict]:
     return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
 
 
+@lru_cache(maxsize=8)
+def _capability_fees(path: Path) -> tuple[dict, ...]:
+    return tuple(json.loads(path.read_text()).get("capability_monthly_fees", []))
+
+
+def _sms_route_exists(provider: str) -> bool:
+    from hailhq.core.carrier_routing import CARRIERS
+
+    return provider not in CARRIERS or CARRIERS[provider].sms_route is not None
+
+
+def effective_capabilities(row: dict, provider: str) -> list[str]:
+    """What Hail can deliver on this catalog row: ``voice`` and/or ``sms``.
+    Hail routes no SMS through a carrier whose ``sms_route`` is None. Its
+    catalog row may list SMS, because the carrier sells it; Hail cannot
+    deliver it, so it is never promised. An SMS-only row at such a carrier
+    gives an empty list."""
+    caps = []
+    if row.get("voice"):
+        caps.append("voice")
+    if row.get("sms") and _sms_route_exists(provider):
+        caps.append("sms")
+    return caps
+
+
 def capabilities(
     country_code: str, number_type: str, provider: str = "auto"
 ) -> dict | None:
     """What a number of this kind can do at ``provider``, or None when that
     carrier does not sell it. 'auto' answers from the first carrier the API
     can buy from that lists it."""
-    # Imported here: carrier_routing imports the carrier adapters, and
-    # number_offers imports carrier_routing.
-    from hailhq.core.carrier_routing import CARRIERS
+    # Imported here: number_offers imports carrier_routing, which imports
+    # the carrier adapters.
     from hailhq.core.number_offers import PROVIDERS
 
     # Only carriers the API can buy from.
@@ -56,14 +88,12 @@ def capabilities(
         # orders a by_request number by hand.
         if row.get("receive_only") or row.get("by_request"):
             continue
-        # Hail routes no SMS through this carrier. Its catalog row may list
-        # SMS, because the carrier sells it; Hail cannot deliver it, so it
-        # is never promised.
-        if name in CARRIERS and CARRIERS[name].sms_route is None:
-            if not row["voice"]:
-                continue  # an SMS-only number Hail cannot use at this carrier
-            return {"voice": True, "sms": False, "mms": False}
-        return {"voice": row["voice"], "sms": row["sms"], "mms": row["mms"]}
+        caps = effective_capabilities(row, name)
+        if not caps and not _sms_route_exists(name):
+            continue  # an SMS-only number Hail cannot use at this carrier
+        # No SMS route also means no MMS.
+        mms = bool(row.get("mms")) and _sms_route_exists(name)
+        return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 
 
@@ -91,3 +121,42 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
     sells it by request only (support orders it by hand), else None."""
     row = _load(provider).get((country_code, number_type))
     return row if row and row.get("by_request") else None
+
+
+def requirements(country_code: str, number_type: str, provider: str) -> dict | None:
+    """The stored requirements block of ``provider``'s catalog row (who may
+    buy and which paper categories each needs), or None when the row has no
+    block. Read from the catalog only; no carrier call."""
+    row = _load(provider).get((country_code, number_type))
+    return row.get("requirements") if row else None
+
+
+def rows(country_code: str, provider: str) -> list[dict]:
+    """Every catalog row of ``provider`` in this country, by-request rows
+    included, receive-only rows left out."""
+    return [
+        row
+        for (cc, _), row in _load(provider).items()
+        if cc == country_code and not row.get("receive_only")
+    ]
+
+
+def monthly_price(provider: str, base_cents: int, selected: list[str]) -> dict:
+    """Complete purchase rental, keeping base and selected capability fees separate.
+
+    Inventory prices exclude these provider-published capability fees. Each
+    fee is charged once even when several of its capabilities are selected.
+    """
+    from hailhq.core.carrier_offer import cents
+
+    fees = sum(
+        cents(fee["usd_per_month"])
+        for fee in _capability_fees(_path(provider))
+        if set(selected).intersection(fee["capabilities"])
+    )
+    return {
+        "monthly_price_version": 2,
+        "base_monthly_cents": base_cents,
+        "capability_monthly_cents": fees,
+        "monthly_cents": base_cents + fees,
+    }

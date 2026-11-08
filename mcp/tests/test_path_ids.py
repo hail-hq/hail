@@ -85,6 +85,7 @@ _BODY_ID_METHODS = {
     "send_email",
     "acquire_number",
     "get_verification_requirements",
+    "preview_sms_application",
     "submit_verification",
 }
 
@@ -115,6 +116,8 @@ def test_the_id_method_list_is_the_expected_one() -> None:
         "delete_number",
         "get_sms",
         "get_verification",
+        "get_sms_application",
+        "amend_sms_application",
         "cancel_verification",
         "confirm_verification",
         "get_email",
@@ -146,6 +149,12 @@ _TOOL_CASES = [
     ("cancel_verification", "verification_id", {}),
     ("confirm_verification", "verification_id", {"code": "123456"}),
     ("get_verification", "verification_id", {}),
+    ("get_sms_application", "verification_id", {}),
+    (
+        "amend_sms_application",
+        "verification_id",
+        {"fields": {}, "attest_authorized": True},
+    ),
     ("release_number", "number_id", {"confirm_e164": "+15550001111"}),
     ("get_number", "number_id", {}),
     ("route_number", "number_id", {"clear_voice": True}),

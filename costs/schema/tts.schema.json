@@ -37,8 +37,24 @@
       ],
       "anyOf": [
         { "required": ["price_per_1m_chars_usd"] },
-        { "required": ["price_per_second_usd"] }
+        { "required": ["price_per_1m_chars_eur"] },
+        { "required": ["price_per_second_usd"] },
+        { "required": ["price_per_second_eur"] }
       ],
+      "if": {
+        "anyOf": [
+          { "required": ["price_per_1m_chars_eur"] },
+          { "required": ["price_per_second_eur"] }
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["price_per_1m_chars_usd"] },
+            { "required": ["price_per_second_usd"] }
+          ]
+        }
+      },
       "properties": {
         "provider": { "type": "string", "minLength": 1 },
         "provider_url": { "type": "string", "format": "uri" },
@@ -49,7 +65,9 @@
           "description": "Include this model in the prerendered /costs/compare/<a>-vs-<b> page set. Not cleared on deprecation — see docs/superpowers/specs/2026-07-27-costs-compare-crawl-trap-design.md."
         },
         "price_per_1m_chars_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_1m_chars_eur": { "$ref": "#/$defs/decimal" },
         "price_per_second_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_second_eur": { "$ref": "#/$defs/decimal" },
         "voice_quality": { "enum": ["standard", "neural", "cloned"] },
         "voice_count": { "type": "integer", "minimum": 1 },
         "voices_count": { "type": "integer", "minimum": 1 },
@@ -69,12 +87,17 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["price_usd", "unit"],
+              "required": ["unit"],
               "properties": {
                 "price_usd": { "$ref": "#/$defs/decimal" },
+                "price_eur": { "$ref": "#/$defs/decimal" },
                 "unit": { "enum": ["per-clone", "monthly", "per-1m-chars"] },
                 "min_seconds": { "type": "integer", "minimum": 1 }
-              }
+              },
+              "anyOf": [
+                { "required": ["price_usd"] },
+                { "required": ["price_eur"] }
+              ]
             }
           ]
         },
@@ -129,6 +152,11 @@
             "requests_per_day": { "type": "integer", "minimum": 0 },
             "tokens_per_day": { "type": "integer", "minimum": 0 }
           }
+        },
+        "promo_ends_at": {
+          "type": "string",
+          "format": "date",
+          "description": "Last day the row's promotional price applies. Set only when a structured price field holds a promotional or introductory rate. The weekly check-stale run lists the row after this date."
         },
         "deprecated_at": { "type": "string", "format": "date" },
         "replaced_by_model_id": { "type": "string", "minLength": 1 },

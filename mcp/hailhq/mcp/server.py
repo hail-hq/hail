@@ -27,7 +27,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from urllib.parse import urljoin, urlsplit
 
+import httpx
 import logfire
 from hailhq.core.config import settings
 from hailhq.core.telemetry import (
@@ -37,6 +39,7 @@ from hailhq.core.telemetry import (
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
+from hailhq.core.urls import join_url
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
@@ -44,11 +47,12 @@ from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Icon
 
 _telemetry = configure_telemetry("hail-mcp")
 if _telemetry:
@@ -61,6 +65,19 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     if mode is AuthMode.OAUTH_RS and not settings.mcp_resource_url:
         raise RuntimeError("oauth-rs mode requires MCP_RESOURCE_URL to be set")
 
+    # The website owns branding. Advertise a stable endpoint and resolve its
+    # current raster icon from the web manifest when a client requests it.
+    manifest_url = (
+        join_url(settings.hail_base_url, "site.webmanifest")
+        if settings.hail_base_url
+        else None
+    )
+    icons = (
+        [Icon(src=join_url(settings.mcp_resource_url, "favicon.ico"))]
+        if manifest_url and settings.mcp_resource_url
+        else None
+    )
+
     if mode is AuthMode.OAUTH_RS:
         verifier = PassThroughVerifier(resource_server_url=settings.mcp_resource_url)
         auth_settings = AuthSettings(
@@ -70,6 +87,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         )
         mcp_app: FastMCP = TaggedFastMCP(
             name="hail",
+            icons=icons,
             streamable_http_path="/",
             host="0.0.0.0",
             token_verifier=verifier,
@@ -80,7 +98,9 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         singleton: HailClient | None = None
     else:
         # static-key: pre-1c shape.
-        mcp_app = TaggedFastMCP(name="hail", streamable_http_path="/", host="0.0.0.0")
+        mcp_app = TaggedFastMCP(
+            name="hail", icons=icons, streamable_http_path="/", host="0.0.0.0"
+        )
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
@@ -89,6 +109,34 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
+
+    async def favicon(_request: Request) -> Response:
+        if not manifest_url:
+            return Response(status_code=404)
+        try:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
+                response = await client.get(manifest_url)
+                response.raise_for_status()
+            manifest = response.json()
+            entries = manifest.get("icons", []) if isinstance(manifest, dict) else []
+            for icon in entries if isinstance(entries, list) else []:
+                if not isinstance(icon, dict) or icon.get("type") not in {
+                    "image/png",
+                    "image/jpeg",
+                }:
+                    continue
+                src = icon.get("src")
+                if not isinstance(src, str) or not src:
+                    continue
+                icon_url = urljoin(str(response.url), src)
+                if urlsplit(icon_url).scheme not in {"http", "https"}:
+                    continue
+                return RedirectResponse(
+                    icon_url, headers={"Cache-Control": "public, max-age=3600"}
+                )
+        except (httpx.HTTPError, ValueError):
+            pass
+        return Response(status_code=503)
 
     async def glama_connector_claim(_request: Request) -> Response:
         return JSONResponse(
@@ -120,6 +168,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
+            Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
             *http_app.routes,
         ],

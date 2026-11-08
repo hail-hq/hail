@@ -41,8 +41,11 @@ export type LLMRow = CommonFields & {
   knowledge_cutoff?: string;
   context_window: number;
   max_output_tokens: number;
-  input_per_mtok_usd: string;
-  output_per_mtok_usd: string;
+  // A vendor with no USD price uses the matching *_eur fields instead.
+  input_per_mtok_usd?: string;
+  output_per_mtok_usd?: string;
+  input_per_mtok_eur?: string;
+  output_per_mtok_eur?: string;
   audio_input_per_mtok_usd?: string;
   cache_read_per_mtok_usd?: string;
   cache_write_per_mtok_usd?: string;
@@ -79,6 +82,8 @@ export type STTRow = CommonFields & {
   price_per_minute_usd?: string;
   price_per_second_usd?: string;
   price_per_minute_batch_usd?: string;
+  price_per_minute_eur?: string;
+  price_per_minute_batch_eur?: string;
   diarization_per_minute_usd?: string;
   pii_redaction_per_minute_usd?: string;
   languages: string[] | string;
@@ -103,6 +108,7 @@ export type STTRow = CommonFields & {
 
 export type TTSRow = CommonFields & {
   price_per_1m_chars_usd?: string;
+  price_per_1m_chars_eur?: string;
   price_per_second_usd?: string;
   voice_quality: 'standard' | 'neural' | 'cloned';
   voice_count?: number;
@@ -159,6 +165,19 @@ export type NumberProvider = 'twilio' | 'telnyx' | 'didww';
 /** A catalog row plus the carrier it came from (the file's `provider`). */
 export interface NumberRow extends TelephonyNumberRow {
   provider: NumberProvider;
+  /** The fees this number's capabilities add to `usd_per_month`. */
+  monthly_fees: { label: string; usd_per_month: string }[];
+  /** `usd_per_month` plus `monthly_fees`. */
+  total_usd_per_month: string;
+}
+
+/** A carrier's monthly fee, charged once when any listed capability is used. */
+export interface CapabilityMonthlyFee {
+  capabilities: ('voice' | 'sms' | 'mms' | 'fax')[];
+  usd_per_month: string;
+  source_url: string;
+  last_verified: string;
+  effective_from: string;
 }
 
 export interface TelephonyFeeRow extends TelephonyProvenance {
@@ -174,7 +193,8 @@ export interface SmsRateRow extends TelephonyProvenance {
   provider: string;
   country_code: string;
   direction: 'outbound';
-  usd_per_segment: string;
+  usd_per_segment?: string;
+  eur_per_segment?: string;
 }
 
 export interface SmsFile {
@@ -188,6 +208,7 @@ export interface NumberCatalogFile {
   license: 'CC-BY-4.0';
   provider: NumberProvider;
   numbers: TelephonyNumberRow[];
+  capability_monthly_fees?: CapabilityMonthlyFee[];
   a2p_10dlc?: TelephonyFeeRow[];
 }
 

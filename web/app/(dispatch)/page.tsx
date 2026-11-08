@@ -5,7 +5,7 @@ import { TTSSection } from "@/components/categories/tts-section";
 import { SmsSection } from "@/components/categories/sms-section";
 import { TelephonySection } from "@/components/categories/telephony-section";
 import { Toolbar } from "@/components/toolbar";
-import { mostRecent, priceRange } from "@/lib/format";
+import { mostRecent, priceRange, rowRange } from "@/lib/format";
 import {
   COSTS_HERO_COPY,
   COSTS_SITE_DESCRIPTION,
@@ -129,8 +129,7 @@ export default function CostsPage() {
               <div className="k">LLMs</div>
               <div className="v">{llm.models.length}</div>
               <div className="n">
-                {priceRange(
-                  llm.models.map((m) => m.output_per_mtok_usd),
+                {rowRange(llm.models, 'output_per_mtok_usd',
                   2,
                   0,
                   "Mtok output",
@@ -141,8 +140,7 @@ export default function CostsPage() {
               <div className="k">STT</div>
               <div className="v">{stt.models.length}</div>
               <div className="n">
-                {priceRange(
-                  stt.models.map((m) => m.price_per_minute_usd),
+                {rowRange(stt.models, 'price_per_minute_usd',
                   6,
                   4,
                   "min",
@@ -153,8 +151,7 @@ export default function CostsPage() {
               <div className="k">TTS</div>
               <div className="v">{tts.models.length}</div>
               <div className="n">
-                {priceRange(
-                  tts.models.map((m) => m.price_per_1m_chars_usd),
+                {rowRange(tts.models, 'price_per_1m_chars_usd',
                   0,
                   0,
                   "1M chars",
@@ -165,8 +162,7 @@ export default function CostsPage() {
               <div className="k">SMS</div>
               <div className="v">{sms.providers.length}</div>
               <div className="n">
-                {priceRange(
-                  sms.providers.map((r) => r.usd_per_segment),
+                {rowRange(sms.providers, 'usd_per_segment',
                   5,
                   5,
                   "segment",
@@ -179,7 +175,7 @@ export default function CostsPage() {
               <div className="v">{numbers.length}</div>
               <div className="n">
                 {priceRange(
-                  numbers.filter(onSale).map((r) => r.usd_per_month),
+                  numbers.filter(onSale).map((r) => r.total_usd_per_month),
                   2,
                   2,
                   "mo",

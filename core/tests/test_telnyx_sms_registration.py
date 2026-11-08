@@ -6,9 +6,9 @@ import pytest
 from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
-    CAMPAIGN_REJECTED,
     Address,
     Problem,
+    RegistrationHoldsAnotherNumber,
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.telnyx_sms import (
@@ -22,11 +22,35 @@ def _no_brand_wait(monkeypatch):
 
 
 FIELDS = {
+    "sender_country": "US",
+    "has_tax_id": "YES",
+    "program_name": "Acme",
+    "opt_in_message": "Acme: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Acme appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://acme.org/privacy https://acme.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "legal_name": "Acme Inc",
     "business_type": "PRIVATE_PROFIT",
     "ein": "12-3456789",
     "industry": "RETAIL",
-    "website": "https://acme.example",
+    "website": "https://acme.org",
     "rep_name": "Ada Lovelace",
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
@@ -36,9 +60,8 @@ FIELDS = {
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
     "opt_in_description": "Customers tick a box at checkout on acme.example.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://acme.example/privacy",
-    "terms_url": "https://acme.example/terms",
+    "privacy_policy_url": "https://acme.org/privacy",
+    "terms_url": "https://acme.org/terms",
 }
 ADDRESS = Address(
     customer_name="Acme Inc",
@@ -111,7 +134,7 @@ async def test_business_draft_creates_brand_and_requests_vetting() -> None:
     assert (method, path) == ("POST", "/v2/10dlc/brand")
     assert body["entityType"] == "PRIVATE_PROFIT" and body["ein"] == "123456789"
     assert body["country"] == "US" and body["state"] == "TX"
-    assert body["website"] == "https://acme.example"
+    assert body["website"] == "https://acme.org"
     assert calls[1][:2] == ("GET", "/v2/10dlc/brand/B1")
     assert calls[2][:2] == ("POST", "/v2/10dlc/brand/B1/externalVetting")
     assert calls[2][2] == {"evpId": "AEGIS", "vettingClass": "STANDARD"}
@@ -128,7 +151,7 @@ async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     draft = await _draft(
         _provider(handler), fields={**FIELDS, "terms_url": "acme.example/terms"}
     )
-    assert [p.field for p in draft.problems] == ["terms_url"]
+    assert "terms_url" in [p.field for p in draft.problems]
     assert draft.refs == {} and calls == []
 
 
@@ -181,8 +204,14 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
+            "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+            "privacy_policy_url": "https://acme.org/privacy",
+            "terms_url": "https://acme.org/terms",
         },
     }
     st = await p.status(refs)
@@ -190,8 +219,8 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["usecase"] == "MIXED" and posted[0]["brandId"] == "B1"
     assert posted[0]["sample1"] == "s" * 20 and posted[0]["embeddedLink"] is False
     assert posted[0]["optoutKeywords"] == "STOP,STOPALL,UNSUBSCRIBE,CANCEL,END,QUIT"
-    assert posted[0]["privacyPolicyLink"] == "https://acme.example/privacy"
-    assert posted[0]["termsAndConditionsLink"] == "https://acme.example/terms"
+    assert posted[0]["privacyPolicyLink"] == "https://acme.org/privacy"
+    assert posted[0]["termsAndConditionsLink"] == "https://acme.org/terms"
     # MIXED needs 2 or more sub use cases; Telnyx refuses with 400 without.
     assert posted[0]["subUsecases"] == ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"]
     assert posted[0]["termsAndConditions"] is True
@@ -199,7 +228,7 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     assert posted[0]["subscriberOptout"] is True
     # No name on the brand read: the replies are filed without one.
     assert posted[0]["optoutMessage"] == (
-        "You are unsubscribed and will get no more messages from this number."
+        "You are unsubscribed and will get no more messages from this workspace."
     )
 
 
@@ -213,11 +242,12 @@ def test_campaign_replies_open_with_the_brand_name() -> None:
             "Acme Dental: Reply STOP to opt out. For help contact help@acme.example."
         ),
         "optinMessage": (
-            "Acme Dental: You are opted in. Reply STOP to opt out, HELP for help."
+            "Acme Dental: You are opted in. Msg frequency varies. "
+            "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
         ),
         "optoutMessage": (
             "Acme Dental: You are unsubscribed and will get no more messages "
-            "from this number."
+            "from this workspace."
         ),
     }
     person = _campaign_replies({"firstName": "Jo", "lastName": "Doe"}, refs)
@@ -248,10 +278,17 @@ async def test_status_files_an_old_snapshot_without_links() -> None:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
+            "schema_version": 1,
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
         },
     }
-    assert (await _provider(handler).status(refs)).state == "pending"
-    assert "privacyPolicyLink" not in posted[0]
+    result = await _provider(handler).status(refs)
+    assert result.state == "pending" and "consent evidence" in result.reason
+    assert refs["needs_information"] is True
+    assert posted == []
 
 
 async def test_status_waits_while_identity_not_verified() -> None:
@@ -313,7 +350,7 @@ async def test_status_approved_and_rejected_from_campaign() -> None:
         }
     )
     st = await p.status(refs)
-    assert st.state == "rejected" and st.reason == CAMPAIGN_REJECTED
+    assert st.state == "rejected" and "message examples" in st.reason
     assert "opt-out" in st.raw_reason
 
 
@@ -386,6 +423,326 @@ async def test_attach_posts_and_conflict_is_success() -> None:
         await p.attach_number(
             {"campaign_id": "C1"}, provider_resource_id="PN1", e164="+15125550100"
         )
+
+
+async def test_a_refused_attach_carries_telnyx_reason() -> None:
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"code": "10015", "detail": "Number not eligible"}]}
+        )
+
+    with pytest.raises(VerificationProviderError, match="Number not eligible"):
+        await _provider(handler).attach_number(
+            {"campaign_id": "C1"}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
+def _linked_handler(
+    calls: list, records: list, list_status: int = 200, list_errors=None
+):
+    """Telnyx with ``records`` on the campaign, served in pages as the API
+    reference says (``page``, ``recordsPerPage``, ``totalRecords``); a link
+    answers 200."""
+
+    def handler(req):
+        calls.append((req.method, req.url.path, dict(req.url.params)))
+        if req.method == "GET":
+            if list_status != 200:
+                return httpx.Response(list_status, json={"errors": list_errors or []})
+            page = int(req.url.params.get("page", 1))
+            size = int(req.url.params.get("recordsPerPage", 20))
+            return httpx.Response(
+                200,
+                json={
+                    "records": records[(page - 1) * size : page * size],
+                    "page": page,
+                    "totalRecords": len(records),
+                },
+            )
+        return httpx.Response(200, json={})
+
+    return handler
+
+
+def _link(number: str, status: str = "ASSIGNED", campaign: str = "C1") -> dict:
+    return {
+        "phoneNumber": number,
+        "campaignId": campaign,
+        "telnyxCampaignId": campaign,
+        "assignmentStatus": status,
+    }
+
+
+def _unlisted(record: dict) -> dict:
+    return {k: v for k, v in record.items() if k != "assignmentStatus"}
+
+
+async def test_a_persons_campaign_with_another_number_is_refused() -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, [_link("+15125550199")]))
+    with pytest.raises(VerificationProviderError, match=r"\+15125550199"):
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert calls == [
+        (
+            "GET",
+            "/v2/10dlc/phone_number_campaigns",
+            {"filter[telnyx_campaign_id]": "C1", "recordsPerPage": "20", "page": "1"},
+        )
+    ]
+
+
+async def test_a_persons_number_already_on_the_campaign_is_a_success() -> None:
+    calls = []
+    # A link that timed out went through: Telnyx has it linked.
+    p = _provider(_linked_handler(calls, [_link("+15125550100", "ASSIGNED")]))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize("link_status", [200, 409])
+@pytest.mark.parametrize(
+    "record",
+    [
+        _link("+15125550100", "PENDING_ASSIGNMENT"),
+        _link("+15125550100", "FAILED_UNASSIGNMENT"),
+        _link("+15125550100", None),
+        _unlisted(_link("+15125550100")),
+        _link("+15125550100", "SOMETHING_NEW"),
+    ],
+    ids=["pending", "failed_unlink", "null", "missing", "unknown"],
+)
+async def test_a_persons_number_not_yet_linked_is_linked_again(
+    record, link_status
+) -> None:
+    # Only ASSIGNED is a done link. Any other status of the number tried
+    # sends the link, so Hail never records a link Telnyx may not finish; a
+    # 409 on it is a success.
+    calls = []
+    handler = _linked_handler(calls, [record])
+
+    def answer(req):
+        response = handler(req)
+        return response if req.method == "GET" else httpx.Response(link_status)
+
+    await _provider(answer).attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET", "POST"]
+
+
+async def test_a_persons_pending_number_still_meets_another_linked_one() -> None:
+    # The number tried is pending and another number is linked: the
+    # other-number rule applies, naming only the other number.
+    calls = []
+    records = [_link("+15125550100", "PENDING_ASSIGNMENT"), _link("+15125550199")]
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert "+15125550100" not in str(caught.value)
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [],
+        # A failed link and a number being unlinked do not hold the campaign.
+        [_link("+15125550199", "FAILED_ASSIGNMENT")],
+        [_link("+15125550199", "PENDING_UNASSIGNMENT")],
+        # Another campaign's number, in case Telnyx ignores the filter.
+        [_link("+15125550199", campaign="C2")],
+    ],
+)
+async def test_a_persons_free_campaign_gets_the_number(records) -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, records))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[:2] for c in calls] == [
+        ("GET", "/v2/10dlc/phone_number_campaigns"),
+        ("POST", "/v2/10dlc/phone_number_campaigns"),
+    ]
+
+
+async def test_a_linked_number_on_the_campaign_can_be_recorded() -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, [_link("+15125550199", "ASSIGNED")]))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert "+15125550199 (ASSIGNED)" in str(caught.value)
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        _link("+15125550199", None),
+        _unlisted(_link("+15125550199")),
+        _link("+15125550199", "SOMETHING_NEW"),
+    ],
+    ids=["null", "missing", "unknown"],
+)
+async def test_a_number_with_no_known_status_holds_the_campaign(record) -> None:
+    # Fail safe: only a failed link and a number being unlinked free it.
+    calls = []
+    p = _provider(_linked_handler(calls, [record]))
+    with pytest.raises(VerificationProviderError, match=r"\+15125550199") as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert not isinstance(caught.value, RegistrationHoldsAnotherNumber)
+    assert [c[0] for c in calls] == ["GET"]
+
+
+@pytest.mark.parametrize("status", ["PENDING_ASSIGNMENT", "FAILED_UNASSIGNMENT"])
+async def test_a_number_not_yet_linked_is_named_with_its_status(status) -> None:
+    # Still linking or unlinking: the number tried is refused, Hail records
+    # nothing, and the worker tries again after the wait.
+    calls = []
+    p = _provider(_linked_handler(calls, [_link("+15125550199", status)]))
+    with pytest.raises(VerificationProviderError) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert not isinstance(caught.value, RegistrationHoldsAnotherNumber)
+    assert f"+15125550199 ({status})" in str(caught.value)
+    assert [c[0] for c in calls] == ["GET"]
+
+
+async def test_a_persons_number_being_unlinked_is_linked_again() -> None:
+    # Telnyx is about to unlink it: not a success, so the link is sent.
+    calls = []
+    p = _provider(
+        _linked_handler(calls, [_link("+15125550100", "PENDING_UNASSIGNMENT")])
+    )
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [c[0] for c in calls] == ["GET", "POST"]
+
+
+async def test_two_numbers_on_a_persons_campaign_name_no_one_number() -> None:
+    calls = []
+    records = [_link("+15125550198"), _link("+15125550199")]
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(
+        VerificationProviderError,
+        match=r"5550198 \(ASSIGNED\), \+15125550199 \(ASSIGNED\)",
+    ) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert not isinstance(caught.value, RegistrationHoldsAnotherNumber)
+
+
+async def test_the_campaign_check_reads_every_page() -> None:
+    # Newest first: failed links fill page 1, the number that holds the
+    # campaign is on page 2.
+    calls = []
+    records = [_link(f"+1512555{i:04}", "FAILED_ASSIGNMENT") for i in range(20)]
+    records.append(_link("+15125550199"))
+    p = _provider(_linked_handler(calls, records))
+    with pytest.raises(RegistrationHoldsAnotherNumber) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert caught.value.e164 == "+15125550199"
+    assert [(c[0], c[2].get("page")) for c in calls] == [("GET", "1"), ("GET", "2")]
+
+
+async def test_the_campaign_check_stops_at_the_last_page() -> None:
+    calls = []
+    records = [_link(f"+1512555{i:04}", "FAILED_ASSIGNMENT") for i in range(20)]
+    p = _provider(_linked_handler(calls, records))
+    await p.attach_number(
+        _person_refs(campaign_id="C1"),
+        provider_resource_id="PN1",
+        e164="+15125550100",
+    )
+    assert [(c[0], c[2].get("page")) for c in calls] == [("GET", "1"), ("POST", None)]
+
+
+async def test_a_failed_campaign_check_keeps_telnyx_reason() -> None:
+    calls = []
+    errors = [{"code": "10015", "title": "Bad Request", "detail": "Invalid filter"}]
+    p = _provider(_linked_handler(calls, [], list_status=400, list_errors=errors))
+    with pytest.raises(VerificationProviderError) as caught:
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert str(caught.value).startswith("status 400: ")
+    assert "10015" in str(caught.value) and "Invalid filter" in str(caught.value)
+    assert [c[0] for c in calls] == ["GET"]
+
+
+async def test_the_campaign_check_stops_when_telnyx_repeats_a_page() -> None:
+    # Telnyx ignores ``page``: page 2 is page 1 again, so the holder on the
+    # real page 2 is never seen. No link is sent.
+    calls = []
+    records = [_link(f"+1512555{i:04}", "FAILED_ASSIGNMENT") for i in range(20)]
+
+    def handler(req):
+        calls.append((req.method, req.url.params.get("page")))
+        if req.method == "GET":
+            return httpx.Response(
+                200, json={"records": records, "page": 1, "totalRecords": 21}
+            )
+        return httpx.Response(200, json={})
+
+    with pytest.raises(VerificationProviderError, match="repeats an earlier page"):
+        await _provider(handler).attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert calls == [("GET", "1"), ("GET", "2")]
+
+
+async def test_a_persons_link_is_not_sent_when_telnyx_cannot_be_read() -> None:
+    calls = []
+    p = _provider(_linked_handler(calls, [], list_status=500))
+    with pytest.raises(VerificationProviderError):
+        await p.attach_number(
+            _person_refs(campaign_id="C1"),
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
+    assert [c[0] for c in calls] == ["GET"]
 
 
 async def test_detach_deletes_the_number_campaign_link() -> None:
@@ -470,6 +827,30 @@ async def test_campaign_status_mapping(campaign_status, state) -> None:
 
 
 PERSON_FIELDS = {
+    "sender_country": "US",
+    "has_tax_id": "NO",
+    "program_name": "Ada",
+    "opt_in_message": "Ada: Enrolled for appointment updates, once per appointment. Msg and data rates may apply. Reply HELP for help, STOP to stop.",
+    "message_frequency": "once per appointment",
+    "disclosure_purposes_confirmed": "YES",
+    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
+    "sample_1_type": "CUSTOMER_CARE",
+    "sample_2_type": "ACCOUNT_NOTIFICATION",
+    "consent_methods": "WEBSITE",
+    "consent_disclosure": "Get Ada appointment reminders, once per appointment. Message and data rates may apply. Reply STOP to opt out or HELP for help. https://ada.org/privacy https://ada.org/terms",
+    "consent_records": "We privately retain the checkbox selection, timestamp and disclosure version.",
+    "consent_optional": "YES",
+    "marketing_consent": "NO",
+    "evidence_redacted": "YES",
+    "website_url": "https://acme.org/book",
+    "website_evidence_url": "https://acme.org/evidence/booking.png",
+    "website_action": "Select the initially unchecked SMS reminder checkbox, then submit.",
+    "policies_confirmed": "YES",
+    "has_phone": "NO",
+    "age_gated": "NO",
+    "direct_lending": "NO",
+    "restricted_content": "NONE",
+    "registration_country": "US",
     "first_name": "Ada",
     "last_name": "Lovelace",
     "email": "ada@example.com",
@@ -479,9 +860,8 @@ PERSON_FIELDS = {
     "sample_2": "Ada: thanks for booking. Reply STOP to opt out.",
     "opt_in_description": "Clients give their number on my booking form.",
     "has_links": "NO",
-    "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION",
-    "privacy_policy_url": "https://ada.example/privacy",
-    "terms_url": "https://ada.example/terms",
+    "privacy_policy_url": "https://ada.org/privacy",
+    "terms_url": "https://ada.org/terms",
 }
 
 
@@ -619,6 +999,39 @@ async def test_a_kept_brand_that_does_not_fit_files_a_new_one(brand) -> None:
     assert not [c for c in calls if c[0] == "GET" and "/10dlc/campaign" in c[1]]
 
 
+@pytest.mark.parametrize("code", [404, 410])
+async def test_a_kept_brand_telnyx_no_longer_holds_files_a_new_one(code) -> None:
+    calls: list = []
+    inner = _kept_brand_handler(calls, KEPT_BRAND)
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append((req.method, req.url.path))
+            return httpx.Response(code, json={})
+        return inner(req)
+
+    draft = await _kept_draft(_provider(handler), new_brand_funded=True)
+    assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
+
+
+@pytest.mark.parametrize("code", [400, 401, 403])
+async def test_a_kept_brand_lookup_refusal_buys_no_new_brand(code) -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
+    calls: list = []
+    inner = _kept_brand_handler(calls, KEPT_BRAND)
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B9"):
+            calls.append((req.method, req.url.path))
+            return httpx.Response(code, json={})
+        return inner(req)
+
+    with pytest.raises(VerificationProviderError):
+        await _kept_draft(_provider(handler), new_brand_funded=True)
+    assert ("POST", "/v2/10dlc/brand") not in calls
+
+
 async def test_a_reused_brand_files_when_a_new_brand_is_not_funded() -> None:
     calls: list = []
     p = _provider(_kept_brand_handler(calls, KEPT_BRAND))
@@ -677,7 +1090,7 @@ async def _lookup_answering(status: int):
 
 
 async def test_a_refused_lookup_files_a_new_brand() -> None:
-    draft = await _lookup_answering(400)
+    draft = await _lookup_answering(404)
     assert draft.problems == []
     assert draft.refs["brand_id"] == "B1" and "brand_reused" not in draft.refs
 
@@ -771,7 +1184,8 @@ async def test_person_mobile_must_be_us_or_canadian() -> None:
     )
     assert draft.problems == [
         Problem(
-            field="mobile_phone_number", message="Use a US or Canadian mobile number."
+            field="mobile_phone_number",
+            message="Use your own US or Canadian mobile number, not a Hail or other internet phone number.",
         )
     ]
     assert calls == []
@@ -837,8 +1251,14 @@ def _person_refs(**extra) -> dict:
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
-            "privacy_policy_url": "https://acme.example/privacy",
-            "terms_url": "https://acme.example/terms",
+            "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+            "privacy_policy_url": "https://acme.org/privacy",
+            "terms_url": "https://acme.org/terms",
         },
         **extra,
     }
@@ -1097,17 +1517,10 @@ async def test_a_failed_read_keeps_waiting_instead_of_deleting_the_brand() -> No
     assert not any(m == "DELETE" for m, _ in calls)
 
 
-async def test_odd_error_bodies_give_a_neutral_problem() -> None:
-    bodies = iter([{"errors": 5}, {"errors": [{"source": "/email"}]}])
-
-    def handler(req):
-        if req.url.path.endswith("/10dlc/brand"):
-            return httpx.Response(400, json=next(bodies))
-        return httpx.Response(204)
-
-    for _ in range(2):
-        draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-        assert [p.field for p in draft.problems] == [""]
+async def test_unknown_error_body_is_retryable():
+    provider = _provider(lambda req: httpx.Response(400, json={"errors": 5}))
+    with pytest.raises(VerificationProviderError):
+        await _draft(provider, "person", PERSON_FIELDS)
 
 
 async def test_4xx_pointing_at_a_field_names_that_field() -> None:
@@ -1133,6 +1546,64 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
     ]
 
 
+@pytest.mark.parametrize("status", [400, 422])
+@pytest.mark.parametrize(
+    ("pointer", "field"),
+    [("/firstName", "first_name"), ("/postalCode", "address.postal_code")],
+)
+async def test_generic_structured_validation_returns_field_without_further_writes(
+    status, pointer, field
+):
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(
+            status,
+            json={
+                "errors": [{"detail": "Invalid value", "source": {"pointer": pointer}}]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [(p.field, p.message) for p in draft.problems] == [
+        (field, "The 10DLC registry did not accept this value.")
+    ]
+    assert draft.refs == {} and not draft.billed_refs
+    assert calls == [("POST", "/v2/10dlc/brand")]
+
+
+@pytest.mark.parametrize(
+    ("status", "pointer", "detail"),
+    [
+        (400, "/unknown", "Invalid value"),
+        (422, "/messagingProfileId", "Invalid value"),
+        (400, "/apiKey", "Invalid value"),
+        (422, "/account/email", "Invalid value"),
+        (422, "/brandId", "Invalid value"),
+        (401, "/firstName", "Invalid value"),
+        (403, "/postalCode", "Invalid value"),
+        (400, "/firstName", "Account configuration is invalid"),
+        (422, "/postalCode", "Invalid API key"),
+    ],
+)
+async def test_operational_or_unknown_pointer_draft_failures_stay_retryable(
+    status, pointer, detail
+):
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(
+            status,
+            json={"errors": [{"detail": detail, "source": {"pointer": pointer}}]},
+        )
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert calls == [("POST", "/v2/10dlc/brand")]
+
+
 async def test_status_files_the_picked_text_types() -> None:
     posted = []
 
@@ -1149,6 +1620,11 @@ async def test_status_files_the_picked_text_types() -> None:
         "message_flow": "f",
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
+        "schema_version": 2,
+        "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
         "text_types": ["2FA", "SECURITY_ALERT"],
     }
     refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
@@ -1206,6 +1682,12 @@ async def test_terms_are_declared_only_with_a_terms_link() -> None:
         "message_flow": "f",
         "samples": ["s" * 20, "t" * 20],
         "has_links": False,
+        "schema_version": 2,
+        "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+        "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
     }
     refs = {"brand_id": "B1", "subject_type": "business", "campaign": campaign}
     await _provider(handler).status(refs)
@@ -1252,7 +1734,8 @@ async def test_a_failure_after_the_brand_reports_it_billed() -> None:
         return httpx.Response(204)
 
     draft = await _draft(_provider(handler))
-    assert draft.problems and draft.billed_refs["brand_id"] == "B1"
+    assert not draft.problems and draft.refs["brand_id"] == "B1"
+    assert draft.refs["vetting_requested"] is False
 
 
 def _outage_after_the_brand(step: str, failure, calls: list):
@@ -1427,8 +1910,8 @@ async def test_a_4xx_on_the_brand_call_bills_nothing() -> None:
             return httpx.Response(400, json={"errors": [{"code": "10015"}]})
         return httpx.Response(204)
 
-    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-    assert draft.problems and draft.billed_refs == {}
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
 
 
 @pytest.mark.parametrize("blank", [None, "", "   "])
@@ -1517,6 +2000,12 @@ def _filing_refs():
             "message_flow": "f" * 40,
             "samples": ["s" * 20, "t" * 20],
             "has_links": False,
+            "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+            "has_phone": False,
+            "age_gated": False,
+            "direct_lending": False,
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
             "contact_email": "help@acme.example",
         },
     }
@@ -1659,9 +2148,12 @@ def _approved_handler(calls, *, replies_fail=False, record=None, profiles=None):
 
 _FILED = {
     "helpMessage": "Acme: Reply STOP to opt out. For help contact help@acme.example.",
-    "optinMessage": "Acme: You are opted in. Reply STOP to opt out, HELP for help.",
+    "optinMessage": (
+        "Acme: You are opted in. Msg frequency varies. "
+        "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
+    ),
     "optoutMessage": (
-        "Acme: You are unsubscribed and will get no more messages from this number."
+        "Acme: You are unsubscribed and will get no more messages from this workspace."
     ),
 }
 
@@ -1693,7 +2185,9 @@ async def test_approval_waits_until_the_auto_replies_are_set() -> None:
     refs = _campaign_refs()
     failing = _provider(_approved_handler(calls, replies_fail=True))
     assert (await failing.status(refs)).state == "pending"
-    assert "replies_set" not in refs and refs["replies_waits"] == 1
+    assert "replies_set" not in refs
+    assert refs["campaign_accepted"] is True and refs["runtime_ready"] is False
+    assert failing.step(refs) == "runtime_setup"
     working = _provider(_approved_handler(calls))
     assert (await working.status(refs)).state == "approved"
     assert refs["replies_set"] is True
@@ -1703,17 +2197,16 @@ async def test_approval_waits_until_the_auto_replies_are_set() -> None:
     }
 
 
-async def test_approval_goes_through_after_the_last_wait(caplog) -> None:
-    """A Telnyx call that keeps failing never blocks approval for good."""
-    p = _provider(_approved_handler([], replies_fail=True))
+async def test_failed_runtime_setup_never_approves_or_refiles() -> None:
+    calls = []
+    p = _provider(_approved_handler(calls, replies_fail=True))
     refs = _campaign_refs()
-    for _ in range(telnyx_sms._REPLY_WAITS):
+    for _ in range(12):
         assert (await p.status(refs)).state == "pending"
-    with caplog.at_level("ERROR"):
-        assert (await p.status(refs)).state == "approved"
-    assert "replies_set" not in refs
-    errors = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert errors and "campaign=C1" in errors[0].getMessage()
+    assert refs["campaign_accepted"] is True
+    assert refs["runtime_ready"] is False
+    assert p.step(refs) == "runtime_setup"
+    assert not any(path.endswith("campaignBuilder") for _, path, _ in calls)
 
 
 async def test_approved_at_once_when_the_replies_are_set() -> None:
@@ -1920,10 +2413,11 @@ def test_every_reply_caps_the_name() -> None:
         # Cut at a word boundary.
         assert name.split(" ")[-1] == "Acme", key
     assert replies["optoutMessage"].endswith(
-        ": You are unsubscribed and will get no more messages from this number."
+        ": You are unsubscribed and will get no more messages from this workspace."
     )
     assert replies["optinMessage"].endswith(
-        ": You are opted in. Reply STOP to opt out, HELP for help."
+        ": You are opted in. Msg frequency varies. "
+        "Msg and data rates may apply. Reply HELP for help, STOP to opt out."
     )
 
 
@@ -1945,3 +2439,388 @@ def test_a_long_contact_email_gives_hail_support_not_a_cut_name() -> None:
         {"displayName": name}, {"campaign": {"contact_email": email}}
     )["helpMessage"]
     assert help_text == (f"{name}: Reply STOP to opt out. For help contact hi@hail.so.")
+
+
+async def test_single_purpose_payload_uses_all_real_attributes_and_samples():
+    posted = []
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    text = {
+        "schema_version": 2,
+        "use_case": "CUSTOMER_CARE",
+        "text_types": ["CUSTOMER_CARE"],
+        "description": "Actual support replies",
+        "message_flow": "Actual consent flow",
+        "samples": [f"Acme sample {i}" for i in range(5)],
+        "has_links": True,
+        "has_phone": True,
+        "age_gated": True,
+        "direct_lending": True,
+        "privacy_policy_url": "https://acme.org/privacy",
+        "terms_url": "https://acme.org/terms",
+        "opt_in_message": "Acme: your actual subscription confirmation.",
+        "opt_in_keywords": ["JOIN"],
+    }
+    await _provider(handler).status(
+        {"brand_id": "B1", "subject_type": "business", "campaign": text}
+    )
+    assert len(posted) == 1
+    body = posted[0]
+    assert body["usecase"] == "CUSTOMER_CARE" and "subUsecases" not in body
+    assert [body[f"sample{i}"] for i in range(1, 6)] == text["samples"]
+    assert body["embeddedPhone"] and body["ageGated"] and body["directLending"]
+    assert body["privacyPolicyLink"] == text["privacy_policy_url"]
+    assert body["termsAndConditionsLink"] == text["terms_url"]
+    assert body["optinMessage"] == text["opt_in_message"]
+    assert body["optinKeywords"] == "JOIN"
+
+
+def test_new_application_does_not_invent_subscription_confirmation():
+    replies = telnyx_sms._campaign_replies(
+        {"displayName": "Acme"}, {"campaign": {"schema_version": 2}}
+    )
+    assert "optinMessage" not in replies
+    assert "workspace" in replies["optoutMessage"]
+
+
+@pytest.mark.parametrize("mobile", ["+12425550123", "+17875550123", "+447700900123"])
+async def test_person_phone_geo_is_checked_before_carrier_calls(mobile):
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    result = await _draft(
+        provider, "person", {**PERSON_FIELDS, "mobile_phone_number": mobile}
+    )
+    assert any(p.field == "mobile_phone_number" for p in result.problems)
+    assert not calls
+
+
+async def test_address_country_must_match_eligibility():
+    provider = _provider(lambda req: pytest.fail("must not contact carrier"))
+    result = await _draft(provider, fields={**FIELDS, "sender_country": "CA"})
+    assert any(p.field == "address.country_code" for p in result.problems)
+
+
+def test_provider_repair_reason_never_echoes_personal_details():
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    message = campaign_repair_reason(
+        "Privacy policy absent for Person Secret, mobile +15125550199, EIN 12-3456789"
+    )
+    assert "privacy policy" in message
+    assert not any(
+        value in message for value in ("Person Secret", "+15125550199", "12-3456789")
+    )
+
+
+async def test_campaign_submission_refusal_returns_safe_repair_guidance():
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            return httpx.Response(
+                400,
+                json={
+                    "errors": [
+                        {
+                            "detail": "Privacy policy absent for Ada Secret EIN 12-3456789"
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    result = await _provider(handler).status(refs)
+    assert result.state == "pending" and "privacy policy" in result.reason
+    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert "Ada Secret" in result.raw_reason
+    assert "campaign_id" not in refs
+    # Held for the customer's answers on the same paid brand.
+    assert refs["needs_information"] is True and refs["brand_id"] == "B1"
+
+
+@pytest.mark.parametrize("status", [400, 422])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "messageFlow",
+        "usecase",
+        "subUsecases",
+        "description",
+        "sample1",
+        "sample2",
+        "sample3",
+        "sample4",
+        "sample5",
+        "embeddedLink",
+        "embeddedPhone",
+        "ageGated",
+        "directLending",
+        "subscriberOptin",
+        "subscriberOptout",
+        "subscriberHelp",
+        "optinKeywords",
+        "optoutKeywords",
+        "helpKeywords",
+        "optinMessage",
+        "optoutMessage",
+        "helpMessage",
+        "termsAndConditions",
+        "privacyPolicyLink",
+        "termsAndConditionsLink",
+    ],
+)
+async def test_campaign_structured_validation_requests_repair(status, field):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    writes = []
+
+    def handler(req):
+        if req.method != "GET":
+            writes.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={
+                    "errors": [
+                        {"detail": "Invalid value", "source": {"pointer": f"/{field}"}}
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    result = await _provider(handler).status(refs)
+    assert result.state == "pending" and result.reason
+    assert refs["campaign_needs_repair"] is True
+    assert refs["needs_information"] is True
+    assert refs["brand_id"] == "B1" and "campaign_id" not in refs
+    assert writes == [("POST", "/v2/10dlc/campaignBuilder")]
+    if field == "messageFlow":
+        assert "consent" in result.reason
+    if field == "usecase":
+        assert "purposes" in result.reason
+
+
+@pytest.mark.parametrize(
+    ("status", "pointer", "detail"),
+    [
+        (400, "/brandId", "Invalid value"),
+        (422, "/numberPool", "Invalid value"),
+        (422, "/messagingProfileId", "Invalid value"),
+        (400, "/unknown", "Invalid value"),
+        (422, "/account/email", "Invalid value"),
+        (401, "/messageFlow", "Invalid value"),
+        (403, "/usecase", "Invalid value"),
+        (400, "/messageFlow", "Account configuration missing"),
+        (422, "/usecase", "Invalid API key"),
+    ],
+)
+async def test_campaign_operational_pointers_remain_retryable(status, pointer, detail):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    writes = []
+
+    def handler(req):
+        if req.method != "GET":
+            writes.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={"errors": [{"detail": detail, "source": {"pointer": pointer}}]},
+            )
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    with pytest.raises(VerificationProviderError):
+        await _provider(handler).status(refs)
+    assert "campaign_needs_repair" not in refs and "campaign_id" not in refs
+    assert refs["brand_id"] == "B1"
+    assert writes == [("POST", "/v2/10dlc/campaignBuilder")]
+
+
+async def test_legacy_confirmed_person_keeps_paid_brand_for_evidence_repair():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    provider = _provider(handler)
+    refs = {"subject_type": "person", "brand_id": "B1", "campaign": {}}
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information"
+    assert refs["brand_id"] == "B1"
+    assert not any(method in {"DELETE", "POST"} for method, _ in calls)
+
+
+async def test_telnyx_requires_actual_confirmation_before_paid_brand():
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    fields = {**FIELDS, "opt_in_message": ""}
+    result = await _draft(provider, fields=fields)
+    assert any(problem.field == "opt_in_message" for problem in result.problems)
+    assert calls == []
+    req = await provider.requirements("US", "local", "business")
+    assert next(spec for spec in req.fields if spec.name == "opt_in_message").required
+
+
+@pytest.mark.parametrize(
+    "status,detail",
+    [
+        (401, "Invalid credentials"),
+        (403, "Forbidden"),
+        (404, "Not found"),
+        (409, "Conflict"),
+        (429, "Slow down"),
+        (400, "Account configuration missing"),
+        (422, "Messaging service configuration invalid"),
+    ],
+)
+async def test_campaign_operational_errors_keep_the_brand_retryable(status, detail):
+    from hailhq.core.providers.verification.sms_form import campaign_text
+
+    def handler(req):
+        if req.method == "POST" and req.url.path.endswith("/campaignBuilder"):
+            return httpx.Response(status, json={"errors": [{"detail": detail}]})
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": campaign_text(FIELDS, "business").__dict__,
+    }
+    with pytest.raises(VerificationProviderError):
+        await _provider(handler).status(refs)
+    assert refs["brand_id"] == "B1" and "campaign_needs_repair" not in refs
+
+
+@pytest.mark.parametrize("subject", ["person", "business"])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+    calls = []
+
+    def handler(req):
+        calls.append(req.method)
+        return httpx.Response(200, json={"identityStatus": "VERIFIED"})
+
+    provider = _provider(handler)
+    refs = {"brand_id": "B1", "subject_type": subject, "campaign": {}}
+    assert (await provider.status(refs)).state == "pending"
+    assert provider.step(refs) == "needs_information" and refs["brand_id"] == "B1"
+    assert set(calls) == {"GET"}
+
+
+async def test_telnyx_recovers_authoritative_person_identity_readonly():
+    calls = []
+    brand = {
+        **KEPT_BRAND,
+        "country": "US",
+        "street": ADDRESS.street,
+        "city": ADDRESS.city,
+        "state": ADDRESS.region,
+        "postalCode": ADDRESS.postal_code,
+    }
+    provider = _provider(
+        lambda req: calls.append(req.method) or httpx.Response(200, json=brand)
+    )
+    identity = await provider.application_identity({"brand_id": "B9"}, "person")
+    assert identity["fields"]["email"].casefold() == PERSON_FIELDS["email"].casefold()
+    assert identity["address"]["street"] == ADDRESS.street and calls == ["GET"]
+
+
+async def test_invalid_confirmation_content_never_creates_a_paid_brand():
+    calls = []
+    provider = _provider(lambda req: calls.append(req) or httpx.Response(500))
+    draft = await _draft(
+        provider,
+        fields={
+            **FIELDS,
+            "opt_in_message": "Thank you, your subscription is now active.",
+        },
+    )
+    assert any(problem.field == "opt_in_message" for problem in draft.problems)
+    assert calls == []
+
+
+def test_body_pointer_names_an_application_field() -> None:
+    """Telnyx points at campaign fields as "/body/<field>" too."""
+    from hailhq.core.providers.verification.telnyx_sms import _refused
+
+    request = httpx.Request("POST", "https://api.telnyx.com/v2/10dlc/campaignBuilder")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={
+            "errors": [
+                {
+                    "code": "10015",
+                    "detail": "optoutMessage is required if subscriberOptout is true.",
+                    "source": {"pointer": "/body/optoutMessage"},
+                }
+            ]
+        },
+    )
+    exc = httpx.HTTPStatusError("400", request=request, response=response)
+    assert _refused(exc)
+
+
+def test_repair_reason_matches_whole_word_starts_only() -> None:
+    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    assert campaign_repair_reason("for example, it determines nothing") == (
+        CAMPAIGN_REJECTED
+    )
+    assert "message examples" in campaign_repair_reason("Samples are generic")
+    for raw in ("Invalid MessageSamples", "MESSAGE_SAMPLES", "/body/sample1"):
+        assert "message examples" in campaign_repair_reason(raw)
+    assert "selected purposes" in campaign_repair_reason("subUsecases is invalid")
+    assert "application links" in campaign_repair_reason("HasEmbeddedLinks")
+
+
+def test_same_sender_ignores_website_scheme_and_trailing_slash() -> None:
+    from hailhq.core.providers.verification.base import Address
+    from hailhq.core.providers.verification.sms_review import same_sender
+
+    location = {
+        "street": "1 Main St",
+        "city": "Austin",
+        "region": "TX",
+        "postal_code": "78701",
+        "country_code": "US",
+    }
+    original = {
+        "fields": {
+            "legal_name": "Acme Inc",
+            "ein": "123456789",
+            "registration_country": "US",
+            "website": "http://acme.com/",
+        },
+        "address": location,
+    }
+    fields = {
+        "legal_name": "Acme Inc",
+        "ein": "12-3456789",
+        "registration_country": "US",
+        "website": "https://acme.com",
+    }
+    address = Address(customer_name="Acme Inc", **location)
+    assert same_sender(original, fields, address, "business")
+    assert not same_sender(
+        original, {**fields, "website": "https://other.com"}, address, "business"
+    )

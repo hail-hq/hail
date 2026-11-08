@@ -23,6 +23,7 @@ from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
+from hailhq.core.prompts import PRIVACY_REMINDER
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -108,6 +109,12 @@ def test_build_instructions_uses_the_selected_spoken_language() -> None:
     assert "Speak in" not in build_instructions("Welcome the user", language="invalid")
 
 
+def test_build_instructions_keeps_privacy_reminder_last_with_language() -> None:
+    out = build_instructions("Welcome the user", language="fr", other_party="Bob")
+    assert out.endswith(PRIVACY_REMINDER)
+    assert out.index("Bob") < out.index("Speak in French for this call.")
+
+
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
     """The fixed voice preamble always leads; the caller prompt follows it."""
     caller = "You are calling Dr. Lee's office to book a teeth cleaning."
@@ -125,8 +132,9 @@ def test_build_instructions_present_without_caller_prompt() -> None:
     This is the exact condition behind the bug: no caller framing → the model
     defaulted to a generic chat-assistant self-concept.
     """
-    assert build_instructions(None) == VOICE_PREAMBLE
-    assert build_instructions("") == VOICE_PREAMBLE
+    expected = f"{VOICE_PREAMBLE}\n\n{PRIVACY_REMINDER}"
+    assert build_instructions(None) == expected
+    assert build_instructions("") == expected
     assert VOICE_PREAMBLE.strip(), "preamble must be non-empty"
 
 
@@ -190,9 +198,12 @@ def test_voice_preamble_requires_confirmation_before_sending() -> None:
     Regression for an agent tool (send_sms/send_email) firing without the
     other party ever agreeing to what would be sent.
     """
-    lowered = VOICE_PREAMBLE.lower()
-    assert "before sending" in lowered
-    assert "confirmation" in lowered
+    from hailhq.core.agent_tools import send_email, send_sms
+
+    for spec in (send_sms.SPEC, send_email.SPEC):
+        lowered = spec.description.lower()
+        assert "before sending" in lowered
+        assert "confirmation" in lowered
 
 
 class _FakeSession:

@@ -5,7 +5,7 @@ import type { STTRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { langs, numOpt, priceRange, usd } from "@/lib/format";
+import { langs, priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<STTRow>[] = [
   {
@@ -24,18 +24,20 @@ const columns: ColumnDef<STTRow>[] = [
   },
   {
     id: "price",
-    accessorFn: (row) => numOpt(row.price_per_minute_usd),
-    header: "$/min",
-    cell: ({ row }) => usd(row.original.price_per_minute_usd, 4),
+    accessorFn: (row) => usdSort(row, "price_per_minute_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "$/min", "Price/min"),
+    cell: ({ row }) => rowPrice(row.original, "price_per_minute_usd", 4),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true, killer: true },
   },
   {
     id: "batch",
-    accessorFn: (row) => numOpt(row.price_per_minute_batch_usd),
-    header: "$/min batch",
-    cell: ({ row }) => usd(row.original.price_per_minute_batch_usd, 4),
+    accessorFn: (row) => usdSort(row, "price_per_minute_batch_usd"),
+    header: ({ table }) => priceLabel(rowsOf(table), "$/min batch", "Price/min batch"),
+    cell: ({ row }) => rowPrice(row.original, "price_per_minute_batch_usd", 4),
     sortingFn: "basic",
+    sortUndefined: "last",
     meta: { num: true },
   },
   {
@@ -73,8 +75,9 @@ export function STTSection({ data }: { data: STTRow[] }) {
       num="02"
       title="Speech to text"
       count={data.length}
-      rangeLabel={priceRange(
-        data.map((r) => r.price_per_minute_usd),
+      rangeLabel={rowRange(
+        data,
+        "price_per_minute_usd",
         6,
         4,
         "min",

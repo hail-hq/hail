@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Literal
 
+from hailhq.core.schemas import Address
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "FieldSpec",
     "Problem",
     "ProviderStatus",
+    "RegistrationHoldsAnotherNumber",
     "Requirements",
     "SmsRegistrationProvider",
     "SubjectType",
@@ -52,6 +54,18 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+class RegistrationHoldsAnotherNumber(VerificationProviderError):
+    """A person's registration holds one number, and the carrier already has
+    another one linked to it, the link done: ``e164``. The caller may record
+    that number as the registration's own when it is one of the
+    organization's. A number the carrier is still linking or unlinking is a
+    plain ``VerificationProviderError``."""
+
+    def __init__(self, message: str, e164: str) -> None:
+        super().__init__(message)
+        self.e164 = e164
 
 
 class SubmitRefused(VerificationProviderError):
@@ -167,6 +181,10 @@ class DocumentSlot(BaseModel):
     options: tuple[DocumentOption, ...] = Field(
         description="The accepted ways to fill this slot. The customer picks one."
     )
+    # Every requirement this slot stands for, as (name, label), when a carrier
+    # that takes one document of each type gets one slot for several of them.
+    # Empty: the slot is its own requirement. Internal: not in the public form.
+    also: tuple[tuple[str, str], ...] = Field(default=(), exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -249,21 +267,16 @@ class DocumentInput(BaseModel):
     file: UploadedFile | None = None
 
 
-class Address(BaseModel):
-    customer_name: str
-    street: str
-    city: str
-    region: str
-    postal_code: str
-    country_code: str
-
-
 # Hail's own wording for a carrier refusal. The carrier's text goes in
 # ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator.
 NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
+# The carrier takes one document of each type per check (Twilio).
+SAME_DOCUMENT = (
+    "This needs the same document as another item. Use one document for both."
+)
 DETAILS_REJECTED = "The carrier rejected the details. Start again."
 # US texting (10DLC): the registry checks the business or person, then the
 # US mobile networks review what will be sent.
@@ -460,6 +473,36 @@ class SmsRegistrationProvider(VerificationProvider):
     # Carrier maximums, in characters, for fields of the shared US form
     # (``sms_form``), by field name.
     field_limits: Mapping[str, int] = MappingProxyType({})
+    # Some carriers require the actual subscription confirmation on every filing.
+    opt_in_message_required: bool = False
+
+    def validate_application(
+        self, fields: dict[str, str], address: Address | None, subject_type: SubjectType
+    ) -> list[Problem]:
+        """Local preflight shared by review previews and paid submissions."""
+        from hailhq.core.providers.verification.sms_form import field_problems
+        from hailhq.core.providers.verification.sms_review import sender_problems
+
+        problems = field_problems(self, fields, subject_type)
+        problems.extend(sender_problems(fields, address, subject_type))
+        if address is None:
+            problems.append(Problem(field="address", message="An address is required."))
+        return problems
+
+    async def application_identity(
+        self, refs: dict, subject_type: SubjectType
+    ) -> dict | None:
+        """Read the original sender and address from the provider, never change it.
+
+        None means support must restore authoritative details before amendment.
+        """
+        return None
+
+    async def recover_campaign(self, refs: dict) -> bool:
+        """Read-only discovery of a previously filed campaign; never create one."""
+        raise VerificationProviderError(
+            "Campaign discovery is unavailable; contact support."
+        )
 
     def extra_fields(self, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
         """Fields this carrier asks for on top of the shared US form. They
@@ -486,6 +529,8 @@ class SmsRegistrationProvider(VerificationProvider):
         """Where a filing still in progress is: 'confirm_identity' while the
         person must act on a text already sent, 'carrier_review' while the
         carriers review it, else 'filing'."""
+        if refs.get("needs_information") and not self.campaign_filed(refs):
+            return "needs_information"
         if self.confirmation(refs):
             return "confirm_identity"
         return "carrier_review" if self.in_review(refs) else "filing"

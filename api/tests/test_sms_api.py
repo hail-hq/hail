@@ -48,6 +48,7 @@ async def _seed_dedicated_number(
     number_type: str = "local",
     provider: str = "twilio",
     register_sms: bool = True,
+    country_code: str = "US",
 ) -> None:
     """Seed an active SMS number. US long codes need an approved ``sms``
     registration to send to the US, so ``register_sms`` adds one by default."""
@@ -56,7 +57,7 @@ async def _seed_dedicated_number(
     pn = PhoneNumber(
         organization_id=organization_id,
         e164=e164,
-        country_code="US",
+        country_code=country_code,
         number_type=number_type,
         provider=provider,
         provider_resource_id=f"PN_{e164}",
@@ -886,11 +887,24 @@ def _us_text(**extra) -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    "country_code,e164",
+    [
+        ("US", "+14155559999"),
+        ("VI", "+13405550100"),
+        ("PR", "+17875550100"),
+        ("GU", "+16715550100"),
+        ("MP", "+16705550100"),
+        ("AS", "+16845550100"),
+    ],
+)
 async def test_us_to_us_from_unregistered_long_code_is_422(
-    client, async_session, org_and_key, sms_mock
+    client, async_session, org_and_key, sms_mock, country_code, e164
 ) -> None:
     org_id, _, key = org_and_key
-    await _seed_dedicated_number(async_session, org_id, register_sms=False)
+    await _seed_dedicated_number(
+        async_session, org_id, register_sms=False, country_code=country_code, e164=e164
+    )
     resp = await client.post(
         "/sms", json=_us_text(), headers={"Authorization": f"Bearer {key}"}
     )

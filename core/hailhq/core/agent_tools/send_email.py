@@ -101,7 +101,11 @@ SPEC = ToolSpec(
         "(use list_contacts to see who). You cannot email arbitrary "
         "addresses, only directory names. When the person on the call asks "
         "for the email, send it right away; their request is the "
-        "confirmation."
+        "confirmation. Then say it is sent. Ask one short question only when "
+        "the recipient, the channel (text or email) or the content is "
+        "unclear, and never ask the same question twice. Before sending "
+        "something they did not ask for, say what you will send and to whom, "
+        "and wait for a yes."
     ),
     parameters={
         "type": "object",

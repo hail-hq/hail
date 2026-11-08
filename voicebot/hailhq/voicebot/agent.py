@@ -301,19 +301,18 @@ def build_instructions(
     system_prompt: str | None,
     direction: str | None = None,
     *,
-    thread_tool: bool = False,
     language: str | None = None,
     other_party: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
-    instructions = build_voice_instructions(
-        system_prompt, direction, thread_tool=thread_tool, other_party=other_party
+    # The language line goes before the privacy reminder, which stays last.
+    spoken = (
+        f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
+        if language in SUPPORTED_LANGUAGES
+        else None
     )
-    if language in SUPPORTED_LANGUAGES:
-        instructions += (
-            f"\n\nSpeak in {SUPPORTED_LANGUAGES[language].name} for this call."
-        )
-    return instructions
+    tail = "\n\n".join(part for part in (other_party, spoken) if part) or None
+    return build_voice_instructions(system_prompt, direction, other_party=tail)
 
 
 # The other-party lookup runs before the session starts, so a slow DB must
@@ -351,12 +350,6 @@ async def other_party(call_id: UUID) -> DirectoryEntry | None:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None
     return entry
-
-
-def has_thread_tool(tools: list[Any]) -> bool:
-    """Whether ``thread_history`` is among the tools actually built for this
-    call (dispatch allow-list, availability checks and build failures applied)."""
-    return any(getattr(t.info, "name", None) == "thread_history" for t in tools)
 
 
 # Proactive AI disclosure, spoken by default as the first thing on every
@@ -2514,14 +2507,11 @@ async def _run_call(
         # off: a wrong detected term degrades recognition for the whole call.
         session.update_options(keyterms=[known.name])
 
-    thread_tool = has_thread_tool(agent_tools)
-    logger.info("call_id=%s thread_history tool=%s", call_id, thread_tool)
     agent = SpeechSanitizingAgent(
         opening_pending=not inbound,
         instructions=build_instructions(
             metadata.get("system_prompt"),
             metadata.get("direction"),
-            thread_tool=thread_tool,
             language=language,
             # send_email reaches members only, so a contact's email is no use.
             other_party=(

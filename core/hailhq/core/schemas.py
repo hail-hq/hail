@@ -363,6 +363,7 @@ TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
 
 
 NumberType = Literal["local", "mobile", "toll_free", "national"]
+Capability = Literal["voice", "sms"]
 
 
 class CallResponse(BaseModel):
@@ -671,7 +672,7 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         description="Restrict number type; omit to compare all supported types.",
     )
-    capabilities: list[Literal["voice", "sms"]] = Field(
+    capabilities: list[Capability] = Field(
         min_length=1,
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
@@ -696,6 +697,10 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         pattern=r"^[A-Za-z]{2}$",
         description="Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.",
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description="Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.",
     )
 
     @field_validator("country_code")
@@ -1094,19 +1099,6 @@ class AgentResponse(BaseModel):
 
 class AgentListResponse(BaseModel):
     items: list[AgentResponse] = Field(description="Agents, newest first.")
-
-
-class AgentPromptTemplates(BaseModel):
-    """What the model is told on each channel, read-only. Hail's framing leads
-    and cannot be edited; ``instructions_placeholder`` marks where the agent's
-    own instructions go."""
-
-    instructions_placeholder: str = Field(
-        description="The marker inside each template where the agent's instructions go."
-    )
-    calls_in: str = Field(description="Full prompt for a call the agent answers.")
-    calls_out: str = Field(description="Full prompt for a call the agent places.")
-    texts: str = Field(description="Full prompt for a text reply.")
 
 
 class PhoneNumberListResponse(BaseModel):
@@ -2699,6 +2691,45 @@ class ProviderValidateResult(BaseModel):
     )
 
 
+class Address(BaseModel):
+    customer_name: str = Field(description="Name associated with the address.")
+    street: str = Field(description="Street address.")
+    city: str = Field(description="City or locality.")
+    region: str = Field(description="State, province or region.")
+    postal_code: str = Field(description="Postal or ZIP code.")
+    country_code: str = Field(description="ISO alpha-2 address country.")
+
+
+class SmsApplicationResponse(BaseModel):
+    """Private submitted SMS answers, or verified sender details for an old filing."""
+
+    schema_version: int = Field(
+        default=1, description="Version of this saved-answer response format."
+    )
+    subject_type: Literal["person", "business"] = Field(
+        description="Original sender route: person or business."
+    )
+    fields: dict[str, str] = Field(
+        description="Saved application answers; legacy responses may contain only verified sender details."
+    )
+    address: Address | None = Field(
+        default=None, description="Original sender address, when available."
+    )
+
+
+class SmsApplicationAmendRequest(BaseModel):
+    """Complete replacement answers for an existing sender's missing evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+    fields: dict[str, str] = Field(
+        description="Complete current form answers. The legal sender must remain unchanged."
+    )
+    address: Address | None = Field(
+        default=None,
+        description="Original sender address; changing it requires support.",
+    )
+
+
 class VerificationResponse(BaseModel):
     """A carrier verification: its state and the name of the person or
     company it is for. No other personal data."""
@@ -2751,15 +2782,38 @@ class VerificationResponse(BaseModel):
             "is pending."
         ),
     )
-    step: Literal["confirm_identity", "filing", "carrier_review"] | None = Field(
+    step: (
+        Literal[
+            "confirm_identity",
+            "filing",
+            "carrier_review",
+            "runtime_setup",
+            "needs_information",
+        ]
+        | None
+    ) = Field(
         default=None,
         description=(
             "For a US texting registration that is not yet approved or "
             "rejected: 'confirm_identity' while the person must confirm (see "
             "`confirmation`), 'filing' while Hail files the details with the "
             "carriers, 'carrier_review' once the carriers are reviewing them "
-            "(1 to 7 business days). Null otherwise."
+            "(1 to 7 business days), or runtime_setup when accepted but required "
+            "messaging responses still need configuration; needs_information when "
+            "the existing sender needs current campaign evidence before filing. Null otherwise."
         ),
+    )
+    campaign_accepted: bool = Field(
+        default=False,
+        description="The carrier accepted the SMS campaign; this alone does not mean a number is ready to send.",
+    )
+    runtime_ready: bool | None = Field(
+        default=None,
+        description="True when required runtime configuration was verified, false while setup retries, null when not independently tracked.",
+    )
+    cancellable: bool = Field(
+        default=False,
+        description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
     )
     identity_confirmed: bool = Field(
         default=False,

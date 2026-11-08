@@ -123,62 +123,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /v1/agents/prompt-templates:
-    get:
-      tags:
-        - agents
-      summary: Get Prompt Templates
-      description:
-        "The full prompt the model gets on each channel, with a marker
-        where the
-
-        agent's own instructions go. Hail's framing is fixed; only the
-
-        instructions are the agent's."
-      operationId: get_prompt_templates_v1_agents_prompt_templates_get
-      parameters:
-        - name: authorization
-          in: header
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: "null"
-            title: Authorization
-      responses:
-        "200":
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentPromptTemplates"
-        "429":
-          description:
-            Rate limited. This caller exceeded the general request-rate
-            ceiling. Retry after the Retry-After header (seconds).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-            RateLimit-Limit:
-              description: The request ceiling for the current window.
-              schema:
-                type: integer
-            RateLimit-Remaining:
-              description: Requests remaining in the current window.
-              schema:
-                type: integer
-            RateLimit-Reset:
-              description: Seconds until the current window resets.
-              schema:
-                type: integer
-        "422":
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HTTPValidationError"
   /v1/agents/{agent_id}:
     get:
       tags:
@@ -2113,25 +2057,16 @@ paths:
       tags:
         - numbers
       summary: Acquire Number
-      description: "Buy a dedicated phone number for the caller's organization.
-
-
-        This purchases a real number at the carrier and starts a recurring
-
-        monthly fee immediately — it is not a reservation. quote_id is required:
-
-        request live offers from POST /numbers/quotes first, then buy one. The
-
-        number is usable for voice, SMS, or both, as the quote lists.
-
-
-        A number that needs verification is bought with one of your approved
-
-        verifications. With one, it is used. With more than one (several people
-
-        or companies), pass `verification_id`: the `id` of one of the quote's
-
-        `verifications`, which carry the person's or company's name."
+      description:
+        "Buy a dedicated phone number for the caller's organization.\n\n\
+        This purchases a real number at the carrier and starts a recurring\nmonthly\
+        \ fee immediately \u2014 it is not a reservation. quote_id is required:\n\
+        request live offers from POST /numbers/quotes first, then buy one. The\nnumber\
+        \ is usable for voice, SMS, or both, as the quote lists.\n\nA number that\
+        \ needs verification is bought with one of your approved\nverifications. With\
+        \ one, it is used. With more than one (several people\nor companies), pass\
+        \ `verification_id`: the `id` of one of the quote's\n`verifications`, which\
+        \ carry the person's or company's name."
       operationId: acquire_number_v1_numbers_post
       parameters:
         - name: authorization
@@ -2190,11 +2125,10 @@ paths:
           description:
             "quote_id is missing (request one from POST /numbers/quotes),
             the quote does not match the country or type, the offer is by_request
-            (ask support for it), or the verification to buy with is unclear or
-            not usable: you have more than one approved verification for this number
-            (pass verification_id), verification_id is not one of your approved
-            verifications for it, or you are not verified as the subject_type you
-            passed."
+            (ask support for it), or the verification to buy with is unclear or not
+            usable: you have more than one approved verification for this number (pass
+            verification_id), verification_id is not one of your approved verifications
+            for it, or you are not verified as the subject_type you passed."
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
@@ -2203,25 +2137,23 @@ paths:
         "409":
           description:
             The quote expired, the number is taken, the price changed,
-            expected_total_cents differs from the quoted total, or the carrier
-            rejected or failed the order. In the last case the credit hold is refunded
-            and the detail gives the reason. Also returned when the quote's number
-            was released since it was bought.
+            expected_total_cents differs from the quoted total, or the carrier rejected
+            or failed the order. In the last case the credit hold is refunded and
+            the detail gives the reason. Also returned when the quote's number was
+            released since it was bought.
         "503":
-          description: The carrier lookup or number price is unavailable, or no
-            inventory matched. Nothing was charged; retry shortly.
+          description:
+            The carrier lookup or number price is unavailable, or no inventory
+            matched. Nothing was charged; retry shortly.
     get:
       tags:
         - numbers
       summary: List Numbers
-      description: "List dedicated numbers owned by the caller's organization.
-
-
-        Cursor-paginated, newest first. Only org-owned numbers are listed —
-
-        shared pool numbers used for outbound calls never appear here. Failed
-
-        orders that were dismissed (DELETE) are not listed."
+      description:
+        "List dedicated numbers owned by the caller's organization.\n\n\
+        Cursor-paginated, newest first. Only org-owned numbers are listed \u2014\n\
+        shared pool numbers used for outbound calls never appear here. Failed\norders\
+        \ that were dismissed (DELETE) are not listed."
       operationId: list_numbers_v1_numbers_get
       parameters:
         - name: cursor
@@ -2549,27 +2481,117 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/numbers/options:
+    get:
+      tags:
+        - numbers
+      summary: Get Number Options
+      description:
+        "The number types sold in a country, one row each. For a person
+        and for
+
+        a business it gives the best option: price, capabilities, the papers
+
+        needed, and whether this organization already has them verified. Reads
+
+        the bundled catalog and your verifications. It calls no carrier, so
+
+        prices are catalog prices and the live quote may differ slightly."
+      operationId: get_number_options_v1_numbers_options_get
+      parameters:
+        - name: country_code
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+            pattern: ^[A-Za-z]{2}$
+            description: ISO alpha-2 country code, such as CH.
+            title: Country Code
+          description: ISO alpha-2 country code, such as CH.
+        - name: capabilities
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: array
+                items:
+                  enum:
+                    - voice
+                    - sms
+                  type: string
+                maxItems: 2
+              - type: "null"
+            description:
+              "Optional. Keep only options that do all these jobs. Without
+              it, each number type shows its best option in this order: buy now before
+              order by hand, then ready now, then options that do every job the type
+              offers (even when a number that does fewer jobs costs less), then lower
+              price, then fewer papers."
+            title: Capabilities
+          description:
+            "Optional. Keep only options that do all these jobs. Without
+            it, each number type shows its best option in this order: buy now before
+            order by hand, then ready now, then options that do every job the type offers
+            (even when a number that does fewer jobs costs less), then lower price,
+            then fewer papers."
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NumberOptionsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/numbers/{number_id}/enable-sms:
     post:
       tags:
         - numbers
       summary: Enable Sms
-      description: "Set up a dedicated number for SMS at its carrier.
-
-
-        Hail does this itself when an sms-capable number becomes active and when
-
-        a texts agent is assigned, so this call is only needed to repair a number
-
-        whose setup failed, or an older one whose service lacks the inbound
-
-        text settings. Idempotent — an already-enabled number gets those settings
-
-        set again and returns its current state. A US long code is also put on
-
-        the org's approved US SMS registration. Fails with 422 for a released
-
-        number or one that lacks sms capability."
+      description:
+        "Set up a dedicated number for SMS at its carrier.\n\nHail does\
+        \ this itself when an sms-capable number becomes active and when\na texts\
+        \ agent is assigned, so this call is only needed to repair a number\nwhose\
+        \ setup failed, or an older one whose service lacks the inbound\ntext settings.\
+        \ Idempotent \u2014 an already-enabled number gets those settings\nset again\
+        \ and returns its current state. A US long code is also put on\nthe org's\
+        \ approved US SMS registration. Fails with 422 for a released\nnumber or one\
+        \ that lacks sms capability."
       operationId: enable_sms_v1_numbers__number_id__enable_sms_post
       parameters:
         - name: number_id
@@ -2671,7 +2693,16 @@ paths:
 
         one's `id` as `verification_id` to POST /numbers. An offer that needs
 
-        verification is `ready` when one of them is approved."
+        verification is `ready` when one of them is approved.
+
+
+        Send `subject_type` (`person` or `business`) to get offers for that
+
+        subject only: offers that do not accept it are left out, the rest come
+
+        best first in the same order as GET /numbers/options, and each lists the
+
+        `paperwork` that subject must give. Without it, nothing changes."
       operationId: quote_numbers_v1_numbers_quotes_post
       parameters:
         - name: authorization
@@ -4626,8 +4657,9 @@ paths:
       tags:
         - verifications
       summary: Get Requirements
-      description: "What the carrier needs from you: the fields, the documents,
-        and whether
+      description:
+        "What the carrier needs from you: the fields, the documents, and
+        whether
 
         an address is needed. `purpose=number` (default) is for buying a number;
 
@@ -4664,11 +4696,13 @@ paths:
               - person
               - business
             type: string
-            description: "Who is verifying: 'person' (you) or 'business' (your
-              company). Required. Ask the user which one."
+            description:
+              "Who is verifying: 'person' (you) or 'business' (your company).
+              Required. Ask the user which one."
             title: Subject Type
-          description: "Who is verifying: 'person' (you) or 'business' (your
-            company). Required. Ask the user which one."
+          description:
+            "Who is verifying: 'person' (you) or 'business' (your company).
+            Required. Ask the user which one."
         - name: provider
           in: query
           required: false
@@ -4700,9 +4734,9 @@ paths:
               - type: string
                 format: uuid
               - type: "null"
-            description: "Required for purpose=number: quote_id of an offer from
-              POST /numbers/quotes that needs verification. The carrier is read from
-              it."
+            description:
+              "Required for purpose=number: quote_id of an offer from POST
+              /numbers/quotes that needs verification. The carrier is read from it."
             title: Quote Id
           description:
             "Required for purpose=number: quote_id of an offer from POST
@@ -4717,12 +4751,11 @@ paths:
               - type: "null"
             description:
               "For purpose=sms: id of one of your US numbers. The carrier
-              is read from it. Needed when your US numbers are with more than one
-              carrier."
+              is read from it. Needed when your US numbers are with more than one carrier."
             title: Number Id
           description:
-            "For purpose=sms: id of one of your US numbers. The carrier
-            is read from it. Needed when your US numbers are with more than one carrier."
+            "For purpose=sms: id of one of your US numbers. The carrier is
+            read from it. Needed when your US numbers are with more than one carrier."
         - name: authorization
           in: header
           required: false
@@ -4738,6 +4771,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerificationRequirements"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/preview:
+    post:
+      tags:
+        - verifications
+      summary: Preview Sms Application
+      description:
+        "Compile the exact campaign text without creating or charging a
+        filing.
+
+
+        Checks answers locally. This does not establish policy accessibility,
+
+        carrier acceptance, identity ownership or runtime messaging readiness."
+      operationId: preview_sms_application
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsPreviewRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Preview Sms Application
         "429":
           description:
             Rate limited. This caller exceeded the general request-rate
@@ -4997,7 +5095,8 @@ paths:
         - verifications
       summary: Cancel Verification
       description:
-        "Withdraw a verification that has not been sent for review, or dismiss
+        "Withdraw a verification that has not been sent for review, or
+        dismiss
 
         a rejected one. The draft is discarded either way, except a person's
 
@@ -5008,7 +5107,9 @@ paths:
         cancelled: wait for the result; if it is rejected, dismiss it.
 
 
-        An approved US SMS registration (`purpose=sms`) can be cancelled too:
+        An accepted campaign waiting on runtime setup can be cancelled, as can
+
+        an approved US SMS registration (`purpose=sms`):
 
         its numbers leave the campaign, the campaign is deleted at the carrier,
 
@@ -5038,6 +5139,149 @@ paths:
               - type: string
               - type: "null"
             title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}/application:
+    get:
+      tags:
+        - verifications
+      summary: Get Verification Application
+      description:
+        "Read your organization's saved SMS answers, including after rejection.
+
+        Answers of a cancelled or rejected registration are kept for 30 days
+
+        after it ended; after that this returns 404.
+
+
+        Older applications may recover their verified sender identity through
+
+        read-only provider calls; a 404 asks for original details and support when
+
+        these cannot be recovered. The ordinary list never contains application
+
+        fields or addresses. No records are filed or charged here."
+      operationId: get_verification_application
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsApplicationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    patch:
+      tags:
+        - verifications
+      summary: Amend Sms Application
+      description:
+        "Repair missing evidence on the same sender, brand and registration.
+
+
+        No paid provider action occurs here. Only the campaign answers change;
+
+        carrier review resumes on a later poll. Original sender identity/address
+
+        must match stored or authoritative provider details. An identical retry
+
+        is safe even after the campaign has subsequently been filed."
+      operationId: amend_sms_application
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsApplicationAmendRequest"
       responses:
         "200":
           description: Successful Response
@@ -5163,6 +5407,41 @@ paths:
                 title: Response Healthz Healthz Get
 components:
   schemas:
+    Address:
+      properties:
+        customer_name:
+          type: string
+          title: Customer Name
+          description: Name associated with the address.
+        street:
+          type: string
+          title: Street
+          description: Street address.
+        city:
+          type: string
+          title: City
+          description: City or locality.
+        region:
+          type: string
+          title: Region
+          description: State, province or region.
+        postal_code:
+          type: string
+          title: Postal Code
+          description: Postal or ZIP code.
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 address country.
+      type: object
+      required:
+        - customer_name
+        - street
+        - city
+        - region
+        - postal_code
+        - country_code
+      title: Address
     AgentCreate:
       properties:
         name:
@@ -5191,8 +5470,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits the workspace recording choice; true or false sets
-            recording for this agent's calls, whatever the workspace setting.
+            Null inherits the workspace recording choice; true or false
+            sets recording for this agent's calls, whatever the workspace setting.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5297,40 +5576,6 @@ components:
       required:
         - items
       title: AgentListResponse
-    AgentPromptTemplates:
-      properties:
-        instructions_placeholder:
-          type: string
-          title: Instructions Placeholder
-          description:
-            The marker inside each template where the agent's instructions
-            go.
-        calls_in:
-          type: string
-          title: Calls In
-          description: Full prompt for a call the agent answers.
-        calls_out:
-          type: string
-          title: Calls Out
-          description: Full prompt for a call the agent places.
-        texts:
-          type: string
-          title: Texts
-          description: Full prompt for a text reply.
-      type: object
-      required:
-        - instructions_placeholder
-        - calls_in
-        - calls_out
-        - texts
-      title: AgentPromptTemplates
-      description:
-        "What the model is told on each channel, read-only. Hail's framing
-        leads
-
-        and cannot be edited; ``instructions_placeholder`` marks where the agent's
-
-        own instructions go."
     AgentResponse:
       properties:
         id:
@@ -5363,8 +5608,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits the workspace recording choice; true or false sets
-            recording for this agent's calls, whatever the workspace setting.
+            Null inherits the workspace recording choice; true or false
+            sets recording for this agent's calls, whatever the workspace setting.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5482,8 +5727,8 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Null inherits workspace recording; true or false sets it for this
-            agent's calls.
+            Null inherits workspace recording; true or false sets it for
+            this agent's calls.
         ai_disclosure:
           anyOf:
             - type: boolean
@@ -5665,10 +5910,10 @@ components:
             - type: "null"
           title: Recording Enabled
           description:
-            Best-effort audio recording for this call. true records and false does
-            not, whatever the workspace setting. Null inherits the agent, then the
-            workspace. Recording failure never prevents the call. The
-            recording-enabled call rate applies regardless of capture outcome.
+            Best-effort audio recording for this call. true records and
+            false does not, whatever the workspace setting. Null inherits the agent,
+            then the workspace. Recording failure never prevents the call. The recording-enabled
+            call rate applies regardless of capture outcome.
         ai_disclosure:
           type: boolean
           title: Ai Disclosure
@@ -5891,7 +6136,9 @@ components:
             - type: string
             - type: "null"
           title: Failure Message
-          description: Human-readable explanation for a failed call. Null for other statuses.
+          description:
+            Human-readable explanation for a failed call. Null for other
+            statuses.
       type: object
       required:
         - id
@@ -6501,10 +6748,10 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            User-chosen local-part prefix for a hail_mail address. One organization
-            only may hold it; a taken prefix returns 409. Only valid for kind='hail_mail'.
-            Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization
-            token if omitted.
+            User-chosen local-part prefix for a hail_mail address. One
+            organization only may hold it; a taken prefix returns 409. Only valid
+            for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus
+            a per-organization token if omitted.
         local_prefix_org:
           anyOf:
             - type: string
@@ -6512,8 +6759,8 @@ components:
           title: Local Prefix Org
           description:
             Org-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to a prefix derived from
-            the organization id if omitted.
+            valid for kind='hail_mail'. Falls back to a prefix derived from the organization
+            id if omitted.
       additionalProperties: false
       type: object
       required:
@@ -6617,11 +6864,10 @@ components:
             - type: "null"
           title: Default From
           description:
-            The From address used when a send omits 'from'. A verified custom
-            domain wins over the hail-mail address. Null when no such default
-            can be resolved (e.g. multiple verified custom domains, or none
-            that can send yet). Computed across the whole organization, not just this
-            page.
+            The From address used when a send omits 'from'. A verified
+            custom domain wins over the hail-mail address. Null when no such default
+            can be resolved (e.g. multiple verified custom domains, or none that can
+            send yet). Computed across the whole organization, not just this page.
       type: object
       required:
         - items
@@ -6634,9 +6880,9 @@ components:
             - type: "null"
           title: Local Prefix User
           description:
-            New user local-part prefix. One organization only may hold it;
-            a taken prefix returns 409. Only valid on kind='hail_mail' rows.
-            Omit to leave unchanged.
+            New user local-part prefix. One organization only may hold
+            it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit
+            to leave unchanged.
         local_prefix_org:
           anyOf:
             - type: string
@@ -7701,8 +7947,8 @@ components:
             - choices
           title: Kind
           description:
-            "Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick
-            several of `options`; send their keys joined by commas)."
+            "Input kind: 'text', 'email', 'phone', 'url', or 'choices'
+            (pick several of `options`; send their keys joined by commas)."
           default: text
         help:
           type: string
@@ -7749,7 +7995,11 @@ components:
             - type: integer
             - type: "null"
           title: Max Length
-          description: "The most characters the value may hold, when known, counted in UTF-16 code units (an emoji counts as 2). Enforced: a longer value gets 422. A form can show a field allowed more than about 100 characters as a box that wraps."
+          description:
+            "The most characters the value may hold, when known, counted
+            in UTF-16 code units (an emoji counts as 2). Enforced: a longer value
+            gets 422. A form can show a field allowed more than about 100 characters
+            as a box that wraps."
       type: object
       required:
         - name
@@ -7987,8 +8237,8 @@ components:
           title: Expected Total Cents
           description:
             "The total the caller expects to pay now: the quoted monthly
-            price plus the setup price, in cents. When set, the order is refused
-            with 409 if the quoted total differs."
+            price plus the setup price, in cents. When set, the order is refused with
+            409 if the quoted total differs."
         subject_type:
           anyOf:
             - type: string
@@ -7999,8 +8249,8 @@ components:
           title: Subject Type
           description:
             "Buy with an approved verification of this kind only: 'person'
-            (you) or 'business' (your company). With `verification_id` it must
-            match that verification. Ignored when the number needs no verification."
+            (you) or 'business' (your company). With `verification_id` it must match
+            that verification. Ignored when the number needs no verification."
         verification_id:
           anyOf:
             - type: string
@@ -8009,16 +8259,38 @@ components:
           title: Verification Id
           description:
             Hail id of the approved verification to buy with, from the
-            quote's `verifications`. Needed when you have more than one approved
-            verification for this number (422 without it); with one it is used. 422
-            when it is not one of your approved verifications for this number. Ignored
-            when the number needs no verification.
+            quote's `verifications`. Needed when you have more than one approved verification
+            for this number (422 without it); with one it is used. 422 when it is
+            not one of your approved verifications for this number. Ignored when the
+            number needs no verification.
       additionalProperties: false
       type: object
       required:
         - quote_id
         - country_code
       title: NumberAcquireRequest
+    NumberOptionsResponse:
+      properties:
+        country_code:
+          type: string
+          title: Country Code
+          description: ISO alpha-2 country code.
+        needs_paperwork:
+          type: boolean
+          title: Needs Paperwork
+          description: False when no type needs papers for anyone.
+        types:
+          items:
+            $ref: "#/components/schemas/TypeOptions"
+          type: array
+          title: Types
+          description: One row per number type.
+      type: object
+      required:
+        - country_code
+        - needs_paperwork
+        - types
+      title: NumberOptionsResponse
     NumberQuoteRequest:
       properties:
         country_code:
@@ -8089,6 +8361,19 @@ components:
           description:
             "Optional, with city: a US state or Canadian province code,
             such as AZ. GET /numbers/regions lists the codes."
+        subject_type:
+          anyOf:
+            - type: string
+              enum:
+                - person
+                - business
+            - type: "null"
+          title: Subject Type
+          description:
+            "Who the number is for: 'person' (you) or 'business' (your
+            company). Offers that do not accept that subject are left out, the rest
+            are ranked for it, and each offer lists its `paperwork`. Omit to get every
+            offer as before."
       additionalProperties: false
       type: object
       required:
@@ -8115,8 +8400,9 @@ components:
         incomplete:
           type: boolean
           title: Incomplete
-          description: True when some carriers did not answer, so the offers may
-            not be complete. Search again later for a full comparison.
+          description:
+            True when some carriers did not answer, so the offers may not
+            be complete. Search again later for a full comparison.
         expires_at:
           type: string
           format: date-time
@@ -8244,6 +8530,54 @@ components:
         - state
         - subject_type
       title: OfferVerification
+    OptionVerification:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Hail verification id.
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description:
+            Who that verification is for. A by-request option can be ready
+            through the other subject's verification, so this can differ from the
+            subject of the option.
+        subject_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Subject Name
+          description: Name of the person or company, when known.
+        state:
+          type: string
+          title: State
+          description: State of that verification.
+      type: object
+      required:
+        - id
+        - subject_type
+        - state
+      title: OptionVerification
+    PaperworkItem:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: Fixed paper category key, such as id_document.
+        label:
+          type: string
+          title: Label
+          description: Short text to show for that category.
+      type: object
+      required:
+        - key
+        - label
+      title: PaperworkItem
     PhoneNumberListResponse:
       properties:
         items:
@@ -8282,8 +8616,7 @@ components:
         number_type:
           type: string
           title: Number Type
-          description: "Kind of number: 'local', 'mobile', 'toll_free', or
-            'national'."
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
         capabilities:
           items:
             type: string
@@ -8325,8 +8658,8 @@ components:
           title: Inbound Registered
           description:
             True while the number is attached for inbound calls at the
-            carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id
-            is set.
+            carrier and on Hail's LiveKit inbound trunk. Set when voice_agent_id is
+            set.
           default: false
         subject_type:
           anyOf:
@@ -8345,8 +8678,9 @@ components:
               format: uuid
             - type: "null"
           title: Verification Id
-          description: Hail id of the verification used to buy this number. Null
-            when no verification was used.
+          description:
+            Hail id of the verification used to buy this number. Null when
+            no verification was used.
         subject_name:
           anyOf:
             - type: string
@@ -8706,17 +9040,17 @@ components:
           title: Verifications
           description:
             "The verifications you can buy this offer with, approved first,
-            then newest first: yours of a subject type in `subject_types` that are under
-            review, and the approved ones the carrier still accepts for this offer. Once
-            one is approved, pass its `id` as `verification_id` to POST /numbers to buy
-            with it."
+            then newest first: yours of a subject type in `subject_types` that are
+            under review, and the approved ones the carrier still accepts for this
+            offer. Once one is approved, pass its `id` as `verification_id` to POST
+            /numbers to buy with it."
         verification:
           anyOf:
             - $ref: "#/components/schemas/OfferVerification"
             - type: "null"
           description:
-            "Deprecated: read `verifications`. The verification a purchase without
-            verification_id would use: the one approved verification in `verifications`,
+            "Deprecated: read `verifications`. The verification a purchase
+            without verification_id would use: the one approved verification in `verifications`,
             else the newest one there; null when there is none."
         by_request:
           type: boolean
@@ -8726,6 +9060,17 @@ components:
             bought with POST /numbers. Ask support for it. Its quote_id still works
             for verification."
           default: false
+        paperwork:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/PaperworkItem"
+              type: array
+            - type: "null"
+          title: Paperwork
+          description:
+            The papers the chosen `subject_type` must give for this offer,
+            from the catalog. Null when the request had no `subject_type`. An empty
+            list means no papers are needed.
       type: object
       required:
         - e164
@@ -8775,6 +9120,62 @@ components:
       required:
         - custom_sender_id
       title: SenderIdResponse
+    SmsApplicationAmendRequest:
+      properties:
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Complete current form answers. The legal sender must remain
+            unchanged.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Original sender address; changing it requires support.
+      additionalProperties: false
+      type: object
+      required:
+        - fields
+      title: SmsApplicationAmendRequest
+      description: Complete replacement answers for an existing sender's missing evidence.
+    SmsApplicationResponse:
+      properties:
+        schema_version:
+          type: integer
+          title: Schema Version
+          description: Version of this saved-answer response format.
+          default: 1
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "Original sender route: person or business."
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Saved application answers; legacy responses may contain only
+            verified sender details.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Original sender address, when available.
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsApplicationResponse
+      description:
+        Private submitted SMS answers, or verified sender details for an
+        old filing.
     SmsCreate:
       properties:
         recipient_consent:
@@ -8820,16 +9221,16 @@ components:
             - type: "null"
           title: From
           description:
-            "Sender phone number, E.164 format. Must be an active number owned
-            by the organization with the SMS capability. Omitted: destinations where the
-            sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about
-            110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the
-            Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py)
-            use the organization's sender ID, or the platform default 'HAIL' when none
-            is set; Australia (+61) may always use 'HAIL', depending on the carrier.
-            Every other destination, including the US and Canada, uses the organization's
-            oldest active SMS-capable number; if none exists the request fails with 422.
-            SMS never uses the shared pool."
+            "Sender phone number, E.164 format. Must be an active number
+            owned by the organization with the SMS capability. Omitted: destinations
+            where the sender-ID carrier delivers a dynamic alphanumeric sender ID
+            unchanged (about 110 countries: most of Europe, Africa, the Middle East,
+            Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py)
+            use the organization's sender ID, or the platform default 'HAIL' when
+            none is set; Australia (+61) may always use 'HAIL', depending on the
+            carrier. Every other destination, including the US and Canada, uses the
+            organization's oldest active SMS-capable number; if none exists the request
+            fails with 422. SMS never uses the shared pool."
         body:
           type: string
           maxLength: 1600
@@ -8870,6 +9271,40 @@ components:
       required:
         - items
       title: SmsListResponse
+    SmsPreviewRequest:
+      properties:
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "Sender route to preview: person or business."
+        number_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Number Id
+          description:
+            Owned US local number selecting the carrier, required when
+            ambiguous.
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: Current registration form answers.
+        address:
+          anyOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+          description: Sender address required by the registration form.
+      type: object
+      required:
+        - subject_type
+        - fields
+      title: SmsPreviewRequest
     SmsResponse:
       properties:
         id:
@@ -8973,6 +9408,92 @@ components:
         - requested_at
         - sent_at
       title: SmsResponse
+    SubjectOption:
+      properties:
+        allowed:
+          type: boolean
+          title: Allowed
+          description:
+            False when no option lets this subject have this number type.
+            The other fields then describe the other subject's best option.
+        reason:
+          anyOf:
+            - type: string
+              enum:
+                - company_only
+                - person_only
+            - type: "null"
+          title: Reason
+          description: Why allowed is false, else null.
+        how:
+          type: string
+          enum:
+            - buy
+            - by_request
+          title: How
+          description: "'buy' in the console, or 'by_request' (support orders
+            it)."
+        monthly_cents:
+          type: integer
+          title: Monthly Cents
+          description: Catalog monthly price in USD cents.
+        setup_cents:
+          type: integer
+          title: Setup Cents
+          description: Catalog one-time setup price in USD cents.
+        capabilities:
+          items:
+            type: string
+            enum:
+              - voice
+              - sms
+          type: array
+          title: Capabilities
+          description: What this option can do.
+        paperwork:
+          items:
+            $ref: "#/components/schemas/PaperworkItem"
+          type: array
+          title: Paperwork
+          description:
+            Paper categories this subject needs. Empty when none, or when
+            unknown.
+        paperwork_known:
+          type: boolean
+          title: Paperwork Known
+          description: False when the list is not known yet. The list is then empty.
+        status:
+          type: string
+          enum:
+            - ready
+            - in_review
+            - needs_check
+          title: Status
+          description:
+            "ready: no papers needed, or a verification covers it. in_review:
+            a verification is under review. needs_check: papers are needed."
+        verification:
+          anyOf:
+            - $ref: "#/components/schemas/OptionVerification"
+            - type: "null"
+          description: The verification behind ready or in_review, else null.
+        more_options:
+          type: integer
+          title: More Options
+          description: How many other options this subject has for this type.
+      type: object
+      required:
+        - allowed
+        - how
+        - monthly_cents
+        - setup_cents
+        - capabilities
+        - paperwork
+        - paperwork_known
+        - status
+        - more_options
+      title: SubjectOption
+      description: The best way for one subject (person or business) to get one type.
     SuppressionListResponse:
       properties:
         items:
@@ -9039,6 +9560,27 @@ components:
         - source
         - created_at
       title: SuppressionResponse
+    TypeOptions:
+      properties:
+        number_type:
+          type: string
+          title: Number Type
+          description: local, mobile, national or toll_free.
+        for:
+          additionalProperties:
+            $ref: "#/components/schemas/SubjectOption"
+          propertyNames:
+            enum:
+              - person
+              - business
+          type: object
+          title: For
+          description: The best option for each subject.
+      type: object
+      required:
+        - number_type
+        - for
+      title: TypeOptions
     ValidationError:
       properties:
         loc:
@@ -9152,8 +9694,7 @@ components:
         number_type:
           type: string
           title: Number Type
-          description: "Kind of number: 'local', 'mobile', 'toll_free', or
-            'national'."
+          description: "Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
         subject_type:
           type: string
           title: Subject Type
@@ -9225,21 +9766,49 @@ components:
                 - confirm_identity
                 - filing
                 - carrier_review
+                - runtime_setup
+                - needs_information
             - type: "null"
           title: Step
           description:
-            "For a US texting registration that is not yet approved or rejected:
-            'confirm_identity' while the person must confirm (see `confirmation`),
+            "For a US texting registration that is not yet approved or
+            rejected: 'confirm_identity' while the person must confirm (see `confirmation`),
             'filing' while Hail files the details with the carriers, 'carrier_review'
-            once the carriers are reviewing them (1 to 7 business days). Null otherwise."
+            once the carriers are reviewing them (1 to 7 business days), or runtime_setup
+            when accepted but required messaging responses still need configuration;
+            needs_information when the existing sender needs current campaign evidence
+            before filing. Null otherwise."
+        campaign_accepted:
+          type: boolean
+          title: Campaign Accepted
+          description:
+            The carrier accepted the SMS campaign; this alone does not
+            mean a number is ready to send.
+          default: false
+        runtime_ready:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Runtime Ready
+          description:
+            True when required runtime configuration was verified, false
+            while setup retries, null when not independently tracked.
+        cancellable:
+          type: boolean
+          title: Cancellable
+          description:
+            True when `DELETE /v1/verifications/{id}` accepts this verification
+            now.
+          default: false
         identity_confirmed:
           type: boolean
           title: Identity Confirmed
-          description: "True on a person's newest US texting registration when
-            it is cancelled, or rejected and not yet dismissed, and the person
-            stays confirmed: the next filing with the same first name, last name,
-            email and mobile needs no code and has no submission fee. Dismiss
-            a rejected registration first. Ignore it on older registrations."
+          description:
+            "True on a person's newest US texting registration when it
+            is cancelled, or rejected and not yet dismissed, and the person stays
+            confirmed: the next filing with the same first name, last name, email
+            and mobile needs no code and has no submission fee. Dismiss a rejected
+            registration first. Ignore it on older registrations."
           default: false
       type: object
       required:
@@ -9252,8 +9821,8 @@ components:
         - created_at
         - updated_at
       title: VerificationResponse
-      description: "A carrier verification: its state and the name of the person
-        or
+      description:
+        "A carrier verification: its state and the name of the person or
 
         company it is for. No other personal data."
     VoiceConfig:

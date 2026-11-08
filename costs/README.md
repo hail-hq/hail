@@ -13,6 +13,7 @@ Programmatic consumers (agents, scripts, dashboards) should fetch directly:
 - TTS: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json>
 - Phone numbers, one file per carrier: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/telnyx.json>, <https://raw.githubusercontent.com/hail-hq/hail/main/costs/didww.json>
 - SMS base rates: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/sms.json>
+- Call rates per minute: <https://raw.githubusercontent.com/hail-hq/hail/main/costs/voice.json>
 
 Schemas are served at their `$id` URLs:
 
@@ -21,12 +22,17 @@ Schemas are served at their `$id` URLs:
 - <https://hail.so/costs/schema/tts.json>
 - <https://hail.so/costs/schema/sms.json>
 - <https://hail.so/costs/schema/numbers.json> (shared by the three number catalogs)
+- <https://hail.so/costs/schema/voice.json>
 
 **Note:** The interactive `web/` compare view and `costs.md` markdown export do not yet include telephony or SMS data (out of scope; a later PR).
 
 ## How AI agents should use this
 
 Model files (llm/stt/tts) share a common envelope: `{ version, license, models[] }`. Every model row has `provider`, `model_id`, `display_name`, primary price fields (as decimal strings, e.g. `"5.0"`), `last_verified`, `last_changed_at`, `verification_method`, `verified_by`, and `source_url`. The number catalogs (`twilio.json`, `telnyx.json`, `didww.json`) instead carry `provider` and `numbers[]` (Twilio's also `a2p_10dlc[]`), since a phone number is not a model. Each number row has `verification_required`: the buyer must be verified (ID, address or regulatory bundle) before purchase. Refresh: `uv run python scripts/costs/sync_numbers.py --env-file .env`; the weekly workflow, secrets, merge rules and PR review steps are in [docs/operations/number-catalog-sync.md](../docs/operations/number-catalog-sync.md). See the JSON Schemas above for the exact shape per category.
+
+`voice.json` holds carrier call rates in `rates[]`, one row per carrier rate, with `usd_per_minute`. An `outbound` row covers the numbers in `destination_prefixes`, for calls whose caller ID starts with one of `origination_prefixes` (`ALL`: any caller ID; `ROW`: caller IDs no other row of that destination lists). Pick the row with the longest matching destination prefix. An `inbound` row prices calls to a number of that `number_type`. Refresh: `uv run python scripts/costs/sync_voice.py --env-file .env`; see [docs/operations/voice-rate-sync.md](../docs/operations/voice-rate-sync.md).
+
+Number catalog `usd_per_month` is the base rental. Optional provider-level `capability_monthly_fees` are additional monthly costs for selected capabilities. Each entry applies once when any listed capability is selected; SMS and MMS can share one fee. Keep source and verification fields with the fee. `effective_from` is Hail's prospective start for existing calendar billing periods, not a claimed carrier price-change date. New purchases include the fee immediately. The sync preserves this separately sourced block and never folds it into base rental.
 
 Canonical fetch pattern:
 
@@ -48,9 +54,9 @@ git log -p costs/llm.json | grep -A 5 '"model_id": "claude-opus-4-7"'
 
 ## Currency and units
 
-- All prices are in USD (`currency: "USD"` implicit).
+- Prices are in USD. A vendor that publishes no USD price uses the matching EUR fields instead: `_usd` becomes `_eur` (for example `price_per_minute_eur`), and `usd_per_segment` becomes `eur_per_segment`. A row uses one currency only, and prices are never converted.
 - LLM prices are per 1M tokens (`*_per_mtok_usd`).
-- STT prices are per minute of audio (`price_per_minute_usd`).
+- STT prices are per minute of audio (`price_per_minute_usd`, or `price_per_minute_eur`).
 - TTS prices are per 1M characters of input (`price_per_1m_chars_usd`).
 - Prices are stored as decimal strings — `"0.0048"`, not `0.0048` — to avoid float roundtrip errors. Parse with `Decimal` (Python), `decimal.js` or `big.js` (JS), or any fixed-point library — do not use native `Number` or `parseFloat`.
 
@@ -101,15 +107,33 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 2. Edit the relevant file in this directory (e.g. `llm.json`).
 3. Update `last_verified` to today's date (ISO `YYYY-MM-DD`) — when you last _checked_ the price.
 4. If the price actually changed, also update `last_changed_at` to today's date. Otherwise leave it alone.
+   If the price is promotional, set `promo_ends_at` to its last day. When the promotion ends, record the list price and remove the field.
 5. Set `verified_by` to your GitHub handle.
-6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source).
+6. Set `verification_method` to `community-pr` for PR-driven updates (or `manual-confirmed` if you cross-checked the price against the vendor's pricing page yourself with a second source). Number catalogs (`twilio.json`, `telnyx.json`, `didww.json`): use `community-pr` for a price you saw. `manual-confirmed` pins the row: the weekly sync keeps its price and other fields, even when the carrier changes them, and refreshes only its `requirements` block (with `last_changed_at` when that block changes) ([docs](../docs/operations/number-catalog-sync.md)).
 7. Update `source_url` if it has changed.
 8. **Two-source rule**: any price change must include two independent links in the PR description (vendor pricing page + a secondary source — vendor announcement, third-party aggregator, doc page). If a second source is genuinely unavailable, set `confidence: medium` on the affected row and call it out in the PR.
 9. Open a pull request. CI validates the schema and runs alias-uniqueness + `replaced_by_model_id` resolution checks.
 
+## Weekly jobs, in order
+
+Every Monday these jobs run in this order (UTC). Each one writes its own files, so two jobs never edit the same file.
+
+| Time  | Workflow             | Writes                                         | Output                          |
+| ----- | -------------------- | ---------------------------------------------- | ------------------------------- |
+| 05:00 | `costs-refresh`      | `llm.json`, `stt.json`, `tts.json`, `sms.json` | PR `costs/weekly-refresh`       |
+| 08:00 | `costs-sync-numbers` | `twilio.json`, `telnyx.json`, `didww.json`     | PR `costs/numbers-sync`         |
+| 08:30 | `costs-sync-voice`   | `voice.json`                                   | PR `costs/voice-sync`           |
+| 09:00 | `costs-stale`        | nothing (reads `main`)                         | issue "Model costs: stale rows" |
+
+Rules:
+
+1. The stale check runs last. It reads `main` only, so a row refreshed in a sync PR that is not merged yet still shows as stale. Merge the Monday sync PRs, then rerun **Actions → costs-stale → Run workflow** if the issue lists rows those PRs fixed.
+2. A new job gets its own time slot and its own files. Never let two jobs write the same file: their PRs would conflict.
+3. Moving a job's time? Update this table and the `cron` comment in each workflow file in the same PR.
+
 ## Refresh cadence
 
-A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
+A scheduled GitHub Action runs every Monday and opens an issue listing rows whose `last_verified` is more than 30 days old, and rows whose `promo_ends_at` has passed. Anyone can pick a row off that list, verify the price against the provider's published pricing page, and PR the update.
 
 ## Adding a new provider or model
 
