@@ -137,7 +137,7 @@ def test_buy_after_check_beats_by_request_without_papers(catalog):
     assert "sms" in o.capabilities and o.more_options == 1
 
 
-def test_fewer_items_then_price(catalog):
+def test_price_then_fewer_items(catalog):
     few = need(person={"accepted": True, "items": ["id_document"]})
     catalog(
         twilio=[row(usd="1.00", **need())],
@@ -146,7 +146,7 @@ def test_fewer_items_then_price(catalog):
         ],
         didww=[],
     )
-    assert one(number_options("CH", {})).monthly_cents == 900
+    assert one(number_options("CH", {})).monthly_cents == 100
     catalog(
         twilio=[row(usd="4.00", **need())],
         telnyx=[row(usd="2.00", setup_usd="1.00", **need())],
@@ -346,8 +346,14 @@ def test_option_key_order():
     assert option_key("ready", "buy", 0, 3, 1, 0) < option_key(
         "ready", "buy", 1, 0, 1, 0
     )
+    # Cheaper first, even with more papers: a $4 number with 7 items beats
+    # a $9.60 + $9.50 setup one with 4.
+    assert option_key("ready", "buy", 1, 7, 400, 0) < option_key(
+        "ready", "buy", 1, 4, 960, 950
+    )
+    # Same price: fewer papers first.
     assert option_key("ready", "buy", 1, 1, 500, 0) < option_key(
-        "ready", "buy", 1, 2, 1, 0
+        "ready", "buy", 1, 2, 500, 0
     )
     assert option_key("ready", "buy", 0, 1, 100, 50) < option_key(
         "ready", "buy", 0, 1, 200, 0
@@ -391,13 +397,18 @@ def test_disallowed_copy_has_no_more_options_or_verification(catalog):
 
 def test_unknown_paperwork_ranks_after_known(catalog):
     catalog(
-        twilio=[row(usd="1.00", verification_required=True)],
+        twilio=[row(usd="9.00", verification_required=True)],
         telnyx=[row(usd="9.00", **need())],
     )
+    # Same price: a known paper list first.
     o = one(number_options("CH", {}))
     assert o.paperwork_known is True and o.monthly_cents == 900
     assert option_key("needs_check", "buy", 0, 0, 1, 0, False) > option_key(
         "needs_check", "buy", 0, 5, 1, 0
+    )
+    # Price comes first: a cheaper unknown list beats a known one.
+    assert option_key("needs_check", "buy", 0, 0, 100, 0, False) < option_key(
+        "needs_check", "buy", 0, 1, 900, 0
     )
 
 

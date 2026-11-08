@@ -1034,8 +1034,8 @@ async def test_quotes_subject_ranking_matches_options(
         assert first["monthly_cents"] == best["monthly_cents"]
         assert first["paperwork"] == best["paperwork"]
     person = await _quotes(client, key, subject_type="person")
-    # Telnyx lists one paper, Twilio two: fewer papers first.
-    assert next(o["e164"] for o in person.json()["offers"]) == "+41215550002"
+    # Twilio costs $1 with two papers, Telnyx $3 with one: cheaper first.
+    assert next(o["e164"] for o in person.json()["offers"]) == "+41215550001"
 
 
 async def test_quotes_paperwork_from_catalog(

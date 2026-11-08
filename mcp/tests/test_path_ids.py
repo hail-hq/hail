@@ -85,6 +85,7 @@ _BODY_ID_METHODS = {
     "send_email",
     "acquire_number",
     "get_verification_requirements",
+    "preview_sms_application",
     "submit_verification",
 }
 

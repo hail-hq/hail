@@ -45,6 +45,7 @@ from hailhq.api.routes.internal import org_closures as internal_org_closures
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.routes.internal import voices as internal_voices
+from hailhq.api.sms_registration import drain_audits as drain_sms_audits
 from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
@@ -340,6 +341,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(verification_worker, verification_task)
         await internal_webhook.aclose()
         await calls_routes.close_livekit_singleton()
+        # Refusal audits run after the request commits. Let them finish while
+        # the database engine is still open.
+        await drain_sms_audits()
         await dispose_engine()
         await asyncio.to_thread(flush_telemetry)
 

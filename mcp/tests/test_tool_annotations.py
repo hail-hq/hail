@@ -38,10 +38,12 @@ _READ_ONLY = {
     "list_verifications",
     "get_verification",
     "get_sms_application",
+    "preview_sms_application",
 }
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {
     "get_sms_application",
+    "preview_sms_application",
     "quote_numbers",
     "get_verification_requirements",
     "list_verifications",
@@ -72,7 +74,7 @@ _OPEN_WORLD_WRITES = {
     "confirm_verification",
 }
 
-_EXPECTED_COUNT = 40
+_EXPECTED_COUNT = 41
 
 
 @pytest.fixture()
