@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent, threads
-from hailhq.core.models import Agent, Call, PhoneNumber, Sms
+from hailhq.core.models import AccountCredit, Agent, Call, PhoneNumber, Sms
 from hailhq.core.reconcile import sweep_stale_calls
 from sqlalchemy import update
 
@@ -20,6 +20,16 @@ def _now():
 
 async def _seed(session, *, direction="outbound", ring_seconds=45, status="ringing"):
     org = uuid.uuid4()
+    session.add(
+        AccountCredit(
+            organization_id=org,
+            kind="credit",
+            channel="credit",
+            amount_cents=10_000,
+            source="test",
+            ref="test",
+        )
+    )
     agent = Agent(
         organization_id=org,
         name="a",

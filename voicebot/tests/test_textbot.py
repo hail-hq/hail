@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core import text_agent
-from hailhq.core.models import Agent, PhoneNumber, Sms
+from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.voicebot import textbot
 from hailhq.voicebot.pipeline import ProviderKeyError
@@ -23,8 +23,19 @@ ORG_NUMBER = "+14155550100"
 PERSON = "+33612345678"
 
 
-async def _seed(session):
+async def _seed(session, *, credits=10_000):
     org = uuid.uuid4()
+    if credits:
+        session.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=credits,
+                source="test",
+                ref="test",
+            )
+        )
     agent = Agent(
         organization_id=org, name="Front desk", system_prompt="Book appointments."
     )
@@ -100,6 +111,29 @@ async def test_skipped_and_failed_states_are_recorded(async_session, fake_llm) -
     await textbot.reply_once(api)
     async_session.expire_all()
     assert (await async_session.get(Sms, sms_id)).agent_reply_state == "skipped"
+
+
+async def test_unfunded_org_reply_skipped_before_llm(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A $0 org's text is skipped before the model runs: no LLM spend for a
+    reply that POST /internal/agent/reply-sms would refuse anyway."""
+    sms_id = await _seed(async_session, credits=0)
+
+    def no_llm(*_a, **_kw):
+        raise AssertionError("the LLM must not be built for an unfunded org")
+
+    monkeypatch.setattr(textbot, "build_llm", no_llm)
+    api = SimpleNamespace(post=AsyncMock())
+
+    assert await textbot.reply_once(api) is False  # nothing left to answer
+
+    api.post.assert_not_awaited()
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    assert row.agent_reply_attempts == 0
+    assert row.metadata_["skipped_reason"] == "insufficient_funds"
 
 
 async def test_provider_error_marks_failed_without_posting(

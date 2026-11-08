@@ -42,6 +42,7 @@ Exposes the following tools to the calling agent:
 * ``list_verifications`` — the org's verifications and their states
 * ``get_verification`` — one verification; poll or repair its reported step
 * ``get_sms_application`` — read the saved application or recover the original sender
+* ``preview_sms_application`` — the campaign text a carrier reviews, before submitting
 * ``amend_sms_application`` — correct evidence on the same paid sender and row
   (needs ``attest_authorized=True``)
 * ``cancel_verification`` — cancel or dismiss (``awaiting_review``/``rejected``, or an
@@ -96,7 +97,12 @@ from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
-from hailhq.mcp.hail_client import HailAPIError, HailClient, InvalidPathIdError
+from hailhq.mcp.hail_client import (
+    HailAPIError,
+    HailClient,
+    InvalidPathIdError,
+    PreviewShapeError,
+)
 from pydantic import StrictBool, ValidationError, WithJsonSchema
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -1013,6 +1019,119 @@ async def get_sms_application(
         return {"error": _UNEXPECTED_ERROR}
 
 
+async def preview_sms_application(
+    *,
+    client: HailClient,
+    subject_type: Any,
+    fields: Any,
+    address: Any = None,
+    number_id: Any = None,
+) -> dict[str, Any]:
+    if subject_type not in _SUBJECT_TYPES:
+        return {"error": f"{_SUBJECT_TYPE_ERROR}. Nothing was sent."}
+    number_id_ = None
+    if number_id is not None:
+        number_id_ = _as_uuid(number_id)
+        if number_id_ is None:
+            return _not_uuid("number_id")
+    input_error = _application_input_error(fields, address)
+    if input_error:
+        return {"error": f"{input_error}. Nothing was sent."}
+    try:
+        return await client.preview_sms_application(
+            subject_type=subject_type,
+            fields=fields,
+            address=address,
+            number_id=number_id_,
+        )
+    except HailAPIError as exc:
+        if exc.status in (404, 422):
+            return _answer_problems(
+                exc,
+                "Correct the listed fields with the user, then preview again before submitting.",
+                "Nothing was saved. Check the answers against get_verification_requirements with the user.",
+            )
+        return _format_api_error(exc)
+    except PreviewShapeError:
+        return {"error": _VERSION_MISMATCH}
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except Exception:
+        return {"error": _UNEXPECTED_ERROR}
+
+
+def _details_bytes(*parts: Any) -> int | None:
+    """The UTF-8 size of the parts as JSON, so non-ASCII text is not
+    over-counted; None when a part is not valid JSON text."""
+    try:
+        return sum(len(json.dumps(p, ensure_ascii=False).encode()) for p in parts)
+    except (TypeError, ValueError):
+        return None
+
+
+def _application_input_error(fields: Any, address: Any) -> str | None:
+    """The shape or size problem with application answers, or None."""
+    shape_error = _verification_shape_error(fields, {}, [], address)
+    if shape_error:
+        return shape_error
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return f"too many fields (at most {_VERIFICATION_MAX_FIELDS})"
+    size = _details_bytes(fields, address or {})
+    if size is None:
+        return "fields and address must be valid text"
+    if size > _VERIFICATION_MAX_DETAILS_BYTES:
+        return f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes"
+    return None
+
+
+# Request parts a 422 can name that are not the user's answers.
+_NOT_ANSWERS = {"number_id", "subject_type"}
+
+
+def _answer_problems(exc: HailAPIError, fix: str, fallback: str) -> dict[str, Any]:
+    """The reply to a 404 or 422 about an application. Problems on the
+    user's answers get `fix`. Other problems (pick a number, contact support)
+    add the API's own messages, read from the stripped problems or the API's
+    plain sentence only, so no submitted value or proxy page is echoed."""
+    problems = exc.problems or []
+    # A user's answer is a body part that is not a request setting.
+    others = [
+        p["msg"]
+        for p in problems
+        if not (
+            len(p.get("loc", [])) >= 2
+            and p["loc"][0] == "body"
+            and str(p["loc"][1]) not in _NOT_ANSWERS
+        )
+    ]
+    if problems:
+        parts = [*others, fix] if len(others) < len(problems) else others
+        return {"error": " ".join(_sentence(m) for m in parts), "problems": problems}
+    message = (exc.message or "").strip()
+    # FastAPI's own "Not Found" means the route is missing: an older API.
+    if exc.status == 404 and message == "Not Found":
+        return {"error": _VERSION_MISMATCH}
+    # A plain API sentence, not an HTML page.
+    if message and len(message) <= 500 and not message.startswith("<"):
+        return {"error": _sentence(message)}
+    if exc.status == 404:
+        return _format_api_error(exc)
+    return {"error": f"the API refused the request ({exc.status}). {fallback}"}
+
+
+def _sentence(text: str) -> str:
+    """The text with an end mark, unless it already has one (also before a
+    closing quote or bracket)."""
+    text = text.strip()
+    return text if text.rstrip("\"')]").endswith((".", "!", "?")) else f"{text}."
+
+
+_VERSION_MISMATCH = (
+    "the API and this MCP version differ; retrying will not help. "
+    "Ask the user to review the application in the Hail console, or contact support."
+)
+
+
 async def amend_sms_application(
     *,
     client: HailClient,
@@ -1032,20 +1151,9 @@ async def amend_sms_application(
         return {
             "error": "address is required; use the saved address only if still correct. Nothing was sent."
         }
-    shape_error = _verification_shape_error(fields, {}, [], address)
-    if shape_error:
-        return {"error": f"{shape_error}. Nothing was sent."}
-    if len(fields) > _VERIFICATION_MAX_FIELDS:
-        return {
-            "error": f"too many fields (at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
-        }
-    if (
-        sum(len(json.dumps(part)) for part in (fields, address or {}))
-        > _VERIFICATION_MAX_DETAILS_BYTES
-    ):
-        return {
-            "error": f"fields and address exceed {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
-        }
+    input_error = _application_input_error(fields, address)
+    if input_error:
+        return {"error": f"{input_error}. Nothing was sent."}
     try:
         return _without_carrier(
             await client.amend_sms_application(
@@ -1054,10 +1162,11 @@ async def amend_sms_application(
         )
     except HailAPIError as exc:
         if exc.status == 422:
-            return {
-                "error": "Correct the listed application fields with the user, then amend the same verification_id.",
-                "problems": exc.problems or [],
-            }
+            return _answer_problems(
+                exc,
+                "Correct the listed application fields with the user, then amend the same verification_id.",
+                "Nothing was changed. Keep the same verification_id: check the answers with the user and amend again. Do not cancel or submit a new one.",
+            )
         return _format_api_error(exc)
     except httpx.TransportError:
         return {
@@ -1148,12 +1257,11 @@ async def submit_verification(
             "error": f"too many fields: {len(fields)} "
             f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
         }
-    try:
-        details_bytes = sum(
-            len(json.dumps(part)) for part in (fields, address or {}, documents)
-        )
-    except (TypeError, ValueError):
-        return {"error": "fields, address and documents must be JSON values"}
+    details_bytes = _details_bytes(fields, address or {}, documents)
+    if details_bytes is None:
+        return {
+            "error": "fields, address and documents must be valid JSON text. Nothing was sent."
+        }
     if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
         return {
             "error": f"fields, address and documents total {details_bytes} "
@@ -1209,7 +1317,8 @@ def _submit_error(exc: HailAPIError) -> dict[str, Any]:
             "same name already exists; nothing new was stored. Call "
             "list_verifications to see it."
         }
-    if exc.status in (401, 404, 409, 429, 503):
+    if exc.status in (401, 402, 404, 409, 429, 503):
+        # 402 says how much credit is needed; it never holds submitted data.
         return _format_api_error(exc)
     return {"error": f"hail api error {exc.status}"}
 
@@ -2728,7 +2837,9 @@ def register_tools(
         credit at filing. Pass the same ``purpose`` to
         get_verification_requirements. For ``purpose='number'``, pass the
         same ``quote_id`` you passed to get_verification_requirements. For
-        ``purpose='sms'``, pass the same ``number_id`` if you passed one.
+        ``purpose='sms'``, pass the same ``number_id`` if you passed one, and
+        first call preview_sms_application with the same answers so the user
+        approves the campaign text the carrier will review.
 
         ``subject_type`` is required: ``person`` (the user) or ``business``
         (the user's company), the same one passed to
@@ -2758,6 +2869,15 @@ def register_tools(
         ``application/pdf``. Limits: 10 MiB per file, 29 MiB in total, at
         most 20 files and 100 fields. Compress images to JPG or PNG under about
         7 MiB so the call stays small.
+
+        Credit: for ``purpose='number'`` the balance must cover the offer's
+        setup and first month (``setup_cents`` + ``monthly_cents`` from
+        quote_numbers), or you get a 402 error and nothing is sent: ask the
+        user to add credit in the console first. That amount is set aside
+        while the carrier checks the papers. It pays for setup and the first
+        month when the number is bought with this verification, and comes
+        back if the verification is rejected or cancelled, or if no number
+        is bought with it within 30 days of approval.
 
         Returns the verification: ``id``, ``state`` and ``subject_name``.
         Review takes business days and nothing notifies you: poll
@@ -2814,15 +2934,17 @@ def register_tools(
         "subject_type", "subject_name", "purpose", "state",
         "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation",
-        "step", "identity_confirmed"}]}``. ``step`` says where a US texting
-        filing in progress is: ``confirm_identity``, ``filing`` or
-        ``carrier_review``, ``needs_information`` (repair the existing application),
-        or ``runtime_setup`` (accepted but required response
-        configuration is still pending). ``campaign_accepted`` alone does not
-        authorize sending; check ``runtime_ready`` and number attachment.
-        ``identity_confirmed`` on a person's newest
-        filing, when cancelled or rejected: the next one with the same person
-        needs no code. Dismiss a rejected filing first.
+        "step", "identity_confirmed", "waiting_for_credit"}]}``. ``step``
+        says where a US texting filing in progress is: ``confirm_identity``,
+        ``filing`` or ``carrier_review``, ``needs_information`` (repair the
+        existing application), or ``runtime_setup`` (accepted but required
+        response configuration is still pending). ``campaign_accepted`` alone
+        does not authorize sending; check ``runtime_ready`` and number
+        attachment. ``identity_confirmed`` on a person's newest filing, when
+        cancelled or rejected: the next one with the same person needs no
+        code. Dismiss a rejected filing first. ``waiting_for_credit`` true:
+        the balance does not cover the carrier fee of the next step (filing
+        the campaign); add credit and it goes on.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
         submission already exists before submitting again. ``confirmation``
@@ -2905,6 +3027,49 @@ def register_tools(
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_sms_application(
                     client=client, verification_id=verification_id
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="preview_sms_application",
+        title="Preview a US texting registration",
+        annotations=ToolAnnotations(
+            title="Preview a US texting registration",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def preview_sms_application_tool(
+        ctx: Context,
+        subject_type: str,
+        fields: _JsonObject,
+        address: _JsonObjectOrNone = None,
+        number_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Show the campaign text a carrier reviews for a US texting
+        registration, before submit_verification with purpose='sms'.
+
+        Pass the same subject_type, fields, address and number_id you will
+        submit (from get_verification_requirements with purpose='sms').
+        Nothing is filed or charged. The API checks the answers' fields and
+        lengths; a field problem comes back as ``problems``. Submit can still
+        refuse for other reasons (a duplicate registration, low credit, a
+        carrier refusal). Show the
+        returned description, consent flow and samples to the user and get
+        their approval before submitting. Never invent consent evidence.
+        Maximum 100 fields and 64 KiB of fields/address combined.
+        """
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await preview_sms_application(
+                    client=client,
+                    subject_type=subject_type,
+                    fields=fields,
+                    address=address,
+                    number_id=number_id,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}

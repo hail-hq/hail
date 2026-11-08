@@ -42,7 +42,12 @@ from hailhq.api.routes.verifications import (
     approved_handles,
     refresh_number_verifications,
 )
-from hailhq.core import inbound_routing, sms_setup, telephony_catalog
+from hailhq.core import (
+    inbound_routing,
+    sms_setup,
+    telephony_catalog,
+    verification_hold,
+)
 from hailhq.core.carrier_offer import (
     CarrierOffer,
     NumberOptionsResponse,
@@ -134,8 +139,9 @@ async def _get_org_number_or_404(
         402: {
             "description": (
                 FUNDS_RESPONSES[402]["description"]
-                + ". Also returned when the balance doesn't cover this "
-                "number's full monthly price."
+                + ". Also returned when the balance, plus the credit the "
+                "verification you buy with set aside, doesn't cover this "
+                "number's setup and the first month."
             ),
         },
         409: {
@@ -588,8 +594,8 @@ async def get_number_options(
                 "it, each number type shows its best option in this order: "
                 "buy now before order by hand, then ready now, then options "
                 "that do every job the type offers (even when a number that "
-                "does fewer jobs costs less), then fewer papers, then lower "
-                "price."
+                "does fewer jobs costs less), then lower price, then fewer "
+                "papers."
             ),
         ),
     ] = None,
@@ -1031,16 +1037,21 @@ async def _offer_verifications(
     """The org's number verifications per carrier, country and number type,
     leaving out cancelled and rejected ones, newest first."""
     rows = (
-        await db.execute(
-            select(CarrierVerification)
-            .where(
-                CarrierVerification.organization_id == organization_id,
-                CarrierVerification.purpose == "number",
-                CarrierVerification.state.not_in(("cancelled", "rejected")),
+        (
+            await db.execute(
+                select(CarrierVerification)
+                .where(
+                    CarrierVerification.organization_id == organization_id,
+                    CarrierVerification.purpose == "number",
+                    CarrierVerification.state.not_in(("cancelled", "rejected")),
+                )
+                .order_by(CarrierVerification.created_at.desc(), CarrierVerification.id)
             )
-            .order_by(CarrierVerification.created_at.desc(), CarrierVerification.id)
         )
-    ).scalars()
+        .scalars()
+        .all()
+    )
+    held = await verification_hold.open_holds(db, organization_id, [r.id for r in rows])
     out: dict[tuple[str, str, str], list[OfferVerification]] = {}
     for r in rows:
         out.setdefault((r.provider, r.country_code, r.number_type), []).append(
@@ -1049,6 +1060,7 @@ async def _offer_verifications(
                 state=r.state,
                 subject_type=r.subject_type,
                 subject_name=r.subject_name,
+                held_cents=held[r.id],
             )
         )
     return out

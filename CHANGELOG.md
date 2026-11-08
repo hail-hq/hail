@@ -6,12 +6,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
+- Hail records what the carrier charged for each call, from Twilio, Telnyx and DIDWW.
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 
 ### Fixed
 
+- Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
 - Verification: when several Twilio requirements accept only the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
 - Voice replies start sooner: the call's instructions are cached after the first turn.
@@ -23,6 +26,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
 - US texting: a number the carrier refuses for a registration now gets an audit row with the reason (a new one when the reason changes), and Hail retries it less often.
 - US texting: when the carrier refuses a person's number, Hail now tries their next number.
+- Text agents: a text to a workspace with no credits is skipped before the AI writes a reply (`metadata.skipped_reason: "insufficient_funds"`).
 
 ## [0.32.0] (2026-10-30)
 

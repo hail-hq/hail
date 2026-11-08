@@ -304,6 +304,47 @@ async def test_status_creates_campaign_once_brand_approved() -> None:
     assert create["terms_and_conditions_url"] == "https://acme.org/terms"
 
 
+async def test_status_files_no_campaign_while_it_may_not() -> None:
+    """Without credit for the campaign fee: no paid create, the rest runs."""
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", brand_feedback=None
+    )
+    r["us_app_to_person.create"] = SimpleNamespace(
+        sid="QE1", campaign_status="PENDING", errors=[]
+    )
+    p = _provider(r)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "campaign": _campaign(),
+    }
+    st = await p.status(refs, may_file_campaign=False)
+    assert st.state == "pending"
+    assert "campaign_sid" not in refs
+    assert not _calls(p, "us_app_to_person.create")
+
+
+async def test_status_applies_a_brand_rejection_while_no_campaign_may_be_filed() -> (
+    None
+):
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="FAILED", identity_status=None, brand_feedback=None, failure_reason="x"
+    )
+    p = _provider(r)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "campaign": _campaign(),
+    }
+    st = await p.status(refs, may_file_campaign=False)
+    assert st.state == "rejected"
+    assert not _calls(p, "us_app_to_person.create")
+
+
 async def test_status_files_an_old_snapshot_without_links() -> None:
     """A draft filed before the links existed still reaches the carrier."""
     r = _ok_responses()

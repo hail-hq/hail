@@ -59,3 +59,26 @@ async def test_lifespan_starts_with_an_sms_carrier(
     monkeypatch.setattr(settings, "sender_id_sms_carrier", value)
     async with lifespan(app):
         pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_waits_for_pending_sms_refusal_audits(
+    monkeypatch: pytest.MonkeyPatch, async_session: AsyncSession
+):
+    """A refusal audit queued before shutdown must finish before the engine closes."""
+    import asyncio
+
+    from hailhq.api import sms_registration
+
+    finished = asyncio.Event()
+
+    async def slow_audit() -> None:
+        await asyncio.sleep(0.05)
+        finished.set()
+
+    task = asyncio.create_task(slow_audit())
+    sms_registration._audit_tasks.add(task)
+    task.add_done_callback(sms_registration._audit_tasks.discard)
+    async with lifespan(app):
+        pass
+    assert finished.is_set()

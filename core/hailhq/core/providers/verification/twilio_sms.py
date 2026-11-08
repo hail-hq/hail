@@ -341,13 +341,13 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         # Vetting starts when the brand is created; nothing more to send.
         return None
 
-    async def status(self, refs) -> ProviderStatus:
+    async def status(self, refs, *, may_file_campaign: bool = True) -> ProviderStatus:
         try:
-            return await asyncio.to_thread(self._status, refs)
+            return await asyncio.to_thread(self._status, refs, may_file_campaign)
         except _TWILIO_ERRORS as exc:
             raise VerificationProviderError("Twilio request failed") from exc
 
-    def _status(self, refs) -> ProviderStatus:
+    def _status(self, refs, may_file_campaign: bool = True) -> ProviderStatus:
         brand = self._client.messaging.v1.a2p.brand_registrations(
             refs["brand_sid"]
         ).fetch()
@@ -373,6 +373,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             if text.get("schema_version", 1) < 2:
                 refs["needs_information"] = True
                 return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
+            if not may_file_campaign:
+                # The credit does not cover the campaign fee yet.
+                return ProviderStatus(state="pending")
             try:
                 campaign = svc.us_app_to_person.create(
                     brand_registration_sid=refs["brand_sid"],

@@ -63,18 +63,19 @@ def option_key(
     paperwork_known: bool = True,
 ) -> tuple[int, int, int, int, int, int]:
     """Sort key, best first: buy before by request, then status, then fewer
-    jobs missing from the type's union (see ``_missing_jobs``), then a known
-    paper list before an unknown one, then fewer papers, then lower monthly
-    plus setup."""
+    jobs missing from the type's union (see ``_missing_jobs``), then lower
+    monthly plus setup, then a known paper list before an unknown one, then
+    fewer papers."""
     # Buy first: a number the customer can buy online, even after a check,
     # beats one only support can order, even when that one needs no papers.
+    # Then the cheapest, even when its paper list is longer or unknown.
     return (
         0 if how == "buy" else 1,
         _STATUS_RANK[status],
         missing,
+        monthly_cents + setup_cents,
         0 if paperwork_known else 1,
         paperwork_count,
-        monthly_cents + setup_cents,
     )
 
 

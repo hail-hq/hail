@@ -2132,8 +2132,8 @@ paths:
         "402":
           description:
             insufficient credits; top up at https://hail.so/console/billing.
-            Also returned when the balance doesn't cover this number's full monthly
-            price.
+            Also returned when the balance, plus the credit the verification you buy
+            with set aside, doesn't cover this number's setup and the first month.
         "409":
           description:
             The quote expired, the number is taken, the price changed,
@@ -2527,15 +2527,15 @@ paths:
               "Optional. Keep only options that do all these jobs. Without
               it, each number type shows its best option in this order: buy now before
               order by hand, then ready now, then options that do every job the type
-              offers (even when a number that does fewer jobs costs less), then fewer
-              papers, then lower price."
+              offers (even when a number that does fewer jobs costs less), then lower
+              price, then fewer papers."
             title: Capabilities
           description:
             "Optional. Keep only options that do all these jobs. Without
             it, each number type shows its best option in this order: buy now before
             order by hand, then ready now, then options that do every job the type offers
-            (even when a number that does fewer jobs costs less), then fewer papers,
-            then lower price."
+            (even when a number that does fewer jobs costs less), then lower price,
+            then fewer papers."
         - name: authorization
           in: header
           required: false
@@ -4915,6 +4915,21 @@ paths:
         A 409 comes before your files are checked and before anything is filed.
 
 
+        A number verification needs credit for the offer''s setup and first month
+
+        (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+
+        nothing is filed. That amount is set aside from your balance while the
+
+        carrier checks your papers. It pays for setup and the first month when
+
+        you buy the number with this verification, and comes back if the
+
+        verification is rejected or cancelled, or if no number is bought with it
+
+        within 30 days of approval. A by-request offer sets nothing aside.
+
+
         The carrier checks the details right away. Problems come back as 422 with
 
         the field named, and nothing is kept. When it passes, the verification is
@@ -4960,6 +4975,12 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "402":
+          description:
+            Not enough credit. A number verification needs the offer's
+            setup and first month (`setup_cents` + `monthly_cents` of the quote) and
+            sets that amount aside until you buy the number. A US SMS registration
+            needs its filing fee. Nothing is filed.
         "422":
           description: Validation Error
           content:
@@ -5326,13 +5347,19 @@ paths:
 
         registration. Use it when the verification shows `confirmation: "code"`.
 
-        On success the campaign is filed at once; poll GET /verifications/{id}
+        On success the campaign is usually filed at once. It waits when your
 
-        until `approved`. A wrong or expired code is 422 on `code`; after five
+        credit does not cover its fee (`waiting_for_credit` is true until you
 
-        wrong codes, 429 until the carrier sends a new code (once a day). 409
+        add credit). It also waits while another check of it is running or
 
-        when there is nothing to confirm.'
+        recently failed, or another process holds it; a later check files it.
+
+        Poll GET /verifications/{id} until `approved`. A wrong or expired code is
+
+        422 on `code`; after five wrong codes, 429 until the carrier sends a
+
+        new code (once a day). 409 when there is nothing to confirm.'
       operationId: confirm_verification
       parameters:
         - name: verification_id
@@ -8524,6 +8551,15 @@ components:
           description:
             Name of the person or company that verification is for, as
             typed in the verification form. Null when unknown.
+        held_cents:
+          type: integer
+          title: Held Cents
+          description:
+            "Credit, in USD cents, set aside from your balance for this
+            verification: setup and the first month of the offer it was started for.
+            A purchase with this verification counts it toward the price. 0 when nothing
+            is set aside."
+          default: 0
       type: object
       required:
         - id
@@ -9809,6 +9845,15 @@ components:
             confirmed: the next filing with the same first name, last name, email
             and mobile needs no code and has no submission fee. Dismiss a rejected
             registration first. Ignore it on older registrations."
+          default: false
+        waiting_for_credit:
+          type: boolean
+          title: Waiting For Credit
+          description:
+            "True when a US texting registration waits for credit: its
+            next step, filing the campaign, has a carrier fee your balance does not
+            cover. Nothing is filed until it does. Add credit; Hail goes on at its
+            next check."
           default: false
       type: object
       required:
