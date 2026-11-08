@@ -1097,7 +1097,8 @@ def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
     others = [
         p["msg"]
         for p in problems
-        if not (
+        if isinstance(p.get("msg"), str)
+        and not (
             len(p.get("loc", [])) >= 2
             and p["loc"][0] == "body"
             and str(p["loc"][1]) not in _NOT_ANSWERS
