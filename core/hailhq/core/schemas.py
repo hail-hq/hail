@@ -2816,3 +2816,17 @@ class VerificationResponse(BaseModel):
             "goes on at its next check."
         ),
     )
+    credit_needed_cents: int | None = Field(
+        default=None,
+        description=(
+            "The credit this registration still needs before Hail files its "
+            "campaign, in US cents; null when `waiting_for_credit` is false. "
+            "Per registration, not a running total: the credit goes to the "
+            "organization's waiting registrations oldest first, and each one "
+            "shows only its own share (the first also covers any shortfall "
+            "of the balance). Add the sum over every registration with "
+            "`waiting_for_credit` true, and one top-up lets them all go. It "
+            "is the carrier's fee less your credit, so it changes as the "
+            "balance does; read it again before you pay."
+        ),
+    )

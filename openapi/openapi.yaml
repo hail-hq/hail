@@ -5555,9 +5555,11 @@ paths:
 
         credit does not cover its fee (`waiting_for_credit` is true until you
 
-        add credit). It also waits while another check of it is running or
+        add credit; `credit_needed_cents` says how much). It also waits while
 
-        recently failed, or another process holds it; a later check files it.
+        another check of it is running or recently failed, or another process
+
+        holds it; a later check files it.
 
         Poll GET /verifications/{id} until `approved`. A wrong or expired code is
 
@@ -10081,6 +10083,20 @@ components:
             cover. Nothing is filed until it does. Add credit; Hail goes on at its
             next check."
           default: false
+        credit_needed_cents:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Credit Needed Cents
+          description:
+            "The credit this registration still needs before Hail files
+            its campaign, in US cents; null when `waiting_for_credit` is false. Per
+            registration, not a running total: the credit goes to the organization's
+            waiting registrations oldest first, and each one shows only its own share
+            (the first also covers any shortfall of the balance). Add the sum over
+            every registration with `waiting_for_credit` true, and one top-up lets
+            them all go. It is the carrier's fee less your credit, so it changes
+            as the balance does; read it again before you pay."
       type: object
       required:
         - id

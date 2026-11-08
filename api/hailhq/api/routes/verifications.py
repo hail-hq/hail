@@ -775,18 +775,25 @@ _GATE_COLUMNS = (
 
 async def _campaign_unfunded(
     db: AsyncSession, rows: list[CarrierVerification], registry: Registry
-) -> set[UUID]:
-    """Ids of the rows whose campaign is still to file (``_campaign_gated``)
-    while the credit does not cover the carrier's campaign fee. Their polls
-    file no campaign until a top-up. The public API knows no Hail prices; the
-    carrier's cost is the floor, as for the filing.
+) -> dict[UUID, int]:
+    """The rows whose campaign is still to file (``_campaign_gated``) while
+    the credit does not cover the carrier's campaign fee, each with the
+    credit it still needs, in cents. Their polls file no campaign until a
+    top-up. The public API knows no Hail prices; the carrier's cost is the
+    floor, as for the filing.
 
     The credit is the balance less the steps not yet charged
     (``_uncharged_cents``). It goes to the organization's registrations
     still before their campaign, reserved ones first (``_campaign_reserved_sql``)
     then oldest first, each using up its fee, so
     one credit never pays for two campaigns. All of them count, not only
-    ``rows``, so every path gives the credit to the same registration."""
+    ``rows``, so every path gives the credit to the same registration.
+
+    The credit needed is per row and adds up: the first row left without
+    credit needs its fee less what is left once every covered row has
+    taken its own (more than its fee when that is below zero), each later
+    one its whole fee. So the sum over an organization's waiting rows is
+    the one top-up that lets them all go."""
     given = {row.id for row in rows}
     # From every US texting row given, not only those gated in the caller's
     # copy: a copy can be stale. The stored rows decide below.
@@ -795,7 +802,7 @@ async def _campaign_unfunded(
         for row in rows
         if _billed_sms(row) and row.state not in _SETTLED_STATES
     }
-    unfunded: set[UUID] = set()
+    unfunded: dict[UUID, int] = {}
     for org in orgs:
         # The stored rows, not the caller's copies: a copy can be stale (the
         # sweeper reads all rows first). Columns only, so the rows the caller
@@ -813,6 +820,7 @@ async def _campaign_unfunded(
         left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
         # A reserved row (its campaign may be in flight) keeps its claim.
         order = sorted(found, key=lambda r: (not r.reserved, r.created_at, r.id))
+        waiting: list[tuple[UUID, int]] = []
         for row in order:
             if not _campaign_gated(row, registry):
                 continue
@@ -824,10 +832,14 @@ async def _campaign_unfunded(
             if fee is None:
                 continue
             if left < fee:
-                unfunded.add(row.id)
+                waiting.append((row.id, fee))
             else:
                 left -= fee
-    return unfunded & given
+        # ``left`` only falls, so it is below each waiting row's fee: the
+        # first one needs more than zero.
+        for i, (row_id, fee) in enumerate(waiting):
+            unfunded[row_id] = fee - left if i == 0 else fee
+    return {row_id: need for row_id, need in unfunded.items() if row_id in given}
 
 
 class _CreditCheck(NamedTuple):
@@ -1203,11 +1215,12 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
     *,
-    waiting_for_credit: bool = False,
+    credit_needed_cents: int | None = None,
 ) -> VerificationResponse:
     """The response for a row, with ``confirmation``, ``step`` and
-    ``identity_confirmed`` filled in. ``waiting_for_credit``: the row is in
-    ``_campaign_unfunded`` (the caller reads the balance)."""
+    ``identity_confirmed`` filled in. ``credit_needed_cents``: the row's
+    credit need from ``_campaign_unfunded`` (the caller reads the balance),
+    None when it does not wait for credit."""
     refs = row.provider_refs or {}
     identity_confirmed = bool(refs.get("kept_brand_id"))
     if row.purpose == "sms" and row.state == "rejected":
@@ -1227,7 +1240,8 @@ def _out(
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
             "cancellable": _can_cancel(row),
-            "waiting_for_credit": waiting_for_credit,
+            "waiting_for_credit": credit_needed_cents is not None,
+            "credit_needed_cents": credit_needed_cents,
         }
     )
 
@@ -1238,9 +1252,10 @@ async def _out_checked(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """``_out`` with ``waiting_for_credit`` read from the balance."""
-    waiting = row.id in await _campaign_unfunded(db, [row], registry)
-    return _out(row, registry, model, waiting_for_credit=waiting)
+    """``_out`` with ``waiting_for_credit`` and ``credit_needed_cents`` read
+    from the balance."""
+    waiting = await _campaign_unfunded(db, [row], registry)
+    return _out(row, registry, model, credit_needed_cents=waiting.get(row.id))
 
 
 async def approved_handles(
@@ -2482,7 +2497,7 @@ async def list_verifications(
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
     waiting = await _campaign_unfunded(db, rows, registry)
-    return [_out(r, registry, waiting_for_credit=r.id in waiting) for r in rows]
+    return [_out(r, registry, credit_needed_cents=waiting.get(r.id)) for r in rows]
 
 
 @router.get(
@@ -2817,8 +2832,9 @@ async def confirm_verification(
     registration. Use it when the verification shows `confirmation: "code"`.
     On success the campaign is usually filed at once. It waits when your
     credit does not cover its fee (`waiting_for_credit` is true until you
-    add credit). It also waits while another check of it is running or
-    recently failed, or another process holds it; a later check files it.
+    add credit; `credit_needed_cents` says how much). It also waits while
+    another check of it is running or recently failed, or another process
+    holds it; a later check files it.
     Poll GET /verifications/{id} until `approved`. A wrong or expired code is
     422 on `code`; after five wrong codes, 429 until the carrier sends a
     new code (once a day). 409 when there is nothing to confirm."""
@@ -2923,7 +2939,7 @@ async def admin_list(
     )
     waiting = await _campaign_unfunded(db, rows, registry)
     return [
-        _out(r, registry, AdminVerification, waiting_for_credit=r.id in waiting)
+        _out(r, registry, AdminVerification, credit_needed_cents=waiting.get(r.id))
         for r in rows
     ]
 
