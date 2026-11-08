@@ -4677,12 +4677,6 @@ paths:
               - type: string
               - type: "null"
             title: Authorization
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              $ref: "#/components/schemas/Body_upload_sms_evidence"
       responses:
         "201":
           description: Successful Response
@@ -4717,7 +4711,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /v1/verifications/sms/evidence/{token}:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A PNG, JPG or PDF of 10 MB or less.
+  /v1/verifications/sms/evidence/{organization_id}/{token}:
     get:
       tags:
         - verifications
@@ -4729,6 +4736,13 @@ paths:
         No sign-in. Carrier reviewers open this link."
       operationId: get_sms_evidence
       parameters:
+        - name: organization_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Organization Id
         - name: token
           in: path
           required: true
@@ -5949,17 +5963,6 @@ components:
       required:
         - file
       title: Body_upload_email_attachment
-    Body_upload_sms_evidence:
-      properties:
-        file:
-          type: string
-          contentMediaType: application/octet-stream
-          title: File
-          description: A PNG, JPG or PDF of 10 MB or less.
-      type: object
-      required:
-        - file
-      title: Body_upload_sms_evidence
     CallCreate:
       properties:
         recipient_consent:

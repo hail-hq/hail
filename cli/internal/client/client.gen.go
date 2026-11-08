@@ -1744,12 +1744,6 @@ type BodyUploadEmailAttachment struct {
 	File string `json:"file"`
 }
 
-// BodyUploadSmsEvidence defines model for Body_upload_sms_evidence.
-type BodyUploadSmsEvidence struct {
-	// File A PNG, JPG or PDF of 10 MB or less.
-	File string `json:"file"`
-}
-
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
 	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
@@ -4175,6 +4169,12 @@ type GetVerificationRequirementsParams struct {
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParamsSubjectType string
 
+// UploadSmsEvidenceMultipartBody defines parameters for UploadSmsEvidence.
+type UploadSmsEvidenceMultipartBody struct {
+	// File A PNG, JPG or PDF of 10 MB or less.
+	File openapi_types.File `json:"file"`
+}
+
 // UploadSmsEvidenceParams defines parameters for UploadSmsEvidence.
 type UploadSmsEvidenceParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4317,7 +4317,7 @@ type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
 
 // UploadSmsEvidenceMultipartRequestBody defines body for UploadSmsEvidence for multipart/form-data ContentType.
-type UploadSmsEvidenceMultipartRequestBody = BodyUploadSmsEvidence
+type UploadSmsEvidenceMultipartRequestBody UploadSmsEvidenceMultipartBody
 
 // PreviewSmsApplicationJSONRequestBody defines body for PreviewSmsApplication for application/json ContentType.
 type PreviewSmsApplicationJSONRequestBody = SmsPreviewRequest
@@ -4929,7 +4929,7 @@ type ClientInterface interface {
 	UploadSmsEvidenceWithBody(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSmsEvidence request
-	GetSmsEvidence(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetSmsEvidence(ctx context.Context, organizationId openapi_types.UUID, token string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewSmsApplicationWithBody request with any body
 	PreviewSmsApplicationWithBody(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5974,8 +5974,8 @@ func (c *Client) UploadSmsEvidenceWithBody(ctx context.Context, params *UploadSm
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSmsEvidence(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSmsEvidenceRequest(c.Server, token)
+func (c *Client) GetSmsEvidence(ctx context.Context, organizationId openapi_types.UUID, token string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsEvidenceRequest(c.Server, organizationId, token)
 	if err != nil {
 		return nil, err
 	}
@@ -10182,12 +10182,19 @@ func NewUploadSmsEvidenceRequestWithBody(server string, params *UploadSmsEvidenc
 }
 
 // NewGetSmsEvidenceRequest generates requests for GetSmsEvidence
-func NewGetSmsEvidenceRequest(server string, token string) (*http.Request, error) {
+func NewGetSmsEvidenceRequest(server string, organizationId openapi_types.UUID, token string) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
 
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "token", token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organization_id", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "token", token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
 	if err != nil {
 		return nil, err
 	}
@@ -10197,7 +10204,7 @@ func NewGetSmsEvidenceRequest(server string, token string) (*http.Request, error
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/v1/verifications/sms/evidence/%s", pathParam0)
+	operationPath := fmt.Sprintf("/v1/verifications/sms/evidence/%s/%s", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -11369,7 +11376,7 @@ type ClientWithResponsesInterface interface {
 	UploadSmsEvidenceWithBodyWithResponse(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadSmsEvidenceResponse, error)
 
 	// GetSmsEvidenceWithResponse request
-	GetSmsEvidenceWithResponse(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error)
+	GetSmsEvidenceWithResponse(ctx context.Context, organizationId openapi_types.UUID, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error)
 
 	// PreviewSmsApplicationWithBodyWithResponse request with any body
 	PreviewSmsApplicationWithBodyWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error)
@@ -13997,8 +14004,8 @@ func (c *ClientWithResponses) UploadSmsEvidenceWithBodyWithResponse(ctx context.
 }
 
 // GetSmsEvidenceWithResponse request returning *GetSmsEvidenceResponse
-func (c *ClientWithResponses) GetSmsEvidenceWithResponse(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error) {
-	rsp, err := c.GetSmsEvidence(ctx, token, reqEditors...)
+func (c *ClientWithResponses) GetSmsEvidenceWithResponse(ctx context.Context, organizationId openapi_types.UUID, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error) {
+	rsp, err := c.GetSmsEvidence(ctx, organizationId, token, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

@@ -47,6 +47,7 @@ from uuid import UUID
 
 from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
 from hailhq.core.recordings import delete_recording
+from hailhq.core.sms_evidence import delete_org_evidence
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +69,7 @@ class PurgeSummary:
     sms_scrubbed: int = 0
     emails_scrubbed: int = 0
     contacts_deleted: int = 0
+    evidence_files_deleted: int = 0
     # Compatibility counter for older operator consumers. Audio is now optional.
     calls_with_unexpected_recording: int = 0
 
@@ -89,6 +91,8 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
       CHECK constraint requires at least one of ``body_text``/
       ``body_html`` to be non-NULL; an empty string satisfies the
       constraint while still clearing the actual content.
+    * SMS registration evidence files (public consent screenshots) are
+      deleted from the mail bucket.
     * ``Contact`` rows scoped to the org are deleted outright — see module
       docstring; this is the explicit replacement for the FK cascade that
       isn't possible across the two databases.
@@ -135,6 +139,10 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     )
     for call in recordings:
         await delete_recording(call)
+
+    # Public links must stop working once the account's data is gone.
+    for org_id in org_ids:
+        summary.evidence_files_deleted += await delete_org_evidence(org_id)
 
     call_result = await session.execute(
         update(Call)
@@ -192,12 +200,13 @@ async def _main() -> None:
     logger.info(
         "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
         "%d sms scrubbed, %d email(s) scrubbed, %d contact(s) deleted, "
-        "%d unexpected recording anomaly(ies)",
+        "%d evidence file(s) deleted, %d unexpected recording anomaly(ies)",
         len(summary.organizations_purged),
         summary.calls_scrubbed,
         summary.sms_scrubbed,
         summary.emails_scrubbed,
         summary.contacts_deleted,
+        summary.evidence_files_deleted,
         summary.calls_with_unexpected_recording,
     )
 

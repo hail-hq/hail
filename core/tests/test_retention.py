@@ -284,3 +284,36 @@ async def test_purge_expired_data_deletes_optional_recording(
     assert call.recording_s3_key is None
     storage.delete_object.assert_called_once()
     assert call.transcript is None
+
+
+async def test_purge_expired_data_deletes_closed_org_evidence_only(
+    async_session, monkeypatch
+):
+    """Public consent screenshots stop working once the account's data goes."""
+    closed, open_org = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        OrgClosure(
+            organization_id=closed,
+            closed_at=now - timedelta(days=400),
+            source="hail_website",
+        )
+    )
+    async_session.add(
+        OrgClosure(
+            organization_id=open_org,
+            closed_at=now - timedelta(days=10),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+    deleted: list[uuid.UUID] = []
+
+    async def fake_delete(org_id):
+        deleted.append(org_id)
+        return 2
+
+    monkeypatch.setattr("hailhq.core.retention.delete_org_evidence", fake_delete)
+    summary = await purge_expired_data(async_session, now)
+    assert deleted == [closed]
+    assert summary.evidence_files_deleted == 2

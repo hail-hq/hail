@@ -20,9 +20,21 @@ data "aws_iam_policy_document" "main" {
   # Consent screenshots for US SMS registration. Carrier reviewers open
   # them through the API's public link (routes/sms_evidence.py).
   statement {
-    sid       = "SmsEvidenceReadWrite"
-    actions   = ["s3:GetObject", "s3:PutObject"]
+    sid       = "SmsEvidenceReadWriteDelete"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.inbound.arn}/sms-evidence/*"]
+  }
+
+  # The retention sweep lists a closed organization's evidence to delete it.
+  statement {
+    sid       = "SmsEvidenceList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.inbound.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["sms-evidence/*"]
+    }
   }
 
   statement {

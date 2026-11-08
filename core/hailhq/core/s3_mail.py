@@ -40,27 +40,38 @@ class S3MailClient:
 
         return await asyncio.to_thread(_do)
 
-    async def put_attachment(
-        self,
-        key: str,
-        payload: bytes,
-        content_type: str,
-        *,
-        metadata: dict[str, str] | None = None,
-    ) -> None:
+    async def put_attachment(self, key: str, payload: bytes, content_type: str) -> None:
         await asyncio.to_thread(
             self._client.put_object,
             Bucket=self._bucket,
             Key=key,
             Body=payload,
             ContentType=content_type,
-            **({"Metadata": metadata} if metadata else {}),
         )
 
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(
             self._client.delete_object, Bucket=self._bucket, Key=key
         )
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Delete every object under ``prefix``; returns how many."""
+
+        def _do() -> int:
+            deleted = 0
+            pages = self._client.get_paginator("list_objects_v2").paginate(
+                Bucket=self._bucket, Prefix=prefix
+            )
+            for page in pages:
+                keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+                if keys:
+                    self._client.delete_objects(
+                        Bucket=self._bucket, Delete={"Objects": keys, "Quiet": True}
+                    )
+                    deleted += len(keys)
+            return deleted
+
+        return await asyncio.to_thread(_do)
 
     async def presign_get(self, key: str, *, ttl_seconds: int = 300) -> str:
         def _do() -> str:

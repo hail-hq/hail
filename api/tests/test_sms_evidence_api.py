@@ -15,6 +15,7 @@ from .conftest import insert_org_and_key  # noqa: F401
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
 PDF = b"%PDF-1.4 fake"
+ORG = "8f6f3c1e-2d4b-4a8e-9b1a-0c2d3e4f5a6b"
 
 
 @pytest.fixture()
@@ -47,16 +48,14 @@ async def test_upload_returns_a_public_link(
     body = resp.json()
     assert body["content_type"] == kind
     assert body["size_bytes"] == len(data)
-    prefix = "/v1/verifications/sms/evidence/"
+    prefix = f"/v1/verifications/sms/evidence/{org_and_key[0]}/"
     assert prefix in body["url"]
     token = body["url"].split(prefix)[1]
     assert len(token) == 32
     key, payload, content_type = store.put_attachment.await_args.args
-    assert key == f"sms-evidence/{token}"
+    # Stored under the organization, so closing it can delete the folder.
+    assert key == f"sms-evidence/{org_and_key[0]}/{token}"
     assert (payload, content_type) == (data, kind)
-    assert store.put_attachment.await_args.kwargs["metadata"] == {
-        "organization-id": str(org_and_key[0])
-    }
 
 
 @pytest.mark.parametrize(
@@ -94,6 +93,43 @@ async def test_upload_refuses_a_big_file(
     store.put_attachment.assert_not_awaited()
 
 
+async def test_upload_refuses_a_big_body_before_reading_it(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        content=b"x",
+        headers={
+            **_auth(org_and_key),
+            "content-type": "multipart/form-data; boundary=x",
+            "content-length": str(20 * 1024 * 1024),
+        },
+    )
+    assert resp.status_code == 422
+    assert "10 MB" in resp.json()["detail"]
+
+
+async def test_upload_needs_one_file_part(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"other": ("shot.png", PNG, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 422
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files=[
+            ("file", ("a.png", PNG, "image/png")),
+            ("file", ("b.png", PNG, "image/png")),
+        ],
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 422
+    store.put_attachment.assert_not_awaited()
+
+
 async def test_upload_needs_a_key(client: httpx.AsyncClient, store) -> None:
     resp = await client.post(
         "/v1/verifications/sms/evidence",
@@ -122,35 +158,44 @@ async def test_upload_without_storage_says_paste_a_link(
 async def test_link_opens_without_sign_in(client: httpx.AsyncClient, store) -> None:
     store.fetch_raw.return_value = PNG
     token = "a" * 32
-    resp = await client.get(f"/v1/verifications/sms/evidence/{token}")
+    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{token}")
     assert resp.status_code == 200
     assert resp.content == PNG
     assert resp.headers["content-type"] == "image/png"
     assert resp.headers["x-content-type-options"] == "nosniff"
     assert resp.headers["content-disposition"] == "inline"
     assert "sandbox" in resp.headers["content-security-policy"]
-    store.fetch_raw.assert_awaited_once_with(f"sms-evidence/{token}")
+    store.fetch_raw.assert_awaited_once_with(f"sms-evidence/{ORG}/{token}")
 
 
 async def test_link_never_serves_a_stored_file_of_another_type(
     client: httpx.AsyncClient, store
 ) -> None:
     store.fetch_raw.return_value = b"<html></html>"
-    resp = await client.get(f"/v1/verifications/sms/evidence/{'a' * 32}")
+    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
     assert resp.status_code == 404
 
 
-@pytest.mark.parametrize("token", ["short", "a" * 33, "a" * 31 + "."])
-async def test_bad_tokens_are_404_without_a_read(
-    client: httpx.AsyncClient, store, token
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{ORG}/short",
+        f"{ORG}/{'a' * 33}",
+        f"{ORG}/{'a' * 31}.",
+        f"not-a-uuid/{'a' * 32}",
+    ],
+)
+async def test_bad_links_are_refused_without_a_read(
+    client: httpx.AsyncClient, store, path
 ) -> None:
-    resp = await client.get(f"/v1/verifications/sms/evidence/{token}")
-    assert resp.status_code == 404
+    resp = await client.get(f"/v1/verifications/sms/evidence/{path}")
+    assert resp.status_code in (404, 422)
+    store.fetch_raw.assert_not_awaited()
     store.fetch_raw.assert_not_awaited()
 
 
 @pytest.mark.parametrize("code", ["NoSuchKey", "AccessDenied"])
 async def test_unknown_link_is_404(client: httpx.AsyncClient, store, code) -> None:
     store.fetch_raw.side_effect = ClientError({"Error": {"Code": code}}, "GetObject")
-    resp = await client.get(f"/v1/verifications/sms/evidence/{'b' * 32}")
+    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'b' * 32}")
     assert resp.status_code == 404
