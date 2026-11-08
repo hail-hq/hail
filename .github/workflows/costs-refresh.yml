@@ -27,7 +27,7 @@ name: costs-refresh
 #     is longer, so a timed-out run still exports what it finished.
 on:
   schedule:
-    - cron: "0 5 * * 1" # Mondays 05:00 UTC, before the number sync and stale check
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC. Order of the Monday jobs: costs/README.md, "Weekly jobs, in order"
   workflow_dispatch: {}
 
 concurrency:

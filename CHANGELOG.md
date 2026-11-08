@@ -7,10 +7,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
+- Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 
 ### Fixed
 
+- Verification: when several Twilio requirements accept only the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
 - Voice replies start sooner: the call's instructions are cached after the first turn.
 - `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.

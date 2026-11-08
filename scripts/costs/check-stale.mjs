@@ -21,6 +21,7 @@ const ROW_ARRAYS = {
   didww: ['numbers'],
   sms: ['providers'],
   'sms-registration': ['providers'],
+  voice: ['rates'],
 };
 
 export function rowsForFile(filename, data) {
@@ -58,7 +59,8 @@ function rowLabel(row) {
     row.model_id ||
     row.display_name ||
     row.carrier ||
-    [row.country_code, row.direction].filter(Boolean).join(' ') ||
+    row.name ||
+    [row.country_code, row.direction, row.number_type].filter(Boolean).join(' ') ||
     '(row)';
   return [row.provider, label].filter(Boolean).join(' / ');
 }
