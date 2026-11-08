@@ -999,7 +999,10 @@ def _problems(resp: httpx.Response) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
     for item in detail:
-        if not isinstance(item, dict) or not isinstance(item.get("msg"), str):
+        # A problem with no message text tells the agent nothing: drop it here,
+        # once, for every tool.
+        msg = item.get("msg") if isinstance(item, dict) else None
+        if not isinstance(msg, str) or not msg.strip():
             continue
         loc = item.get("loc")
         loc = (

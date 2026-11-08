@@ -1702,3 +1702,29 @@ async def test_preview_sms_application_passes_a_plain_422_sentence(
         client=client, subject_type="person", fields={"program_name": "Acme"}
     )
     assert result == {"error": "Keep samples < 160 characters."}
+
+
+@respx.mock
+async def test_preview_sms_application_drops_problems_with_no_message(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {"loc": ["body", "number_id"], "msg": ""},
+                    {"loc": ["body", "number_id"], "msg": "   "},
+                    {"loc": ["body", "number_id"]},
+                    {"loc": ["body", "number_id"], "msg": "Pass number_id."},
+                ]
+            },
+        )
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="person", fields={"program_name": "Acme"}
+    )
+    assert result == {
+        "error": "Pass number_id.",
+        "problems": [{"loc": ["body", "number_id"], "msg": "Pass number_id."}],
+    }
