@@ -191,11 +191,19 @@ class TelnyxVerificationProvider(VerificationProvider):
         )
         return _rules_for(payload, country_code, number_type)
 
+    async def rules(self, country_code: str, number_type: str) -> list[dict]:
+        """The raw rules for one country and type. A carrier outage is a
+        ``VerificationProviderError``. Not cached."""
+        try:
+            return await self._rules(country_code, number_type)
+        except httpx.HTTPError as exc:
+            raise VerificationProviderError("Telnyx request failed") from exc
+
     async def _not_for(
         self, country_code: str, number_type: str, subject_type: SubjectType
     ) -> set[str]:
         """Ids of the text rules Telnyx tags for the other kind of end user."""
-        rules = await self._rules(country_code, number_type)
+        rules = await self.rules(country_code, number_type)
         return {
             r["id"]
             for r in rules
@@ -203,12 +211,24 @@ class TelnyxVerificationProvider(VerificationProvider):
         }
 
     async def requirements(
-        self, country_code: str, number_type: str, subject_type: SubjectType
+        self,
+        country_code: str,
+        number_type: str,
+        subject_type: SubjectType,
     ) -> Requirements:
-        try:
-            rules = await self._rules(country_code, number_type)
-        except httpx.HTTPError as exc:
-            raise VerificationProviderError("Telnyx request failed") from exc
+        rules = await self.rules(country_code, number_type)
+        return self.requirements_from_rules(
+            country_code, number_type, subject_type, rules
+        )
+
+    def requirements_from_rules(
+        self,
+        country_code: str,
+        number_type: str,
+        subject_type: SubjectType,
+        rules: list[dict],
+    ) -> Requirements:
+        """``requirements`` for rules already fetched with :meth:`rules`."""
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
         if subject_type not in allowed:
             raise UnsupportedSubjectType(

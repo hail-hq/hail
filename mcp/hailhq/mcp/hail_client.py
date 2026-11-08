@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import asdict
+from dataclasses import fields as dataclass_fields
 from typing import Any
 from urllib.parse import quote
 
@@ -31,6 +33,7 @@ import httpx
 from hailhq.core.carrier_offer import NumberQuotesResponse
 from hailhq.core.config import settings
 from hailhq.core.providers.verification import VerificationRequirements
+from hailhq.core.providers.verification.sms_form import CampaignText
 from hailhq.core.regions import NumberRegionsResponse
 from hailhq.core.schemas import (
     AgentCreate,
@@ -55,12 +58,15 @@ from hailhq.core.schemas import (
     PhoneNumberListResponse,
     PhoneNumberResponse,
     PhoneNumberRoutingUpdate,
+    SmsApplicationAmendRequest,
+    SmsApplicationResponse,
     SmsCreate,
     SmsListResponse,
     SmsResponse,
     VerificationResponse,
     WhoamiResponse,
 )
+from pydantic import TypeAdapter, ValidationError
 from typing_extensions import Self
 
 
@@ -81,14 +87,28 @@ class HailAPIError(Exception):
         detail: str,
         retry_after: str | None = None,
         problems: list[dict[str, Any]] | None = None,
+        message: str | None = None,
     ) -> None:
         super().__init__(f"hail api error {status}: {detail}")
         self.status = status
         self.detail = detail
+        # The API's own sentence: set only when the JSON body's ``detail`` is
+        # a plain string. Never a proxy page or a list holding submitted input.
+        self.message = message
         self.retry_after = retry_after
         # Carrier problems from a 422 on POST /verifications, reduced to
         # ``loc`` and ``msg`` only. See ``HailClient.submit_verification``.
         self.problems = problems
+
+
+class PreviewShapeError(Exception):
+    """The preview reply does not match this MCP's CampaignText: the API and
+    MCP versions differ. Retrying does not help."""
+
+
+# The preview's reply shape, built once.
+_CAMPAIGN_TEXT = TypeAdapter(CampaignText)
+_CAMPAIGN_KEYS = frozenset(f.name for f in dataclass_fields(CampaignText))
 
 
 class HailClient:
@@ -589,6 +609,68 @@ class HailClient:
             mode="json"
         )
 
+    async def get_sms_application(self, verification_id: str) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        resp = await self._client.get(f"/verifications/{verification_id_}/application")
+        return SmsApplicationResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def preview_sms_application(
+        self,
+        *,
+        subject_type: str,
+        fields: dict[str, str],
+        address: dict[str, str] | None = None,
+        number_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications/sms/preview: the campaign text a carrier
+        reviews. Files nothing and charges nothing. A 422 carries the field
+        problems."""
+        body: dict[str, Any] = {"subject_type": subject_type, "fields": fields}
+        if address is not None:
+            body["address"] = address
+        if number_id is not None:
+            body["number_id"] = number_id
+        resp = await self._client.post("/verifications/sms/preview", json=body)
+        if not resp.is_success:
+            _decode(resp, problems=True)  # raises the API error
+        # The reply must be exactly this MCP's CampaignText, version 1: every
+        # key, no other key, each of the right type. Anything else means the
+        # API and MCP differ, and the agent must not show partial text.
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise PreviewShapeError from exc
+        if (
+            not isinstance(data, dict)
+            or set(data) != _CAMPAIGN_KEYS
+            or data.get("schema_version") != 1
+        ):
+            raise PreviewShapeError
+        try:
+            return asdict(_CAMPAIGN_TEXT.validate_json(resp.content, strict=True))
+        except ValidationError as exc:
+            raise PreviewShapeError from exc
+
+    async def amend_sms_application(
+        self,
+        verification_id: str,
+        *,
+        fields: dict[str, str] | None = None,
+        address: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        body = SmsApplicationAmendRequest(fields=fields, address=address)
+        resp = await self._client.patch(
+            f"/verifications/{verification_id_}/application",
+            json=body.model_dump(mode="json"),
+            timeout=120.0,
+        )
+        return VerificationResponse.model_validate(
+            _decode(resp, problems=True)
+        ).model_dump(mode="json")
+
     async def cancel_verification(self, verification_id: str) -> dict[str, Any]:
         verification_id_ = _path_id(verification_id, name="verification_id")
         resp = await self._client.delete(f"/verifications/{verification_id_}")
@@ -849,15 +931,29 @@ def _path_id(value: str, *, name: str = "id") -> str:
     return quote(value, safe="")
 
 
-def _decode(resp: httpx.Response) -> Any:
-    """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise."""
+def _decode(resp: httpx.Response, *, problems: bool = False) -> Any:
+    """Return the JSON body on 2xx, raise :class:`HailAPIError` otherwise.
+    With ``problems``, a 422 carries its field problems (without the input)
+    and the error carries the API's own sentence when there is one."""
     if 200 <= resp.status_code < 300:
         return resp.json()
     raise HailAPIError(
         status=resp.status_code,
         detail=_error_detail(resp),
         retry_after=resp.headers.get("retry-after"),
+        problems=_problems(resp) if problems and resp.status_code == 422 else None,
+        message=_api_message(resp) if problems else None,
     )
+
+
+def _api_message(resp: httpx.Response) -> str | None:
+    """The JSON body's ``detail`` when it is a plain string, else None."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) and detail.strip() else None
 
 
 def _decode_empty(resp: httpx.Response) -> None:
@@ -903,7 +999,10 @@ def _problems(resp: httpx.Response) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
     for item in detail:
-        if not isinstance(item, dict) or not isinstance(item.get("msg"), str):
+        # A problem with no message text tells the agent nothing: drop it here,
+        # once, for every tool.
+        msg = item.get("msg") if isinstance(item, dict) else None
+        if not isinstance(msg, str) or not msg.strip():
             continue
         loc = item.get("loc")
         loc = (
@@ -927,4 +1026,4 @@ def _error_detail(resp: httpx.Response) -> str:
     return str(payload)
 
 
-__all__ = ["HailAPIError", "HailClient"]
+__all__ = ["HailAPIError", "HailClient", "PreviewShapeError"]

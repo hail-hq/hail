@@ -1264,3 +1264,37 @@ async def test_non_didww_timeout_unchanged(async_session, org_and_key, monkeypat
     await async_session.refresh(number)
     await reconcile_order(async_session, number, force=True)
     assert number.provisioning_state == "failed"
+
+
+async def test_sms_price_breakdown_reserved_once_and_persisted(
+    async_session, org_and_key, monkeypatch
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org, monthly=110, setup=300)
+    offer.capabilities = ["voice", "sms"]
+    offer.monthly_price_version = 2
+    offer.base_monthly_cents = 100
+    offer.capability_monthly_cents = 10
+    row.offer = offer.model_dump(mode="json")
+    await async_session.commit()
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(
+        side_effect=[
+            {"data": {"id": str(uuid4()), "status": "pending"}},
+            {"data": {"id": str(uuid4()), "status": "pending"}},
+        ]
+    )
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
+    number = await buy(async_session, org, row)
+    assert await get_balance_cents(async_session, org) == 99590
+    assert number.provisioning_metadata["monthly_cents"] == 110
+    assert number.provisioning_metadata["base_monthly_cents"] == 100
+    assert number.provisioning_metadata["capability_monthly_cents"] == 10
+    assert number.provisioning_metadata["monthly_price_version"] == 2
+    again = await buy(async_session, org, row)
+    assert again.id == number.id
+    assert await get_balance_cents(async_session, org) == 99590

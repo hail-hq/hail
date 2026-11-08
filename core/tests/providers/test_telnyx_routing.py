@@ -701,3 +701,45 @@ async def test_shared_http_client_is_reused_and_closed():
     second = get_http_client()
     assert second is not first
     await close_http_client()
+
+
+@pytest.mark.parametrize(
+    "selected,monthly", [(["voice"], 100), (["sms"], 110), (["voice", "sms"], 110)]
+)
+async def test_telnyx_quote_prices_selected_sms_separately(
+    monkeypatch, selected, monthly
+):
+    for key in (
+        "telnyx_api_key",
+        "telnyx_public_key",
+        "telnyx_connection_id",
+        "livekit_telnyx_sip_outbound_trunk_id",
+        "telnyx_sip_username",
+    ):
+        monkeypatch.setattr(settings, key, "test-only")
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            data = [
+                {
+                    "phone_number": "+13405550100",
+                    "features": [{"name": "voice"}, {"name": "sms"}, {"name": "mms"}],
+                    "cost_information": {
+                        "currency": "USD",
+                        "monthly_cost": "1.00",
+                        "upfront_cost": "3.00",
+                    },
+                }
+            ]
+        else:
+            data = []
+        return httpx.Response(200, json={"data": data})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        result = await telnyx_offers(uuid4(), "VI", "local", selected, http)
+    assert result[0].monthly_cents == monthly
+    assert result[0].setup_cents == 300
+    assert result[0].capabilities == sorted(selected)
+    assert result[0].base_monthly_cents == 100
+    assert result[0].capability_monthly_cents == monthly - 100
+    assert result[0].monthly_price_version == 2

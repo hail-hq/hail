@@ -4,6 +4,7 @@
     "mcp",
     "agents",
     "webhooks",
+    "email",
     "react-email",
     "versioning",
     "byo-llm",

@@ -17,6 +17,7 @@ def test_telnyx_fees_match_telnyx() -> None:
     assert fees.filing_fee_cents("telnyx", "business") == 6050
     # 4.50 brand + 15 campaign review; 2/month for a sole proprietor
     assert fees.filing_fee_cents("telnyx", "person") == 1950
+    assert fees.filing_fee_cents("telnyx", "person", brand_kept=True) == 1500
 
 
 def test_unknown_provider_raises() -> None:

@@ -269,12 +269,14 @@ async def test_replace_and_load_mixed(async_session) -> None:
             "contact_id": f"member:{m.id}",
             "name": "Sam",
             "phone_e164": "+14155550126",
+            "email": m.email,
             "note": "first",
         },
         {
             "contact_id": str(c.id),
             "name": "Person 0",
             "phone_e164": "+14155550125",
+            "email": c.email,
             "note": "second",
         },
     ]

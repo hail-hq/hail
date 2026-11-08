@@ -20,12 +20,14 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
+from hailhq.core.providers.verification import twilio as twilio_mod
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
     SubmitRefused,
 )
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
+from twilio.base.exceptions import TwilioRestException
 
 ACCOUNT_SID = "ACtest1234567890abcdef1234567890ab"
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -382,6 +384,108 @@ async def test_create_draft_carrier_problems_are_returned_and_draft_is_deleted(
 
 
 @responses.activate
+async def test_create_draft_evaluation_400_becomes_a_problem(provider) -> None:
+    req = await _person_requirements(provider)
+    _register_draft_calls({})
+    responses.replace(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is missing items", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": "draft"},
+        status=200,
+    )
+    for path in (
+        f"Bundles/BU{'1' * 32}",
+        f"SupportingDocuments/RD{'1' * 32}",
+        f"SupportingDocuments/RD{'2' * 32}",
+        f"EndUsers/IT{'1' * 32}",
+    ):
+        responses.add(responses.DELETE, f"{NUMBERS}/{path}", status=204)
+    responses.add(
+        responses.DELETE,
+        f"https://api.twilio.com/2010-04-01/Accounts/{ACCOUNT_SID}/Addresses/AD{'1' * 32}.json",
+        status=204,
+    )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields=PERSON_FIELDS,
+        address=ADDRESS,
+        documents=_passport(),
+    )
+
+    assert result.refs == {}
+    assert [(p.field, p.message, p.raw) for p in result.problems] == [
+        ("", NOT_ACCEPTED, "Unable to create record: Bundle is missing items")
+    ]
+    deletes = [c.request.url for c in responses.calls if c.request.method == "DELETE"]
+    assert len(deletes) == 5  # bundle, two documents, end user, address
+
+
+@responses.activate
+async def test_check_evaluation_400_becomes_a_problem(provider) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is missing items", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": "draft"},
+        status=200,
+    )
+
+    problems = await provider.check({"bundle_sid": f"BU{'1' * 32}"})
+
+    assert [(p.field, p.message, p.raw) for p in problems] == [
+        ("", NOT_ACCEPTED, "Unable to create record: Bundle is missing items")
+    ]
+
+
+@responses.activate
+@pytest.mark.parametrize("bundle_status", ["pending-review", "provisionally-approved"])
+async def test_check_evaluation_400_of_a_sent_bundle_is_no_problem(
+    provider, bundle_status
+) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 22215, "message": "Bundle is not in draft", "status": 400},
+        status=400,
+    )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}",
+        json={"sid": f"BU{'1' * 32}", "status": bundle_status},
+        status=200,
+    )
+
+    assert await provider.check({"bundle_sid": f"BU{'1' * 32}"}) == []
+
+
+@responses.activate
+async def test_check_evaluation_500_raises(provider) -> None:
+    responses.add(
+        responses.POST,
+        f"{NUMBERS}/Bundles/BU{'1' * 32}/Evaluations",
+        json={"code": 20500, "message": "Internal error", "status": 500},
+        status=500,
+    )
+
+    with pytest.raises(TwilioRestException):
+        await provider.check({"bundle_sid": f"BU{'1' * 32}"})
+
+
+@responses.activate
 async def test_create_draft_carrier_400_becomes_a_problem(provider) -> None:
     req = await _person_requirements(provider)
     responses.add(responses.POST, ADDRESSES, json={"sid": "AD" + "1" * 32}, status=201)
@@ -539,3 +643,109 @@ async def test_choice_fields_become_options(provider) -> None:
     assert by_name["email"].options is None and by_name["email"].pattern
     assert by_name["phone_number"].options is None
     assert by_name["phone_number"].kind == "phone"
+
+
+@responses.activate
+async def test_create_draft_merges_slots_of_one_document_type(provider) -> None:
+    """South Africa: name and ID number both take a government-issued
+    document. Twilio refuses to evaluate a bundle with two documents of one
+    type, so the form asks once and one document carries both values."""
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    responses.reset()
+    _register_draft_calls({"status": "compliant", "results": []})
+
+    def file() -> UploadedFile:
+        return UploadedFile(
+            filename="passport.pdf", content_type="application/pdf", data=b"%PDF"
+        )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields={"first_name": "Ada", "last_name": "Lovelace", "nationality": "ZA"},
+        address=ADDRESS,
+        documents={
+            "address_proof_info": DocumentInput(option="bank_statement", file=file()),
+            "name_info": DocumentInput(
+                option="government_issued_document",
+                fields={"document_number": "9001015009087"},
+                file=file(),
+            ),
+        },
+    )
+
+    assert result.problems == []
+    uploads = [c.request.body for c in responses.calls if c.request.url == UPLOAD]
+    types = sorted(_form_value(b, b"Type").decode() for b in uploads)
+    assert types == ["bank_statement", "government_issued_document"]
+    gov = next(b for b in uploads if b"government_issued_document" in b)
+    assert json.loads(_form_value(gov, b"Attributes")) == {
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "document_number": "9001015009087",
+    }
+    assigned = [c for c in responses.calls if c.request.url.endswith("ItemAssignments")]
+    assert len(assigned) == 3  # end user and the two documents
+
+
+@responses.activate
+async def test_create_draft_refuses_two_different_documents_of_one_type(
+    provider, monkeypatch
+) -> None:
+    """Twilio takes one government-issued document per check: a second,
+    different one is refused before anything is sent, not silently dropped.
+    The form merges such slots; this covers a client that sends both."""
+    monkeypatch.setattr(twilio_mod, "_one_slot_per_type", tuple)
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    responses.reset()
+
+    def file(data: bytes) -> UploadedFile:
+        return UploadedFile(
+            filename="id.pdf", content_type="application/pdf", data=data
+        )
+
+    result = await provider.create_draft(
+        organization_id=ORG,
+        contact_email=CONTACT,
+        requirements=req,
+        fields={"first_name": "Ada", "last_name": "Lovelace", "nationality": "ZA"},
+        address=ADDRESS,
+        documents={
+            "address_proof_info": DocumentInput(
+                option="bank_statement", file=file(b"%PDF bank")
+            ),
+            "name_info": DocumentInput(
+                option="government_issued_document", file=file(b"%PDF passport")
+            ),
+            "identity_doc_no_info": DocumentInput(
+                option="government_issued_document",
+                fields={"document_number": "9001015009087"},
+                file=file(b"%PDF id card"),
+            ),
+        },
+    )
+
+    assert result.refs == {}
+    assert [p.field for p in result.problems] == ["identity_doc_no_info"]
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+async def test_requirements_ask_once_for_slots_of_one_document_type(provider) -> None:
+    _regs_response("ZA-mobile-individual")
+    req = await provider.requirements("ZA", "mobile", "person")
+    assert [s.name for s in req.documents] == ["address_proof_info", "name_info"]
+    gov = req.documents[1]
+    assert gov.label == "Government-issued photo ID"
+    assert gov.help == (
+        "Used for: Proof of Authorized Representative Name, Proof of Identity Number."
+    )
+    (option,) = gov.options
+    assert [f.name for f in option.fields] == ["document_number"]
+    assert option.copies == ("first_name", "last_name")
+    assert [name for name, _ in gov.also] == ["name_info", "identity_doc_no_info"]
+    # The public form has no trace of the merge.
+    assert "also" not in json.dumps(req.model_dump(mode="json"))

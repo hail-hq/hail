@@ -2,7 +2,7 @@
 
 Covers: suppression blocks a send (org-scoped and global), premium-rate
 prefix blocks, velocity caps, and the ``add_suppression`` helper's
-normalization.
+normalization and de-duplication.
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from hailhq.core.compliance_gate import (
     check_email_allowed,
 )
 from hailhq.core.config import settings
-from hailhq.core.models import UsageEvent
+from hailhq.core.models import Suppression, UsageEvent
+from sqlalchemy import select
 
 # --------------------------------------------------------------------------- #
 # Suppression list.
@@ -120,9 +121,28 @@ async def test_check_email_allowed_blocks_suppressed_recipient(async_session):
     assert result.checks["suppression_hit"] is True
 
 
+async def _suppression_rows(session, org_id, recipient) -> list[Suppression]:
+    return list(
+        (
+            await session.execute(
+                select(Suppression).where(
+                    Suppression.recipient == recipient,
+                    (
+                        Suppression.organization_id.is_(None)
+                        if org_id is None
+                        else Suppression.organization_id == org_id
+                    ),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def test_add_suppression_normalizes_email_case(async_session):
     org_id = uuid.uuid4()
-    row = await add_suppression(
+    inserted = await add_suppression(
         async_session,
         organization_id=org_id,
         recipient="Alice@Example.COM",
@@ -131,10 +151,29 @@ async def test_add_suppression_normalizes_email_case(async_session):
         source="unsubscribe_link",
     )
     await async_session.commit()
-    assert row.recipient == "alice@example.com"
+    assert inserted is True
+    rows = await _suppression_rows(async_session, org_id, "alice@example.com")
+    assert [r.recipient for r in rows] == ["alice@example.com"]
 
     result = await check_email_allowed(async_session, org_id, ["alice@example.com"])
     assert result.allowed is False
+
+
+@pytest.mark.parametrize("org_id", [uuid.uuid4(), None], ids=["org", "platform"])
+async def test_add_suppression_twice_keeps_one_row(async_session, org_id):
+    kwargs = {
+        "organization_id": org_id,
+        "recipient": f"dup-{uuid.uuid4().hex[:8]}@example.com",
+        "channel": "email",
+        "source": "unsubscribe_link",
+    }
+    assert await add_suppression(async_session, reason="first", **kwargs) is True
+    await async_session.commit()
+    assert await add_suppression(async_session, reason="second", **kwargs) is False
+    await async_session.commit()
+
+    rows = await _suppression_rows(async_session, org_id, kwargs["recipient"])
+    assert [r.reason for r in rows] == ["first"]
 
 
 async def test_check_email_allowed_passes_when_not_suppressed(async_session):

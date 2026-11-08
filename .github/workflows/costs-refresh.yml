@@ -1,0 +1,264 @@
+name: costs-refresh
+
+# Weekly refresh of the model and SMS price rows, per
+# docs/operations/refresh-costs.md. Claude Code reads vendor pricing pages,
+# edits costs/*.json, and a second job opens a PR for a person to review.
+#
+# It runs on Amazon Bedrock, never the Anthropic API.
+#
+# Required repo secret:
+#   AWS_ROLE_TO_ASSUME   the role_arn output of infra/costs-refresh.
+#                        The role gets short-lived credentials through OIDC,
+#                        so the repo holds no AWS key.
+#
+# Security notes:
+#   - The agent reads untrusted web pages. It runs with --restricted: no
+#     shell, and file tools only inside the repo. It can edit only the four
+#     data files, and WebFetch reaches only the sites listed in
+#     .github/prompts/costs-refresh-settings.json. Bedrock has no WebSearch.
+#   - The AWS role can only call Bedrock models and read inference
+#     profiles, and only the agent steps get its credentials. The job has a
+#     read-only GitHub token, and the checkout keeps no credentials.
+#   - Only the diff of the four data files and the report leave the job. The
+#     job that can write to the repo never runs the agent.
+#   - The PR body comes from the agent, so its text sits in a code fence.
+#     Mentions, links, and closing keywords in it do nothing.
+#   - The budget and the agent timeout cap the cost of one run. The job limit
+#     is longer, so a timed-out run still exports what it finished.
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC. Order of the Monday jobs: costs/README.md, "Weekly jobs, in order"
+  workflow_dispatch: {}
+
+concurrency:
+  group: costs-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the AWS role
+    timeout-minutes: 210
+    outputs:
+      ready: ${{ steps.export.outputs.ready }}
+      branch: ${{ steps.export.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Check the secret is set
+        env:
+          ROLE: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        run: |
+          if [ -z "$ROLE" ]; then
+            echo "::error::AWS_ROLE_TO_ASSUME is not set (Settings → Secrets → Actions)"
+            exit 1
+          fi
+      # Step outputs, not job env: only the agent steps need AWS access.
+      - id: aws
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: eu-central-1
+          role-duration-seconds: 14400
+          output-credentials: true
+          output-env-credentials: false
+      - name: Run the refresh
+        id: agent
+        env:
+          AWS_REGION: eu-central-1
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+        run: |
+          mkdir -p /tmp/out
+          sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh.md > /tmp/prompt.md
+          # A budget stop or timeout exits non-zero. Keep going: the steps
+          # below save the finished rows and fail the job at the end.
+          set +e
+          scripts/costs/run-refresh-agent.sh /tmp/prompt.md 30 150 /tmp/claude.json
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+      - name: Validate
+        id: first_check
+        continue-on-error: true
+        shell: bash
+        run: scripts/costs/check-refresh.sh 2>&1 | tee /tmp/check.log
+      - name: Repair what validation found
+        id: repair
+        if: steps.first_check.outcome == 'failure'
+        env:
+          AWS_REGION: eu-central-1
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+        run: |
+          # A failure with no data edits is not the agent's to fix.
+          if git diff --quiet -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json; then
+            echo "::warning::Validation failed, but the agent changed no data files."
+            exit 0
+          fi
+          {
+            sed "s/{today}/$(date -u +%F)/g" .github/prompts/costs-refresh-repair.md
+            tail -n 200 /tmp/check.log
+          } > /tmp/repair.md
+          scripts/costs/run-refresh-agent.sh /tmp/repair.md 3 15 /tmp/repair.json || echo "::warning::The repair pass exited non-zero."
+      - name: Validate the repair
+        id: second_check
+        if: steps.first_check.outcome == 'failure'
+        continue-on-error: true
+        run: scripts/costs/check-refresh.sh
+      - name: Export the diff and the report
+        id: export
+        if: always()
+        env:
+          AGENT_EXIT: ${{ steps.agent.outputs.exit }}
+          FIRST_CHECK: ${{ steps.first_check.outcome }}
+          SECOND_CHECK: ${{ steps.second_check.outcome }}
+        run: |
+          mkdir -p /tmp/out
+          git diff -- costs/llm.json costs/stt.json costs/tts.json costs/sms.json > /tmp/out/refresh.patch
+          field() {
+            local value
+            value=$(jq -r "$1" "${3:-/tmp/claude.json}" 2>/dev/null || true)
+            echo "${value:-$2}"
+          }
+          is_error=$(field '.is_error // false' true)
+          [ "$AGENT_EXIT" = "0" ] && [ "$is_error" = "false" ] && agent_ok=true || agent_ok=false
+          [ "$FIRST_CHECK" = "success" ] || [ "$SECOND_CHECK" = "success" ] && valid=true || valid=false
+          # What the LLM cost, per pass, from Claude Code's usage report.
+          cost_row() {
+            jq -r --arg pass "$2" '"| \($pass) | \(.usage.input_tokens // 0) | \(.usage.cache_read_input_tokens // 0) | \(.usage.cache_creation_input_tokens // 0) | \(.usage.output_tokens // 0) | $\((.total_cost_usd // 0) * 10000 | round / 10000) |"' "$1" 2>/dev/null || true
+          }
+          # Each file on its own, so one unreadable report does not zero the total.
+          total_cost=$(for f in /tmp/claude.json /tmp/repair.json; do
+            jq -r '.total_cost_usd // 0' "$f" 2>/dev/null || echo 0
+          done | awk '{ s += $1 } END { printf "%.4f", s }')
+          {
+            echo "## LLM cost"
+            echo
+            echo "| Pass | Input tokens | Cache read | Cache write | Output tokens | Cost |"
+            echo "| --- | ---: | ---: | ---: | ---: | ---: |"
+            cost_row /tmp/claude.json Refresh
+            cost_row /tmp/repair.json Repair
+            echo "| **Total** | | | | | **\$${total_cost}** |"
+            echo
+            echo "Claude Code's estimate at list price. The AWS bill for Bedrock can differ."
+          } > /tmp/out/cost.md
+          echo "::notice title=LLM cost::\$${total_cost} for this run (Claude Code's estimate)"
+          {
+            echo "> An agent wrote the report below after reading untrusted web pages. Check the diff before you merge."
+            echo
+            if [ "$agent_ok" != "true" ]; then
+              echo "**The agent did not finish** (exit ${AGENT_EXIT:-none}). The report can be missing, and some providers were not checked."
+              echo
+            fi
+            if [ -e /tmp/repair.json ]; then
+              echo "**A repair pass ran**, because the first validation failed. Its edits are in the diff, and its notes are at the end of the report."
+              echo
+            fi
+            echo "Rows with a new check date: $(grep -c '^+ *\"last_verified\"' /tmp/out/refresh.patch)."
+            echo "Validation passed: ${valid}."
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            cat /tmp/out/cost.md
+            echo
+            # The fence keeps mentions, links, and closing keywords inert.
+            echo '~~~~~~~~ text'
+            {
+              field '.result // "The run gave no report."' "The run gave no report."
+              if [ -e /tmp/repair.json ]; then
+                echo
+                echo "Repair pass:"
+                field '.result // "The repair gave no report."' "The repair gave no report." /tmp/repair.json
+              fi
+            } | sed -E 's/~{8,}/~~~/g'
+            echo '~~~~~~~~'
+          } > /tmp/out/summary.md
+          cat /tmp/out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "agent_ok=$agent_ok"
+            echo "valid=$valid"
+            # A partial run must not replace a complete PR that is still open.
+            if [ "$agent_ok" = "true" ]; then
+              echo "branch=costs/weekly-refresh"
+            else
+              echo "branch=costs/partial-refresh-$(date -u +%F)"
+            fi
+            if [ "$valid" = "true" ] && [ -s /tmp/out/refresh.patch ]; then
+              echo "ready=true"
+            else
+              echo "ready=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: costs-refresh
+          path: |
+            /tmp/out/refresh.patch
+            /tmp/out/summary.md
+            /tmp/out/cost.md
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail the run if the agent or the checks failed
+        if: always()
+        env:
+          AGENT_OK: ${{ steps.export.outputs.agent_ok }}
+          VALID: ${{ steps.export.outputs.valid }}
+        run: |
+          if [ "$AGENT_OK" != "true" ] || [ "$VALID" != "true" ]; then
+            echo "::error::Agent finished: ${AGENT_OK:-false}. Validation passed: ${VALID:-false}."
+            exit 1
+          fi
+
+  open-pr:
+    needs: refresh
+    # A failed refresh job can still hold valid rows, for example after a
+    # budget stop. The failed run stays red so someone looks at it.
+    if: always() && needs.refresh.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: costs-refresh
+          path: /tmp/out
+      - name: Apply the diff
+        id: apply
+        run: |
+          git apply /tmp/out/refresh.patch
+          echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ${{ needs.refresh.outputs.branch }}
+          base: main
+          add-paths: |
+            costs/llm.json
+            costs/stt.json
+            costs/tts.json
+            costs/sms.json
+          title: "feat(costs): weekly refresh ${{ steps.apply.outputs.today }}"
+          commit-message: "feat(costs): weekly refresh ${{ steps.apply.outputs.today }}"
+          body-path: /tmp/out/summary.md
+          labels: costs-refresh
+          # The review request is what sends the email: GitHub does not
+          # notify anyone about a bot's new pull request on its own.
+          reviewers: r13i

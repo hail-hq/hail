@@ -6,26 +6,74 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
-- CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
-- Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
-- Handover: while the agent dials a contact, the contact gets a text with the caller's number and the reason.
-- Hail Cloud emails the organization's owners when a verification is approved or rejected.
-
-### Changed
-
-- **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
-- **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
-- Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
+- MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
+- New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
+- Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
+- `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 
 ### Fixed
 
+- Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
+- Verification: when several Twilio requirements accept only the same document, the form asks for it once.
+- Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
+- Voice replies start sooner: the call's instructions are cached after the first turn.
+- `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.
+- Verification: when Twilio refuses to check the submitted details, the customer sees that the details were not accepted, instead of "carrier unavailable; try again later".
+- Numbers: a number whose carrier asks for a company registration certificate is offered to companies only.
+- Numbers: a number you can buy online now ranks above one only support can order, even when that one needs no papers.
+- US texting: a filing with changed details now needs enough credit for a new submission before Hail files it.
+- US texting: a number the carrier refuses for a registration now gets an audit row with the reason (a new one when the reason changes), and Hail retries it less often.
+- US texting: when the carrier refuses a person's number, Hail now tries their next number.
+
+## [0.32.0] (2026-10-30)
+
+Email stops sending to addresses that hard bounce, complain or unsubscribe,
+and the Gmail and Yahoo unsubscribe button now works. Verifications carry a
+name, and US texting registration is charged per step.
+
+Component versions cut alongside this release:
+**`cli-v0.31.0`** (Homebrew + GitHub Releases) and **`sdk-v0.22.0`** (PyPI).
+Database migrations run on deploy.
+
+### Added
+
+- Email: every send carries the sending organization in its `Feedback-ID` header, so Google Postmaster Tools can show spam rate per organization for mail from the Hail mail domain.
+- Verifications carry the person's or company's name (`subject_name`); an organization may hold several of each kind and picks one at purchase with `verification_id`.
+- CLI: `hail numbers quotes` lists live offers and the verifications that can buy each one.
+- Email suppressions: list them with `GET /v1/emails/suppressions` and remove one with `DELETE /v1/emails/suppressions/{address}`. CLI: `hail email suppressions list` and `hail email suppressions delete <address>`.
+- Verifications show where a US texting filing is (`step`: `confirm_identity`, `filing`, `carrier_review`).
+- US texting: after a rejected campaign, a person who files again with the same details keeps their confirmed brand, with no new PIN or brand fee.
+- `hail-sdk`: `emails.list_suppressions()` and `emails.delete_suppression(address)` list and remove suppressed email addresses.
+- Handover: while the agent dials a contact, the contact gets a text and an email with the caller's number and the reason.
+- Hail Cloud emails the organization's owners when a verification is approved or rejected.
+- Email: a hard bounce or a spam complaint adds the recipient to the organization's suppression list, so the next send to that address is blocked (403).
+
+### Changed
+
+- Agent texts and emails are no longer limited to 5 per call; each is billed as usual.
+- **Breaking.** A hail-mail user prefix now belongs to one organization (`409` if taken), and mail to `<user>@` or `<user>+<any alias>@` reaches that organization.
+- **Breaking.** An organization holds one hail-mail address, role names such as `admin` cannot be new user prefixes, and an address given up stays out of reach of other organizations.
+- A send with no `from` now uses a verified custom domain over the hail-mail address.
+- Inbound email is free at zero balance: the message is still stored and shown, with no charge.
+- **Breaking.** `GET /verifications/sms-fees` is removed. US texting registration fees are charged per step (submission, carrier review, monthly) and shown in the console.
+- **Breaking.** US texting registration (`purpose=sms`) needs `fields.text_types` when its requirements list it: the kinds of texts you send, as option keys joined by commas (a person picks 1 to 5, a company 2 to 5). Without it: 422. Fields of kind `choices` take several options; see `min_choices` and `max_choices`.
+- Verification forms now enforce `max_length` on every field, for every carrier: a longer value gets 422. Length counts UTF-16 code units (an emoji counts as 2).
+- US texting registration: on Telnyx, the website, company name, person name and email take at most 100 characters.
+- US texting registration: refusal and rejection messages no longer say "the carrier"; refusals name the 10DLC registry.
+- The time-limit goodbye and the goodbye when a call's own LLM keeps failing are spoken in the call's language.
+- The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
+- Email: a send to more than one recipient (to, cc and bcc together) no longer carries the one-click unsubscribe header. Unsubscribe links now work for one year.
+
+### Fixed
+
+- Email: the unsubscribe button in Gmail and Yahoo now works. Hail accepted only a click on the link before.
 - US SMS registration: Telnyx campaigns are filed with the reply sent after STOP, which Telnyx requires.
 - US SMS registration: the STOP and HELP replies a subscriber gets are the ones filed with the campaign, named for the sender; HELP gives your own contact email.
 - Quotes list only the verifications that can buy the offer, and a second verification with no name for the same kind is refused (409).
-- Handover: when voicemail answers the contact's phone, the agent hangs up that line and comes back to the caller instead of introducing them to the mailbox.
-- Handover: a voicemail that answers with silence is treated as no answer, and a contact who says nothing after the intro is hung up, so the caller is never left on a silent line. `call.transferred` now fires once the contact speaks.
-- Handover: the agent's intro to the contact now reads "Reason given: …", and the agent writes no extra reply after the two people are connected.
+- Handover: the agent connects the caller and says nothing to the contact.
+- Handover: the caller can say stop while it rings.
+- Handover: a silent line or a carrier message gives the caller back.
+- `call.transferred` fires once the contact's side speaks and stays on.
 
 ## [0.31.0] (2026-10-23)
 

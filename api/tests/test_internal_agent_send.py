@@ -1,4 +1,4 @@
-"""Internal agent-send routes: auth, call gating, cap, dedupe, org scoping."""
+"""Internal agent-send routes: auth, call gating, dedupe, org scoping."""
 
 from __future__ import annotations
 
@@ -198,23 +198,19 @@ async def test_send_sms_replays_same_invocation_without_double_send(
     assert count == 1
 
 
-async def test_send_sms_cap_blocks_sixth_send(
+async def test_send_sms_has_no_per_call_cap(
     client, async_session, sms_mock, add_phone_number
 ):
+    """Each send is billed like any text, so a call has no send limit."""
     org = uuid.uuid4()
     call = await _insert_live_call(async_session, org, add_phone_number)
-    for _ in range(5):
+    for _ in range(7):
         body = _sms_payload(call.id)
         assert (
             await client.post(
                 "/internal/agent/send-sms", content=body, headers=_signed(body)
             )
         ).json()["ok"] is True
-    body = _sms_payload(call.id)
-    resp = await client.post(
-        "/internal/agent/send-sms", content=body, headers=_signed(body)
-    )
-    assert resp.json()["ok"] is False
 
 
 async def test_send_email_resolves_member_and_never_crosses_orgs(
@@ -316,6 +312,7 @@ async def test_send_email_happy_path_stamps_call_id(
     assert len(rows) == 1
     assert rows[0].to_addresses == ["sarah@a.test"]
     assert rows[0].metadata["call_id"] == str(call.id)
+    assert email_mock.send_email.await_args.kwargs["organization_id"] == org
 
 
 async def test_send_sms_concurrent_same_invocation_sends_once(

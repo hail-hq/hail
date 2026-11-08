@@ -277,6 +277,7 @@ class OutboundForwardWorker:
                 reply_to=row.reply_to,
                 headers=headers,
                 attachments=attachments or None,
+                organization_id=row.organization_id,
             )
         except Exception as exc:
             logger.warning("forward send failed for email_id=%s", row.id, exc_info=True)

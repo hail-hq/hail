@@ -2,7 +2,8 @@ name: costs-stale
 
 on:
   schedule:
-    # Every Monday at 09:00 UTC
+    # Mondays 09:00 UTC, after the syncs. Order of the Monday jobs:
+    # costs/README.md, "Weekly jobs, in order"
     - cron: "0 9 * * 1"
   workflow_dispatch: {}
 
@@ -41,9 +42,11 @@ jobs:
             const report = fs.readFileSync(process.env.REPORT_PATH, 'utf-8');
             const title = 'Model costs: stale rows';
             const body = [
-              'The weekly costs-stale workflow found rows whose `last_verified` is older than 30 days.',
+              'The weekly costs-stale workflow found rows whose `last_verified` is older than 30 days, or whose promotion has ended.',
               '',
               'Pick one off this list, verify the price against the provider\'s pricing page, and open a PR bumping `last_verified` (and any changed fields).',
+              '',
+              'For an ended promotion, record the list price and remove `promo_ends_at`.',
               '',
               '```',
               report,
@@ -59,19 +62,42 @@ jobs:
               labels: 'costs-stale',
             });
 
+            const promoLines = (text) =>
+              text.split('\n').filter((line) => line.includes(' promotion ended '));
+
             if (existing.length > 0) {
+              const known = promoLines(existing[0].body ?? '');
+              const newlyEnded = promoLines(report).filter((line) => !known.includes(line));
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: existing[0].number,
                 body,
               });
+              // GitHub sends no notification for a body edit.
+              if (newlyEnded.length > 0) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing[0].number,
+                  body: ['@r13i promotion ended:', '', ...newlyEnded].join('\n'),
+                });
+              }
             } else {
-              await github.rest.issues.create({
+              const { data: issue } = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 title,
                 body,
                 labels: ['costs-stale'],
               });
+              const ended = promoLines(report);
+              if (ended.length > 0) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: ['@r13i promotion ended:', '', ...ended].join('\n'),
+                });
+              }
             }

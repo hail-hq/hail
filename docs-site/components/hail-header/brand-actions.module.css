@@ -1,6 +1,6 @@
 /* Shared action motion for marketing and product surfaces.
    Pair a .brand-action button/link with a .brand-action-label child.
-   See branding/README.md for the card and CTA pattern. */
+   See docs/design-system.md (Action cards and CTAs) for the card and CTA pattern. */
 .brand-action-label::after,
 .brand-action-direct::after,
 :is(.su-submit, .cf-cta, .cf-link, .cf-link-ghost, .cf-result-console)::after,

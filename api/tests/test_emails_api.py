@@ -12,7 +12,7 @@ from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
-from hailhq.core.hail_mail import org_prefix_from_id
+from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
@@ -101,7 +101,7 @@ async def test_post_emails_with_attachment_ids_attaches_and_lists(
     async_session: AsyncSession,
     s3_mail_mock: AsyncMock,
 ) -> None:
-    _, _, plain = org_and_key
+    org_id, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
     await _register_custom_verified(client, headers, domain="acme.com")
     att_id = await _upload_attachment(client, headers)
@@ -124,6 +124,7 @@ async def test_post_emails_with_attachment_ids_attaches_and_lists(
     call_kwargs = email_mock.send_email.call_args.kwargs
     assert len(call_kwargs["attachments"]) == 1
     assert call_kwargs["attachments"][0].filename == "invoice.pdf"
+    assert call_kwargs["organization_id"] == org_id
 
     get_resp = await client.get(f"/emails/{email_id}", headers=headers)
     assert get_resp.status_code == 200
@@ -623,12 +624,12 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     expected_org = org_prefix_from_id(org_id)
-    assert body["from_address"] == f"admin+{expected_org}@mail.hail.so"
+    assert body["from_address"] == f"admin-{expected_org}+{expected_org}@mail.hail.so"
     # An EmailDomain row should have been created on the fly.
     sd = (await async_session.execute(select(EmailDomain))).scalar_one()
     assert sd.kind == "hail_mail"
     assert sd.verification_status == "verified"
-    assert sd.local_prefix_user == "admin"
+    assert sd.local_prefix_user == f"admin-{expected_org}"
     assert sd.local_prefix_org == expected_org
 
 
@@ -651,14 +652,14 @@ async def test_post_emails_auto_mint_recovers_from_race(
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
     org_id, _, plain = org_and_key
     expected_org = org_prefix_from_id(org_id)
-    address = f"admin+{expected_org}@mail.hail.so"
+    address = f"admin-{expected_org}+{expected_org}@mail.hail.so"
 
     # Pre-seed the row that the concurrent request would have committed first.
     winning = EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
         domain=address,
-        local_prefix_user="admin",
+        local_prefix_user=f"admin-{expected_org}",
         local_prefix_org=expected_org,
         verification_status="verified",
         dns_records=[],
@@ -736,8 +737,8 @@ async def test_post_emails_auto_mint_is_per_org_no_cross_org_conflict(
 
     from_a = resp_a.json()["from_address"]
     from_b = resp_b.json()["from_address"]
-    assert from_a == f"admin+{org_prefix_from_id(org_a)}@mail.hail.so"
-    assert from_b == f"admin+{org_prefix_from_id(org_b)}@mail.hail.so"
+    assert from_a.split("+")[0] == default_user_prefix("admin", org_a)
+    assert from_b.split("+")[0] == default_user_prefix("admin", org_b)
     assert from_a != from_b
 
     # Each org got its own row — neither blocked the other.

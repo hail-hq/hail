@@ -292,21 +292,28 @@ func newSmsSuppressionsListCmd(opts *Options) *cobra.Command {
 			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
 				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
 			}
-			if opts.JSON {
-				return printJSON(opts.Stdout, resp.JSON200)
-			}
-			for _, s := range resp.JSON200.Items {
-				fmt.Fprintf(opts.Stdout, "%s  %s  %s\n", s.Recipient, s.Reason, s.Source)
-			}
-			if resp.JSON200.NextCursor != nil && *resp.JSON200.NextCursor != "" {
-				fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", *resp.JSON200.NextCursor)
-			}
-			return nil
+			return printSuppressionList(opts, resp.JSON200)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "Page size (1..200)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "Resume from a previous next_cursor")
 	return cmd
+}
+
+// printSuppressionList renders one page of suppressions: JSON when --json,
+// otherwise one "recipient  reason  source" line per row plus the next
+// cursor. Shared by `sms suppressions list` and `email suppressions list`.
+func printSuppressionList(opts *Options, page *client.SuppressionListResponse) error {
+	if opts.JSON {
+		return printJSON(opts.Stdout, page)
+	}
+	for _, s := range page.Items {
+		fmt.Fprintf(opts.Stdout, "%s  %s  %s\n", s.Recipient, s.Reason, s.Source)
+	}
+	if page.NextCursor != nil && *page.NextCursor != "" {
+		fmt.Fprintf(opts.Stdout, "\nmore: --cursor %s\n", *page.NextCursor)
+	}
+	return nil
 }
 
 // newSmsSenderIdCmd builds the `sms sender-id` subcommand tree — read and

@@ -205,8 +205,9 @@ class SmsListResponse(BaseModel):
 
 
 class SuppressionResponse(BaseModel):
-    """Shape returned by ``GET /sms/suppressions`` items — one opted-out
-    recipient. Mirrors ``core/hailhq/core/schemas.py:SuppressionResponse``.
+    """Shape returned by ``GET /sms/suppressions`` and
+    ``GET /emails/suppressions`` items — one suppressed recipient.
+    Mirrors ``core/hailhq/core/schemas.py:SuppressionResponse``.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -242,6 +243,13 @@ class OfferVerification(BaseModel):
     subject_name: str | None = None
 
 
+class PaperworkItem(BaseModel):
+    """One paper a subject must give for an offer."""
+
+    key: str
+    label: str
+
+
 class NumberOffer(BaseModel):
     """One live number offer. Mirrors ``QuoteOffer`` in openapi/openapi.yaml.
     ``by_request`` offers have no ``e164`` and cannot be bought: ask support."""
@@ -271,6 +279,9 @@ class NumberOffer(BaseModel):
     # verification_id would use.
     verification: OfferVerification | None = None
     by_request: bool = False
+    # Papers the request's ``subject_type`` must give. None when the request
+    # had no ``subject_type``.
+    paperwork: list[PaperworkItem] | None = None
 
 
 class NumberRegion(BaseModel):
@@ -431,9 +442,11 @@ class EmailCreate(BaseModel):
     with an HTML body; a plain-text-only email is never tracked for opens
     or clicks. ``to`` is a
     non-empty list of recipient addresses. ``from_`` is optional while the
-    org has one verified sender; with several the server 422s and the
-    caller must name one (or none at all, which auto-mints a hail-mail
-    address per the operator's configuration). ``populate_by_name=True``
+    org has one verified custom domain, which wins over the hail-mail
+    address, or only a hail-mail address. With several verified custom
+    domains the server 422s and the caller must name one. With no verified
+    sender, the server auto-mints a hail-mail address per the operator's
+    configuration. ``populate_by_name=True``
     so ``EmailCreate(from_="...")`` works at the Python boundary while
     ``model_dump(by_alias=True)`` still emits ``"from"`` on the wire.
     """
@@ -743,7 +756,7 @@ class EmailDomainListResponse(BaseModel):
     items: list[EmailDomainResponse]
     next_cursor: str | None = None
     # The address a send with no ``from_`` goes out as. ``None`` when such
-    # a send would be rejected: several verified identities (name one), or
+    # a send would be rejected: several verified custom domains (name one), or
     # none that can send yet. Whole-org answer, not per-page.
     default_from: str | None = None
 

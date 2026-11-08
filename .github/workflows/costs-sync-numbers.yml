@@ -6,7 +6,7 @@ name: costs-sync-numbers
 # script runs by hand: uv run python scripts/costs/sync_numbers.py --env-file .env
 on:
   schedule:
-    - cron: "0 8 * * 1" # Mondays 08:00 UTC, before the stale check
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC. Order of the Monday jobs: costs/README.md, "Weekly jobs, in order"
   workflow_dispatch: {}
 
 permissions:
@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: false
       - name: Sync number catalogs from the carriers
         env:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}

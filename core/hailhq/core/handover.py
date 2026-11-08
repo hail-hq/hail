@@ -72,8 +72,8 @@ def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -
     """The text a handover contact gets while the agent dials them: who is
     calling, the caller's number to call back, and the reason. The reason is
     LLM-written and a caller can steer it, so it is attributed ("Reason
-    given: ...") as in the spoken intro, kept short, and links, emails and
-    phone numbers are removed."""
+    given: ..."), kept short, and links, emails and phone numbers are
+    removed. The email to the contact uses the same words."""
     who = f"a caller ({caller})" if caller and caller.startswith("+") else "a caller"
     text = f"{agent_name} (AI agent) is calling you now to connect {who}."
     said = " ".join(_strip_links(reason or "").split())[:HANDOVER_SMS_REASON_CHARS]
@@ -142,6 +142,8 @@ class HandoverPerson:
     contact_id: str  # wire id
     name: str
     phone_e164: str | None
+    # Where the handover email goes: a contact's email, a member's login.
+    email: str | None = None
 
 
 class HandoverInvalid(ValueError):
@@ -322,16 +324,21 @@ async def prune_departed_members(db: AsyncSession, agent_id: UUID) -> None:
 
 async def _member_links(
     db: AsyncSession, agent_ids: list[UUID]
-) -> list[tuple[AgentHandoverContact, str, str | None]]:
+) -> list[tuple[AgentHandoverContact, str, str | None, str | None]]:
     """Member links whose user is still a member of the agent's org. Empty
     when the member tables are missing (pure self-host)."""
     try:
         async with db.begin_nested():
             return [
-                (link, name, phone)
-                for link, name, phone in (
+                (link, name, phone, email)
+                for link, name, phone, email in (
                     await db.execute(
-                        select(AgentHandoverContact, User.name, User.phone_number)
+                        select(
+                            AgentHandoverContact,
+                            User.name,
+                            User.phone_number,
+                            User.email,
+                        )
                         .join(Agent, Agent.id == AgentHandoverContact.agent_id)
                         .join(User, User.id == AgentHandoverContact.user_id)
                         .where(
@@ -358,8 +365,8 @@ async def load_handover(
     out."""
     if not agent_ids:
         return {}
-    rows: list[tuple[AgentHandoverContact, str, str, str | None]] = [
-        (link, str(contact.id), contact.name, contact.phone_e164)
+    rows: list[tuple[AgentHandoverContact, str, str, str | None, str | None]] = [
+        (link, str(contact.id), contact.name, contact.phone_e164, contact.email)
         for link, contact in (
             await db.execute(
                 select(AgentHandoverContact, Contact)
@@ -384,14 +391,20 @@ async def load_handover(
     ).first() is not None
     if has_member_links:
         rows += [
-            (link, contact_wire_id("member", link.user_id), name, phone)
-            for link, name, phone in await _member_links(db, agent_ids)
+            (link, contact_wire_id("member", link.user_id), name, phone, email)
+            for link, name, phone, email in await _member_links(db, agent_ids)
         ]
     rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
-    for link, wire, name, phone in rows:
+    for link, wire, name, phone, email in rows:
         out.setdefault(link.agent_id, []).append(
-            {"contact_id": wire, "name": name, "phone_e164": phone, "note": link.note}
+            {
+                "contact_id": wire,
+                "name": name,
+                "phone_e164": phone,
+                "email": email,
+                "note": link.note,
+            }
         )
     return out
 

@@ -13,8 +13,11 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Literal
 
+from hailhq.core.schemas import Address
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 __all__ = [
@@ -22,6 +25,8 @@ __all__ = [
     "CAMPAIGN_REJECTED",
     "DETAILS_REJECTED",
     "NOT_ACCEPTED",
+    "SMS_REFUSED",
+    "SMS_VALUE_REFUSED",
     "VALUE_NOT_ACCEPTED",
     "Address",
     "DocumentInput",
@@ -31,6 +36,7 @@ __all__ = [
     "FieldSpec",
     "Problem",
     "ProviderStatus",
+    "RegistrationHoldsAnotherNumber",
     "Requirements",
     "SmsRegistrationProvider",
     "SubjectType",
@@ -48,6 +54,18 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+class RegistrationHoldsAnotherNumber(VerificationProviderError):
+    """A person's registration holds one number, and the carrier already has
+    another one linked to it, the link done: ``e164``. The caller may record
+    that number as the registration's own when it is one of the
+    organization's. A number the carrier is still linking or unlinking is a
+    plain ``VerificationProviderError``."""
+
+    def __init__(self, message: str, e164: str) -> None:
+        super().__init__(message)
+        self.e164 = e164
 
 
 class SubmitRefused(VerificationProviderError):
@@ -163,6 +181,10 @@ class DocumentSlot(BaseModel):
     options: tuple[DocumentOption, ...] = Field(
         description="The accepted ways to fill this slot. The customer picks one."
     )
+    # Every requirement this slot stands for, as (name, label), when a carrier
+    # that takes one document of each type gets one slot for several of them.
+    # Empty: the slot is its own requirement. Internal: not in the public form.
+    also: tuple[tuple[str, str], ...] = Field(default=(), exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -245,30 +267,29 @@ class DocumentInput(BaseModel):
     file: UploadedFile | None = None
 
 
-class Address(BaseModel):
-    customer_name: str
-    street: str
-    city: str
-    region: str
-    postal_code: str
-    country_code: str
-
-
 # Hail's own wording for a carrier refusal. The carrier's text goes in
 # ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator.
 NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )
 VALUE_NOT_ACCEPTED = "The carrier did not accept this value."
+# The carrier takes one document of each type per check (Twilio).
+SAME_DOCUMENT = (
+    "This needs the same document as another item. Use one document for both."
+)
 DETAILS_REJECTED = "The carrier rejected the details. Start again."
+# US texting (10DLC): the registry checks the business or person, then the
+# US mobile networks review what will be sent.
 BRAND_REJECTED = (
-    "The carrier rejected the brand registration. Check the business or "
+    "The 10DLC registry rejected the registration. Check the business or "
     "person details and start again."
 )
 CAMPAIGN_REJECTED = (
-    "The carrier rejected the campaign. Check the use case, description, "
-    "sample messages and links, and start again."
+    "The registration was rejected in review. Check the use case, "
+    "description, sample messages and links, and start again."
 )
+SMS_REFUSED = "The 10DLC registry refused a detail. Check your entries and try again."
+SMS_VALUE_REFUSED = "The 10DLC registry did not accept this value."
 
 
 class Problem(BaseModel):
@@ -294,6 +315,9 @@ class DraftResult(BaseModel):
     # With problems: carrier ids of what the carrier made and bills anyway
     # (a brand it registered, then refused). Empty when nothing was billed.
     billed_refs: dict = Field(default_factory=dict)
+    # The kept brand does not fit this filing, and the credit cannot pay for a
+    # new one. No brand was made or billed. A messaging profile may exist.
+    needs_new_brand_credit: bool = False
 
 
 class ProviderStatus(BaseModel):
@@ -385,7 +409,13 @@ class SmsRegistrationProvider(VerificationProvider):
     lifecycle as number verification. ``purpose`` is 'sms'.
 
     ``create_draft`` takes one extra keyword: the organization's messaging
-    service (Twilio) or messaging profile (Telnyx) id, when one exists.
+    service (Twilio) or messaging profile (Telnyx) id, when one exists. A
+    plug-in whose ``discard_rejected`` returns ``kept_brand_id`` also takes
+    that keyword, when the organization's last filing left a brand, and
+    ``new_brand_funded``: False means the credit covers the filing only with
+    that brand, so a plug-in that cannot reuse it files no brand and sets
+    ``needs_new_brand_credit``. It defaults to False, so a caller that does
+    not pass it never pays for a new brand.
     ``status`` creates the campaign once the brand is approved and reports
     'approved' only when the campaign is approved. ``attach_number`` puts
     one of the organization's US long codes on the approved campaign;
@@ -423,18 +453,84 @@ class SmsRegistrationProvider(VerificationProvider):
         text), or None (no confirmation pending)."""
         return None
 
-    # The refs key that holds the campaign once it is filed.
+    def keeps_brand(self, refs: dict) -> bool:
+        """True when dismissing this rejected filing leaves its brand at the
+        carrier for the next filing (``discard_rejected``)."""
+        return False
+
+    async def discard_rejected(self, refs: dict) -> dict:
+        """``discard`` for a rejected filing the customer dismisses. Returns
+        what the organization's next filing may reuse: refs to keep on the
+        cancelled row. A plug-in may leave that part at the carrier."""
+        await self.discard(refs)
+        return {}
+
+    # The refs key that holds the campaign once it is filed. Required, as a
+    # class attribute: the API marks a filing as sent for review
+    # (``campaign_filed_at``) by it, and a test checks every registered
+    # SMS plug-in sets it.
     campaign_ref: str | None = None
+    # Carrier maximums, in characters, for fields of the shared US form
+    # (``sms_form``), by field name.
+    field_limits: Mapping[str, int] = MappingProxyType({})
+    # Some carriers require the actual subscription confirmation on every filing.
+    opt_in_message_required: bool = False
+
+    def validate_application(
+        self, fields: dict[str, str], address: Address | None, subject_type: SubjectType
+    ) -> list[Problem]:
+        """Local preflight shared by review previews and paid submissions."""
+        from hailhq.core.providers.verification.sms_form import field_problems
+        from hailhq.core.providers.verification.sms_review import sender_problems
+
+        problems = field_problems(self, fields, subject_type)
+        problems.extend(sender_problems(fields, address, subject_type))
+        if address is None:
+            problems.append(Problem(field="address", message="An address is required."))
+        return problems
+
+    async def application_identity(
+        self, refs: dict, subject_type: SubjectType
+    ) -> dict | None:
+        """Read the original sender and address from the provider, never change it.
+
+        None means support must restore authoritative details before amendment.
+        """
+        return None
+
+    async def recover_campaign(self, refs: dict) -> bool:
+        """Read-only discovery of a previously filed campaign; never create one."""
+        raise VerificationProviderError(
+            "Campaign discovery is unavailable; contact support."
+        )
+
+    def extra_fields(self, subject_type: SubjectType) -> tuple[FieldSpec, ...]:
+        """Fields this carrier asks for on top of the shared US form. They
+        follow the campaign description."""
+        return ()
+
+    def campaign_filed(self, refs: dict | None) -> bool:
+        """True when the refs hold a filed campaign: a non-empty string
+        under ``campaign_ref``, or ``campaign_filed_at`` (which the API
+        writes). The billing service reads the same rule."""
+        refs = refs or {}
+        return any(
+            isinstance(refs.get(k), str) and refs[k] != ""
+            for k in (self.campaign_ref, "campaign_filed_at")
+            if k
+        )
 
     def in_review(self, refs: dict) -> bool:
         """True while the carriers review the filing: the campaign is filed
-        (``campaign_ref``). A plug-in can add other review steps."""
-        return bool(self.campaign_ref and refs.get(self.campaign_ref))
+        (``campaign_filed``). A plug-in can add other review steps."""
+        return self.campaign_filed(refs)
 
     def step(self, refs: dict) -> str | None:
         """Where a filing still in progress is: 'confirm_identity' while the
         person must act on a text already sent, 'carrier_review' while the
         carriers review it, else 'filing'."""
+        if refs.get("needs_information") and not self.campaign_filed(refs):
+            return "needs_information"
         if self.confirmation(refs):
             return "confirm_identity"
         return "carrier_review" if self.in_review(refs) else "filing"

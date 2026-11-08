@@ -9,6 +9,7 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
 from hailhq.core.sender_id import PLATFORM_DEFAULT_SENDER_ID
@@ -362,6 +363,7 @@ TERMINAL_CALL_STATUSES: frozenset[str] = frozenset(
 
 
 NumberType = Literal["local", "mobile", "toll_free", "national"]
+Capability = Literal["voice", "sms"]
 
 
 class CallResponse(BaseModel):
@@ -670,7 +672,7 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         description="Restrict number type; omit to compare all supported types.",
     )
-    capabilities: list[Literal["voice", "sms"]] = Field(
+    capabilities: list[Capability] = Field(
         min_length=1,
         max_length=2,
         description="Required channels; every returned offer must support all requested capabilities.",
@@ -695,6 +697,10 @@ class NumberQuoteRequest(BaseModel):
         default=None,
         pattern=r"^[A-Za-z]{2}$",
         description="Optional, with city: a US state or Canadian province code, such as AZ. GET /numbers/regions lists the codes.",
+    )
+    subject_type: Literal["person", "business"] | None = Field(
+        default=None,
+        description="Who the number is for: 'person' (you) or 'business' (your company). Offers that do not accept that subject are left out, the rest are ranked for it, and each offer lists its `paperwork`. Omit to get every offer as before.",
     )
 
     @field_validator("country_code")
@@ -1095,19 +1101,6 @@ class AgentListResponse(BaseModel):
     items: list[AgentResponse] = Field(description="Agents, newest first.")
 
 
-class AgentPromptTemplates(BaseModel):
-    """What the model is told on each channel, read-only. Hail's framing leads
-    and cannot be edited; ``instructions_placeholder`` marks where the agent's
-    own instructions go."""
-
-    instructions_placeholder: str = Field(
-        description="The marker inside each template where the agent's instructions go."
-    )
-    calls_in: str = Field(description="Full prompt for a call the agent answers.")
-    calls_out: str = Field(description="Full prompt for a call the agent places.")
-    texts: str = Field(description="Full prompt for a text reply.")
-
-
 class PhoneNumberListResponse(BaseModel):
     items: list[PhoneNumberResponse] = Field(description="Numbers in this page.")
     next_cursor: str | None = Field(
@@ -1217,8 +1210,9 @@ LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 # User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
 # of every forward and system mail; ``forwarder`` was its old name. Org
 # prefixes are free text, so without this another org could own the
-# address a tenant's forwards come from and receive its bounces.
-RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"})
+# address a tenant's forwards come from and receive its bounces. Role names
+# belong to the operator of the base domain.
+RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"}) | ROLE_MAILBOXES
 
 
 def _normalize_domain(addr: str) -> str:
@@ -1308,9 +1302,11 @@ class EmailDomainCreate(BaseModel):
     local_prefix_user: str | None = Field(
         default=None,
         description=(
-            "User-chosen local-part prefix for a hail_mail address. Only "
+            "User-chosen local-part prefix for a hail_mail address. One "
+            "organization only may hold it; a taken prefix returns 409. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_USER_PREFIX if omitted."
+            "HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if "
+            "omitted."
         ),
     )
     local_prefix_org: str | None = Field(
@@ -1318,7 +1314,7 @@ class EmailDomainCreate(BaseModel):
         description=(
             "Org-chosen local-part prefix for a hail_mail address. Only "
             "valid for kind='hail_mail'. Falls back to "
-            "HAIL_MAIL_DEFAULT_ORG_PREFIX if omitted."
+            "a prefix derived from the organization id if omitted."
         ),
     )
 
@@ -1351,9 +1347,7 @@ class EmailDomainCreate(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @model_validator(mode="after")
@@ -1409,7 +1403,7 @@ class EmailDomainPatch(BaseModel):
 
     local_prefix_user: str | None = Field(
         default=None,
-        description="New user local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+        description="New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
     )
     local_prefix_org: str | None = Field(
         default=None,
@@ -1452,9 +1446,7 @@ class EmailDomainPatch(BaseModel):
     @classmethod
     def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
         if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(
-                f"user prefix {v!r} is reserved for Hail's own sender address"
-            )
+            raise ValueError(f"user prefix {v!r} is reserved")
         return v
 
     @field_validator("forward_to")
@@ -1704,14 +1696,15 @@ class EmailDomainListResponse(BaseModel):
         description="Opaque cursor for the next page. Null when there are no more results.",
     )
     # The address a send with no ``from`` goes out as. ``None`` when such a
-    # send would be rejected: several verified identities (name one), or
+    # send would be rejected: several verified custom domains (name one), or
     # none that can send yet. Computed across the whole org, not the page.
     default_from: str | None = Field(
         default=None,
         description=(
-            "The From address used when a send omits 'from'. Null when no "
-            "such default can be resolved (e.g. multiple verified "
-            "identities, or none that can send yet). Computed across the "
+            "The From address used when a send omits 'from'. A verified "
+            "custom domain wins over the hail-mail address. Null when no "
+            "such default can be resolved (e.g. multiple verified custom "
+            "domains, or none that can send yet). Computed across the "
             "whole organization, not just this page."
         ),
     )
@@ -2680,6 +2673,45 @@ class ProviderValidateResult(BaseModel):
     )
 
 
+class Address(BaseModel):
+    customer_name: str = Field(description="Name associated with the address.")
+    street: str = Field(description="Street address.")
+    city: str = Field(description="City or locality.")
+    region: str = Field(description="State, province or region.")
+    postal_code: str = Field(description="Postal or ZIP code.")
+    country_code: str = Field(description="ISO alpha-2 address country.")
+
+
+class SmsApplicationResponse(BaseModel):
+    """Private submitted SMS answers, or verified sender details for an old filing."""
+
+    schema_version: int = Field(
+        default=1, description="Version of this saved-answer response format."
+    )
+    subject_type: Literal["person", "business"] = Field(
+        description="Original sender route: person or business."
+    )
+    fields: dict[str, str] = Field(
+        description="Saved application answers; legacy responses may contain only verified sender details."
+    )
+    address: Address | None = Field(
+        default=None, description="Original sender address, when available."
+    )
+
+
+class SmsApplicationAmendRequest(BaseModel):
+    """Complete replacement answers for an existing sender's missing evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+    fields: dict[str, str] = Field(
+        description="Complete current form answers. The legal sender must remain unchanged."
+    )
+    address: Address | None = Field(
+        default=None,
+        description="Original sender address; changing it requires support.",
+    )
+
+
 class VerificationResponse(BaseModel):
     """A carrier verification: its state and the name of the person or
     company it is for. No other personal data."""
@@ -2732,13 +2764,46 @@ class VerificationResponse(BaseModel):
             "is pending."
         ),
     )
-    step: Literal["confirm_identity", "filing", "carrier_review"] | None = Field(
+    step: (
+        Literal[
+            "confirm_identity",
+            "filing",
+            "carrier_review",
+            "runtime_setup",
+            "needs_information",
+        ]
+        | None
+    ) = Field(
         default=None,
         description=(
             "For a US texting registration that is not yet approved or "
             "rejected: 'confirm_identity' while the person must confirm (see "
             "`confirmation`), 'filing' while Hail files the details with the "
             "carriers, 'carrier_review' once the carriers are reviewing them "
-            "(1 to 7 business days). Null otherwise."
+            "(1 to 7 business days), or runtime_setup when accepted but required "
+            "messaging responses still need configuration; needs_information when "
+            "the existing sender needs current campaign evidence before filing. Null otherwise."
+        ),
+    )
+    campaign_accepted: bool = Field(
+        default=False,
+        description="The carrier accepted the SMS campaign; this alone does not mean a number is ready to send.",
+    )
+    runtime_ready: bool | None = Field(
+        default=None,
+        description="True when required runtime configuration was verified, false while setup retries, null when not independently tracked.",
+    )
+    cancellable: bool = Field(
+        default=False,
+        description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
+    )
+    identity_confirmed: bool = Field(
+        default=False,
+        description=(
+            "True on a person's newest US texting registration when it is "
+            "cancelled, or rejected and not yet dismissed, and the person stays "
+            "confirmed: the next filing with the same first name, last name, "
+            "email and mobile needs no code and has no submission fee. Dismiss "
+            "a rejected registration first. Ignore it on older registrations."
         ),
     )

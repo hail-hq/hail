@@ -106,8 +106,12 @@ hail email list --direction outbound --status failed
 # Fetch one email (full UUID or 4+ char prefix)
 hail email get 1a2b
 
+# Suppressions
+hail email suppressions list                       # addresses Hail will not send to
+hail email suppressions delete alice@example.com   # allow sends to this address again
+
 # Send (subject + at least one body flag required)
-hail email send --to alice@example.com --subject "Hi" --body "Hello"
+hail email send --to alice@example.com --subject "Hi" --body "Hello" --recipient-consent
 ```
 
 `hail email list` flags: `--direction` (`inbound|outbound`), `--status` (`queued|sent|failed|bounced|complained|received`), `--limit` (default 50), `--cursor`, `--all` (walk every page). Alias: `hail email ls`.
@@ -116,7 +120,9 @@ hail email send --to alice@example.com --subject "Hi" --body "Hello"
 
 `hail email send` flags: `--to` (repeatable / comma-separated), `--cc`, `--bcc`, `--from`, `--from-name`, `--reply-to`, `--subject` (required), `--body`, `--body-html`, `--body-file`, `--body-html-file` (`-` reads stdin), `--idempotency-key`.
 
-More email subcommands: `tail <id>`, `raw <id>`, `events <id>`, `stats`, `attachment`, `attachment-upload`. Run `hail email --help` for the list.
+`hail email suppressions list` takes `--limit` (default 50) and `--cursor`. Each row shows the address, reason, and source. `delete <address>` ignores case and returns not found for an address that is not on your list. Only use it when the person has agreed to get mail again.
+
+More email subcommands: `tail <id>`, `raw <id>`, `events <id>`, `stats`, `suppressions`, `attachment`, `attachment-upload`. Run `hail email --help` for the list.
 
 ### Email domains
 
@@ -140,7 +146,7 @@ hail email domain delete <id>      # also drops the SES identity for custom rows
 
 `dns-check <id>` is read-only: it detects the tenant's DNS host and checks whether DKIM/MX/SPF and DMARC are live in public DNS. It never changes `verification_status` (run `verify` for that). `kind='hail_mail'` rows do no lookups, so the host line reads `not recognised`, and there's no table or DMARC line — that zone is Hail's, not the customer's. Otherwise, output is a `DNS host: <name> — <url>` line, a TYPE/NAME/VALUE/SEEN table (`SEEN` = seen in public DNS, not verified; `?` = that record's lookup failed, so it could not be checked), and a `DMARC: found` or `DMARC: not found — add TXT <name> "<value>"` line. If the zone or DMARC lookup fails, or the check times out, it prints one line — `DNS check could not be completed. Try again in a minute.` — instead of guessing at missing records.
 
-`hail email domain list` closes with the address a send without `--from` goes out as. Own two or more verified identities and there is no default: the line reads `No default sender — a send without --from is rejected.`, and a `--from`-less `hail email send` fails with a 422 listing them.
+`hail email domain list` closes with the address a send without `--from` goes out as. A verified custom domain wins over the hail-mail address. Own two or more verified custom domains and there is no default: the line reads `No default sender — a send without --from is rejected.`, and a `--from`-less `hail email send` fails with a 422 listing them.
 
 > Renamed: `hail sender-domain ...` is now `hail email domain ...`. The old name no longer exists.
 

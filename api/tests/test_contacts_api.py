@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 from hailhq.api import deps
-from hailhq.core.models import Contact, User
+from hailhq.core.models import Contact, OrganizationMember, User
 from hailhq.core.testing.fixtures import seed_member as _seed_member
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +57,14 @@ async def test_list_union(
     uid = await _seed_member(
         async_session, org_id, name="Ada", email="ada@acme.com", phone="+15550001001"
     )
+    # The cursor orders by timestamp. Do not compare host-clock member times
+    # with PostgreSQL's clock for the manual contact: the clocks can differ.
+    member = (
+        await async_session.execute(
+            select(OrganizationMember).where(OrganizationMember.user_id == uid)
+        )
+    ).scalar_one()
+    member.created_at = datetime(2000, 1, 1, tzinfo=timezone.utc)
     async_session.add(Contact(organization_id=org_id, name="Maya", email="maya@x.com"))
     await async_session.commit()
 

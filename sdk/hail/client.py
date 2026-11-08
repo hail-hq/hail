@@ -339,10 +339,12 @@ class _EmailsResource:
         delivered, and bounce events, but opens and clicks are never
         tracked. ``recipient_consent``
         is required — the server 422s without it. ``from_`` is optional
-        while the org has one verified sender; with several the server
-        422s and you must name one (read ``default_from`` from
-        :meth:`Client.email_domains.list`). With none it auto-mints a
-        hail-mail address (operator-configured).
+        while the org has one verified custom domain, which wins over the
+        hail-mail address, or only a hail-mail address. With several
+        verified custom domains the server 422s and you must name one (read
+        ``default_from`` from :meth:`Client.email_domains.list`). With no
+        verified sender it auto-mints a hail-mail address
+        (operator-configured).
         ``idempotency_key`` defaults to a fresh UUIDv4.
         """
         # Build the body with the wire-side ``"from"`` alias. We don't
@@ -449,6 +451,22 @@ class _EmailsResource:
         if to is not None:
             params["to"] = to.isoformat() if isinstance(to, datetime) else to
         return await self._http.request("GET", "/emails/stats", params=params)
+
+    async def list_suppressions(
+        self, *, cursor: str | None = None, limit: int = 50
+    ) -> SuppressionListResponse:
+        """List suppressed addresses (bounce, complaint, unsubscribe), cursor-paginated."""
+        params = {"limit": limit, "cursor": cursor}
+        data = await self._http.request("GET", "/emails/suppressions", params=params)
+        return SuppressionListResponse.model_validate(data)
+
+    async def delete_suppression(self, address: str) -> None:
+        """Remove an address from the suppression list (manual correction only)."""
+        # Percent-encode reserved characters ('/', '#', '?', '+') so the
+        # address stays one path segment.
+        await self._http.request(
+            "DELETE", f"/emails/suppressions/{quote(address, safe='@')}"
+        )
 
 
 class _EmailAttachmentsResource:

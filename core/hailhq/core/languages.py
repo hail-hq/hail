@@ -24,12 +24,13 @@ run): ka, ml, pa.
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal
+from typing import Literal, TypeVar
 
 __all__ = [
     "SUPPORTED_LANGUAGES",
     "Language",
     "LanguageCaps",
+    "by_language",
     "default_stt_for",
     "elevenlabs_language",
     "resolve_stt_provider",
@@ -183,6 +184,16 @@ CARTESIA_MODEL_LANGUAGES: dict[str, frozenset[str]] = dict.fromkeys(
 # ElevenLabs uses ISO 639-3 where a language has no ISO 639-1 code.
 # https://elevenlabs.io/docs/models lists Filipino as "fil".
 _ELEVENLABS_CODES = {"tl": "fil"}
+
+
+_T = TypeVar("_T")
+
+
+def by_language(table: dict[str, _T], language: str | None) -> _T:
+    """``table``'s entry for ``language``, English when it is unknown."""
+    if not isinstance(language, str):
+        return table["en"]
+    return table.get(language, table["en"])
 
 
 def elevenlabs_language(language: str) -> str:

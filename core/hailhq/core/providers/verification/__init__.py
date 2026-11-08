@@ -13,6 +13,7 @@ from hailhq.core.providers.verification.base import (
     FieldSpec,
     Problem,
     ProviderStatus,
+    RegistrationHoldsAnotherNumber,
     Requirements,
     SmsRegistrationProvider,
     SubjectType,
@@ -34,6 +35,7 @@ __all__ = [
     "FieldSpec",
     "Problem",
     "ProviderStatus",
+    "RegistrationHoldsAnotherNumber",
     "Requirements",
     "SmsRegistrationProvider",
     "SubjectType",
@@ -59,7 +61,8 @@ def register_verification_provider(
 ) -> None:
     """Make a carrier plug-in available under ``name`` for a ``purpose``
     ('number' or 'sms'). Adding a carrier is one plug-in module plus one call
-    to this function."""
+    to this function. For ``purpose='sms'`` pass the plug-in class itself:
+    a test reads its ``campaign_ref``."""
     _FACTORIES[(name, purpose)] = factory
     _INSTANCES.pop((name, purpose), None)
 

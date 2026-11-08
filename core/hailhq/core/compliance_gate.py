@@ -31,6 +31,7 @@ from uuid import UUID
 from hailhq.core.config import settings
 from hailhq.core.models import ChannelSuspension, Sms, Suppression, UsageEvent
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -369,26 +370,34 @@ async def add_suppression(
     channel: str,
     reason: str,
     source: str,
-) -> Suppression:
-    """Insert one suppression row. Flushes but does not commit — the
-    caller owns the transaction (matches the rest of this codebase's
-    session-handling convention, e.g. ``resolve_sender`` in emails.py)."""
-    row = Suppression(
-        organization_id=organization_id,
-        recipient=normalize_recipient(recipient),
-        channel=channel,
-        reason=reason,
-        source=source,
+) -> bool:
+    """Insert one suppression row unless (organization_id, recipient,
+    channel) already has one; the existing row is kept as is. The partial
+    unique indexes on ``suppressions`` enforce this, so concurrent calls
+    cannot add a second row. Does not commit: the caller owns the
+    transaction (matches the rest of this codebase's session-handling
+    convention, e.g. ``resolve_sender`` in emails.py). Returns True iff a
+    new row was inserted."""
+    stmt = (
+        pg_insert(Suppression)
+        .values(
+            organization_id=organization_id,
+            recipient=normalize_recipient(recipient),
+            channel=channel,
+            reason=reason,
+            source=source,
+        )
+        # No conflict target: covers both partial unique indexes.
+        .on_conflict_do_nothing()
+        .returning(Suppression.id)
     )
-    db.add(row)
-    await db.flush()
-    return row
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
 
 
 async def remove_suppression(
     db: AsyncSession, *, organization_id: UUID | None, recipient: str, channel: str
 ) -> bool:
-    """Delete all suppression rows matching (recipient, channel) that belong
+    """Delete the suppression row matching (recipient, channel) that belongs
     to this org — the mirror of ``add_suppression`` for the STOP->START
     re-subscribe flow.
 
@@ -397,12 +406,10 @@ async def remove_suppression(
     platform-wide rows (``organization_id IS NULL``, e.g. operator-owned
     spam-trap / global blocks) are deliberately NOT removable through a
     tenant-authority path — a tenant deleting one would un-suppress that
-    number for every org on the platform. ``suppressions`` has no unique
-    constraint on (recipient, channel, organization_id), so more than one
-    org-scoped row can still match; this deletes every one so no leftover
-    row silently defeats the re-subscribe. Flushes but does not commit,
-    matching this module's session convention. Returns True iff at least
-    one row was deleted."""
+    number for every org on the platform. A unique index allows at most
+    one org-scoped row per (organization_id, recipient, channel), so this
+    deletes zero or one row. Flushes but does not commit, matching this
+    module's session convention. Returns True iff a row was deleted."""
     normalized = normalize_recipient(recipient)
     stmt = delete(Suppression).where(
         Suppression.recipient == normalized,

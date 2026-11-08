@@ -972,3 +972,65 @@ async def test_create_draft_unknown_address_country(provider):
         ("address", "This country is not known to the carrier.")
     ]
     assert all(c.request.method == "GET" for c in responses.calls)
+
+
+def _group_requirement(req_id, identity_type):
+    return {
+        "id": req_id,
+        "type": "address_requirements",
+        "attributes": {
+            "identity_type": identity_type,
+            "personal_proof_qty": 1,
+            "business_proof_qty": 1,
+            "address_proof_qty": 0,
+            "personal_mandatory_fields": [],
+            "business_mandatory_fields": [],
+        },
+        "relationships": {},
+    }
+
+
+@responses.activate
+async def test_requirements_per_group_one_per_requirement(provider):
+    _static()
+    responses.add(
+        responses.GET,
+        f"{BASE}/address_requirements",
+        json={
+            "data": [
+                _group_requirement("r1", "any"),
+                _group_requirement("r2", "business"),
+            ],
+            "included": [],
+        },
+    )
+    got = await provider.requirements_per_group("PT", "national", "person")
+    assert len(got) == 1  # the business-only group is left out
+    both = await provider.requirements_per_group("PT", "national", "business")
+    assert len(both) == 2
+
+
+@responses.activate
+async def test_requirements_per_group_none_accepts_subject(provider):
+    _static()
+    responses.add(
+        responses.GET,
+        f"{BASE}/address_requirements",
+        json={"data": [_group_requirement("r2", "business")], "included": []},
+    )
+    with pytest.raises(UnsupportedSubjectType):
+        await provider.requirements_per_group("PT", "national", "person")
+
+
+@responses.activate
+async def test_requirements_null_mandatory_fields(provider):
+    _static()
+    req = _group_requirement("r1", "any")
+    req["attributes"]["personal_mandatory_fields"] = None
+    responses.add(
+        responses.GET,
+        f"{BASE}/address_requirements",
+        json={"data": [req], "included": []},
+    )
+    got = await provider.requirements_per_group("PT", "national", "person")
+    assert [f.name for f in got[0].fields] == ["first_name", "last_name"]

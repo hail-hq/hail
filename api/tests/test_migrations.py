@@ -244,21 +244,21 @@ def test_provider_message_id_unique_is_outbound_only(empty_db: str) -> None:
         assert "direction" in indexdef and "outbound" in indexdef
 
 
-def test_hail_mail_prefix_pair_is_globally_unique(empty_db: str) -> None:
-    """After 0010 a partial unique index makes hail_mail prefix pairs
-    global — inbound routing matches (local_prefix_user, local_prefix_org)
-    with no org scoping, so two orgs holding the same pair would let one
-    intercept the other's mail (even across base-domain changes)."""
+def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
+    """After 0070 a partial unique index makes hail_mail heads global —
+    inbound routing matches local_prefix_user with no org scoping, so two
+    orgs holding the same head would let one intercept the other's mail
+    (even across base-domain changes)."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
-        indexdef = _index_def(conn, "email_domains_hail_mail_prefix_uq")
+        indexdef = _index_def(conn, "email_domains_hail_mail_head_uq")
         assert (
             indexdef is not None
-        ), "partial unique index email_domains_hail_mail_prefix_uq missing"
+        ), "partial unique index email_domains_hail_mail_head_uq missing"
         assert "UNIQUE" in indexdef
         assert "hail_mail" in indexdef
-        assert "local_prefix_user" in indexdef
-        assert "local_prefix_org" in indexdef
+        assert "(local_prefix_user)" in indexdef
+        assert _index_def(conn, "email_domains_hail_mail_prefix_uq") is None
 
 
 def test_forward_queue_poll_index_exists(empty_db: str) -> None:
