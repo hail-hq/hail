@@ -101,25 +101,32 @@ async def record_call_legs(call_id: UUID, legs: list[LegRecord]) -> None:
 
 async def fetch_leg_costs(now: datetime | None = None) -> int:
     """One pass: look up pending legs at their carriers. Returns how many
-    legs got a cost. Safe to run on several api instances at once: an
-    update only touches a leg that is still pending."""
+    legs got a cost. Safe to run on several api instances at once: each
+    pass claims its legs (``cost_checked_at``) before asking a carrier, so
+    no leg is asked about twice in one ``RECHECK_EVERY``."""
     now = now or datetime.now(timezone.utc)
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(CallLeg)
-                .where(
-                    CallLeg.cost_status == "pending",
-                    func.coalesce(CallLeg.left_at, CallLeg.joined_at) < now - SETTLE,
-                    or_(
-                        CallLeg.cost_checked_at.is_(None),
-                        CallLeg.cost_checked_at < now - RECHECK_EVERY,
-                    ),
+            (
+                await session.execute(
+                    select(CallLeg)
+                    .where(
+                        CallLeg.cost_status == "pending",
+                        func.coalesce(CallLeg.left_at, CallLeg.joined_at)
+                        < now - SETTLE,
+                        or_(
+                            CallLeg.cost_checked_at.is_(None),
+                            CallLeg.cost_checked_at < now - RECHECK_EVERY,
+                        ),
+                    )
+                    .order_by(CallLeg.joined_at)
+                    .limit(BATCH)
+                    .with_for_update(skip_locked=True)
                 )
-                .order_by(CallLeg.joined_at)
-                .limit(BATCH)
             )
-        ).scalars()
+            .scalars()
+            .all()
+        )
         by_provider: dict[str, list[LegRef]] = {}
         for row in rows:
             by_provider.setdefault(row.provider, []).append(
@@ -132,6 +139,13 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
                     row.left_at,
                 )
             )
+        if rows:
+            await session.execute(
+                update(CallLeg)
+                .where(CallLeg.id.in_([row.id for row in rows]))
+                .values(cost_checked_at=now)
+            )
+            await session.commit()
 
     priced = 0
     for provider, refs in by_provider.items():
@@ -162,11 +176,6 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
                 priced += result.rowcount or 0
             rest = [ref.id for ref in refs if ref.id not in found]
             if rest:
-                await session.execute(
-                    update(CallLeg)
-                    .where(CallLeg.id.in_(rest), CallLeg.cost_status == "pending")
-                    .values(cost_checked_at=now)
-                )
                 await session.execute(
                     update(CallLeg)
                     .where(

@@ -2303,7 +2303,7 @@ async def _run_call(
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
 
     # Every SIP leg of the call, for its carrier cost (hailhq.core.call_legs).
-    legs = LegTracker(inbound)
+    legs = LegTracker(inbound, lambda identity: is_handover_leg(identity, call_id))
 
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:

@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 
+from hailhq.voicebot.agent import human_identity, is_handover_leg
 from hailhq.voicebot.leg_tracker import LegTracker
 from livekit import rtc
 
 SIP = rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+CALL_ID = uuid4()
+
+
+def _tracker(inbound: bool) -> LegTracker:
+    return LegTracker(inbound, lambda identity: is_handover_leg(identity, CALL_ID))
 
 
 def _p(identity: str, kind=SIP, **attrs) -> SimpleNamespace:
@@ -15,7 +22,7 @@ def _p(identity: str, kind=SIP, **attrs) -> SimpleNamespace:
 
 
 def test_inbound_caller_and_handover_legs():
-    legs = LegTracker(inbound=True)
+    legs = _tracker(True)
     caller = _p(
         "sip_+33612345678",
         **{
@@ -27,7 +34,7 @@ def test_inbound_caller_and_handover_legs():
     )
     legs.seen(caller)
     ringing = _p(
-        "human-call-1",
+        human_identity(CALL_ID),
         **{"sip.phoneNumber": "+33698765432", "sip.callStatus": "ringing"},
     )
     legs.seen(ringing)
@@ -57,7 +64,7 @@ def test_inbound_caller_and_handover_legs():
 
 
 def test_outbound_call_leg_is_answered_on_active():
-    legs = LegTracker(inbound=False)
+    legs = _tracker(False)
     callee = _p("sip_callee", **{"sip.phoneNumber": "+15125550123"})
     legs.seen(callee)
     assert legs.records()[0].answered_at is None
@@ -69,14 +76,14 @@ def test_outbound_call_leg_is_answered_on_active():
 
 
 def test_ignores_the_agent_and_unknown_leavers():
-    legs = LegTracker(inbound=True)
+    legs = _tracker(True)
     legs.seen(_p("agent", kind=rtc.ParticipantKind.PARTICIPANT_KIND_AGENT))
     legs.left(_p("never-seen"))
     assert legs.records() == []
 
 
 def test_a_leg_still_in_the_room_ends_at_records():
-    legs = LegTracker(inbound=True)
+    legs = _tracker(True)
     legs.seen(_p("sip_caller"))
     (leg,) = legs.records()
     assert leg.left_at is not None and leg.left_at >= leg.joined_at

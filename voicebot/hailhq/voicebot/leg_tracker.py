@@ -1,7 +1,7 @@
 """The SIP participants of one call, kept as carrier legs.
 
 Each SIP participant in the room is one phone line the carrier bills: the
-caller (or the person Hail dialed), and each handover dial (``human-*``).
+caller (or the person Hail dialed), and each handover dial.
 The tracker notes the ids that find the leg in the carrier's records and
 when it joined, was answered and left. The call's shutdown hands the legs
 to ``hailhq.core.call_legs.record_call_legs``.
@@ -9,6 +9,7 @@ to ``hailhq.core.call_legs.record_call_legs``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from hailhq.core.call_legs import LegRecord
@@ -22,9 +23,9 @@ def _now() -> datetime:
 
 
 class LegTracker:
-    def __init__(self, inbound: bool, handover_prefix: str = "human-") -> None:
+    def __init__(self, inbound: bool, is_handover: Callable[[str], bool]) -> None:
         self._inbound = inbound
-        self._handover_prefix = handover_prefix
+        self._is_handover = is_handover
         self._legs: dict[str, dict] = {}
 
     def seen(self, participant: rtc.Participant) -> None:
@@ -34,7 +35,7 @@ class LegTracker:
         attrs = participant.attributes or {}
         leg = self._legs.get(participant.identity)
         if leg is None:
-            handover = participant.identity.startswith(self._handover_prefix)
+            handover = self._is_handover(participant.identity)
             leg = self._legs[participant.identity] = {
                 "role": "handover" if handover else "call",
                 "direction": (

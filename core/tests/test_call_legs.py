@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -66,7 +67,11 @@ def _leg(**kw) -> LegRecord:
 async def _legs(session) -> list[CallLeg]:
     session.expire_all()
     return list(
-        (await session.execute(select(CallLeg).order_by(CallLeg.joined_at))).scalars()
+        (
+            await session.execute(
+                select(CallLeg).order_by(CallLeg.joined_at, CallLeg.sip_call_id)
+            )
+        ).scalars()
     )
 
 
@@ -82,7 +87,8 @@ def lookups(monkeypatch):
             answer = answers.get(provider, {})
             if isinstance(answer, Exception):
                 raise answer
-            return answer(refs) if callable(answer) else answer
+            result = answer(refs) if callable(answer) else answer
+            return await result if inspect.isawaitable(result) else result
 
         return lookup
 
@@ -183,7 +189,7 @@ async def test_pass_survives_an_unconfigured_carrier(async_session, lookups):
     await record_call_legs(call_id, [_leg()])
     assert await fetch_leg_costs(NOW) == 0
     (leg,) = await _legs(async_session)
-    assert (leg.cost_status, leg.cost_checked_at) == ("pending", None)
+    assert (leg.cost_status, leg.cost_checked_at) == ("pending", NOW)
 
 
 async def test_outage_never_gives_up(async_session, lookups):
@@ -214,3 +220,19 @@ async def test_pass_groups_legs_by_carrier(async_session, lookups):
     await record_call_legs(didww, [_leg(direction="outbound")])
     await fetch_leg_costs(NOW)
     assert sorted(seen) == ["didww", "twilio"]
+
+
+async def test_a_second_pass_skips_claimed_legs(async_session, lookups):
+    # Another api instance runs a pass while this one waits on the carrier.
+    answers, seen = lookups
+    nested: list[int] = []
+
+    async def slow_carrier(refs):
+        nested.append(await fetch_leg_costs(NOW))
+        return {}
+
+    answers["telnyx"] = slow_carrier
+    await record_call_legs(await _call(async_session), [_leg()])
+    await fetch_leg_costs(NOW)
+    assert nested == [0]
+    assert len(seen["telnyx"]) == 1
