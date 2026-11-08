@@ -4119,6 +4119,8 @@ async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_bus
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert resp.status_code == 200, resp.text
     assert resp.json()["waiting_for_credit"] is False
+    assert locks == [org_id]  # the real lock this time
+    assert sms_carrier.status_calls == 2
     assert sms_carrier.campaigns_created == 1
     assert await _reserved(async_session, vid) is None
 

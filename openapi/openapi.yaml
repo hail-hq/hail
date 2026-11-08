@@ -5332,11 +5332,9 @@ paths:
 
         add credit). It also waits while another check of it is running or
 
-        recently failed, or another process holds it: a later check files it,
+        recently failed, or another process holds it; a later check files it.
 
-        within about 15 minutes once the carrier answers. Poll
-
-        GET /verifications/{id} until `approved`. A wrong or expired code is
+        Poll GET /verifications/{id} until `approved`. A wrong or expired code is
 
         422 on `code`; after five wrong codes, 429 until the carrier sends a
 
