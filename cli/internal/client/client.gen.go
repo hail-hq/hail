@@ -3997,7 +3997,7 @@ type GetNumberOptionsV1NumbersOptionsGetParams struct {
 	// CountryCode ISO alpha-2 country code, such as CH.
 	CountryCode string `form:"country_code" json:"country_code"`
 
-	// Capabilities Optional. Keep only options that do all these jobs. Without it, each number type shows its best option in this order: ready now, then buy now before order by hand, then options that do every job the type offers (even when a number that does fewer jobs costs less), then fewer papers, then lower price.
+	// Capabilities Optional. Keep only options that do all these jobs. Without it, each number type shows its best option in this order: ready now, then buy now before order by hand, then options that do every job the type offers (even when a number that does fewer jobs costs less), then lower price, then fewer papers.
 	Capabilities  *[]GetNumberOptionsV1NumbersOptionsGetParamsCapabilities `form:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Authorization *string                                                  `json:"authorization,omitempty"`
 }
