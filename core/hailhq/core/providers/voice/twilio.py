@@ -27,6 +27,7 @@ from hailhq.core.providers.voice.base import (
     OrderState,
     ProviderCallStatus,
     VoiceProvider,
+    gather_leg_costs,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.http.http_client import TwilioHttpClient
@@ -494,39 +495,14 @@ def _leg_cost(client: TwilioClient, sid: str) -> LegCost | None:
     return LegCost(abs(Decimal(call.price)))
 
 
-# Calls looked up at the same time, per pass.
-LEG_LOOKUPS_AT_ONCE = 8
-
-
 async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     """Twilio finds a leg by its CallSid only; a leg without one is skipped."""
     if not (settings.twilio_account_sid and settings.twilio_auth_token):
         raise CarrierNotConfigured("Twilio is not configured")
     client = _order_client()
 
-    gate = asyncio.Semaphore(LEG_LOOKUPS_AT_ONCE)
-
-    async def one(leg: LegRef) -> LegCost | Exception | None:
-        async with gate:
-            # One refused or timed-out lookup must not discard the others.
-            try:
-                return await asyncio.to_thread(_leg_cost, client, leg.carrier_call_id)
-            except Exception as exc:
-                logger.warning(
-                    "twilio call %s lookup failed: %s", leg.carrier_call_id, exc
-                )
-                return exc
-
-    asked = [leg for leg in legs if leg.carrier_call_id]
-    answers = await asyncio.gather(*(one(leg) for leg in asked))
-    found = {
-        leg.id: cost
-        for leg, cost in zip(asked, answers, strict=True)
-        if isinstance(cost, LegCost)
-    }
-    # Nothing priced and a lookup failed: an outage or a bad key, not
-    # "no record yet". Raise so the pass logs it.
-    failed = [a for a in answers if isinstance(a, Exception)]
-    if failed and not found:
-        raise failed[0]
-    return found
+    return await gather_leg_costs(
+        "twilio",
+        [leg for leg in legs if leg.carrier_call_id],
+        lambda leg: asyncio.to_thread(_leg_cost, client, leg.carrier_call_id),
+    )

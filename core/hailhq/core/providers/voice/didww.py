@@ -801,13 +801,27 @@ def _leg_costs_sync(legs: list[LegRef]) -> dict[UUID, LegCost]:
         rate = row.get("Rate (USD)")
         # One odd row must not fail the whole export for every leg.
         try:
-            found[leg.id] = LegCost(
+            row_cost = LegCost(
                 Decimal(charged),
                 int(Decimal(seconds)) if seconds else None,
                 Decimal(rate) if rate else None,
             )
         except (ArithmeticError, ValueError):
             logger.warning("didww cdr row for %s is not a number", leg.sip_call_id)
+            continue
+        # A leg with several rows (a reroute) costs the sum of them.
+        if (seen := found.get(leg.id)) is not None:
+            row_cost = LegCost(
+                seen.usd + row_cost.usd,
+                (
+                    (seen.billed_seconds or 0) + (row_cost.billed_seconds or 0)
+                    if seen.billed_seconds is not None
+                    or row_cost.billed_seconds is not None
+                    else None
+                ),
+                seen.usd_per_minute,
+            )
+        found[leg.id] = row_cost
     return found
 
 

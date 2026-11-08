@@ -158,6 +158,15 @@ async def test_telnyx_unknown_billed_time_stays_unknown(telnyx_records):
     }
 
 
+async def test_telnyx_one_bad_record_keeps_the_others(telnyx_records):
+    records, _ = telnyx_records
+    records["sip-1"] = [{"cost": "n/a", "currency": "USD"}]
+    records["sip-2"] = [{"cost": "0.005", "billed_sec": 60, "currency": "USD"}]
+    good = _leg(sip="sip-2")
+    found = await telnyx.leg_costs([_leg(sip="sip-1"), good])
+    assert found == {good.id: LegCost(Decimal("0.005"), 60, None)}
+
+
 async def test_telnyx_skips_a_non_usd_record(telnyx_records):
     records, _ = telnyx_records
     records["sip-1"] = [{"cost": "0.01", "billed_sec": 60, "currency": "EUR"}]
@@ -273,3 +282,16 @@ async def test_didww_skips_a_row_it_cannot_read(didww_keys):
     )
     found = await didww.leg_costs([bad, good])
     assert found == {good.id: LegCost(Decimal("0.0450"), 60, Decimal("0.0450"))}
+
+
+@responses.activate
+async def test_didww_adds_up_rows_of_one_call(didww_keys):
+    leg = _leg(sip="sip-1")
+    row = (
+        "2026-11-08 10:00:00,2026-11-08 10:00:05,2026-11-08 10:01:00,success,,"
+        "+351300000001,+34600000000,55,{s},200,OK,hail,ES,mobile,INTERNATIONAL,"
+        "0.0450,{c},,sip-1\n"
+    )
+    _export(row.format(s=60, c="0.0450") + row.format(s=30, c="0.0225"))
+    found = await didww.leg_costs([leg])
+    assert found == {leg.id: LegCost(Decimal("0.0675"), 90, Decimal("0.0450"))}

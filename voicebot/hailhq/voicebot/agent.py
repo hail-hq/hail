@@ -2655,6 +2655,7 @@ async def _run_call(
     async def _shutdown_body() -> None:
         nonlocal shutting_down
         shutting_down = True
+        legs_recorded = False
         try:
             await recovery.aclose()
             # Never close the classifier under a running check: let the
@@ -2671,6 +2672,10 @@ async def _run_call(
             # Worker shutdown, BYO-LLM give-up or any other end while a
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
+            # Every leg has ended: write them before the slow steps below, so
+            # a shutdown timeout cannot lose them.
+            await record_call_legs(call_id, legs.records())
+            legs_recorded = True
             await finish_answer_post(bridge_state, call_id)
             # The background handover dial, result and notice posts use
             # agent_api: give them a moment before it closes.
@@ -2698,7 +2703,8 @@ async def _run_call(
             )
         finally:
             # Also when a step above raised: the carrier still billed the legs.
-            await record_call_legs(call_id, legs.records())
+            if not legs_recorded:
+                await record_call_legs(call_id, legs.records())
             if telemetry_span is not None:
                 telemetry_span.set_attribute(
                     "call.status", captured["status"] or "completed"

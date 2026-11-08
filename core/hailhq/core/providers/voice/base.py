@@ -15,6 +15,8 @@ helpers.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -27,6 +29,7 @@ from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
 
 __all__ = [
+    "LEG_LOOKUPS_AT_ONCE",
     "CarrierNotConfigured",
     "CarrierPreOrderError",
     "CarrierRequestError",
@@ -37,6 +40,7 @@ __all__ = [
     "OrderState",
     "ProviderCallStatus",
     "VoiceProvider",
+    "gather_leg_costs",
 ]
 
 
@@ -87,6 +91,47 @@ class LegCost:
 # A carrier's cost lookup: the legs found in its records, by leg id. A leg
 # left out has no record yet (or never will); the caller asks again later.
 LegCosts = Callable[[list[LegRef]], Awaitable[dict[UUID, LegCost]]]
+
+# Calls one carrier looks up at the same time, per pass.
+LEG_LOOKUPS_AT_ONCE = 8
+
+logger = logging.getLogger(__name__)
+
+
+async def gather_leg_costs(
+    carrier: str,
+    legs: list[LegRef],
+    fetch: Callable[[LegRef], Awaitable[LegCost | None]],
+) -> dict[UUID, LegCost]:
+    """Run ``fetch`` for each leg, ``LEG_LOOKUPS_AT_ONCE`` at a time. One
+    failed lookup (refused, timed out, unreadable) does not discard the
+    others. When nothing was priced and a lookup failed, it raises: an
+    outage or a bad key, not "no record yet"."""
+    gate = asyncio.Semaphore(LEG_LOOKUPS_AT_ONCE)
+
+    async def one(leg: LegRef) -> LegCost | Exception | None:
+        async with gate:
+            try:
+                return await fetch(leg)
+            except Exception as exc:
+                logger.warning(
+                    "%s leg %s lookup failed: %s",
+                    carrier,
+                    leg.carrier_call_id or leg.sip_call_id,
+                    exc,
+                )
+                return exc
+
+    answers = await asyncio.gather(*(one(leg) for leg in legs))
+    found = {
+        leg.id: cost
+        for leg, cost in zip(legs, answers, strict=True)
+        if isinstance(cost, LegCost)
+    }
+    failed = [answer for answer in answers if isinstance(answer, Exception)]
+    if failed and not found:
+        raise failed[0]
+    return found
 
 
 class ProviderCallStatus(BaseModel):

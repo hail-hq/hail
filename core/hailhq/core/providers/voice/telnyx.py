@@ -1,7 +1,6 @@
 """Telnyx number inventory discovery, order placement, order lookup, release
 and call costs."""
 
-import asyncio
 import logging
 from decimal import Decimal
 from typing import Any, Literal
@@ -22,6 +21,7 @@ from hailhq.core.providers.voice.base import (
     LegCost,
     LegRef,
     OrderState,
+    gather_leg_costs,
 )
 from hailhq.core.schemas import NumberType
 from hailhq.core.telephony_catalog import monthly_price
@@ -491,33 +491,22 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 # Call-ID. Telnyx writes the record after the call ends.
 
 
-# Calls looked up at the same time, per pass.
-LEG_LOOKUPS_AT_ONCE = 8
-
-
 async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     try:
         client = TelnyxClient()
     except ValueError as exc:
         raise CarrierNotConfigured(str(exc)) from exc
-    gate = asyncio.Semaphore(LEG_LOOKUPS_AT_ONCE)
 
-    async def one(leg: LegRef) -> LegCost | Exception | None:
-        async with gate:
-            # One refused lookup must not discard the others.
-            try:
-                body = await client.request(
-                    "GET",
-                    "/detail_records",
-                    params={
-                        "filter[record_type]": "sip-trunking",
-                        "filter[sip_call_id]": leg.sip_call_id,
-                        "filter[date_range]": "last_7_days",
-                    },
-                )
-            except httpx.HTTPError as exc:
-                logger.warning("telnyx leg %s lookup failed: %s", leg.sip_call_id, exc)
-                return exc
+    async def fetch(leg: LegRef) -> LegCost | None:
+        body = await client.request(
+            "GET",
+            "/detail_records",
+            params={
+                "filter[record_type]": "sip-trunking",
+                "filter[sip_call_id]": leg.sip_call_id,
+                "filter[date_range]": "last_7_days",
+            },
+        )
         records = [r for r in body.get("data") or [] if r.get("cost") is not None]
         if not records:
             return None
@@ -532,16 +521,6 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
             Decimal(str(rate)) if rate is not None else None,
         )
 
-    asked = [leg for leg in legs if leg.sip_call_id]
-    answers = await asyncio.gather(*(one(leg) for leg in asked))
-    found = {
-        leg.id: cost
-        for leg, cost in zip(asked, answers, strict=True)
-        if isinstance(cost, LegCost)
-    }
-    # Nothing priced and a lookup failed: an outage or a bad key, not
-    # "no record yet". Raise so the pass logs it.
-    failed = [a for a in answers if isinstance(a, Exception)]
-    if failed and not found:
-        raise failed[0]
-    return found
+    return await gather_leg_costs(
+        "telnyx", [leg for leg in legs if leg.sip_call_id], fetch
+    )
