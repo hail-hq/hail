@@ -18,8 +18,15 @@ PDF = b"%PDF-1.4 fake"
 ORG = "8f6f3c1e-2d4b-4a8e-9b1a-0c2d3e4f5a6b"
 
 
+def _msg(resp) -> str:
+    return "; ".join(d["msg"] for d in resp.json()["detail"])
+
+
 @pytest.fixture()
-def store():
+def store(monkeypatch):
+    monkeypatch.setattr(
+        "hailhq.api.routes.sms_evidence.settings.hail_api_url", "https://api.hail.test"
+    )
     s3 = AsyncMock()
     app.dependency_overrides[get_evidence_store] = lambda: s3
     try:
@@ -76,7 +83,7 @@ async def test_upload_refuses_other_files(
         headers=_auth(org_and_key),
     )
     assert resp.status_code == 422
-    assert resp.json()["detail"] == "Upload a PNG, JPG or PDF."
+    assert _msg(resp) == "Upload a PNG, JPG or PDF."
     store.put_attachment.assert_not_awaited()
 
 
@@ -89,7 +96,7 @@ async def test_upload_refuses_a_big_file(
         headers=_auth(org_and_key),
     )
     assert resp.status_code == 422
-    assert "10 MB" in resp.json()["detail"]
+    assert "10 MB" in _msg(resp)
     store.put_attachment.assert_not_awaited()
 
 
@@ -106,7 +113,7 @@ async def test_upload_refuses_a_big_body_before_reading_it(
         },
     )
     assert resp.status_code == 422
-    assert "10 MB" in resp.json()["detail"]
+    assert _msg(resp) == "request is too large"
 
 
 async def test_upload_needs_one_file_part(
@@ -191,11 +198,65 @@ async def test_bad_links_are_refused_without_a_read(
     resp = await client.get(f"/v1/verifications/sms/evidence/{path}")
     assert resp.status_code in (404, 422)
     store.fetch_raw.assert_not_awaited()
-    store.fetch_raw.assert_not_awaited()
 
 
-@pytest.mark.parametrize("code", ["NoSuchKey", "AccessDenied"])
-async def test_unknown_link_is_404(client: httpx.AsyncClient, store, code) -> None:
-    store.fetch_raw.side_effect = ClientError({"Error": {"Code": code}}, "GetObject")
+async def test_unknown_link_is_404(client: httpx.AsyncClient, store) -> None:
+    store.fetch_raw.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchKey"}}, "GetObject"
+    )
     resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'b' * 32}")
     assert resp.status_code == 404
+
+
+async def test_a_permission_fault_is_not_hidden_as_404(
+    client: httpx.AsyncClient, store
+) -> None:
+    store.fetch_raw.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied"}}, "GetObject"
+    )
+    with pytest.raises(ClientError):
+        await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'b' * 32}")
+
+
+async def test_a_pdf_opens_in_the_browser_viewer(
+    client: httpx.AsyncClient, store
+) -> None:
+    store.fetch_raw.return_value = PDF
+    resp = await client.get(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert "content-security-policy" not in resp.headers
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "http://localhost:8080",
+        "http://api.example.com",
+        "https://localhost",
+        "https://10.0.0.5",
+        "https://api",
+    ],
+)
+async def test_upload_refuses_a_link_reviewers_cannot_open(
+    client: httpx.AsyncClient, org_and_key, store, monkeypatch, base
+) -> None:
+    monkeypatch.setattr("hailhq.api.routes.sms_evidence.settings.hail_api_url", base)
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", PNG, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 503
+    assert "HAIL_API_URL" in resp.json()["detail"]
+    store.put_attachment.assert_not_awaited()
+
+
+def test_only_the_public_link_skips_the_rate_limit() -> None:
+    from hailhq.api.ratelimit import _is_exempt
+
+    assert _is_exempt(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
+    assert _is_exempt(f"/verifications/sms/evidence/{ORG}/{'a' * 32}")
+    assert not _is_exempt("/v1/verifications/sms/evidence")
+    assert not _is_exempt("/v1/verifications")

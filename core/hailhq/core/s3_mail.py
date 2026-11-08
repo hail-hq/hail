@@ -65,9 +65,17 @@ class S3MailClient:
             for page in pages:
                 keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
                 if keys:
-                    self._client.delete_objects(
+                    resp = self._client.delete_objects(
                         Bucket=self._bucket, Delete={"Objects": keys, "Quiet": True}
                     )
+                    # A 200 can still carry per-key failures; never count
+                    # (or silently keep) a file S3 did not delete.
+                    errors = resp.get("Errors") or []
+                    if errors:
+                        raise RuntimeError(
+                            f"S3 could not delete {len(errors)} object(s) under "
+                            f"{prefix}: {errors[0].get('Code')}"
+                        )
                     deleted += len(keys)
             return deleted
 

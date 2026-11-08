@@ -60,12 +60,26 @@ def test_delete_prefix_deletes_every_page():
         {"Contents": [{"Key": "sms-evidence/o/c"}]},
         {},
     ]
+    stub.delete_objects.return_value = {}
     client = S3MailClient(client=stub, bucket="hail-inbound")
     assert asyncio.run(client.delete_prefix("sms-evidence/o/")) == 3
     stub.get_paginator.return_value.paginate.assert_called_once_with(
         Bucket="hail-inbound", Prefix="sms-evidence/o/"
     )
     assert stub.delete_objects.call_count == 2
+
+
+def test_delete_prefix_raises_when_s3_keeps_a_file():
+    stub = MagicMock()
+    stub.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "sms-evidence/o/a"}]},
+    ]
+    stub.delete_objects.return_value = {
+        "Errors": [{"Key": "sms-evidence/o/a", "Code": "AccessDenied"}]
+    }
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        asyncio.run(client.delete_prefix("sms-evidence/o/"))
 
 
 def test_delete_org_evidence_without_a_bucket_does_nothing(monkeypatch):

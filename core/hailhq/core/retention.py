@@ -140,10 +140,6 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     for call in recordings:
         await delete_recording(call)
 
-    # Public links must stop working once the account's data is gone.
-    for org_id in org_ids:
-        summary.evidence_files_deleted += await delete_org_evidence(org_id)
-
     call_result = await session.execute(
         update(Call)
         .where(
@@ -187,6 +183,12 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     summary.contacts_deleted = contact_result.rowcount or 0
 
     await session.commit()
+
+    # Public links must stop working once the account's data is gone. After
+    # the commit, so an S3 failure never blocks the database scrub; every
+    # sweep retries it, since closed orgs stay past the cutoff.
+    for org_id in org_ids:
+        summary.evidence_files_deleted += await delete_org_evidence(org_id)
     return summary
 
 
