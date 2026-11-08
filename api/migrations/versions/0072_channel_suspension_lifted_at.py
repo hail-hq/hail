@@ -24,8 +24,8 @@ the old constraint, and drops the index.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0071"
-down_revision = "0070"
+revision = "0072"
+down_revision = "0071"
 branch_labels = None
 depends_on = None
 
