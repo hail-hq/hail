@@ -47,6 +47,11 @@ def upgrade() -> None:
         "channel_suspensions",
         sa.Column("lifted_at", sa.DateTime(timezone=True), nullable=True),
     )
+    op.create_check_constraint(
+        "channel_suspensions_lifted_after_suspended_check",
+        "channel_suspensions",
+        "lifted_at IS NULL OR lifted_at >= suspended_at",
+    )
     op.drop_constraint(
         "channel_suspensions_org_channel_uniq", "channel_suspensions", type_="unique"
     )
@@ -72,5 +77,10 @@ def downgrade() -> None:
         "channel_suspensions_org_channel_uniq",
         "channel_suspensions",
         ["organization_id", "channel"],
+    )
+    op.drop_constraint(
+        "channel_suspensions_lifted_after_suspended_check",
+        "channel_suspensions",
+        type_="check",
     )
     op.drop_column("channel_suspensions", "lifted_at")

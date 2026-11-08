@@ -354,6 +354,10 @@ class ChannelSuspension(Base):
             "channel IN ('sms','voice','email')",
             name="channel_suspensions_channel_check",
         ),
+        CheckConstraint(
+            "lifted_at IS NULL OR lifted_at >= suspended_at",
+            name="channel_suspensions_lifted_after_suspended_check",
+        ),
         Index(
             "channel_suspensions_active_uq",
             "organization_id",

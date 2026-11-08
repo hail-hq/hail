@@ -351,8 +351,6 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         sends, bounces, complaints = int(sent_to), int(bounces), int(complaints)
         if org_id in already_suspended:
             continue
-        if sends < settings.hail_email_abuse_min_sends:
-            continue
         bounce_rate = bounces / sends
         complaint_rate = complaints / sends
         reasons = []

@@ -408,6 +408,7 @@ async def test_email_lift_counts_only_mail_sent_after_it(
             organization_id=org_id,
             channel="email",
             reason="flagged",
+            suspended_at=datetime.now(timezone.utc) - timedelta(days=3),
             lifted_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
     )
@@ -527,6 +528,7 @@ async def test_sms_late_stops_on_pre_lift_numbers_do_not_count(
             organization_id=org_id,
             channel="sms",
             reason="flagged",
+            suspended_at=datetime.now(timezone.utc) - timedelta(days=3),
             lifted_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
     )

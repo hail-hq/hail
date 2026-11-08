@@ -571,6 +571,7 @@ async def test_check_email_allowed_passes_after_suspension_lifted(
             organization_id=org_id,
             channel="email",
             reason="abuse",
+            suspended_at=datetime.now(timezone.utc) - timedelta(days=3),
             lifted_at=datetime.now(timezone.utc),
         )
     )

@@ -775,6 +775,6 @@ or the `HAIL_EMAIL_ABUSE_*` rates up.
 - `hail bootstrap` admin CLI (closes the manual DB-seed step above)
 - CallEvent dedupe across voicebot redispatch
 - **Un-suspend tooling for `channel_suspensions`** — auto-suspend has no
-  reverse path (refer to "SMS abuse monitor" above); add a `hail sms suspensions
-lift <org>` command / operator route and/or an automatic cooldown column
-  so recovery is not raw SQL.
+  reverse path (refer to "Abuse monitor & channel suspensions" above); add a
+  `hail suspensions lift <org> <channel>` command / operator route and/or
+  an automatic cooldown so recovery is not raw SQL.

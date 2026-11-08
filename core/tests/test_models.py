@@ -112,7 +112,7 @@ async def test_channel_suspension_unique_per_org_and_channel(async_session) -> N
 
 async def test_channel_suspension_allows_a_new_row_after_a_lift(async_session) -> None:
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     from hailhq.core.models import ChannelSuspension
 
@@ -122,6 +122,7 @@ async def test_channel_suspension_allows_a_new_row_after_a_lift(async_session) -
             organization_id=org_id,
             channel="sms",
             reason="a",
+            suspended_at=datetime.now(timezone.utc) - timedelta(days=3),
             lifted_at=datetime.now(timezone.utc),
         )
     )
@@ -131,3 +132,26 @@ async def test_channel_suspension_allows_a_new_row_after_a_lift(async_session) -
         ChannelSuspension(organization_id=org_id, channel="sms", reason="b")
     )
     await async_session.commit()
+
+
+async def test_channel_suspension_rejects_a_lift_before_the_suspension(
+    async_session,
+) -> None:
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.core.models import ChannelSuspension
+    from sqlalchemy.exc import IntegrityError
+
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        ChannelSuspension(
+            organization_id=uuid.uuid4(),
+            channel="email",
+            reason="a",
+            suspended_at=now,
+            lifted_at=now - timedelta(seconds=1),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
