@@ -68,7 +68,7 @@ def option_key(
     fewer papers."""
     # Buy first: a number the customer can buy online, even after a check,
     # beats one only support can order, even when that one needs no papers.
-    # Then the cheapest: a longer paper list is still one form.
+    # Then the cheapest, even when its paper list is longer or unknown.
     return (
         0 if how == "buy" else 1,
         _STATUS_RANK[status],
