@@ -588,8 +588,8 @@ async def get_number_options(
                 "it, each number type shows its best option in this order: "
                 "buy now before order by hand, then ready now, then options "
                 "that do every job the type offers (even when a number that "
-                "does fewer jobs costs less), then fewer papers, then lower "
-                "price."
+                "does fewer jobs costs less), then lower price, then fewer "
+                "papers."
             ),
         ),
     ] = None,

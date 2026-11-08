@@ -12,6 +12,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
 - Verification: when several Twilio requirements accept only the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
 - Voice replies start sooner: the call's instructions are cached after the first turn.
