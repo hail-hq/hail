@@ -4652,6 +4652,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/evidence:
+    post:
+      tags:
+        - verifications
+      summary: Upload Sms Evidence
+      description: "Upload a consent screenshot and get back a public link.
+
+
+        Put the returned `url` in an SMS registration field that asks for an
+
+        evidence URL (for example `website_evidence_url`). Carrier reviewers open
+
+        it without signing in, so anyone with the link can see the file. Remove
+
+        personal information first. Pasting your own public link still works."
+      operationId: upload_sms_evidence
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_upload_sms_evidence"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceUploadResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/sms/evidence/{token}:
+    get:
+      tags:
+        - verifications
+      summary: Get Sms Evidence
+      description:
+        "Public: the file behind a link from `POST /verifications/sms/evidence`.
+
+
+        No sign-in. Carrier reviewers open this link."
+      operationId: get_sms_evidence
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Token
+      responses:
+        "200":
+          description: The uploaded file.
+          content:
+            image/png: {}
+            image/jpeg: {}
+            application/pdf: {}
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: No file has this link.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/requirements:
     get:
       tags:
@@ -5830,6 +5949,17 @@ components:
       required:
         - file
       title: Body_upload_email_attachment
+    Body_upload_sms_evidence:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+          description: A PNG, JPG or PDF of 10 MB or less.
+      type: object
+      required:
+        - file
+      title: Body_upload_sms_evidence
     CallCreate:
       properties:
         recipient_consent:
@@ -7911,6 +8041,28 @@ components:
       required:
         - items
       title: EventStreamResponse
+    EvidenceUploadResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Public link to the file. Put it in an `*_evidence_url` field.
+        content_type:
+          type: string
+          title: Content Type
+          description:
+            "`image/png`, `image/jpeg` or `application/pdf`, read from
+            the file."
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: File size in bytes.
+      type: object
+      required:
+        - url
+        - content_type
+        - size_bytes
+      title: EvidenceUploadResponse
     FieldOption:
       properties:
         key:

@@ -40,13 +40,21 @@ class S3MailClient:
 
         return await asyncio.to_thread(_do)
 
-    async def put_attachment(self, key: str, payload: bytes, content_type: str) -> None:
+    async def put_attachment(
+        self,
+        key: str,
+        payload: bytes,
+        content_type: str,
+        *,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
         await asyncio.to_thread(
             self._client.put_object,
             Bucket=self._bucket,
             Key=key,
             Body=payload,
             ContentType=content_type,
+            **({"Metadata": metadata} if metadata else {}),
         )
 
     async def delete(self, key: str) -> None:

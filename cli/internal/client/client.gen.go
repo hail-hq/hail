@@ -1744,6 +1744,12 @@ type BodyUploadEmailAttachment struct {
 	File string `json:"file"`
 }
 
+// BodyUploadSmsEvidence defines model for Body_upload_sms_evidence.
+type BodyUploadSmsEvidence struct {
+	// File A PNG, JPG or PDF of 10 MB or less.
+	File string `json:"file"`
+}
+
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
 	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
@@ -2663,6 +2669,18 @@ type EventStreamResponse struct {
 
 // EventStreamResponseCallStatus Current status of the call named by the id filter (e.g. id=call:<uuid>). Null for org-wide tails and non-call filters, since there is no single call to report a status for.
 type EventStreamResponseCallStatus string
+
+// EvidenceUploadResponse defines model for EvidenceUploadResponse.
+type EvidenceUploadResponse struct {
+	// ContentType `image/png`, `image/jpeg` or `application/pdf`, read from the file.
+	ContentType string `json:"content_type"`
+
+	// SizeBytes File size in bytes.
+	SizeBytes int `json:"size_bytes"`
+
+	// Url Public link to the file. Put it in an `*_evidence_url` field.
+	Url string `json:"url"`
+}
 
 // FieldOption One allowed value for a field with a fixed set of answers.
 type FieldOption struct {
@@ -4157,6 +4175,11 @@ type GetVerificationRequirementsParams struct {
 // GetVerificationRequirementsParamsSubjectType defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParamsSubjectType string
 
+// UploadSmsEvidenceParams defines parameters for UploadSmsEvidence.
+type UploadSmsEvidenceParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // PreviewSmsApplicationParams defines parameters for PreviewSmsApplication.
 type PreviewSmsApplicationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4292,6 +4315,9 @@ type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
 
 // UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
+
+// UploadSmsEvidenceMultipartRequestBody defines body for UploadSmsEvidence for multipart/form-data ContentType.
+type UploadSmsEvidenceMultipartRequestBody = BodyUploadSmsEvidence
 
 // PreviewSmsApplicationJSONRequestBody defines body for PreviewSmsApplication for application/json ContentType.
 type PreviewSmsApplicationJSONRequestBody = SmsPreviewRequest
@@ -4898,6 +4924,12 @@ type ClientInterface interface {
 
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UploadSmsEvidenceWithBody request with any body
+	UploadSmsEvidenceWithBody(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSmsEvidence request
+	GetSmsEvidence(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewSmsApplicationWithBody request with any body
 	PreviewSmsApplicationWithBody(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5920,6 +5952,30 @@ func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificat
 
 func (c *Client) GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVerificationRequirementsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UploadSmsEvidenceWithBody(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUploadSmsEvidenceRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSmsEvidence(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsEvidenceRequest(c.Server, token)
 	if err != nil {
 		return nil, err
 	}
@@ -10081,6 +10137,84 @@ func NewGetVerificationRequirementsRequest(server string, params *GetVerificatio
 	return req, nil
 }
 
+// NewUploadSmsEvidenceRequestWithBody generates requests for UploadSmsEvidence with any type of body
+func NewUploadSmsEvidenceRequestWithBody(server string, params *UploadSmsEvidenceParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/sms/evidence")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetSmsEvidenceRequest generates requests for GetSmsEvidence
+func NewGetSmsEvidenceRequest(server string, token string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "token", token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/sms/evidence/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewPreviewSmsApplicationRequest calls the generic PreviewSmsApplication builder with application/json body
 func NewPreviewSmsApplicationRequest(server string, params *PreviewSmsApplicationParams, body PreviewSmsApplicationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -11230,6 +11364,12 @@ type ClientWithResponsesInterface interface {
 
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
+
+	// UploadSmsEvidenceWithBodyWithResponse request with any body
+	UploadSmsEvidenceWithBodyWithResponse(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadSmsEvidenceResponse, error)
+
+	// GetSmsEvidenceWithResponse request
+	GetSmsEvidenceWithResponse(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error)
 
 	// PreviewSmsApplicationWithBodyWithResponse request with any body
 	PreviewSmsApplicationWithBodyWithResponse(ctx context.Context, params *PreviewSmsApplicationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PreviewSmsApplicationResponse, error)
@@ -12725,6 +12865,51 @@ func (r GetVerificationRequirementsResponse) StatusCode() int {
 	return 0
 }
 
+type UploadSmsEvidenceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *EvidenceUploadResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UploadSmsEvidenceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UploadSmsEvidenceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetSmsEvidenceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSmsEvidenceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSmsEvidenceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type PreviewSmsApplicationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -13800,6 +13985,24 @@ func (c *ClientWithResponses) GetVerificationRequirementsWithResponse(ctx contex
 		return nil, err
 	}
 	return ParseGetVerificationRequirementsResponse(rsp)
+}
+
+// UploadSmsEvidenceWithBodyWithResponse request with arbitrary body returning *UploadSmsEvidenceResponse
+func (c *ClientWithResponses) UploadSmsEvidenceWithBodyWithResponse(ctx context.Context, params *UploadSmsEvidenceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UploadSmsEvidenceResponse, error) {
+	rsp, err := c.UploadSmsEvidenceWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUploadSmsEvidenceResponse(rsp)
+}
+
+// GetSmsEvidenceWithResponse request returning *GetSmsEvidenceResponse
+func (c *ClientWithResponses) GetSmsEvidenceWithResponse(ctx context.Context, token string, reqEditors ...RequestEditorFn) (*GetSmsEvidenceResponse, error) {
+	rsp, err := c.GetSmsEvidence(ctx, token, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSmsEvidenceResponse(rsp)
 }
 
 // PreviewSmsApplicationWithBodyWithResponse request with arbitrary body returning *PreviewSmsApplicationResponse
@@ -15955,6 +16158,65 @@ func ParseGetVerificationRequirementsResponse(rsp *http.Response) (*GetVerificat
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUploadSmsEvidenceResponse parses an HTTP response from a UploadSmsEvidenceWithResponse call
+func ParseUploadSmsEvidenceResponse(rsp *http.Response) (*UploadSmsEvidenceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UploadSmsEvidenceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest EvidenceUploadResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSmsEvidenceResponse parses an HTTP response from a GetSmsEvidenceWithResponse call
+func ParseGetSmsEvidenceResponse(rsp *http.Response) (*GetSmsEvidenceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSmsEvidenceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

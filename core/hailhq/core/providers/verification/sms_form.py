@@ -205,6 +205,14 @@ _METHOD_FIELDS = {
     "QR": ("qr_url", "qr_evidence_url", "qr_advertisement"),
     "INBOUND": ("inbound_number", "inbound_evidence_url", "inbound_advertisement"),
 }
+# Optional for its method. Carriers ask for the staff script and the
+# confirmation text for verbal consent, not a picture of it.
+_OPTIONAL_METHOD_FIELDS = frozenset({"verbal_evidence_url"})
+_EVIDENCE_HELP = (
+    "A public link to a screenshot of where recipients agree, with personal "
+    "information removed. Carrier reviewers open it without signing in. No link? "
+    "Upload the file with POST /verifications/sms/evidence and use the url it returns."
+)
 _METHOD_LABELS = {
     "url": "Exact enrollment page URL",
     "evidence_url": "Public redacted evidence URL",
@@ -225,7 +233,16 @@ def _method_spec(method: str, name: str) -> FieldSpec:
         required=False,
         kind="url" if suffix.endswith("url") else "text",
         max_length=_URL_MAX if suffix.endswith("url") else 1024,
-        help="Required for this consent method. Use real, accessible evidence with personal information removed; never publish recipient records or identity documents.",
+        help=(
+            _EVIDENCE_HELP
+            + (
+                " Optional for verbal consent."
+                if name in _OPTIONAL_METHOD_FIELDS
+                else ""
+            )
+            if suffix == "evidence_url"
+            else "Required for this consent method. Use real, accessible evidence with personal information removed; never publish recipient records or identity documents."
+        ),
     )
 
 
@@ -604,7 +621,8 @@ def _application_problems(
     for method in methods:
         for name in _METHOD_FIELDS.get(method, ()):
             if not val(name):
-                issue(name, "This is required for the selected consent method.")
+                if name not in _OPTIONAL_METHOD_FIELDS:
+                    issue(name, "This is required for the selected consent method.")
             elif name.endswith("_number") and not re.fullmatch(
                 r"\+[1-9][0-9]{7,14}", val(name)
             ):

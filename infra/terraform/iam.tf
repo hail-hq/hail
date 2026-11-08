@@ -17,6 +17,14 @@ data "aws_iam_policy_document" "main" {
     resources = ["${aws_s3_bucket.inbound.arn}/outbound-attachments/*"]
   }
 
+  # Consent screenshots for US SMS registration. Carrier reviewers open
+  # them through the API's public link (routes/sms_evidence.py).
+  statement {
+    sid       = "SmsEvidenceReadWrite"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.inbound.arn}/sms-evidence/*"]
+  }
+
   statement {
     sid = "OutboundSES"
     actions = [

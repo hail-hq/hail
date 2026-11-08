@@ -1,0 +1,156 @@
+"""POST /verifications/sms/evidence and the public GET of its link."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from botocore.exceptions import ClientError
+from hailhq.api.main import app
+from hailhq.api.routes.sms_evidence import MAX_EVIDENCE_BYTES, get_evidence_store
+
+from .conftest import insert_org_and_key  # noqa: F401
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+PDF = b"%PDF-1.4 fake"
+
+
+@pytest.fixture()
+def store():
+    s3 = AsyncMock()
+    app.dependency_overrides[get_evidence_store] = lambda: s3
+    try:
+        yield s3
+    finally:
+        app.dependency_overrides.pop(get_evidence_store, None)
+
+
+def _auth(org_and_key) -> dict:
+    return {"Authorization": f"Bearer {org_and_key[2]}"}
+
+
+@pytest.mark.parametrize(
+    "data,kind", [(PNG, "image/png"), (JPG, "image/jpeg"), (PDF, "application/pdf")]
+)
+async def test_upload_returns_a_public_link(
+    client: httpx.AsyncClient, org_and_key, store, data, kind
+) -> None:
+    # The type comes from the bytes, not the header the client sent.
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot", data, "application/octet-stream")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["content_type"] == kind
+    assert body["size_bytes"] == len(data)
+    prefix = "/v1/verifications/sms/evidence/"
+    assert prefix in body["url"]
+    token = body["url"].split(prefix)[1]
+    assert len(token) == 32
+    key, payload, content_type = store.put_attachment.await_args.args
+    assert key == f"sms-evidence/{token}"
+    assert (payload, content_type) == (data, kind)
+    assert store.put_attachment.await_args.kwargs["metadata"] == {
+        "organization-id": str(org_and_key[0])
+    }
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"<html><script>alert(1)</script></html>",
+        b'<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+        b"GIF89a",
+        b"",
+    ],
+)
+async def test_upload_refuses_other_files(
+    client: httpx.AsyncClient, org_and_key, store, data
+) -> None:
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", data, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Upload a PNG, JPG or PDF."
+    store.put_attachment.assert_not_awaited()
+
+
+async def test_upload_refuses_a_big_file(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("big.png", PNG + b"\x00" * MAX_EVIDENCE_BYTES, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 422
+    assert "10 MB" in resp.json()["detail"]
+    store.put_attachment.assert_not_awaited()
+
+
+async def test_upload_needs_a_key(client: httpx.AsyncClient, store) -> None:
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", PNG, "image/png")},
+    )
+    assert resp.status_code == 401
+    store.put_attachment.assert_not_awaited()
+
+
+async def test_upload_without_storage_says_paste_a_link(
+    client: httpx.AsyncClient, org_and_key
+) -> None:
+    app.dependency_overrides[get_evidence_store] = lambda: None
+    try:
+        resp = await client.post(
+            "/v1/verifications/sms/evidence",
+            files={"file": ("shot.png", PNG, "image/png")},
+            headers=_auth(org_and_key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_evidence_store, None)
+    assert resp.status_code == 503
+    assert "public link" in resp.json()["detail"]
+
+
+async def test_link_opens_without_sign_in(client: httpx.AsyncClient, store) -> None:
+    store.fetch_raw.return_value = PNG
+    token = "a" * 32
+    resp = await client.get(f"/v1/verifications/sms/evidence/{token}")
+    assert resp.status_code == 200
+    assert resp.content == PNG
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["content-disposition"] == "inline"
+    assert "sandbox" in resp.headers["content-security-policy"]
+    store.fetch_raw.assert_awaited_once_with(f"sms-evidence/{token}")
+
+
+async def test_link_never_serves_a_stored_file_of_another_type(
+    client: httpx.AsyncClient, store
+) -> None:
+    store.fetch_raw.return_value = b"<html></html>"
+    resp = await client.get(f"/v1/verifications/sms/evidence/{'a' * 32}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("token", ["short", "a" * 33, "a" * 31 + "."])
+async def test_bad_tokens_are_404_without_a_read(
+    client: httpx.AsyncClient, store, token
+) -> None:
+    resp = await client.get(f"/v1/verifications/sms/evidence/{token}")
+    assert resp.status_code == 404
+    store.fetch_raw.assert_not_awaited()
+
+
+@pytest.mark.parametrize("code", ["NoSuchKey", "AccessDenied"])
+async def test_unknown_link_is_404(client: httpx.AsyncClient, store, code) -> None:
+    store.fetch_raw.side_effect = ClientError({"Error": {"Code": code}}, "GetObject")
+    resp = await client.get(f"/v1/verifications/sms/evidence/{'b' * 32}")
+    assert resp.status_code == 404
