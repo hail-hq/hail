@@ -1503,7 +1503,9 @@ def _e164(number: str) -> str:
     return number
 
 
-async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
+async def open_inbound_from_room(
+    ctx: JobContext, on_caller: Callable[[rtc.Participant], None] | None = None
+) -> dict[str, Any] | None:
     """Turn an inbound room into a ``Call`` row and dispatch-shaped metadata.
 
     Reads the SIP participant's attributes (``sip.trunkPhoneNumber`` is the
@@ -1521,6 +1523,8 @@ async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
         logger.warning("inbound room %s: no SIP participant; leaving", ctx.room.name)
         ctx.shutdown(reason="no_sip_participant")
         return None
+    if on_caller is not None:
+        on_caller(participant)
     attrs = participant.attributes
     sip = SipAttributes(
         dialed=_e164(attrs.get("sip.trunkPhoneNumber", "")),
@@ -2263,8 +2267,11 @@ async def _run_call(
     await ctx.connect()
 
     inbound = metadata.get("direction") == "inbound"
+    # The caller's SIP leg as first seen: it may leave before the leg
+    # tracker exists, and the carrier bills it anyway.
+    callers: list[rtc.Participant] = []
     if inbound and "call_id" not in metadata:
-        opened = await open_inbound_from_room(ctx)
+        opened = await open_inbound_from_room(ctx, callers.append)
         if opened is None:
             return
         metadata = opened
@@ -2354,7 +2361,7 @@ async def _run_call(
         _maybe_mark_answered(participant)
 
     # The SIP leg may already be present/active by the time handlers register.
-    for _participant in ctx.room.remote_participants.values():
+    for _participant in [*callers, *ctx.room.remote_participants.values()]:
         legs.seen(_participant)
         _maybe_mark_answered(_participant)
 

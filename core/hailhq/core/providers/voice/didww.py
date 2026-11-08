@@ -736,7 +736,7 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 # --- call costs: DIDWW has no per-call lookup, so one outbound CDR export
 # covers every leg asked about. Voice IN legs are not in it: they stay
 # unpriced. The export is ready within seconds; one that is not ready after
-# EXPORT_WAIT_SECONDS raises, so its legs stay pending for the next pass.
+# EXPORT_WAIT_SECONDS raises, so its legs are asked about again next pass.
 
 EXPORT_WAIT_SECONDS = 60
 EXPORT_MARGIN = timedelta(minutes=10)

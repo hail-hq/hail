@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import uuid
 from dataclasses import replace
@@ -192,13 +193,17 @@ async def test_pass_survives_an_unconfigured_carrier(async_session, lookups):
     assert (leg.cost_status, leg.cost_checked_at) == ("pending", NOW)
 
 
-async def test_outage_never_gives_up(async_session, lookups):
+@pytest.mark.parametrize(
+    "answer", [RuntimeError("carrier down"), CarrierNotConfigured("no key")]
+)
+async def test_an_outage_gives_up_after_the_window_too(async_session, lookups, answer):
+    # No cost after the window, for any reason: billing falls back to a rate.
     answers, _ = lookups
-    answers["telnyx"] = RuntimeError("carrier down")
+    answers["telnyx"] = answer
     await record_call_legs(await _call(async_session), [_leg()])
     await fetch_leg_costs(NOW + call_legs.GIVE_UP_AFTER)
     (leg,) = await _legs(async_session)
-    assert leg.cost_status == "pending"
+    assert leg.cost_status == "missing"
 
 
 async def test_unpriceable_legs_are_missing_at_record_time(async_session, lookups):
@@ -262,3 +267,27 @@ async def test_new_legs_go_before_legs_already_asked(
     seen.clear()
     await fetch_leg_costs(NOW)
     assert [ref.sip_call_id for ref in seen["telnyx"]] == ["new"]
+
+
+async def test_carriers_are_asked_at_the_same_time(async_session, lookups):
+    answers, _ = lookups
+    both_waiting = asyncio.Event()
+    waiting: list[str] = []
+
+    def waits(name):
+        async def lookup(_refs):
+            waiting.append(name)
+            if len(waiting) == 2:
+                both_waiting.set()
+            await asyncio.wait_for(both_waiting.wait(), timeout=2)
+            return {}
+
+        return lookup
+
+    answers["twilio"], answers["telnyx"] = waits("twilio"), waits("telnyx")
+    twilio = await _call(async_session, "twilio")
+    await record_call_legs(twilio, [_leg(carrier_call_id="CA1")])
+    telnyx = await _call(async_session, "telnyx", "+14155550101")
+    await record_call_legs(telnyx, [_leg()])
+    await fetch_leg_costs(NOW)
+    assert sorted(waiting) == ["telnyx", "twilio"]

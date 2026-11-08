@@ -242,8 +242,11 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
     async_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Inbound: the room is empty once the Call row exists → the row is
-    closed as canceled and no session starts."""
-    from hailhq.core.models import Call, PhoneNumber
+    closed as canceled and no session starts. The carrier billed the
+    caller's leg, so it is still recorded."""
+    from hailhq.core.models import Call, CallLeg, PhoneNumber
+    from livekit import rtc
+    from sqlalchemy import select
 
     org = uuid.uuid4()
     pn = PhoneNumber(
@@ -262,22 +265,31 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
         to_e164=pn.e164,
         direction="inbound",
         status="ringing",
+        provider="twilio",
         voice_config={},
     )
     async_session.add(call)
     await async_session.commit()
     call_id = call.id
 
+    caller = SimpleNamespace(
+        identity="sip_+33612345678",
+        kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+        attributes={"sip.callIDFull": "c89b2bfa", "sip.twilio.callSid": "CA1"},
+    )
+
+    async def fake_open(_ctx, on_caller=None):
+        on_caller(caller)  # the caller then hangs up
+        return {
+            "call_id": call_id,
+            "direction": "inbound",
+            "organization_id": str(org),
+        }
+
     monkeypatch.setattr(
         agent_mod,
         "open_inbound_from_room",
-        AsyncMock(
-            return_value={
-                "call_id": call_id,
-                "direction": "inbound",
-                "organization_id": str(org),
-            }
-        ),
+        fake_open,
     )
     started = AsyncMock()
     monkeypatch.setattr(agent_mod, "resolve_org_configs", started)
@@ -307,6 +319,8 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
     row = await async_session.get(Call, call_id)
     assert row.status == "canceled"
     assert row.end_reason == "normal_hangup"
+    (leg,) = (await async_session.execute(select(CallLeg))).scalars()
+    assert (leg.role, leg.direction, leg.carrier_call_id) == ("call", "inbound", "CA1")
 
 
 def test_inbound_instructions_say_the_agent_answers_the_call() -> None:

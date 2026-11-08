@@ -11,6 +11,7 @@ Legs are internal: carrier costs never reach a customer API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,7 @@ from uuid import UUID
 from hailhq.core.carrier_routing import carrier
 from hailhq.core.db import session_scope
 from hailhq.core.models import Call, CallLeg
-from hailhq.core.providers.voice.base import CarrierNotConfigured, LegRef
+from hailhq.core.providers.voice.base import CarrierNotConfigured, LegCost, LegRef
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
@@ -152,20 +153,14 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
             )
             await session.commit()
 
+    # Carriers are asked at the same time: a slow one does not hold up
+    # the others.
+    answers = await asyncio.gather(
+        *(_lookup(provider, refs) for provider, refs in by_provider.items())
+    )
     priced = 0
-    for provider, refs in by_provider.items():
-        # A skipped or failed lookup leaves the legs untouched: an outage or a
-        # missing key must not turn into lost costs.
-        try:
-            found = await carrier(provider).leg_costs(refs)
-        except CarrierNotConfigured as exc:
-            # Our gap, not the carrier's: keep the legs pending, no give-up.
-            logger.info("leg costs: %s skipped, %s", provider, exc)
-            continue
-        except Exception:
-            logger.warning("leg costs: %s lookup failed", provider, exc_info=True)
-            continue
-        async with session_scope() as session:
+    async with session_scope() as session:
+        for refs, found in zip(by_provider.values(), answers, strict=True):
             for leg_id, cost in found.items():
                 result = await session.execute(
                     update(CallLeg)
@@ -179,6 +174,8 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
                     )
                 )
                 priced += result.rowcount or 0
+            # No cost by GIVE_UP_AFTER, for any reason (no record, outage,
+            # missing key): mark it missing so billing falls back to a rate.
             rest = [ref.id for ref in refs if ref.id not in found]
             if rest:
                 await session.execute(
@@ -191,5 +188,16 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
                     )
                     .values(cost_status="missing")
                 )
-            await session.commit()
+        await session.commit()
     return priced
+
+
+async def _lookup(provider: str, refs: list[LegRef]) -> dict[UUID, LegCost]:
+    """One carrier's costs. A failure counts as "not found yet"."""
+    try:
+        return await carrier(provider).leg_costs(refs)
+    except CarrierNotConfigured as exc:
+        logger.info("leg costs: %s skipped, %s", provider, exc)
+    except Exception:
+        logger.warning("leg costs: %s lookup failed", provider, exc_info=True)
+    return {}

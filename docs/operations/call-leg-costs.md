@@ -7,8 +7,8 @@
 Each row of `call_legs` is one phone line a call used, and what the carrier charged for it. A call has one `call` leg (the caller, or the person Hail dialed) plus one `handover` leg per handover dial. Model: `CallLeg` in [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py). Code: [`core/hailhq/core/call_legs.py`](../../core/hailhq/core/call_legs.py).
 
 1. The voicebot notes every SIP participant of the call ([`voicebot/hailhq/voicebot/leg_tracker.py`](../../voicebot/hailhq/voicebot/leg_tracker.py)) and writes the legs when the call ends.
-2. The api runs a pass every 5 minutes (`_leg_cost_loop` in [`api/hailhq/api/main.py`](../../api/hailhq/api/main.py)). It asks each carrier for the legs that ended at least 2 minutes ago, at most once every 15 minutes per leg.
-3. A leg gets `cost_status = 'found'` with `cost_usd`, or `missing` when no record turned up within 48 hours.
+2. The api runs a pass every 5 minutes (`_leg_cost_loop` in [`api/hailhq/api/main.py`](../../api/hailhq/api/main.py)). It asks each carrier for the legs that ended at least 2 minutes ago, at most once every 15 minutes per leg. Carriers are asked at the same time, and Twilio and Telnyx up to 8 calls at once.
+3. A leg gets `cost_status = 'found'` with `cost_usd`, or `missing` when it has no cost after 48 hours, for any reason (no record, carrier outage, missing key). Billing (a later step) will charge a fallback rate for it.
 
 Nothing bills from these costs yet. Carrier costs are internal: no customer API returns them.
 

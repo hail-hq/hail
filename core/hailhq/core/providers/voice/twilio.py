@@ -494,33 +494,39 @@ def _leg_cost(client: TwilioClient, sid: str) -> LegCost | None:
     return LegCost(abs(Decimal(call.price)))
 
 
+# Calls looked up at the same time, per pass.
+LEG_LOOKUPS_AT_ONCE = 8
+
+
 async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     """Twilio finds a leg by its CallSid only; a leg without one is skipped."""
     if not (settings.twilio_account_sid and settings.twilio_auth_token):
         raise CarrierNotConfigured("Twilio is not configured")
     client = _order_client()
 
-    def lookup() -> dict[UUID, LegCost]:
-        found = {}
-        failed: Exception | None = None
-        for leg in legs:
-            if not leg.carrier_call_id:
-                continue
-            # One refused lookup must not discard the legs already priced.
+    gate = asyncio.Semaphore(LEG_LOOKUPS_AT_ONCE)
+
+    async def one(leg: LegRef) -> LegCost | Exception | None:
+        async with gate:
+            # One refused or timed-out lookup must not discard the others.
             try:
-                cost = _leg_cost(client, leg.carrier_call_id)
-            except Exception as exc:  # refused, timed out or unreachable
+                return await asyncio.to_thread(_leg_cost, client, leg.carrier_call_id)
+            except Exception as exc:
                 logger.warning(
                     "twilio call %s lookup failed: %s", leg.carrier_call_id, exc
                 )
-                failed = exc
-                continue
-            if cost:
-                found[leg.id] = cost
-        # Nothing priced and a lookup failed: an outage or a bad key, not
-        # "no record yet". Raise so the legs are not given up on.
-        if failed is not None and not found:
-            raise failed
-        return found
+                return exc
 
-    return await asyncio.to_thread(lookup)
+    asked = [leg for leg in legs if leg.carrier_call_id]
+    answers = await asyncio.gather(*(one(leg) for leg in asked))
+    found = {
+        leg.id: cost
+        for leg, cost in zip(asked, answers, strict=True)
+        if isinstance(cost, LegCost)
+    }
+    # Nothing priced and a lookup failed: an outage or a bad key, not
+    # "no record yet". Raise so the pass logs it.
+    failed = [a for a in answers if isinstance(a, Exception)]
+    if failed and not found:
+        raise failed[0]
+    return found

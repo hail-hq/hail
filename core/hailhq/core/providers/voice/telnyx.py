@@ -1,6 +1,7 @@
 """Telnyx number inventory discovery, order placement, order lookup, release
 and call costs."""
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import Any, Literal
@@ -490,52 +491,57 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 # Call-ID. Telnyx writes the record after the call ends.
 
 
+# Calls looked up at the same time, per pass.
+LEG_LOOKUPS_AT_ONCE = 8
+
+
 async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     try:
         client = TelnyxClient()
     except ValueError as exc:
         raise CarrierNotConfigured(str(exc)) from exc
-    found: dict[UUID, LegCost] = {}
-    failed: httpx.HTTPError | None = None
-    for leg in legs:
-        if not leg.sip_call_id:
-            continue
-        # One refused lookup must not discard the legs already priced.
-        try:
-            body = await client.request(
-                "GET",
-                "/detail_records",
-                params={
-                    "filter[record_type]": "sip-trunking",
-                    "filter[sip_call_id]": leg.sip_call_id,
-                    "filter[date_range]": "last_7_days",
-                },
-            )
-        except httpx.HTTPError as exc:
-            logger.warning("telnyx leg %s lookup failed: %s", leg.sip_call_id, exc)
-            failed = exc
-            continue
+    gate = asyncio.Semaphore(LEG_LOOKUPS_AT_ONCE)
+
+    async def one(leg: LegRef) -> LegCost | Exception | None:
+        async with gate:
+            # One refused lookup must not discard the others.
+            try:
+                body = await client.request(
+                    "GET",
+                    "/detail_records",
+                    params={
+                        "filter[record_type]": "sip-trunking",
+                        "filter[sip_call_id]": leg.sip_call_id,
+                        "filter[date_range]": "last_7_days",
+                    },
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("telnyx leg %s lookup failed: %s", leg.sip_call_id, exc)
+                return exc
         records = [r for r in body.get("data") or [] if r.get("cost") is not None]
         if not records:
-            continue
+            return None
         if any((r.get("currency") or "").upper() != "USD" for r in records):
             logger.warning("telnyx leg %s is not priced in USD", leg.sip_call_id)
-            continue
-        found[leg.id] = LegCost(
+            return None
+        billed = [r for r in records if r.get("billed_sec") is not None]
+        rate = records[0].get("rate")
+        return LegCost(
             sum((Decimal(str(r["cost"])) for r in records), Decimal(0)),
-            (
-                sum(int(r["billed_sec"]) for r in billed)
-                if (billed := [r for r in records if r.get("billed_sec") is not None])
-                else None
-            ),
-            (
-                Decimal(str(records[0]["rate"]))
-                if records[0].get("rate") is not None
-                else None
-            ),
+            sum(int(r["billed_sec"]) for r in billed) if billed else None,
+            Decimal(str(rate)) if rate is not None else None,
         )
+
+    asked = [leg for leg in legs if leg.sip_call_id]
+    answers = await asyncio.gather(*(one(leg) for leg in asked))
+    found = {
+        leg.id: cost
+        for leg, cost in zip(asked, answers, strict=True)
+        if isinstance(cost, LegCost)
+    }
     # Nothing priced and a lookup failed: an outage or a bad key, not
-    # "no record yet". Raise so the legs are not given up on.
-    if failed is not None and not found:
-        raise failed
+    # "no record yet". Raise so the pass logs it.
+    failed = [a for a in answers if isinstance(a, Exception)]
+    if failed and not found:
+        raise failed[0]
     return found
