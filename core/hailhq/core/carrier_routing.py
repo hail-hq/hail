@@ -6,10 +6,10 @@ would reject or rewrite the caller ID) and vice versa.
 
 ``CARRIERS`` is the one place that names the carriers. Quotes, orders and
 release reach a carrier only through its ``Carrier`` entry. Adding a carrier
-is one adapter module in ``providers/voice/`` with the five interface
-functions (``offers``, ``place_order``, ``order_outcome``, ``release`` and,
-when it registers end users after the purchase, ``revoke``) plus one entry
-here.
+is one adapter module in ``providers/voice/`` with the interface functions
+(``offers``, ``place_order``, ``order_outcome``, ``release``, ``leg_costs``
+and, when it registers end users after the purchase, ``revoke``) plus one
+entry here.
 """
 
 from collections.abc import Awaitable, Callable
@@ -23,6 +23,7 @@ from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.voice import OrderState, didww, telnyx, twilio
+from hailhq.core.providers.voice.base import LegCosts
 from hailhq.core.schemas import NumberType
 
 TWILIO = "twilio"
@@ -143,6 +144,8 @@ class Carrier:
     # (provider_resource_id, e164).
     attach_inbound: InboundHook
     detach_inbound: InboundHook
+    # What the carrier charged for each call leg, from its call records.
+    leg_costs: LegCosts
     # How long a pending order may wait for the carrier before Hail fails
     # it and refunds the hold. DIDWW registers the end user after the
     # purchase, which takes days; the others answer within minutes.
@@ -173,6 +176,7 @@ CARRIERS: dict[str, Carrier] = {
         inbound_trunk=_twilio_inbound,
         attach_inbound=twilio.attach_inbound_number,
         detach_inbound=twilio.detach_inbound_number,
+        leg_costs=twilio.leg_costs,
     ),
     TELNYX: Carrier(
         _telnyx_voice,
@@ -186,6 +190,7 @@ CARRIERS: dict[str, Carrier] = {
         inbound_trunk=_telnyx_inbound,
         attach_inbound=telnyx.attach_inbound_number,
         detach_inbound=telnyx.detach_inbound_number,
+        leg_costs=telnyx.leg_costs,
     ),
     # Voice only (no SMS). Orders complete after DIDWW approves the
     # end-user registration: docs/public/self-host/didww.md.
@@ -201,6 +206,7 @@ CARRIERS: dict[str, Carrier] = {
         inbound_trunk=_didww_inbound,
         attach_inbound=didww.attach_inbound_number,
         detach_inbound=didww.detach_inbound_number,
+        leg_costs=didww.leg_costs,
         pending_timeout=timedelta(days=7),
         poll_interval=timedelta(minutes=15),
         revoke_registration=didww.revoke,

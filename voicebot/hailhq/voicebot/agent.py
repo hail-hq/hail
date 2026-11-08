@@ -42,6 +42,7 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
+from hailhq.core.call_legs import record_call_legs
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
@@ -90,6 +91,7 @@ from hailhq.voicebot.amd import (
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
+from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -1501,7 +1503,9 @@ def _e164(number: str) -> str:
     return number
 
 
-async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
+async def open_inbound_from_room(
+    ctx: JobContext, on_caller: Callable[[rtc.Participant], None] | None = None
+) -> dict[str, Any] | None:
     """Turn an inbound room into a ``Call`` row and dispatch-shaped metadata.
 
     Reads the SIP participant's attributes (``sip.trunkPhoneNumber`` is the
@@ -1519,6 +1523,8 @@ async def open_inbound_from_room(ctx: JobContext) -> dict[str, Any] | None:
         logger.warning("inbound room %s: no SIP participant; leaving", ctx.room.name)
         ctx.shutdown(reason="no_sip_participant")
         return None
+    if on_caller is not None:
+        on_caller(participant)
     attrs = participant.attributes
     sip = SipAttributes(
         dialed=_e164(attrs.get("sip.trunkPhoneNumber", "")),
@@ -2261,8 +2267,11 @@ async def _run_call(
     await ctx.connect()
 
     inbound = metadata.get("direction") == "inbound"
+    # The caller's SIP leg as first seen: it may leave before the leg
+    # tracker exists, and the carrier bills it anyway.
+    callers: list[rtc.Participant] = []
     if inbound and "call_id" not in metadata:
-        opened = await open_inbound_from_room(ctx)
+        opened = await open_inbound_from_room(ctx, callers.append)
         if opened is None:
             return
         metadata = opened
@@ -2300,8 +2309,12 @@ async def _run_call(
     # connected, and whether it answered. Written by the bridge handle.
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
 
+    # Every SIP leg of the call, for its carrier cost (hailhq.core.call_legs).
+    legs = LegTracker(inbound, lambda identity: is_handover_leg(identity, call_id))
+
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
+        legs.left(participant)
         handle_sip_disconnect(ctx, participant, captured, bridge_state, call_id)
 
     # Answer detection: flip the call to `in_progress` + stamp `answered_at`
@@ -2337,16 +2350,19 @@ async def _run_call(
 
     @ctx.room.on("participant_connected")
     def _on_participant_connected(participant: rtc.RemoteParticipant) -> None:
+        legs.seen(participant)
         _maybe_mark_answered(participant)
 
     @ctx.room.on("participant_attributes_changed")
     def _on_participant_attributes_changed(
         _changed: Any, participant: rtc.Participant
     ) -> None:
+        legs.seen(participant)
         _maybe_mark_answered(participant)
 
     # The SIP leg may already be present/active by the time handlers register.
-    for _participant in ctx.room.remote_participants.values():
+    for _participant in [*callers, *ctx.room.remote_participants.values()]:
+        legs.seen(_participant)
         _maybe_mark_answered(_participant)
 
     if inbound and not any(
@@ -2364,6 +2380,7 @@ async def _run_call(
             status_override="canceled",
             end_reason_override=CallEndReason.NORMAL_HANGUP.value,
         )
+        await record_call_legs(call_id, legs.records())
         ctx.shutdown(reason="caller_left")
         return
 
@@ -2442,6 +2459,7 @@ async def _run_call(
             status_override=captured["status"],
             end_reason_override=captured["end_reason"],
         )
+        await record_call_legs(call_id, legs.records())
         ctx.shutdown(reason="provider_key_error")
         return
 
@@ -2637,6 +2655,7 @@ async def _run_call(
     async def _shutdown_body() -> None:
         nonlocal shutting_down
         shutting_down = True
+        legs_recorded = False
         try:
             await recovery.aclose()
             # Never close the classifier under a running check: let the
@@ -2653,6 +2672,10 @@ async def _run_call(
             # Worker shutdown, BYO-LLM give-up or any other end while a
             # contact leg is up: drop both legs, not just the job.
             await drop_handover_leg(ctx, bridge_state, call_id)
+            # Every leg has ended: write them before the slow steps below, so
+            # a shutdown timeout cannot lose them.
+            await record_call_legs(call_id, legs.records())
+            legs_recorded = True
             await finish_answer_post(bridge_state, call_id)
             # The background handover dial, result and notice posts use
             # agent_api: give them a moment before it closes.
@@ -2679,6 +2702,9 @@ async def _run_call(
                 failure_code=captured.get("failure_code"),
             )
         finally:
+            # Also when a step above raised: the carrier still billed the legs.
+            if not legs_recorded:
+                await record_call_legs(call_id, legs.records())
             if telemetry_span is not None:
                 telemetry_span.set_attribute(
                     "call.status", captured["status"] or "completed"

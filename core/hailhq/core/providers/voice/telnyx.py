@@ -1,5 +1,7 @@
-"""Telnyx number inventory discovery, order placement, order lookup and release."""
+"""Telnyx number inventory discovery, order placement, order lookup, release
+and call costs."""
 
+import logging
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -14,10 +16,18 @@ from hailhq.core.providers.telnyx import (
     path_id,
     subject_types_for,
 )
-from hailhq.core.providers.voice.base import CarrierNotConfigured, OrderState
+from hailhq.core.providers.voice.base import (
+    CarrierNotConfigured,
+    LegCost,
+    LegRef,
+    OrderState,
+    gather_leg_costs,
+)
 from hailhq.core.schemas import NumberType
 from hailhq.core.telephony_catalog import monthly_price
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class NumberQuote(BaseModel):
@@ -475,3 +485,42 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
     # The same connection carries outbound calls (set at purchase), so it stays.
     # The LiveKit inbound trunk number list is what gates inbound calls.
     return None
+
+
+# --- call costs: each leg's SIP trunking detail record, found by its SIP
+# Call-ID. Telnyx writes the record after the call ends.
+
+
+async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
+    try:
+        client = TelnyxClient()
+    except ValueError as exc:
+        raise CarrierNotConfigured(str(exc)) from exc
+
+    async def fetch(leg: LegRef) -> LegCost | None:
+        body = await client.request(
+            "GET",
+            "/detail_records",
+            params={
+                "filter[record_type]": "sip-trunking",
+                "filter[sip_call_id]": leg.sip_call_id,
+                "filter[date_range]": "last_7_days",
+            },
+        )
+        records = [r for r in body.get("data") or [] if r.get("cost") is not None]
+        if not records:
+            return None
+        if any((r.get("currency") or "").upper() != "USD" for r in records):
+            logger.warning("telnyx leg %s is not priced in USD", leg.sip_call_id)
+            return None
+        billed = [r for r in records if r.get("billed_sec") is not None]
+        rate = records[0].get("rate")
+        return LegCost(
+            sum((Decimal(str(r["cost"])) for r in records), Decimal(0)),
+            sum(int(r["billed_sec"]) for r in billed) if billed else None,
+            Decimal(str(rate)) if rate is not None else None,
+        )
+
+    return await gather_leg_costs(
+        "telnyx", [leg for leg in legs if leg.sip_call_id], fetch
+    )
