@@ -1728,3 +1728,22 @@ async def test_preview_sms_application_drops_problems_with_no_message(
         "error": "Pass number_id.",
         "problems": [{"loc": ["body", "number_id"], "msg": "Pass number_id."}],
     }
+
+
+@respx.mock
+async def test_amend_sms_application_unclear_refusal_keeps_the_same_row(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    respx.patch(f"{_BASE_URL}/verifications/{vid}/application").mock(
+        return_value=httpx.Response(422, text="<html>gateway</html>")
+    )
+    result = await tools.amend_sms_application(
+        client=client,
+        verification_id=vid,
+        fields={"program_name": "Acme"},
+        address=_kwargs(client)["address"],
+        attest_authorized=True,
+    )
+    assert "Keep the same verification_id" in result["error"]
+    assert "<html>" not in result["error"]

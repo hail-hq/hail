@@ -1049,6 +1049,7 @@ async def preview_sms_application(
             return _answer_problems(
                 exc,
                 "Correct the listed fields with the user, then preview again before submitting.",
+                "Nothing was saved. Check the answers against get_verification_requirements with the user.",
             )
         return _format_api_error(exc)
     except PreviewShapeError:
@@ -1084,10 +1085,10 @@ def _application_input_error(fields: Any, address: Any) -> str | None:
 
 
 # Request parts a 422 can name that are not the user's answers.
-_NOT_ANSWERS = {"number_id", "subject_type", "purpose", "country_code", "number_type"}
+_NOT_ANSWERS = {"number_id", "subject_type"}
 
 
-def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
+def _answer_problems(exc: HailAPIError, fix: str, fallback: str) -> dict[str, Any]:
     """The reply to a 404 or 422 about an application. Problems on the
     user's answers get `fix`. Other problems (pick a number, contact support)
     add the API's own messages, read from the stripped problems or the API's
@@ -1115,10 +1116,7 @@ def _answer_problems(exc: HailAPIError, fix: str) -> dict[str, Any]:
         return {"error": _sentence(message)}
     if exc.status == 404:
         return _format_api_error(exc)
-    return {
-        "error": f"the API refused the request ({exc.status}). Nothing was saved. "
-        "Check the answers against get_verification_requirements with the user."
-    }
+    return {"error": f"the API refused the request ({exc.status}). {fallback}"}
 
 
 def _sentence(text: str) -> str:
@@ -1167,6 +1165,7 @@ async def amend_sms_application(
             return _answer_problems(
                 exc,
                 "Correct the listed application fields with the user, then amend the same verification_id.",
+                "Nothing was changed. Keep the same verification_id: check the answers with the user and amend again. Do not cancel or submit a new one.",
             )
         return _format_api_error(exc)
     except httpx.TransportError:
@@ -3043,8 +3042,10 @@ def register_tools(
 
         Pass the same subject_type, fields, address and number_id you will
         submit (from get_verification_requirements with purpose='sms').
-        Nothing is filed or charged. The API checks the answers the same way
-        submit does; a field problem comes back as ``problems``. Show the
+        Nothing is filed or charged. The API checks the answers' fields and
+        lengths; a field problem comes back as ``problems``. Submit can still
+        refuse for other reasons (a duplicate registration, low credit, a
+        carrier refusal). Show the
         returned description, consent flow and samples to the user and get
         their approval before submitting. Never invent consent evidence.
         Maximum 100 fields and 64 KiB of fields/address combined.
