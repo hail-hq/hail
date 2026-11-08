@@ -8,9 +8,17 @@ or credits the customer twice. A unique index makes the database refuse the
 second row, so writers can use ``ON CONFLICT (organization_id, ref) DO
 NOTHING``.
 
-The index is not partial: Postgres treats NULL refs as distinct, so rows
-without a ref are still allowed, and a plain ``ON CONFLICT (organization_id,
-ref)`` finds the index without a ``WHERE`` clause.
+The index is not partial, although the table also holds rows with no ref
+(manual adjustments). Postgres treats NULL refs as distinct, so those rows are
+still allowed, and a plain ``ON CONFLICT (organization_id, ref)`` finds the
+index without a ``WHERE`` clause. A partial index would make every writer
+repeat its ``WHERE`` in the conflict target.
+
+Built in the migration's transaction, not CONCURRENTLY: a failed concurrent
+build of a unique index leaves an invalid index behind that must be dropped by
+hand. On a ledger this size the build holds its write lock briefly. If an open
+ledger transaction makes it wait past the lock timeout, the deploy stops with
+nothing changed and can run again.
 
 ``idx_account_credits_ref`` stays: this change adds a guard and removes
 nothing.

@@ -9,8 +9,8 @@ number the usual way), or when it stays approved and unused too long.
 A release locks the hold row first: two releases of one verification run
 one after the other, and the second sees the first one's return row and adds
 nothing. The ledger's unique (organization, ref) index is the backstop: a
-second return row would fail the commit, never charge twice. The caller
-commits.
+second return row would fail the caller's request with an error, never
+credit twice. The caller commits.
 """
 
 from __future__ import annotations

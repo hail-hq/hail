@@ -18,9 +18,9 @@ spec = importlib.util.spec_from_file_location(
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
-# The statement hail-website's ledger writers run (lib/account-credits.ts,
-# lib/auth.ts). It only works while a unique index on exactly
-# (organization_id, ref) exists.
+# The statement shape hail-website's ledger writers use once they switch to
+# ON CONFLICT (lib/account-credits.ts, lib/auth.ts). It only works while a
+# unique index on exactly (organization_id, ref) exists.
 WEBSITE_INSERT = """
 INSERT INTO account_credits
   (organization_id, kind, channel, amount_cents, qty, ref, source, created_at)
