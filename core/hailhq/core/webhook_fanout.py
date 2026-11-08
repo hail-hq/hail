@@ -20,11 +20,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "build_event_data",
+    "build_suppressed_event_data",
     "call_event_data",
     "fanout_call_event",
     "fanout_email_event",
     "fanout_sms_event",
 ]
+
+
+def build_suppressed_event_data(
+    *,
+    email_id: str,
+    email_domain: str | None,
+    from_address: str,
+    to_addresses: list[str],
+    subject: str,
+    message_id: str | None,
+    reason: str,
+) -> dict[str, Any]:
+    """``data`` for an ``email.received.suppressed`` event (one per reason)."""
+    return {
+        "id": email_id,
+        "direction": "inbound",
+        "email_domain": email_domain,
+        "from_address": from_address,
+        "to_addresses": to_addresses,
+        "subject": subject,
+        "message_id": message_id,
+        "reason": reason,
+    }
 
 
 def build_event_data(

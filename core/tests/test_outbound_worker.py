@@ -10,12 +10,16 @@ from unittest.mock import AsyncMock
 import pytest
 from botocore.exceptions import ClientError
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
+from hailhq.core.billing import has_funds
 from hailhq.core.models import (
+    AccountCredit,
     Email,
     EmailAttachment,
     EmailDomain,
     Organization,
     PlatformFlag,
+    WebhookDelivery,
+    WebhookSubscription,
 )
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.providers.email.base import ProviderSendResult
@@ -54,7 +58,7 @@ def _queued_forward(org_id, domain_id, inbound_id, headers=None):
     )
 
 
-def _worker(async_session, provider, s3=None, usage_callback=None):
+def _worker(async_session, provider, s3=None, usage_callback=None, funds_check=None):
     @asynccontextmanager
     async def session_factory():
         yield async_session
@@ -64,6 +68,7 @@ def _worker(async_session, provider, s3=None, usage_callback=None):
         provider_factory=lambda: provider,
         s3_factory=lambda: s3 or AsyncMock(),
         usage_callback=usage_callback,
+        funds_check=funds_check,
     )
 
 
@@ -513,3 +518,238 @@ async def test_tick_sends_system_mail_without_metering(async_session):
     kwargs = provider.send_email.await_args.kwargs
     assert kwargs["headers"] == {"Auto-Submitted": "auto-generated"}
     assert kwargs["attachments"] is None
+
+
+def _inbound(org_id, domain_id, metadata=None):
+    return Email(
+        organization_id=org_id,
+        email_domain_id=domain_id,
+        direction="inbound",
+        from_address="alice@example.com",
+        to_addresses=["alice+acme@mail.hail.so"],
+        subject="hi",
+        body_text="hello",
+        status="received",
+        provider="ses",
+        metadata_=metadata or {},
+    )
+
+
+def _credit(org_id, cents):
+    return AccountCredit(
+        organization_id=org_id,
+        kind="credit" if cents > 0 else "debit",
+        channel="credit" if cents > 0 else "email",
+        amount_cents=cents,
+        source="test",
+        ref=f"test:{uuid.uuid4()}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_forward_not_sent_when_unfunded_at_send(async_session):
+    """Funded at ingest, balance spent to 0 before the worker runs: the forward
+    is not sent, not metered, and ``insufficient_funds`` lands on the inbound
+    row's ``suppressed_reasons`` the same way the ingest check stamps it."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    inbound = _inbound(
+        org_id, dom.id, metadata={"suppressed_reasons": ["forward_target_pending"]}
+    )
+    async_session.add(inbound)
+    await async_session.flush()
+    inbound_id = inbound.id
+    row = _queued_forward(org_id, dom.id, inbound_id)
+    async_session.add(row)
+    # Credit at ingest, then spent before the send.
+    async_session.add(_credit(org_id, 100))
+    async_session.add(_credit(org_id, -100))
+    await async_session.commit()
+
+    provider = AsyncMock()
+    usage = AsyncMock()
+
+    processed = await _worker(
+        async_session, provider, usage_callback=usage, funds_check=has_funds
+    ).tick()
+
+    assert processed == 1
+    provider.send_email.assert_not_awaited()
+    usage.assert_not_awaited()
+    row_id = row.id
+    async_session.expire_all()
+    fwd = (
+        await async_session.execute(select(Email).where(Email.id == row_id))
+    ).scalar_one()
+    assert fwd.status == "failed"
+    assert fwd.end_reason == "insufficient_funds"
+    assert fwd.failed_at is not None
+    src = (
+        await async_session.execute(select(Email).where(Email.id == inbound_id))
+    ).scalar_one()
+    assert src.metadata_["suppressed_reasons"] == [
+        "forward_target_pending",
+        "insufficient_funds",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unfunded_stamp_is_not_repeated_for_two_targets(async_session):
+    """Two forward rows of one inbound mail, both unfunded: the reason is
+    listed once."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    inbound = _inbound(org_id, dom.id)
+    async_session.add(inbound)
+    await async_session.flush()
+    inbound_id = inbound.id
+    async_session.add(_queued_forward(org_id, dom.id, inbound_id))
+    async_session.add(_queued_forward(org_id, dom.id, inbound_id))
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/hook",
+            secret_encrypted="hash",
+            event_types=["email.received.suppressed"],
+        )
+    )
+    await async_session.commit()
+
+    provider = AsyncMock()
+    processed = await _worker(async_session, provider, funds_check=has_funds).tick()
+
+    assert processed == 2
+    provider.send_email.assert_not_awaited()
+    async_session.expire_all()
+    src = (
+        await async_session.execute(select(Email).where(Email.id == inbound_id))
+    ).scalar_one()
+    assert src.metadata_["suppressed_reasons"] == ["insufficient_funds"]
+    # Same webhook the ingest check fires, once per mail, not per target.
+    deliveries = (await async_session.execute(select(WebhookDelivery))).scalars().all()
+    assert len(deliveries) == 1
+    assert deliveries[0].event_type == "email.received.suppressed"
+    assert deliveries[0].event_id == inbound_id
+    assert deliveries[0].payload["data"]["reason"] == "insufficient_funds"
+    assert deliveries[0].payload["data"]["email_domain"] == "alice+acme@mail.hail.so"
+
+
+@pytest.mark.asyncio
+async def test_unfunded_stamp_handles_json_null_reasons(async_session):
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    inbound = _inbound(org_id, dom.id, metadata={"suppressed_reasons": None})
+    async_session.add(inbound)
+    await async_session.flush()
+    inbound_id = inbound.id
+    async_session.add(_queued_forward(org_id, dom.id, inbound_id))
+    await async_session.commit()
+
+    await _worker(async_session, AsyncMock(), funds_check=has_funds).tick()
+
+    async_session.expire_all()
+    src = (
+        await async_session.execute(select(Email).where(Email.id == inbound_id))
+    ).scalar_one()
+    assert src.metadata_["suppressed_reasons"] == ["insufficient_funds"]
+
+
+@pytest.mark.asyncio
+async def test_forward_sent_when_funded_at_send(async_session):
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_forward(org_id, dom.id, uuid.uuid4())
+    async_session.add(row)
+    async_session.add(_credit(org_id, 100))
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-f")
+
+    processed = await _worker(async_session, provider, funds_check=has_funds).tick()
+
+    assert processed == 1
+    provider.send_email.assert_awaited_once()
+    refreshed = (
+        await async_session.execute(select(Email).where(Email.id == row.id))
+    ).scalar_one()
+    assert refreshed.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_system_mail_skips_funds_check(async_session):
+    """Hail's own mail is never billed, so a zero balance does not stop it."""
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    row = _queued_system_mail(org_id, dom.id)
+    async_session.add(row)
+    await async_session.commit()
+
+    provider = AsyncMock()
+    provider.send_email.return_value = ProviderSendResult(provider_message_id="ses-s")
+    funds = AsyncMock(return_value=False)
+
+    processed = await _worker(async_session, provider, funds_check=funds).tick()
+
+    assert processed == 1
+    funds.assert_not_awaited()
+    refreshed = (
+        await async_session.execute(select(Email).where(Email.id == row.id))
+    ).scalar_one()
+    assert refreshed.status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_unfunded_record_failure_does_not_block_queue(async_session, monkeypatch):
+    """If the webhook insert fails, the forward is still failed and the next
+    row is still processed."""
+    from hailhq.core import outbound_worker
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("fanout down")
+
+    monkeypatch.setattr(outbound_worker, "fanout_email_event", boom)
+    org_id = uuid.uuid4()
+    dom = _domain(org_id)
+    async_session.add(dom)
+    await async_session.flush()
+    first, second = _inbound(org_id, dom.id), _inbound(org_id, dom.id)
+    async_session.add_all([first, second])
+    await async_session.flush()
+    ids = [first.id, second.id]
+    rows = [_queued_forward(org_id, dom.id, i) for i in ids]
+    async_session.add_all(rows)
+    await async_session.commit()
+    row_ids = [r.id for r in rows]
+
+    processed = await _worker(async_session, AsyncMock(), funds_check=has_funds).tick()
+
+    assert processed == 2
+    async_session.expire_all()
+    fwds = (
+        (await async_session.execute(select(Email).where(Email.id.in_(row_ids))))
+        .scalars()
+        .all()
+    )
+    assert {f.status for f in fwds} == {"failed"}
+    assert {f.end_reason for f in fwds} == {"insufficient_funds"}
+    # The webhook failure does not undo the stamp.
+    srcs = (
+        (await async_session.execute(select(Email).where(Email.id.in_(ids))))
+        .scalars()
+        .all()
+    )
+    assert [s.metadata_["suppressed_reasons"] for s in srcs] == [
+        ["insufficient_funds"],
+        ["insufficient_funds"],
+    ]

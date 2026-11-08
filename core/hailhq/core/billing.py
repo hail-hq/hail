@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from hailhq.core.models import AccountCredit
@@ -31,7 +32,21 @@ logger = logging.getLogger(__name__)
 # pool.CALL_META_FROM_POOL.
 CALL_META_BILLED = "billed"
 
-__all__ = ["CALL_META_BILLED", "get_balance_cents", "has_funds", "monthly_fee_ref"]
+# Reason stamped when a forward is skipped because the org has no credit. The
+# ingest check and the forward worker's send-time check both write it.
+INSUFFICIENT_FUNDS = "insufficient_funds"
+
+# Signature of ``has_funds``, for code that takes the funds check as a callback.
+FundsCheck = Callable[[AsyncSession, uuid.UUID], Awaitable[bool]]
+
+__all__ = [
+    "CALL_META_BILLED",
+    "INSUFFICIENT_FUNDS",
+    "FundsCheck",
+    "get_balance_cents",
+    "has_funds",
+    "monthly_fee_ref",
+]
 
 
 def monthly_fee_ref(

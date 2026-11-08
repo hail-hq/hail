@@ -23,6 +23,7 @@ from email import message_from_bytes
 from typing import Any
 from uuid import UUID, uuid4
 
+from hailhq.core.billing import INSUFFICIENT_FUNDS, FundsCheck
 from hailhq.core.email_forwarding import LoopDetected, build_forwarded, detect_loop
 from hailhq.core.email_mime import ParsedAttachment, ParsedMime, parse_mime
 from hailhq.core.email_routing import classify_hail_mail_recipient
@@ -40,7 +41,7 @@ from hailhq.core.system_email import noreply_address
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
-from hailhq.core.webhook_fanout import build_event_data
+from hailhq.core.webhook_fanout import build_event_data, build_suppressed_event_data
 from sqlalchemy import cast, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -51,7 +52,6 @@ __all__ = ["FanoutFn", "ForwardEnqueue", "FundsCheck", "IngestResult", "ingest_i
 
 ForwardEnqueue = Callable[..., Awaitable[None]]
 FanoutFn = Callable[..., Awaitable[int]]
-FundsCheck = Callable[[AsyncSession, UUID], Awaitable[bool]]
 
 # Inbound dedup indexes whose unique violation is a benign concurrent-delivery
 # race (absorbed, not raised). Mirrors the four partial indexes defined in
@@ -534,7 +534,7 @@ async def ingest_inbound(
             elif domain.forward_to:
                 # Out of credit: keep and store, with no charge, and don't spend
                 # on SES forwards. Only flag when targets were actually configured.
-                row_reasons.append("insufficient_funds")
+                row_reasons.append(INSUFFICIENT_FUNDS)
 
         for reason in row_reasons:
             if reason not in result.suppressed_reasons:
@@ -598,17 +598,16 @@ async def ingest_inbound(
                     email_domain_id=domain.id,
                     event_type="email.received.suppressed",
                     event_id=email_id,
-                    data={
-                        "id": str(email_id),
-                        "direction": "inbound",
-                        "email_domain": domain.domain,
-                        "from_address": parsed.from_address,
-                        "to_addresses": parsed.to_addresses
+                    data=build_suppressed_event_data(
+                        email_id=str(email_id),
+                        email_domain=domain.domain,
+                        from_address=parsed.from_address,
+                        to_addresses=parsed.to_addresses
                         or list(message.envelope_recipients),
-                        "subject": parsed.subject or "",
-                        "message_id": parsed.message_id,
-                        "reason": reason,
-                    },
+                        subject=parsed.subject or "",
+                        message_id=parsed.message_id,
+                        reason=reason,
+                    ),
                 )
 
     await db.commit()
