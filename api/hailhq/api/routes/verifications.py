@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 from uuid import UUID
 
 import phonenumbers
@@ -677,7 +677,7 @@ async def _drop_reservation(
             == reserved_at
         )
     if skip_locked:
-        target = CarrierVerification.id.in_(
+        target = target & CarrierVerification.id.in_(
             select(CarrierVerification.id)
             .where(CarrierVerification.id == verification_id)
             .with_for_update(skip_locked=True)
@@ -695,14 +695,18 @@ async def _drop_reservation(
     )
 
 
+def _billed_sms(row: CarrierVerification | Row) -> bool:
+    """A US texting registration of an organization that pays for it: the
+    self-hosted organization (the shared key's) is not billed."""
+    return row.purpose == "sms" and row.organization_id != SELF_HOSTED_ORG_ID
+
+
 def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
     """True when the next billed step of this US texting registration is
     filing its campaign, and its organization pays for it: the self-hosted
     organization (the shared key's) is not billed. The filing itself was
     paid for at creation (create_verification checks the credit)."""
-    if row.purpose != "sms" or row.state not in _BEFORE_CAMPAIGN_STATES:
-        return False
-    if row.organization_id == SELF_HOSTED_ORG_ID:
+    if not _billed_sms(row) or row.state not in _BEFORE_CAMPAIGN_STATES:
         return False
     if (row.provider_refs or {}).get("needs_information"):
         return False  # waits for the customer's repair, not for credit
@@ -770,9 +774,7 @@ async def _campaign_unfunded(
     orgs = {
         row.organization_id
         for row in rows
-        if row.purpose == "sms"
-        and row.state in _BEFORE_CAMPAIGN_STATES
-        and row.organization_id != SELF_HOSTED_ORG_ID
+        if _billed_sms(row) and row.state in _BEFORE_CAMPAIGN_STATES
     }
     unfunded: set[UUID] = set()
     for org in orgs:
@@ -809,13 +811,21 @@ async def _campaign_unfunded(
     return unfunded & given
 
 
+class _CreditCheck(NamedTuple):
+    """``_campaign_may_go``'s answer."""
+
+    may_file: bool
+    reserved_at: str | None
+    gated: bool
+
+
 async def _campaign_may_go(
     db: AsyncSession,
     row: CarrierVerification | Row,
     registry: Registry,
     *,
     wait: bool = True,
-) -> tuple[bool, str | None]:
+) -> _CreditCheck:
     """The campaign credit check of one row, before a poll that may file
     its campaign: ``(may_file, reserved_at)``. ``may_file`` True: the poll
     may file it (covered, or no check applies). False: the poll skips only
@@ -823,6 +833,9 @@ async def _campaign_may_go(
     code resends): not covered, or (``wait`` False) the org lock is busy,
     so the next poll asks. ``reserved_at``: the row's reservation this poll
     holds (``_CAMPAIGN_RESERVED_FOR``), to drop when it makes no call.
+    ``gated``: the stored row needed the check (the caller's copy can be
+    stale, so it decides nothing); a row gone from the database files
+    nothing.
 
     Reads the balance under the organization's lock (``org_lock``), after
     the billing writes in flight, as the filing check does, then commits to
@@ -831,16 +844,22 @@ async def _campaign_may_go(
     billing writes wait for the same lock. Background and GET polls do not
     wait for it (like the row lock); a confirmed code does, so its campaign
     is filed at once."""
-    if not _campaign_gated(row, registry):
-        return True, None
+    stored = (
+        await db.execute(select(*_GATE_COLUMNS).where(CarrierVerification.id == row.id))
+    ).one_or_none()
+    if stored is None:
+        return _CreditCheck(False, None, False)
+    if not _campaign_gated(stored, registry):
+        return _CreditCheck(True, None, False)
+    row = stored
     if wait:
         await org_lock(db, row.organization_id)
     elif not await try_org_lock(db, row.organization_id):
         await db.commit()
-        return False, None
+        return _CreditCheck(False, None, True)
     if await _campaign_unfunded(db, [row], registry):
         await db.commit()  # ends the org lock
-        return False, None
+        return _CreditCheck(False, None, True)
     # Funded: reserve the credit before the lock is released. Not when
     # another poll holds the row (it is asking the carrier now): waiting
     # here would hold the org lock through that call, and this poll would
@@ -881,7 +900,7 @@ async def _campaign_may_go(
             )
         ).scalar_one()
     await db.commit()  # ends the org lock (and the row lock)
-    return held is not None, reserved_at
+    return _CreditCheck(held is not None, reserved_at, True)
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -1063,14 +1082,15 @@ async def _refresh(
         return
     # Not covered, or the org lock is busy (another poll or a billing
     # write: the next poll asks): the poll runs, without the campaign filing.
-    checked = _campaign_gated(row, registry)
-    may_file, reserved = await _campaign_may_go(
-        db, row, registry, wait=wait_for_org_lock
-    )
+    check = await _campaign_may_go(db, row, registry, wait=wait_for_org_lock)
+    may_file, reserved = check.may_file, check.reserved_at
     if not await _lock_for_poll(db, row):
         if reserved:
-            # No carrier call here: give up the claim, unless the row is
-            # held (its holder may clear it; else it runs out).
+            # No carrier call here. The holder is usually another poll: it
+            # read this reservation as its own and clears it when its call
+            # returns. If the row is free again, drop it now; if a non-poll
+            # holds it, it runs out (_CAMPAIGN_RESERVED_FOR). Only the
+            # value this poll wrote.
             await _drop_reservation(db, row.id, reserved, skip_locked=True)
             await db.commit()
         return
@@ -1080,7 +1100,7 @@ async def _refresh(
             await _drop_reservation(db, row.id)
         await db.commit()
         return
-    if not checked and _campaign_gated(row, registry):
+    if not check.gated and _campaign_gated(row, registry):
         # It changed after it was read and got no credit check: fail closed,
         # no campaign on this poll; the next one checks.
         may_file = False

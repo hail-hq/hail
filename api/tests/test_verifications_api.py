@@ -3911,6 +3911,89 @@ async def test_a_kept_claim_is_not_renewed_and_runs_out(
     assert "campaign_reserved_at" not in refs and refs["campaign_id"] == "QE1"
 
 
+async def _reserved(async_session, vid: str):
+    return (await _stored_refs(async_session, vid)).get("campaign_reserved_at")
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_that_loses_the_row_drops_its_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The poll reserved the credit, then did not get the row (it was free
+    # again by the drop): no call, so the claim goes.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    seen = []
+
+    async def lost(db, row):
+        seen.append(await _reserved(db, str(row.id)))
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert seen and seen[0] is not None  # it was reserved
+    assert await _reserved(async_session, vid) is None
+    assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_cannot_drop_another_polls_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Between this poll's reservation and its drop, another poll kept its
+    # own claim on the row (a failed call). This poll drops only its own.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    other = "2026-01-01T00:00:00+00:00"
+
+    async def lost(db, row):
+        refs = await _stored_refs(db, str(row.id))
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(provider_refs={**refs, "campaign_reserved_at": other})
+        )
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) == other
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_row_no_longer_pollable_drops_any_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Re-read under its lock, the row is on hold: there is no campaign to
+    # claim credit for, so any reservation goes, its own or one kept.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    real = verifications_routes._lock_for_poll
+
+    async def put_on_hold(db, row):
+        refs = await _stored_refs(db, str(row.id))
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(
+                provider_refs={
+                    **refs,
+                    "needs_information": True,
+                    "campaign_reserved_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
+        )
+        return await real(db, row)
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", put_on_hold)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) is None
+    assert sms_carrier.status_calls == 0
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
