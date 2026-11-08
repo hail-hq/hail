@@ -406,6 +406,10 @@ def test_unknown_paperwork_ranks_after_known(catalog):
     assert option_key("needs_check", "buy", 0, 0, 1, 0, False) > option_key(
         "needs_check", "buy", 0, 5, 1, 0
     )
+    # Price comes first: a cheaper unknown list beats a known one.
+    assert option_key("needs_check", "buy", 0, 0, 100, 0, False) < option_key(
+        "needs_check", "buy", 0, 1, 900, 0
+    )
 
 
 def test_needs_paperwork_follows_verification_required(catalog):
