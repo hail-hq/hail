@@ -232,6 +232,62 @@ async def test_status_creates_campaign_once_identity_verified() -> None:
     )
 
 
+def _unfiled_campaign_refs() -> dict:
+    return {
+        "brand_id": "B1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "campaign": {
+            "use_case": "MIXED",
+            "description": "d" * 40,
+            "message_flow": "f" * 40,
+            "samples": ["s" * 20, "t" * 20],
+            "has_links": False,
+            "schema_version": 2,
+            "opt_in_message": "Acme: Actual enrollment confirmation. Reply HELP for help, STOP to stop.",
+            "text_types": ["CUSTOMER_CARE", "ACCOUNT_NOTIFICATION"],
+        },
+    }
+
+
+async def test_status_files_no_campaign_while_it_may_not() -> None:
+    # Without credit for the campaign fee: no campaignBuilder call, the
+    # brand read still runs.
+    paths = []
+
+    def handler(req):
+        paths.append(req.url.path)
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"identityStatus": "VETTED_VERIFIED", "failureReasons": None}
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    refs = _unfiled_campaign_refs()
+    st = await _provider(handler).status(refs, may_file_campaign=False)
+    assert st.state == "pending" and "campaign_id" not in refs
+    assert any(p.endswith("/10dlc/brand/B1") for p in paths)
+    assert not any(p.endswith("/10dlc/campaignBuilder") for p in paths)
+
+
+async def test_status_applies_a_brand_rejection_while_no_campaign_may_be_filed() -> (
+    None
+):
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "REGISTRATION_FAILED", "failureReasons": None}
+            )
+        return httpx.Response(404)
+
+    st = await _provider(handler).status(
+        _unfiled_campaign_refs(), may_file_campaign=False
+    )
+    assert st.state == "rejected"
+
+
 def test_campaign_replies_open_with_the_brand_name() -> None:
     from hailhq.core.providers.verification.telnyx_sms import _campaign_replies
 

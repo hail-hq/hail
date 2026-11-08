@@ -424,6 +424,16 @@ class SmsRegistrationProvider(VerificationProvider):
     purpose = "sms"
 
     @abstractmethod
+    async def status(
+        self, refs: dict, *, may_file_campaign: bool = True
+    ) -> ProviderStatus:
+        """``VerificationProvider.status``. With ``may_file_campaign`` False
+        (the credit does not cover the campaign fee) every other step still
+        runs: brand reads, rejections, code resends, adopting a campaign
+        already filed. Only the paid campaign filing is skipped, and the
+        row stays 'pending'. The API always passes it."""
+
+    @abstractmethod
     async def attach_number(
         self, refs: dict, *, provider_resource_id: str, e164: str
     ) -> None:

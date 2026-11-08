@@ -132,6 +132,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         # and reports pending, like the real plug-ins.
         self.campaign_key: str | None = None
         self.campaigns_created = 0
+        # status() calls that would have filed the campaign but were told not to.
+        self.campaigns_skipped = 0
         # Set both to hold the first status() call: it sets ``entered`` and
         # waits for ``release``.
         self.entered: asyncio.Event | None = None
@@ -198,12 +200,16 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.confirmed.append((dict(refs), code))
         return self.confirm_problems
 
-    async def status(self, refs):
+    async def status(self, refs, *, may_file_campaign=True):
         self.status_calls += 1
         if self.release is not None and not self.entered.is_set():
             self.entered.set()
             await self.release.wait()
         if self.campaign_key and self.campaign_key not in refs:
+            if not may_file_campaign:
+                # Like the real plug-ins: everything but the paid filing.
+                self.campaigns_skipped += 1
+                return self.remote_status
             self.campaigns_created += 1
             refs[self.campaign_key] = "QE1"
             return ProviderStatus(state="pending")
@@ -3388,8 +3394,9 @@ async def test_campaign_step_waits_without_credit(
             body = next(v for v in body if v["id"] == vid)
         assert body["state"] == "submitted"
         assert body["waiting_for_credit"] is True
-    # No carrier call, nothing filed, the row as it was.
-    assert sms_carrier.status_calls == 0
+    # The poll ran, without the campaign call: nothing filed, refs kept.
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_skipped == 1
     assert sms_carrier.campaigns_created == 0
     assert await _stored_refs(async_session, vid) == refs
     assert await _stored_state(async_session, vid) == "submitted"
@@ -3441,7 +3448,7 @@ async def test_an_uncharged_submission_counts_against_the_campaign(
     await _set_balance(async_session, org_id, _campaign_fee())
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is True
-    assert sms_carrier.status_calls == 0
+    assert sms_carrier.campaigns_created == 0
     await _charge_submission(async_session, org_id, vid)
     await _set_balance(async_session, org_id, _campaign_fee())
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
@@ -3469,40 +3476,60 @@ async def test_campaign_step_skips_the_credit_check_for_the_shared_key(
 
 
 @pytest.mark.usefixtures("us_number")
+async def test_waiting_row_still_gets_a_brand_rejection(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Only the paid campaign filing waits for credit: the poll still runs
+    # and applies the carrier's brand rejection.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    sms_carrier.remote_status = ProviderStatus(
+        state="rejected", reason=BRAND_REJECTED, raw_reason="brand refused"
+    )
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "rejected"
+    assert resp.json()["rejection_reason"] == BRAND_REJECTED
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 0
+
+
+@pytest.mark.usefixtures("us_number")
 async def test_retry_submit_waits_without_credit(
     client, org_and_key, sms_carrier, async_session
 ) -> None:
+    # The submit is free, so it goes through; the campaign waits.
     org_id, _, key = org_and_key
     vid = await _waiting_sms(client, key, async_session, org_id)
     await _charge_submission(async_session, org_id, vid)
+    sms_carrier.campaign_key = "campaign_id"
     await _set_balance(async_session, org_id, _campaign_fee() - 1)
-    sent = len(sms_carrier.submitted)
-    counts = await verifications_routes.sweep_verifications(
-        async_session, _sms_registry(sms_carrier)
-    )
-    assert counts["submitted"] == 0
-    assert len(sms_carrier.submitted) == sent
-    assert await _stored_state(async_session, vid) == "awaiting_review"
-    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
-    assert resp.json()["waiting_for_credit"] is True
-    # The next pass after a top-up sends it.
-    await _set_balance(async_session, org_id, _campaign_fee())
     counts = await verifications_routes.sweep_verifications(
         async_session, _sms_registry(sms_carrier)
     )
     assert counts["submitted"] == 1
     assert await _stored_state(async_session, vid) == "submitted"
+    assert sms_carrier.campaigns_created == 0
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    # The next poll after a top-up files the campaign.
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
 
 
 @pytest.mark.usefixtures("us_number")
 async def test_admin_approve_waits_without_credit(
     client, org_and_key, sms_carrier, async_session
 ) -> None:
+    # The approve submits; the response says the campaign waits for credit.
     org_id, _, key = org_and_key
     vid = await _waiting_sms(client, key, async_session, org_id)
     await _charge_submission(async_session, org_id, vid)
+    sms_carrier.campaign_key = "campaign_id"
     await _set_balance(async_session, org_id, _campaign_fee() - 1)
-    sent = len(sms_carrier.submitted)
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
         user_id=uuid.uuid4(), api_key_id=None, superadmin=True
     )
@@ -3514,10 +3541,9 @@ async def test_admin_approve_waits_without_credit(
         app.dependency_overrides.pop(require_superadmin, None)
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["state"] == "awaiting_review"
+    assert body["state"] == "submitted"
     assert body["waiting_for_credit"] is True
-    assert len(sms_carrier.submitted) == sent
-    assert await _stored_state(async_session, vid) == "awaiting_review"
+    assert sms_carrier.campaigns_created == 0
 
 
 async def test_one_credit_files_one_campaign(
@@ -3599,7 +3625,7 @@ async def test_the_oldest_registration_gets_the_credit_first(
     await _set_balance(async_session, org_id, _campaign_fee())
     resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is True
-    assert sms_carrier.status_calls == 0
+    assert sms_carrier.campaigns_created == 0
     resp = await client.get(f"/verifications/{older.id}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is False
     assert sms_carrier.campaigns_created == 1
@@ -6046,7 +6072,8 @@ async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
     assert resp.status_code == 201, resp.text
     vid = resp.json()["id"]
 
-    async def status(refs):
+    async def status(refs, *, may_file_campaign=True):
+        assert may_file_campaign
         refs["campaign_id"] = "C1"
         raise RuntimeError("carrier down")
 

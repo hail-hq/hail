@@ -485,17 +485,25 @@ def _poll_due(row: CarrierVerification, now: float) -> bool:
 
 
 async def _fetch_status(
-    row: CarrierVerification, registry: Registry
+    row: CarrierVerification,
+    registry: Registry,
+    *,
+    may_file_campaign: bool = True,
 ) -> ProviderStatus | None:
     """Ask the carrier about a verification. None when there is nothing to
     apply. An SMS plug-in files the campaign inside status() and stores its
     id in the refs: ``_plugin_call`` stamps it, and keeps only the ids a
-    failed call added."""
+    failed call added. ``may_file_campaign`` False: the plug-in skips that
+    paid filing (``_campaign_may_go``) and runs every other step."""
     provider = registry(row.provider, row.purpose)
     if provider is None:
         return None
     try:
         async with _plugin_call(row, provider):
+            if isinstance(provider, SmsRegistrationProvider):
+                return await provider.status(
+                    row.provider_refs, may_file_campaign=may_file_campaign
+                )
             return await provider.status(row.provider_refs)
     except Exception:
         logger.warning("verification status poll failed", exc_info=True)
@@ -739,18 +747,19 @@ async def _campaign_may_go(
     *,
     wait: bool = True,
 ) -> bool:
-    """The campaign credit check of one row, before a step that leads to
-    filing its campaign. True: go on (covered, or no check applies). False:
-    stop, with no carrier call: not covered, or (``wait`` False) the org
-    lock is busy, so the next poll asks.
+    """The campaign credit check of one row, before a poll that may file
+    its campaign. True: the poll may file it (covered, or no check applies).
+    False: the poll skips only that paid filing, and runs every other step
+    (brand reads, rejections, code resends): not covered, or (``wait``
+    False) the org lock is busy, so the next poll asks.
 
     Reads the balance under the organization's lock (``org_lock``), after
     the billing writes in flight, as the filing check does, then commits to
-    release it: it is not held through the row lock and the carrier calls
-    that follow, which can take seconds while the website's rater and other
+    release it: it is not held through the row lock and the carrier call
+    that follows, which can take seconds while the website's rater and other
     billing writes wait for the same lock. Background and GET polls do not
-    wait for it (like the row lock); a confirmed code, the retry and the
-    approve do."""
+    wait for it (like the row lock); a confirmed code does, so its campaign
+    is filed at once."""
     if not _campaign_gated(row, registry):
         return True
     if wait:
@@ -761,20 +770,6 @@ async def _campaign_may_go(
     unfunded = bool(await _campaign_unfunded(db, [row], registry))
     await db.commit()  # ends the org lock
     return not unfunded
-
-
-async def _campaign_may_go_by_id(
-    db: AsyncSession, verification_id: UUID, registry: Registry
-) -> bool:
-    """``_campaign_may_go`` for the retry and the approve, by id (True for
-    a row that is gone: the locked read that follows finds nothing). Reads
-    columns only, so that locked read loads the row fresh."""
-    found = (
-        await db.execute(
-            select(*_GATE_COLUMNS).where(CarrierVerification.id == verification_id)
-        )
-    ).one_or_none()
-    return found is None or await _campaign_may_go(db, found, registry)
 
 
 def _added_only(before: dict, after: dict) -> dict:
@@ -955,16 +950,15 @@ async def _refresh(
     if not _pollable(row):
         return
     # Not covered, or the org lock is busy (another poll or a billing
-    # write: the next poll asks): no carrier call, the row as it is.
-    if not await _campaign_may_go(db, row, registry, wait=wait_for_org_lock):
-        return
+    # write: the next poll asks): the poll runs, without the campaign filing.
+    may_file = await _campaign_may_go(db, row, registry, wait=wait_for_org_lock)
     if not await _lock_for_poll(db, row):
         return
     if not _pollable(row):  # another poll settled it before the lock
         await db.commit()
         return
     before = copy.deepcopy(row.provider_refs)
-    status = await _fetch_status(row, registry)
+    status = await _fetch_status(row, registry, may_file_campaign=may_file)
     changed = await _poll_and_apply(db, row, status, registry, before)
     await db.commit()  # also ends the row lock
     if not changed:
@@ -1905,11 +1899,9 @@ async def _retry_submit(
 ) -> bool:
     """One sweeper retry of an unsent draft. The carrier evaluates it first:
     a draft it refuses becomes 'rejected' with the carrier's reason, so the
-    customer sees why and can start over; it is not retried again. A US
-    texting draft whose campaign fee the credit does not cover waits: the
-    campaign is filed right after the submit."""
-    if not await _campaign_may_go_by_id(db, verification_id, registry):
-        return False  # not covered: nothing changed
+    customer sees why and can start over; it is not retried again. The
+    submit costs nothing for a US texting draft; the poll that files its
+    campaign checks the credit (``_refresh``)."""
     row = await _lock_waiting(db, verification_id)
     if row is None:
         return False
@@ -2674,15 +2666,10 @@ async def admin_approve(
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> AdminVerification:
     """Submit the draft to the carrier for its review. A US texting draft
-    whose campaign fee the organization's credit does not cover is left
-    waiting (`waiting_for_credit`); the background pass sends it after a
-    top-up."""
-    unfunded = not await _campaign_may_go_by_id(db, verification_id, registry)
+    is submitted whatever the credit; its campaign is filed only once the
+    credit covers it (`waiting_for_credit` until then)."""
     row = await _admin_row(db, verification_id)
     provider = _provider_or_404(registry, row.provider, row.purpose)
-    if unfunded:
-        await db.commit()  # ends the row lock; nothing changed
-        return _out(row, registry, AdminVerification, waiting_for_credit=True)
     before = _billing_view(row)
     try:
         async with _plugin_call(row, provider):
@@ -2718,7 +2705,7 @@ async def admin_approve(
         ) from exc
     if not submitted and row.state == "awaiting_review":
         raise _carrier_unavailable()
-    return _out(row, registry, AdminVerification)
+    return await _out_checked(db, row, registry, AdminVerification)
 
 
 @admin_router.post("/{verification_id}/reject", response_model=AdminVerification)
