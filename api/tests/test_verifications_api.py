@@ -4062,6 +4062,30 @@ async def test_a_claim_older_than_its_time_holds_nothing(
     assert sms_carrier.campaigns_created == 1
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_a_filed_campaign_poll_takes_no_org_lock(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Once the campaign is filed there is no credit to check: its polls do
+    # not compete with billing writes for the organization's lock.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert sms_carrier.campaigns_created == 1
+    locks = []
+
+    async def no_lock(db, org):
+        locks.append(org)
+        return False
+
+    monkeypatch.setattr(verifications_routes, "try_org_lock", no_lock)
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert locks == []
+    assert sms_carrier.status_calls == 2
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
