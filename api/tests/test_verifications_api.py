@@ -3862,6 +3862,29 @@ async def test_a_poll_that_files_nothing_gives_up_its_claim(
     assert resp.json()["waiting_for_credit"] is True
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_a_failed_campaign_call_keeps_its_claim(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    # The carrier call raises after it may have filed the campaign: the
+    # reservation stays (the next poll may find that campaign), and the
+    # billing service is not told about a change that is not billed.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+
+    async def status(refs, *, may_file_campaign=True):
+        assert may_file_campaign
+        raise RuntimeError("timed out")
+
+    sms_carrier.status = status
+    pinged.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert "campaign_reserved_at" in await _stored_refs(async_session, vid)
+    assert pinged == []
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
