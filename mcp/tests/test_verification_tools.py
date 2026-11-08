@@ -532,6 +532,7 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "campaign_accepted",
         "runtime_ready",
         "cancellable",
+        "waiting_for_credit",
     }
     _assert_no_sentinel(result)
 

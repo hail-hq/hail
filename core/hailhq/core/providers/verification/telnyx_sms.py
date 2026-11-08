@@ -663,7 +663,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         # The brand is registered when created; nothing more to send.
         return None
 
-    async def status(self, refs) -> ProviderStatus:
+    async def status(self, refs, *, may_file_campaign: bool = True) -> ProviderStatus:
         try:
             brand = await self._api.request("GET", f"/10dlc/brand/{refs['brand_id']}")
             if (
@@ -703,6 +703,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
                     refs["needs_information"] = True
                     return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
+                if not may_file_campaign:
+                    # The credit does not cover the campaign fee yet.
+                    return ProviderStatus(state="pending")
                 replies = _campaign_replies(brand, refs)
                 campaign = await self._api.request(
                     "POST",

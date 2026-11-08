@@ -2934,15 +2934,17 @@ def register_tools(
         "subject_type", "subject_name", "purpose", "state",
         "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation",
-        "step", "identity_confirmed"}]}``. ``step`` says where a US texting
-        filing in progress is: ``confirm_identity``, ``filing`` or
-        ``carrier_review``, ``needs_information`` (repair the existing application),
-        or ``runtime_setup`` (accepted but required response
-        configuration is still pending). ``campaign_accepted`` alone does not
-        authorize sending; check ``runtime_ready`` and number attachment.
-        ``identity_confirmed`` on a person's newest
-        filing, when cancelled or rejected: the next one with the same person
-        needs no code. Dismiss a rejected filing first.
+        "step", "identity_confirmed", "waiting_for_credit"}]}``. ``step``
+        says where a US texting filing in progress is: ``confirm_identity``,
+        ``filing`` or ``carrier_review``, ``needs_information`` (repair the
+        existing application), or ``runtime_setup`` (accepted but required
+        response configuration is still pending). ``campaign_accepted`` alone
+        does not authorize sending; check ``runtime_ready`` and number
+        attachment. ``identity_confirmed`` on a person's newest filing, when
+        cancelled or rejected: the next one with the same person needs no
+        code. Dismiss a rejected filing first. ``waiting_for_credit`` true:
+        the balance does not cover the carrier fee of the next step (filing
+        the campaign); add credit and it goes on.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
         submission already exists before submitting again. ``confirmation``

@@ -5347,13 +5347,19 @@ paths:
 
         registration. Use it when the verification shows `confirmation: "code"`.
 
-        On success the campaign is filed at once; poll GET /verifications/{id}
+        On success the campaign is usually filed at once. It waits when your
 
-        until `approved`. A wrong or expired code is 422 on `code`; after five
+        credit does not cover its fee (`waiting_for_credit` is true until you
 
-        wrong codes, 429 until the carrier sends a new code (once a day). 409
+        add credit). It also waits while another check of it is running or
 
-        when there is nothing to confirm.'
+        recently failed, or another process holds it; a later check files it.
+
+        Poll GET /verifications/{id} until `approved`. A wrong or expired code is
+
+        422 on `code`; after five wrong codes, 429 until the carrier sends a
+
+        new code (once a day). 409 when there is nothing to confirm.'
       operationId: confirm_verification
       parameters:
         - name: verification_id
@@ -9839,6 +9845,15 @@ components:
             confirmed: the next filing with the same first name, last name, email
             and mobile needs no code and has no submission fee. Dismiss a rejected
             registration first. Ignore it on older registrations."
+          default: false
+        waiting_for_credit:
+          type: boolean
+          title: Waiting For Credit
+          description:
+            "True when a US texting registration waits for credit: its
+            next step, filing the campaign, has a carrier fee your balance does not
+            cover. Nothing is filed until it does. Add credit; Hail goes on at its
+            next check."
           default: false
       type: object
       required:

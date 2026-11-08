@@ -132,6 +132,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         # and reports pending, like the real plug-ins.
         self.campaign_key: str | None = None
         self.campaigns_created = 0
+        # status() calls that would have filed the campaign but were told not to.
+        self.campaigns_skipped = 0
         # Set both to hold the first status() call: it sets ``entered`` and
         # waits for ``release``.
         self.entered: asyncio.Event | None = None
@@ -198,12 +200,16 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.confirmed.append((dict(refs), code))
         return self.confirm_problems
 
-    async def status(self, refs):
+    async def status(self, refs, *, may_file_campaign=True):
         self.status_calls += 1
         if self.release is not None and not self.entered.is_set():
             self.entered.set()
             await self.release.wait()
         if self.campaign_key and self.campaign_key not in refs:
+            if not may_file_campaign:
+                # Like the real plug-ins: everything but the paid filing.
+                self.campaigns_skipped += 1
+                return self.remote_status
             self.campaigns_created += 1
             refs[self.campaign_key] = "QE1"
             return ProviderStatus(state="pending")
@@ -3315,6 +3321,814 @@ async def test_overlapping_polls_create_one_campaign(
     assert (await _stored_refs(async_session, vid))["campaign_sid"] == "QE1"
 
 
+# -- credit for the campaign step ------------------------------------------
+
+
+def _campaign_fee() -> int:
+    return sms_registration_fees.campaign_fee_cents("fake", "business")
+
+
+async def _charge(async_session, org_id, vid, step: str, cents: int) -> None:
+    """The website rater's debit for one step of a registration."""
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="sms",
+            amount_cents=-cents,
+            qty=1,
+            ref=f"sms_registration:{vid}:{step}",
+            source=f"sms_registration_{step}",
+        )
+    )
+    await async_session.commit()
+
+
+async def _charge_submission(async_session, org_id, vid) -> None:
+    full = sms_registration_fees.filing_fee_cents("fake", "business")
+    await _charge(async_session, org_id, vid, "submission", full - _campaign_fee())
+
+
+async def _before_campaign(
+    client, key, async_session, org_id, sms_carrier, charged=True
+) -> str:
+    """A submitted US texting registration whose campaign is not filed yet:
+    the next poll files it (a billed step). ``charged``: the rater has
+    charged its submission."""
+    await _set_balance(async_session, org_id, 10_000)
+    resp = await _post_sms(client, key)
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    if charged:
+        await _charge_submission(async_session, org_id, vid)
+    sms_carrier.campaign_key = "campaign_id"
+    return vid
+
+
+async def _stored_state(async_session, vid: str) -> str:
+    return (
+        await async_session.execute(
+            select(CarrierVerification.state).where(
+                CarrierVerification.id == uuid.UUID(vid)
+            )
+        )
+    ).scalar_one()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list", "sweep"])
+async def test_campaign_step_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session, via
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    refs = await _stored_refs(async_session, vid)
+    verifications_routes._last_polled.clear()
+    if via == "sweep":
+        await verifications_routes.sweep_verifications(
+            async_session, _sms_registry(sms_carrier)
+        )
+    else:
+        url = f"/verifications/{vid}" if via == "get" else "/verifications"
+        resp = await client.get(url, headers=_auth(key))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        if via == "list":
+            body = next(v for v in body if v["id"] == vid)
+        assert body["state"] == "submitted"
+        assert body["waiting_for_credit"] is True
+    # The poll ran, without the campaign call: nothing filed, refs kept.
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_skipped == 1
+    assert sms_carrier.campaigns_created == 0
+    assert await _stored_refs(async_session, vid) == refs
+    assert await _stored_state(async_session, vid) == "submitted"
+    # The next poll after a top-up files the campaign.
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list"])
+async def test_campaign_step_runs_when_funded(
+    client, org_and_key, sms_carrier, async_session, via
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    resp = await client.get(url, headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    if via == "list":
+        body = next(v for v in body if v["id"] == vid)
+    assert sms_carrier.campaigns_created == 1
+    assert (await _stored_refs(async_session, vid))["campaign_id"] == "QE1"
+    assert body["waiting_for_credit"] is False
+    # Once the campaign is filed there is no step left to pay for.
+    await _set_balance(async_session, org_id, 0)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.status_calls == 2
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_submission_counts_against_the_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The rater has not charged the filing yet: the balance still holds
+    # the brand's cost, so it cannot pay for the campaign too.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(
+        client, key, async_session, org_id, sms_carrier, charged=False
+    )
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+    await _charge_submission(async_session, org_id, vid)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+async def test_campaign_step_skips_the_credit_check_for_the_shared_key(
+    client, sms_carrier, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_api_key", "hail-test-shared-secret")
+    await _us_number(async_session, SELF_HOSTED_ORG_ID)
+    resp = await _post_sms(client, "hail-test-shared-secret")
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    sms_carrier.campaign_key = "campaign_id"
+    # The self-hosted org has no credit and is not billed.
+    assert await _balance(async_session, SELF_HOSTED_ORG_ID) < _campaign_fee()
+    resp = await client.get(
+        f"/verifications/{vid}", headers=_auth("hail-test-shared-secret")
+    )
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_waiting_row_still_gets_a_brand_rejection(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Only the paid campaign filing waits for credit: the poll still runs
+    # and applies the carrier's brand rejection.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    sms_carrier.remote_status = ProviderStatus(
+        state="rejected", reason=BRAND_REJECTED, raw_reason="brand refused"
+    )
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "rejected"
+    assert resp.json()["rejection_reason"] == BRAND_REJECTED
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_retry_submit_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The submit is free, so it goes through; the campaign waits.
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    await _charge_submission(async_session, org_id, vid)
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    counts = await verifications_routes.sweep_verifications(
+        async_session, _sms_registry(sms_carrier)
+    )
+    assert counts["submitted"] == 1
+    assert await _stored_state(async_session, vid) == "submitted"
+    assert sms_carrier.campaigns_created == 0
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    # The next poll after a top-up files the campaign.
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_admin_approve_waits_without_credit(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The approve submits; the response says the campaign waits for credit.
+    org_id, _, key = org_and_key
+    vid = await _waiting_sms(client, key, async_session, org_id)
+    await _charge_submission(async_session, org_id, vid)
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/approve", headers=_auth(key)
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["state"] == "submitted"
+    assert body["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+
+
+async def test_one_credit_files_one_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Two registrations of one org, each before its campaign, and credit
+    # for one campaign fee: one campaign is filed, the other waits, also on
+    # a later poll before the rater has charged the first.
+    org_id, _, key = org_and_key
+    rows = [
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{number_type}"},
+            requirements_version="1",
+        )
+        for number_type in ("local", "toll_free")
+    ]
+    async_session.add_all(rows)
+    await async_session.commit()
+    for row in rows:
+        await _charge_submission(async_session, org_id, row.id)
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee())
+    verifications_routes._last_polled.clear()
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+    by_id = {v["id"]: v for v in resp.json()}
+    filed = [
+        r for r in rows if "campaign_id" in await _stored_refs(async_session, str(r.id))
+    ]
+    assert len(filed) == 1
+    other = next(r for r in rows if r is not filed[0])
+    assert by_id[str(filed[0].id)]["waiting_for_credit"] is False
+    assert by_id[str(other.id)]["waiting_for_credit"] is True
+    # The first campaign is not charged yet: its fee still counts.
+    resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 1
+    # Once the rater charges it and the org tops up, the other is filed.
+    await _charge(async_session, org_id, filed[0].id, "review", _campaign_fee())
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 2
+
+
+async def test_the_oldest_registration_gets_the_credit_first(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A poll of the newer registration alone leaves the credit to the older
+    # one, as the list does.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{number_type}"},
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age in (("local", 3), ("toll_free", 2))
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+    resp = await client.get(f"/verifications/{older.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "filed_at",
+    [
+        "not a time",
+        "2026-11-07 pending",
+        "2026-13-45T00:00:00",
+        "2026-11-07T25:00:00",
+        "2026-11-07T10:00:00+99:00",
+    ],
+)
+async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
+    client, org_and_key, sms_carrier, async_session, filed_at
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="cancelled",
+            # No submission owed, so only the bad time is in play.
+            provider_refs={"campaign_filed_at": filed_at, "brand_reused": True},
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize(
+    "filed_at", ["2026-11-07", "2026-11-07T10:00+00:00", "2026-11-07T10:00:00Z"]
+)
+async def test_an_uncharged_campaign_in_any_iso_form_counts(
+    client, org_and_key, sms_carrier, async_session, filed_at
+) -> None:
+    # Another registration's campaign, filed today and not charged yet,
+    # still holds the credit, however its time is written.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="cancelled",
+            provider_refs={
+                "campaign_filed_at": datetime.now(timezone.utc).date().isoformat()
+                + filed_at[10:],
+                "brand_reused": True,
+            },
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
+
+
+async def test_a_campaign_in_flight_keeps_its_credit_when_the_order_flips(
+    client, org_and_key, sms_carrier, async_session, session_factory
+) -> None:
+    # Credit for one fee. The newer row B is funded and its campaign call
+    # is in flight (the org lock is released by then). Meanwhile the older
+    # row A becomes ready (its hold is lifted), so by age A would come first.
+    # B's reservation keeps the credit: A files nothing, one campaign in all.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": f"BN-{number_type}",
+                "brand_reused": True,
+                **extra,
+            },
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age, extra in (
+            ("local", 3, {"needs_information": True}),
+            ("toll_free", 2, {}),
+        )
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    sms_carrier.campaign_key = "campaign_id"
+    sms_carrier.entered = asyncio.Event()
+    sms_carrier.release = asyncio.Event()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    restore = _per_request_sessions(session_factory)
+    try:
+        first = asyncio.create_task(
+            client.get(f"/verifications/{newer.id}", headers=_auth(key))
+        )
+        await asyncio.wait_for(sms_carrier.entered.wait(), 5)
+        refs = dict(older.provider_refs)
+        refs.pop("needs_information")
+        await async_session.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == older.id)
+            .values(provider_refs=refs)
+        )
+        await async_session.commit()
+        second = await asyncio.wait_for(
+            client.get(f"/verifications/{older.id}", headers=_auth(key)), 5
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["waiting_for_credit"] is True
+        sms_carrier.release.set()
+        assert (await first).status_code == 200
+    finally:
+        sms_carrier.release.set()
+        restore()
+    assert sms_carrier.campaigns_created == 1
+    assert "campaign_id" in await _stored_refs(async_session, str(newer.id))
+    assert "campaign_id" not in await _stored_refs(async_session, str(older.id))
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("via", ["get", "list"])
+async def test_a_row_that_needs_the_check_only_after_the_reread_files_nothing(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, via
+) -> None:
+    # Read with a campaign stamp (no check needed), then re-read under the
+    # row lock without it: it got no credit check, so no campaign (fail
+    # closed), although the balance is 0.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    refs = await _stored_refs(async_session, vid)
+    stamped = {**refs, "campaign_filed_at": datetime.now(timezone.utc).isoformat()}
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(provider_refs=stamped)
+    )
+    await async_session.commit()
+    await _set_balance(async_session, org_id, 0)
+    real = verifications_routes._lock_for_poll
+
+    async def lock_after_a_change(db, row):
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(provider_refs=refs)
+        )
+        return await real(db, row)
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lock_after_a_change)
+    verifications_routes._last_polled.clear()
+    url = f"/verifications/{vid}" if via == "get" else "/verifications"
+    resp = await client.get(url, headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_created == 0
+    assert "campaign_id" not in await _stored_refs(async_session, vid)
+
+
+async def test_a_poll_that_files_nothing_gives_up_its_claim(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Credit for one fee. The newer row X is polled while funded, but its
+    # brand is not ready (no campaign filed): the poll clears its
+    # reservation, so the older row Y, ready later, gets the credit.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    older, newer = (
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": f"BN-{number_type}",
+                "brand_reused": True,
+                **extra,
+            },
+            requirements_version="1",
+            created_at=now - timedelta(days=age),
+        )
+        for number_type, age, extra in (
+            ("local", 3, {"needs_information": True}),
+            ("toll_free", 2, {}),
+        )
+    )
+    async_session.add_all([older, newer])
+    await async_session.commit()
+    await _set_balance(async_session, org_id, _campaign_fee())
+    # No campaign_key: the fake files no campaign (its brand is pending).
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.status_calls == 1
+    assert "campaign_reserved_at" not in await _stored_refs(
+        async_session, str(newer.id)
+    )
+    refs = dict(older.provider_refs)
+    refs.pop("needs_information")
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == older.id)
+        .values(provider_refs=refs)
+    )
+    await async_session.commit()
+    resp = await client.get(f"/verifications/{older.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    resp = await client.get(f"/verifications/{newer.id}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_failed_campaign_call_keeps_its_claim(
+    client, org_and_key, sms_carrier, async_session, pinged
+) -> None:
+    # The carrier call raises after it may have filed the campaign: the
+    # reservation stays (the next poll may find that campaign), and the
+    # billing service is not told about a change that is not billed.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+
+    async def status(refs, *, may_file_campaign=True):
+        assert may_file_campaign
+        raise RuntimeError("timed out")
+
+    sms_carrier.status = status
+    pinged.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert "campaign_reserved_at" in await _stored_refs(async_session, vid)
+    assert pinged == []
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_kept_claim_is_not_renewed_and_runs_out(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A claim kept after a failed call keeps its first time on later polls,
+    # so it runs out; a successful poll then drops it.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    real = sms_carrier.status
+
+    async def failing(refs, *, may_file_campaign=True):
+        raise RuntimeError("timed out")
+
+    sms_carrier.status = failing
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    first = (await _stored_refs(async_session, vid))["campaign_reserved_at"]
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert (await _stored_refs(async_session, vid))["campaign_reserved_at"] == first
+    # The kept claim is another poll's: the next poll files nothing (the
+    # carrier's answer shows no campaign) and drops it; the one after files.
+    sms_carrier.status = real
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    refs = await _stored_refs(async_session, vid)
+    assert "campaign_reserved_at" not in refs and "campaign_id" not in refs
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    refs = await _stored_refs(async_session, vid)
+    assert "campaign_reserved_at" not in refs and refs["campaign_id"] == "QE1"
+
+
+async def _reserved(async_session, vid: str):
+    return (await _stored_refs(async_session, vid)).get("campaign_reserved_at")
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_that_loses_the_row_drops_its_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The poll reserved the credit, then did not get the row (it was free
+    # again by the drop): no call, so the claim goes.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    seen = []
+
+    async def lost(db, row):
+        seen.append(await _reserved(db, str(row.id)))
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert seen and seen[0] is not None  # it was reserved
+    assert await _reserved(async_session, vid) is None
+    assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_cannot_drop_another_polls_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Between this poll's reservation and its drop, another poll kept its
+    # own claim on the row (a failed call). This poll drops only its own.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    other = "2026-01-01T00:00:00+00:00"
+
+    async def lost(db, row):
+        refs = await _stored_refs(db, str(row.id))
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(provider_refs={**refs, "campaign_reserved_at": other})
+        )
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) == other
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_row_no_longer_pollable_drops_any_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Re-read under its lock, the row is on hold: there is no campaign to
+    # claim credit for, so any reservation goes, its own or one kept.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    real = verifications_routes._lock_for_poll
+
+    async def put_on_hold(db, row):
+        refs = await _stored_refs(db, str(row.id))
+        await db.execute(
+            update(CarrierVerification)
+            .where(CarrierVerification.id == row.id)
+            .values(
+                provider_refs={
+                    **refs,
+                    "needs_information": True,
+                    "campaign_reserved_at": "2026-01-01T00:00:00+00:00",
+                }
+            )
+        )
+        return await real(db, row)
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", put_on_hold)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) is None
+    assert sms_carrier.status_calls == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_that_loses_the_row_keeps_a_kept_claim(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The row carries a claim another poll kept after a failed call. This
+    # poll files nothing on it, and losing the row it drops nothing.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    kept = datetime.now(timezone.utc).isoformat()
+    refs = await _stored_refs(async_session, vid)
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == uuid.UUID(vid))
+        .values(provider_refs={**refs, "campaign_reserved_at": kept})
+    )
+    await async_session.commit()
+
+    async def lost(db, row):
+        return False
+
+    monkeypatch.setattr(verifications_routes, "_lock_for_poll", lost)
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert await _reserved(async_session, vid) == kept
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_claim_older_than_its_time_holds_nothing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A claim left past _CAMPAIGN_RESERVED_FOR (a process that died) does
+    # not keep the credit from the row that is next.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    old = (
+        datetime.now(timezone.utc)
+        - verifications_routes._CAMPAIGN_RESERVED_FOR
+        - timedelta(minutes=1)
+    ).isoformat()
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="toll_free",
+            subject_type="business",
+            state="submitted",
+            provider_refs={
+                "brand_sid": "BN-old",
+                "brand_reused": True,
+                "campaign_reserved_at": old,
+            },
+            requirements_version="1",
+        )
+    )
+    await async_session.commit()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_filed_campaign_poll_takes_no_org_lock(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # Once the campaign is filed there is no credit to check: its polls do
+    # not compete with billing writes for the organization's lock.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert sms_carrier.campaigns_created == 1
+    locks = []
+
+    async def no_lock(db, org):
+        locks.append(org)
+        return False
+
+    monkeypatch.setattr(verifications_routes, "try_org_lock", no_lock)
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert locks == []
+    assert sms_carrier.status_calls == 2
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_busy(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The other side of the test above: a row before its campaign asks for
+    # the lock; when it is busy, the poll runs and files nothing.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    locks = []
+    real_try = verifications_routes.try_org_lock
+
+    async def busy(db, org):
+        locks.append(org)
+        return False
+
+    monkeypatch.setattr(verifications_routes, "try_org_lock", busy)
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert locks == [org_id]
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_skipped == 1  # status() ran with the flag off
+    assert sms_carrier.campaigns_created == 0
+    assert resp.json()["waiting_for_credit"] is False  # funded, just busy
+    assert await _reserved(async_session, vid) is None
+    # Lock free again: the same funded row files. (Not monkeypatch.undo():
+    # that would also undo the fixtures' patches.)
+    monkeypatch.setattr(verifications_routes, "try_org_lock", real_try)
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["waiting_for_credit"] is False
+    assert locks == [org_id]  # the real lock this time
+    assert sms_carrier.status_calls == 2
+    assert sms_carrier.campaigns_created == 1
+    assert await _reserved(async_session, vid) is None
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
@@ -5684,7 +6498,8 @@ async def test_a_failed_sms_status_poll_still_stamps_the_campaign_it_filed(
     assert resp.status_code == 201, resp.text
     vid = resp.json()["id"]
 
-    async def status(refs):
+    async def status(refs, *, may_file_campaign=True):
+        assert may_file_campaign
         refs["campaign_id"] = "C1"
         raise RuntimeError("carrier down")
 
@@ -5994,6 +6809,27 @@ async def _needs_information_application(
     row.provider_refs = refs
     await async_session.commit()
     return vid, {"fields": fields, "address": address}
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_amendment_says_when_the_campaign_waits_for_credit(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+):
+    # The repaired row is next to file its campaign: the amend reply, and
+    # its identical retry, say whether the credit covers it.
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    await _charge_submission(async_session, org_id, vid)
+    await _set_balance(async_session, org_id, _campaign_fee() - 1)
+    path = f"/verifications/{vid}/application"
+    for _ in range(2):
+        resp = await client.patch(path, headers=_auth(key), json=answers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["waiting_for_credit"] is True
+    assert sms_carrier.campaigns_created == 0
 
 
 @pytest.mark.usefixtures("us_number")
