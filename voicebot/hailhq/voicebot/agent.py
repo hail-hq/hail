@@ -42,6 +42,7 @@ from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
+from hailhq.core.call_legs import record_call_legs
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
@@ -90,6 +91,7 @@ from hailhq.voicebot.amd import (
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
+from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
@@ -2300,8 +2302,12 @@ async def _run_call(
     # connected, and whether it answered. Written by the bridge handle.
     bridge_state: dict[str, Any] = {"human": None, "connected": False}
 
+    # Every SIP leg of the call, for its carrier cost (hailhq.core.call_legs).
+    legs = LegTracker(inbound)
+
     @ctx.room.on("participant_disconnected")
     def _on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
+        legs.left(participant)
         handle_sip_disconnect(ctx, participant, captured, bridge_state, call_id)
 
     # Answer detection: flip the call to `in_progress` + stamp `answered_at`
@@ -2337,16 +2343,19 @@ async def _run_call(
 
     @ctx.room.on("participant_connected")
     def _on_participant_connected(participant: rtc.RemoteParticipant) -> None:
+        legs.seen(participant)
         _maybe_mark_answered(participant)
 
     @ctx.room.on("participant_attributes_changed")
     def _on_participant_attributes_changed(
         _changed: Any, participant: rtc.Participant
     ) -> None:
+        legs.seen(participant)
         _maybe_mark_answered(participant)
 
     # The SIP leg may already be present/active by the time handlers register.
     for _participant in ctx.room.remote_participants.values():
+        legs.seen(_participant)
         _maybe_mark_answered(_participant)
 
     if inbound and not any(
@@ -2364,6 +2373,7 @@ async def _run_call(
             status_override="canceled",
             end_reason_override=CallEndReason.NORMAL_HANGUP.value,
         )
+        await record_call_legs(call_id, legs.records())
         ctx.shutdown(reason="caller_left")
         return
 
@@ -2442,6 +2452,7 @@ async def _run_call(
             status_override=captured["status"],
             end_reason_override=captured["end_reason"],
         )
+        await record_call_legs(call_id, legs.records())
         ctx.shutdown(reason="provider_key_error")
         return
 
@@ -2678,6 +2689,7 @@ async def _run_call(
                 end_reason_override=captured["end_reason"],
                 failure_code=captured.get("failure_code"),
             )
+            await record_call_legs(call_id, legs.records())
         finally:
             if telemetry_span is not None:
                 telemetry_span.set_attribute(

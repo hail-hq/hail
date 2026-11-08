@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from decimal import Decimal
 from uuid import UUID
 
 from hailhq.core.carrier_offer import Approval, CarrierOffer, cents, number_prefix
@@ -20,6 +21,8 @@ from hailhq.core.providers.verification.twilio import _TWILIO_TO_SUBJECT
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierRequestError,
+    LegCost,
+    LegRef,
     NumberType,
     OrderState,
     ProviderCallStatus,
@@ -468,3 +471,40 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
         await asyncio.to_thread(detach)
     except TwilioRestException as exc:
         raise CarrierRequestError(exc.status) from exc
+
+
+# --- call costs: the price on each leg's Call resource. Twilio fills it in
+# a few minutes after the call ends; until then it is null.
+
+
+def _leg_cost(client: TwilioClient, sid: str) -> LegCost | None:
+    try:
+        call = client.calls(sid).fetch()
+    except TwilioRestException as exc:
+        if exc.status == 404:
+            return None
+        raise CarrierRequestError(exc.status) from exc
+    if call.price is None:
+        return None
+    if (call.price_unit or "").upper() != "USD":
+        logger.warning("twilio call %s is priced in %s, not USD", sid, call.price_unit)
+        return None
+    # Twilio reports a charge as a negative number. Its ``duration`` is talk
+    # time, not the billed time, so billed_seconds stays unknown.
+    return LegCost(abs(Decimal(call.price)))
+
+
+async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
+    """Twilio finds a leg by its CallSid only; a leg without one is skipped."""
+    if not (settings.twilio_account_sid and settings.twilio_auth_token):
+        raise CarrierNotConfigured("Twilio is not configured")
+    client = _order_client()
+
+    def lookup() -> dict[UUID, LegCost]:
+        found = {}
+        for leg in legs:
+            if leg.carrier_call_id and (cost := _leg_cost(client, leg.carrier_call_id)):
+                found[leg.id] = cost
+        return found
+
+    return await asyncio.to_thread(lookup)

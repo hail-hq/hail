@@ -16,8 +16,12 @@ helpers.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
+from uuid import UUID
 
 from hailhq.core.schemas import NumberType
 from pydantic import BaseModel
@@ -26,6 +30,9 @@ __all__ = [
     "CarrierNotConfigured",
     "CarrierPreOrderError",
     "CarrierRequestError",
+    "LegCost",
+    "LegCosts",
+    "LegRef",
     "NumberType",
     "OrderState",
     "ProviderCallStatus",
@@ -54,6 +61,32 @@ class CarrierPreOrderError(CarrierRequestError):
 
 class CarrierNotConfigured(Exception):
     """The carrier is not configured on this deployment (an operator problem)."""
+
+
+@dataclass(frozen=True)
+class LegRef:
+    """One call leg to look up in a carrier's call records."""
+
+    id: UUID
+    direction: Literal["inbound", "outbound"]
+    sip_call_id: str | None
+    carrier_call_id: str | None
+    joined_at: datetime
+    left_at: datetime | None
+
+
+@dataclass(frozen=True)
+class LegCost:
+    """What the carrier charged for one leg, in USD."""
+
+    usd: Decimal
+    billed_seconds: int | None = None
+    usd_per_minute: Decimal | None = None
+
+
+# A carrier's cost lookup: the legs found in its records, by leg id. A leg
+# left out has no record yet (or never will); the caller asks again later.
+LegCosts = Callable[[list[LegRef]], Awaitable[dict[UUID, LegCost]]]
 
 
 class ProviderCallStatus(BaseModel):
