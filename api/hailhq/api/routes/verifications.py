@@ -847,7 +847,8 @@ async def _campaign_may_go(
     website's rater and other billing writes wait for the same lock.
     Background and GET polls do not wait for it (like the row lock); a
     confirmed code does, so its campaign is filed at once unless another
-    poll's reservation is running on the row or another poll holds it."""
+    poll's reservation is running on the row or another poll holds the row
+    lock."""
     if not _billed_sms(row):  # purpose and organization never change
         return _CreditCheck(True, None, False)
     # A first read without the lock: most polls (a campaign already filed)
@@ -2718,10 +2719,11 @@ async def confirm_verification(
     registration. Use it when the verification shows `confirmation: "code"`.
     On success the campaign is usually filed at once. It waits when your
     credit does not cover its fee (`waiting_for_credit` is true until you
-    add credit), or for the next check when another check of it is
-    running. Poll GET /verifications/{id} until `approved`. A wrong or expired code is 422 on `code`; after five
-    wrong codes, 429 until the carrier sends a new code (once a day). 409
-    when there is nothing to confirm."""
+    add credit). It also waits, up to 15 minutes, while another check of
+    it is running or has just failed. Poll GET /verifications/{id} until
+    `approved`. A wrong or expired code is 422 on `code`; after five wrong
+    codes, 429 until the carrier sends a new code (once a day). 409 when
+    there is nothing to confirm."""
     row = await _org_row_or_404(db, principal, verification_id)
     # Wait for a poll in flight (it holds the same lock), then re-read.
     row = (

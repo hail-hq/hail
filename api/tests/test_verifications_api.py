@@ -4084,6 +4084,31 @@ async def test_a_filed_campaign_poll_takes_no_org_lock(
     assert resp.status_code == 200, resp.text
     assert locks == []
     assert sms_carrier.status_calls == 2
+    assert sms_carrier.campaigns_created == 1
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_poll_before_the_campaign_files_nothing_when_the_org_lock_is_busy(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The other side of the test above: a row before its campaign asks for
+    # the lock; when it is busy, the poll runs and files nothing.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    locks = []
+
+    async def busy(db, org):
+        locks.append(org)
+        return False
+
+    monkeypatch.setattr(verifications_routes, "try_org_lock", busy)
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert locks == [org_id]
+    assert sms_carrier.status_calls == 1
+    assert sms_carrier.campaigns_created == 0
 
 
 async def test_overlapping_polls_email_the_owners_once(
