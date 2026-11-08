@@ -148,6 +148,16 @@ _PRIVATE_SUFFIXES = (
 )
 
 
+def _full() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_409_CONFLICT,
+        detail=(
+            f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
+            "most allowed. Delete one you no longer use, or contact support."
+        ),
+    )
+
+
 def _public_base() -> str | None:
     """HAIL_API_URL when carrier reviewers can reach it, else None."""
     parsed = urlparse(settings.hail_api_url)
@@ -195,26 +205,27 @@ async def upload_sms_evidence(
                 "mail bucket and a public https HAIL_API_URL. Paste a public link instead."
             ),
         )
+    org = principal.organization_id
+    # Before reading the body, so an account at the cap costs no 10 MB read.
+    folder = f"{SMS_EVIDENCE_PREFIX}{org}/"
+    # Checked before the body is read, so a full account costs no upload.
+    if await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES) >= MAX_EVIDENCE_FILES:
+        raise _full()
     data = await _read_upload(request)
     content_type = _sniff(data)
     if content_type is None:
         raise unprocessable("Upload a PNG, JPG or PDF.", loc=["body", "file"])
-    org = principal.organization_id
-    held = await store.count_prefix(
-        f"{SMS_EVIDENCE_PREFIX}{org}/", up_to=MAX_EVIDENCE_FILES
-    )
-    if held >= MAX_EVIDENCE_FILES:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
-                "most allowed. Delete one you no longer use, or contact support."
-            ),
-        )
     token = secrets.token_urlsafe(24)
-    await store.put_attachment(
-        f"{SMS_EVIDENCE_PREFIX}{org}/{token}", data, content_type
-    )
+    key = f"{folder}{token}"
+    await store.put_attachment(key, data, content_type)
+    # Parallel uploads can all pass the first count. Count again after the
+    # save and take this file back when the account went over the cap.
+    if (
+        await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
+        > MAX_EVIDENCE_FILES
+    ):
+        await store.delete(key)
+        raise _full()
     return EvidenceUploadResponse(
         url=join_url(base, f"v1/verifications/sms/evidence/{org}/{token}"),
         content_type=content_type,
@@ -260,7 +271,10 @@ async def get_sms_evidence(
     "/{organization_id}/{token}",
     status_code=http_status.HTTP_204_NO_CONTENT,
     operation_id="delete_sms_evidence",
-    responses={404: {"description": "No file of yours has this link."}},
+    responses={
+        404: {"description": "No file of yours has this link."},
+        503: {"description": "This server does not store files."},
+    },
 )
 async def delete_sms_evidence(
     organization_id: UUID,
@@ -268,17 +282,18 @@ async def delete_sms_evidence(
     principal: Annotated[Principal, Depends(get_current_principal)],
     store: Annotated[S3MailClient | None, Depends(get_evidence_store)],
 ) -> Response:
-    """Delete an uploaded file. Its link stops working at once.
+    """Delete an uploaded file. Its link then leads to a storage error page.
 
     A registration that already names the link keeps the link in its text,
-    and carrier reviewers can no longer open it. Upload a new file and amend
-    the registration if it is still under review.
+    and carrier reviewers can no longer see the file. Upload a new file and
+    amend the registration if it is still under review.
     """
-    if (
-        store is None
-        or organization_id != principal.organization_id
-        or not _TOKEN.fullmatch(token)
-    ):
+    if store is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="This server does not store files.",
+        )
+    if organization_id != principal.organization_id or not _TOKEN.fullmatch(token):
         raise HTTPException(status_code=404, detail="Not found")
     key = f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}"
     if not await store.count_prefix(key, up_to=1):

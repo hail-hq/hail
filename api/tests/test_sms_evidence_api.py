@@ -291,3 +291,34 @@ async def test_delete_needs_a_key(client: httpx.AsyncClient, store) -> None:
     resp = await client.delete(f"/v1/verifications/sms/evidence/{ORG}/{'c' * 32}")
     assert resp.status_code == 401
     store.delete.assert_not_awaited()
+
+
+async def test_parallel_uploads_never_pass_the_cap(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    from hailhq.api.routes.sms_evidence import MAX_EVIDENCE_FILES
+
+    # 99 before the save, 101 after: another upload landed at the same time.
+    store.count_prefix.side_effect = [MAX_EVIDENCE_FILES - 1, MAX_EVIDENCE_FILES + 1]
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", PNG, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 409
+    key = store.put_attachment.await_args.args[0]
+    store.delete.assert_awaited_once_with(key)
+
+
+async def test_delete_without_storage_is_503(
+    client: httpx.AsyncClient, org_and_key
+) -> None:
+    app.dependency_overrides[get_evidence_store] = lambda: None
+    try:
+        resp = await client.delete(
+            f"/v1/verifications/sms/evidence/{org_and_key[0]}/{'c' * 32}",
+            headers=_auth(org_and_key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_evidence_store, None)
+    assert resp.status_code == 503

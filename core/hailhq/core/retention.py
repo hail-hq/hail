@@ -196,17 +196,13 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
             logger.exception("could not delete evidence for org %s", org_id)
             failed.append(org_id)
     if failed:
+        # The database scrub is committed; log what was done before failing.
+        _log_summary(summary)
         raise RuntimeError(f"evidence delete failed for {len(failed)} org(s)")
     return summary
 
 
-async def _main() -> None:
-    logging.basicConfig(level=logging.INFO)
-    from hailhq.core.db import session_scope
-
-    async with session_scope() as session:
-        summary = await purge_expired_data(session, datetime.now(timezone.utc))
-
+def _log_summary(summary: PurgeSummary) -> None:
     logger.info(
         "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
         "%d sms scrubbed, %d email(s) scrubbed, %d contact(s) deleted, "
@@ -219,6 +215,16 @@ async def _main() -> None:
         summary.evidence_files_deleted,
         summary.calls_with_unexpected_recording,
     )
+
+
+async def _main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    from hailhq.core.db import session_scope
+
+    async with session_scope() as session:
+        summary = await purge_expired_data(session, datetime.now(timezone.utc))
+
+    _log_summary(summary)
 
 
 if __name__ == "__main__":
