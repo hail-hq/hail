@@ -15,6 +15,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Billing: the same charge or credit can no longer be written to the ledger twice.
 - Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
 - Verification: when several Twilio requirements accept only the same document, the form asks for it once.
 - Verification: Twilio checks where one document covers several items (a passport for name and ID number, one company register extract for several items) no longer fail.
