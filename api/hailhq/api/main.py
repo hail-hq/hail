@@ -20,7 +20,6 @@ from hailhq.api.number_orders import (
     sync_sms_setup,
 )
 from hailhq.api.ratelimit import GeneralRateLimitMiddleware
-from hailhq.api.sms_registration import drain_audits as drain_sms_audits
 from hailhq.api.routes import agents as agents_routes
 from hailhq.api.routes import calls as calls_routes
 from hailhq.api.routes import contacts as contacts_routes
@@ -46,6 +45,7 @@ from hailhq.api.routes.internal import org_closures as internal_org_closures
 from hailhq.api.routes.internal import provider_config as internal_provider_config
 from hailhq.api.routes.internal import ses_events as internal_ses_events
 from hailhq.api.routes.internal import voices as internal_voices
+from hailhq.api.sms_registration import drain_audits as drain_sms_audits
 from hailhq.api.usage import write_usage_event
 from hailhq.api.verification_worker import VerificationWorker
 from hailhq.core import internal_webhook
