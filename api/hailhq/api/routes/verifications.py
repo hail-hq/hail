@@ -703,8 +703,7 @@ async def _campaign_unfunded(
 
     The credit is the balance less the steps not yet charged
     (``_uncharged_cents``). It goes to the organization's registrations
-    still before their campaign, oldest first (those waiting for the
-    person's confirmation last), each using up its fee, so
+    still before their campaign, oldest first, each using up its fee, so
     one credit never pays for two campaigns. All of them count, not only
     ``rows``, so every path gives the credit to the same registration."""
     given = {row.id: row for row in rows}
@@ -724,17 +723,7 @@ async def _campaign_unfunded(
             i: r for i, r in given.items() if r.organization_id == org
         }
         left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
-
-        # Rows waiting for the person's confirmation cannot file yet: they
-        # come last, so they do not hold credit a ready row needs.
-        def order(r) -> tuple:
-            provider = registry(r.provider, "sms")
-            waits = isinstance(provider, SmsRegistrationProvider) and bool(
-                provider.confirmation(r.provider_refs or {})
-            )
-            return (waits, r.created_at, r.id)
-
-        for row in sorted(candidates.values(), key=order):
+        for row in sorted(candidates.values(), key=lambda r: (r.created_at, r.id)):
             if not _campaign_gated(row, registry):
                 continue
             fee = _carrier_fee(
@@ -962,17 +951,12 @@ async def _refresh(
         return
     # Not covered, or the org lock is busy (another poll or a billing
     # write: the next poll asks): the poll runs, without the campaign filing.
-    checked = _campaign_gated(row, registry)
     may_file = await _campaign_may_go(db, row, registry, wait=wait_for_org_lock)
     if not await _lock_for_poll(db, row):
         return
     if not _pollable(row):  # another poll settled it before the lock
         await db.commit()
         return
-    if not checked and _campaign_gated(row, registry):
-        # It changed since it was read (an amend lifted its hold): it had no
-        # credit check, so no campaign on this poll; the next one checks.
-        may_file = False
     before = copy.deepcopy(row.provider_refs)
     status = await _fetch_status(row, registry, may_file_campaign=may_file)
     changed = await _poll_and_apply(db, row, status, registry, before)
@@ -1047,8 +1031,7 @@ def _out(
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
             "cancellable": _can_cancel(row),
-            # The person must confirm first: that, not credit, is the next step.
-            "waiting_for_credit": waiting_for_credit and confirmation is None,
+            "waiting_for_credit": waiting_for_credit,
         }
     )
 
@@ -1147,15 +1130,8 @@ async def refresh_number_verifications(
     # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
-    # A row that needs the credit check was not given one here (see
-    # _refresh): it may not file a campaign on this poll.
     statuses = await asyncio.gather(
-        *(
-            _fetch_status(
-                r, registry, may_file_campaign=not _campaign_gated(r, registry)
-            )
-            for r in due
-        )
+        *(_fetch_status(r, registry, may_file_campaign=True) for r in due)
     )
     changed = [
         r
@@ -2202,15 +2178,9 @@ async def list_verifications(
     # Locked and re-read first (see _lock_for_poll).
     due = [r for r in asked if await _lock_for_poll(db, r) and _pollable(r)]
     before = [copy.deepcopy(r.provider_refs) for r in due]
-    # A row that needs the credit check was not given one here (see
-    # _refresh): it may not file a campaign on this poll.
+    # Gated rows are not in this batch: _refresh checks their credit.
     statuses = await asyncio.gather(
-        *(
-            _fetch_status(
-                r, registry, may_file_campaign=not _campaign_gated(r, registry)
-            )
-            for r in due
-        )
+        *(_fetch_status(r, registry, may_file_campaign=True) for r in due)
     )
     changed = [
         r

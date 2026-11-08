@@ -3703,46 +3703,6 @@ async def test_an_uncharged_campaign_in_any_iso_form_counts(
     assert sms_carrier.campaigns_created == 0
 
 
-async def test_a_registration_waiting_for_the_person_does_not_hold_the_credit(
-    client, org_and_key, sms_carrier, async_session
-) -> None:
-    # The older one waits for the person's code: the credit goes to the
-    # newer one, and the older one shows the code step, not credit.
-    org_id, _, key = org_and_key
-    now = datetime.now(timezone.utc)
-    person, business = (
-        CarrierVerification(
-            organization_id=org_id,
-            provider="fake",
-            purpose="sms",
-            country_code="US",
-            number_type=number_type,
-            subject_type=subject_type,
-            state="submitted",
-            provider_refs={
-                "brand_sid": f"BN-{number_type}",
-                "subject_type": subject_type,
-            },
-            requirements_version="1",
-            created_at=now - timedelta(days=age),
-        )
-        for number_type, subject_type, age in (
-            ("local", "person", 30),
-            ("toll_free", "business", 1),
-        )
-    )
-    async_session.add_all([person, business])
-    await async_session.commit()
-    sms_carrier.campaign_key = "campaign_id"
-    await _set_balance(async_session, org_id, _campaign_fee())
-    resp = await client.get(f"/verifications/{business.id}", headers=_auth(key))
-    assert resp.json()["waiting_for_credit"] is False
-    assert sms_carrier.campaigns_created == 1
-    resp = await client.get(f"/verifications/{person.id}", headers=_auth(key))
-    assert resp.json()["confirmation"] == "code"
-    assert resp.json()["waiting_for_credit"] is False
-
-
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
