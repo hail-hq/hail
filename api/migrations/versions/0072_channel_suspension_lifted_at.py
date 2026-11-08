@@ -14,7 +14,7 @@ sent after the org's last lift.
   outbound mail by ``sent_at``; without it, each check scans ``emails``.
   Built CONCURRENTLY so writes to ``emails`` do not block; that cannot run
   in a transaction, hence the autocommit block.
-* ``sms_outbound_to_created_idx``: after an SMS lift, the check looks up
+* ``sms_outbound_to_sent_idx``: after an SMS lift, the check looks up
   the org's outbound texts by number and time. Built the same way.
 
 Tables checked: this extends ``channel_suspensions`` itself, the table that
@@ -46,11 +46,11 @@ def upgrade() -> None:
             postgresql_where=sa.text("direction = 'outbound'"),
             postgresql_concurrently=True,
         )
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS sms_outbound_to_created_idx")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS sms_outbound_to_sent_idx")
         op.create_index(
-            "sms_outbound_to_created_idx",
+            "sms_outbound_to_sent_idx",
             "sms",
-            ["organization_id", "to_e164", "created_at"],
+            ["organization_id", "to_e164", "sent_at"],
             postgresql_where=sa.text("direction = 'outbound'"),
             postgresql_concurrently=True,
         )
@@ -83,7 +83,7 @@ def downgrade() -> None:
             postgresql_concurrently=True,
         )
         op.drop_index(
-            "sms_outbound_to_created_idx",
+            "sms_outbound_to_sent_idx",
             table_name="sms",
             postgresql_concurrently=True,
         )

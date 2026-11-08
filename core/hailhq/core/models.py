@@ -1051,10 +1051,10 @@ class Sms(Base):
         ),
         # The abuse monitor's after-lift STOP check.
         Index(
-            "sms_outbound_to_created_idx",
+            "sms_outbound_to_sent_idx",
             "organization_id",
             "to_e164",
-            "created_at",
+            "sent_at",
             postgresql_where=text("direction = 'outbound'"),
         ),
     )

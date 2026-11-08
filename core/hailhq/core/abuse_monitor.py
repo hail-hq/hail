@@ -96,7 +96,8 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
             Suppression.organization_id.is_not(None),
             # After a lift, a STOP counts only if the org texted that number
             # after the lift: late replies to the old blast must not suspend
-            # it again against its few new sends.
+            # it again against its few new sends. sent_at, not created_at:
+            # a text queued before the lift and sent after it counts.
             or_(
                 last_lift.c.lifted_at.is_(None),
                 select(Sms.id)
@@ -104,7 +105,7 @@ async def check_and_suspend_abusive_orgs(db: AsyncSession) -> int:
                     Sms.organization_id == Suppression.organization_id,
                     Sms.direction == "outbound",
                     Sms.to_e164 == Suppression.recipient,
-                    Sms.created_at >= last_lift.c.lifted_at,
+                    Sms.sent_at >= last_lift.c.lifted_at,
                 )
                 .exists(),
             ),
@@ -293,6 +294,19 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
             email_recipients.c.recipients,
         )
 
+    sends = (
+        select(
+            email_recipients.c.organization_id,
+            func.sum(email_recipients.c.recipients).label("sends"),
+        )
+        .group_by(email_recipients.c.organization_id)
+        # Orgs under the floor are never flagged; skip their event work.
+        .having(
+            func.sum(email_recipients.c.recipients)
+            >= settings.hail_email_abuse_min_sends
+        )
+        .subquery()
+    )
     # Joined to the denominator's emails: a late complaint on mail sent
     # before the window must not count against a smaller recent send.
     per_email = (
@@ -304,24 +318,17 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         .select_from(EmailEvent)
         .join(email_recipients, email_recipients.c.email_id == EmailEvent.email_id)
         .outerjoin(event_addr, true())
-        .where(or_(hard_bounce, complained))
+        .where(
+            or_(hard_bounce, complained),
+            # Events come after the send, so this bound is safe and lets
+            # the (email_id, occurred_at) index limit the scan.
+            EmailEvent.occurred_at >= window_start,
+            email_recipients.c.organization_id.in_(select(sends.c.organization_id)),
+        )
         .group_by(
             email_recipients.c.email_id,
             email_recipients.c.organization_id,
             email_recipients.c.recipients,
-        )
-        .subquery()
-    )
-    sends = (
-        select(
-            email_recipients.c.organization_id,
-            func.sum(email_recipients.c.recipients).label("sends"),
-        )
-        .group_by(email_recipients.c.organization_id)
-        # Orgs under the floor are never flagged; skip their event work.
-        .having(
-            func.sum(email_recipients.c.recipients)
-            >= settings.hail_email_abuse_min_sends
         )
         .subquery()
     )

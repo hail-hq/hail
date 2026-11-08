@@ -518,22 +518,24 @@ async def test_sms_late_stops_on_pre_lift_numbers_do_not_count(
 
     from hailhq.core import config
     from hailhq.core.models import Sms
+    from sqlalchemy import select
 
     monkeypatch.setattr(config.settings, "hail_sms_abuse_min_sends", 10)
-    monkeypatch.setattr(config.settings, "hail_sms_abuse_max_opt_out_rate", 0.05)
+    monkeypatch.setattr(config.settings, "hail_sms_abuse_max_opt_out_rate", 0.04)
 
     org_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
     async_session.add(
         ChannelSuspension(
             organization_id=org_id,
             channel="sms",
             reason="flagged",
-            suspended_at=datetime.now(timezone.utc) - timedelta(days=3),
-            lifted_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            suspended_at=now - timedelta(days=3),
+            lifted_at=now - timedelta(hours=1),
         )
     )
     await _seed_sends(async_session, org_id, 20)  # 20 sends after the lift
-    # One number texted after the lift opts out: counts (1/20 = 5%, not over).
+    # Queued before the lift, sent after it: this number's STOP counts.
     async_session.add(
         Sms(
             organization_id=org_id,
@@ -541,13 +543,25 @@ async def test_sms_late_stops_on_pre_lift_numbers_do_not_count(
             to_e164="+14155551000",
             direction="outbound",
             body="hi",
+            created_at=now - timedelta(hours=2),
+            sent_at=now,
         )
     )
     # 5 STOPs arrive after the lift; only +14155551000 got a post-lift text.
     await _seed_opt_outs(async_session, org_id, 5)
     await async_session.commit()
 
-    assert await check_and_suspend_abusive_orgs(async_session) == 0
+    # 1/20 = 5% is over 4%: suspended, and only the one STOP counted.
+    assert await check_and_suspend_abusive_orgs(async_session) == 1
+    row = (
+        await async_session.execute(
+            select(ChannelSuspension).where(
+                ChannelSuspension.organization_id == org_id,
+                ChannelSuspension.lifted_at.is_(None),
+            )
+        )
+    ).scalar_one()
+    assert "(1/20)" in row.reason
 
 
 async def test_email_cap_uses_distinct_recipients(async_session, monkeypatch) -> None:
