@@ -6,19 +6,22 @@ next tick. Now an operator sets ``lifted_at`` instead. A suspension is
 active while ``lifted_at`` is NULL, and the email check counts only mail
 sent after the org's last lift.
 
-* ``channel_suspensions.lifted_at``: new nullable column.
+* ``channel_suspensions.lifted_at``: new nullable column, never before
+  ``suspended_at`` (CHECK).
 * The unique (organization_id, channel) constraint becomes a partial unique
   index on active rows, so an org can be suspended again after a lift.
 * ``emails_outbound_sent_at_idx``: the hourly email abuse check reads
   outbound mail by ``sent_at``; without it, each check scans ``emails``.
   Built CONCURRENTLY so writes to ``emails`` do not block; that cannot run
   in a transaction, hence the autocommit block.
+* ``sms_outbound_to_created_idx``: after an SMS lift, the check looks up
+  the org's outbound texts by number and time. Built the same way.
 
 Tables checked: this extends ``channel_suspensions`` itself, the table that
 holds these rows. No new table.
 
 Downgrade deletes lifted rows (they no longer block anything), restores
-the old constraint, and drops the index.
+the old constraint, and drops the indexes.
 """
 
 import sqlalchemy as sa
@@ -40,6 +43,14 @@ def upgrade() -> None:
             "emails_outbound_sent_at_idx",
             "emails",
             ["sent_at"],
+            postgresql_where=sa.text("direction = 'outbound'"),
+            postgresql_concurrently=True,
+        )
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS sms_outbound_to_created_idx")
+        op.create_index(
+            "sms_outbound_to_created_idx",
+            "sms",
+            ["organization_id", "to_e164", "created_at"],
             postgresql_where=sa.text("direction = 'outbound'"),
             postgresql_concurrently=True,
         )
@@ -69,6 +80,11 @@ def downgrade() -> None:
         op.drop_index(
             "emails_outbound_sent_at_idx",
             table_name="emails",
+            postgresql_concurrently=True,
+        )
+        op.drop_index(
+            "sms_outbound_to_created_idx",
+            table_name="sms",
             postgresql_concurrently=True,
         )
     op.drop_index("channel_suspensions_active_uq", table_name="channel_suspensions")
