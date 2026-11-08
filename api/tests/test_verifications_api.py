@@ -3885,6 +3885,32 @@ async def test_a_failed_campaign_call_keeps_its_claim(
     assert pinged == []
 
 
+@pytest.mark.usefixtures("us_number")
+async def test_a_kept_claim_is_not_renewed_and_runs_out(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # A claim kept after a failed call keeps its first time on later polls,
+    # so it runs out; a successful poll then drops it.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, _campaign_fee())
+    real = sms_carrier.status
+
+    async def failing(refs, *, may_file_campaign=True):
+        raise RuntimeError("timed out")
+
+    sms_carrier.status = failing
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    first = (await _stored_refs(async_session, vid))["campaign_reserved_at"]
+    await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert (await _stored_refs(async_session, vid))["campaign_reserved_at"] == first
+    sms_carrier.status = real
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    refs = await _stored_refs(async_session, vid)
+    assert "campaign_reserved_at" not in refs and refs["campaign_id"] == "QE1"
+
+
 async def test_overlapping_polls_email_the_owners_once(
     client, org_and_key, carrier, session_factory, monkeypatch
 ) -> None:
