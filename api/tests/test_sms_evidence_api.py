@@ -27,6 +27,7 @@ def store(monkeypatch):
         "hailhq.api.routes.sms_evidence.settings.hail_api_url", "https://api.hail.so"
     )
     s3 = AsyncMock()
+    s3.count_prefix.return_value = 0
     app.dependency_overrides[get_evidence_store] = lambda: s3
     try:
         yield s3
@@ -227,4 +228,66 @@ def test_only_the_public_link_skips_the_rate_limit() -> None:
     assert _is_exempt(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}")
     assert _is_exempt(f"/verifications/sms/evidence/{ORG}/{'a' * 32}")
     assert not _is_exempt("/v1/verifications/sms/evidence")
+    assert not _is_exempt(f"/v1/verifications/sms/evidence/{ORG}/{'a' * 32}", "DELETE")
     assert not _is_exempt("/v1/verifications")
+
+
+async def test_upload_stops_at_the_file_cap(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    from hailhq.api.routes.sms_evidence import MAX_EVIDENCE_FILES
+
+    store.count_prefix.return_value = MAX_EVIDENCE_FILES
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", PNG, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 409
+    assert "Delete one" in resp.json()["detail"]
+    store.count_prefix.assert_awaited_once_with(
+        f"sms-evidence/{org_and_key[0]}/", up_to=MAX_EVIDENCE_FILES
+    )
+    store.put_attachment.assert_not_awaited()
+
+
+async def test_delete_removes_your_file(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    store.count_prefix.return_value = 1
+    token = "c" * 32
+    resp = await client.delete(
+        f"/v1/verifications/sms/evidence/{org_and_key[0]}/{token}",
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 204
+    store.delete.assert_awaited_once_with(f"sms-evidence/{org_and_key[0]}/{token}")
+
+
+async def test_delete_never_touches_another_accounts_file(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    store.count_prefix.return_value = 1
+    resp = await client.delete(
+        f"/v1/verifications/sms/evidence/{ORG}/{'c' * 32}",
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 404
+    store.delete.assert_not_awaited()
+
+
+async def test_delete_of_a_missing_file_is_404(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    resp = await client.delete(
+        f"/v1/verifications/sms/evidence/{org_and_key[0]}/{'c' * 32}",
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 404
+    store.delete.assert_not_awaited()
+
+
+async def test_delete_needs_a_key(client: httpx.AsyncClient, store) -> None:
+    resp = await client.delete(f"/v1/verifications/sms/evidence/{ORG}/{'c' * 32}")
+    assert resp.status_code == 401
+    store.delete.assert_not_awaited()

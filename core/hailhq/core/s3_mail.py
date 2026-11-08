@@ -54,6 +54,17 @@ class S3MailClient:
             self._client.delete_object, Bucket=self._bucket, Key=key
         )
 
+    async def count_prefix(self, prefix: str, *, up_to: int) -> int:
+        """How many objects are under ``prefix``, counting at most ``up_to``."""
+
+        def _do() -> int:
+            resp = self._client.list_objects_v2(
+                Bucket=self._bucket, Prefix=prefix, MaxKeys=up_to
+            )
+            return int(resp.get("KeyCount", 0))
+
+        return await asyncio.to_thread(_do)
+
     async def delete_prefix(self, prefix: str) -> int:
         """Delete every object under ``prefix``; returns how many."""
 

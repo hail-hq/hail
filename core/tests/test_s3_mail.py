@@ -91,3 +91,13 @@ def test_delete_org_evidence_without_a_bucket_does_nothing(monkeypatch):
     assert (
         asyncio.run(sms_evidence.delete_org_evidence(__import__("uuid").uuid4())) == 0
     )
+
+
+def test_count_prefix_reads_key_count():
+    stub = MagicMock()
+    stub.list_objects_v2.return_value = {"KeyCount": 7}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    assert asyncio.run(client.count_prefix("sms-evidence/o/", up_to=100)) == 7
+    stub.list_objects_v2.assert_called_once_with(
+        Bucket="hail-inbound", Prefix="sms-evidence/o/", MaxKeys=100
+    )

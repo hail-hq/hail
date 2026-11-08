@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- US texting registration: upload a consent screenshot with `POST /v1/verifications/sms/evidence` and use the public link it returns. Verbal consent no longer needs a screenshot link.
+- US texting registration: upload a consent screenshot with `POST /v1/verifications/sms/evidence`, use the public link it returns, and delete it with `DELETE` on that link. Verbal consent no longer needs a screenshot link.
 - MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.

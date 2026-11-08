@@ -24,7 +24,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi import status as http_status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.multipart import parse_capped_form
@@ -53,6 +53,9 @@ MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 _MAX_BODY_BYTES = MAX_EVIDENCE_BYTES + 64 * 1024
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{32}")
 _TOO_BIG = "The file must be 10 MB or smaller."
+# Files one organization may keep. Normal use needs a few per registration;
+# the cap stops a leaked key from filling storage.
+MAX_EVIDENCE_FILES = 100
 # The file's first bytes decide its type, never the name or the header the
 # client sent. Only these types are kept or served: no HTML or SVG on the
 # API's origin.
@@ -167,6 +170,7 @@ def _public_base() -> str | None:
     response_model=EvidenceUploadResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="upload_sms_evidence",
+    responses={409: {"description": "The account keeps the most files allowed."}},
     openapi_extra=_UPLOAD_BODY,
 )
 async def upload_sms_evidence(
@@ -196,6 +200,17 @@ async def upload_sms_evidence(
     if content_type is None:
         raise unprocessable("Upload a PNG, JPG or PDF.", loc=["body", "file"])
     org = principal.organization_id
+    held = await store.count_prefix(
+        f"{SMS_EVIDENCE_PREFIX}{org}/", up_to=MAX_EVIDENCE_FILES
+    )
+    if held >= MAX_EVIDENCE_FILES:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
+                "most allowed. Delete one you no longer use, or contact support."
+            ),
+        )
     token = secrets.token_urlsafe(24)
     await store.put_attachment(
         f"{SMS_EVIDENCE_PREFIX}{org}/{token}", data, content_type
@@ -239,6 +254,37 @@ async def get_sms_evidence(
         status_code=http_status.HTTP_302_FOUND,
         headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"},
     )
+
+
+@router.delete(
+    "/{organization_id}/{token}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    operation_id="delete_sms_evidence",
+    responses={404: {"description": "No file of yours has this link."}},
+)
+async def delete_sms_evidence(
+    organization_id: UUID,
+    token: str,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    store: Annotated[S3MailClient | None, Depends(get_evidence_store)],
+) -> Response:
+    """Delete an uploaded file. Its link stops working at once.
+
+    A registration that already names the link keeps the link in its text,
+    and carrier reviewers can no longer open it. Upload a new file and amend
+    the registration if it is still under review.
+    """
+    if (
+        store is None
+        or organization_id != principal.organization_id
+        or not _TOKEN.fullmatch(token)
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+    key = f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}"
+    if not await store.count_prefix(key, up_to=1):
+        raise HTTPException(status_code=404, detail="Not found")
+    await store.delete(key)
+    return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
 
 __all__ = ["get_evidence_store", "router"]

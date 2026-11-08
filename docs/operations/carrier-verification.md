@@ -122,6 +122,9 @@ open the link again on a resubmission. The retention sweep (`python -m hailhq.co
 deletes an organization's folder 12 months after the account closes. Uploads need a mail
 bucket and a public https `HAIL_API_URL`; without them the route returns 503 and the customer
 pastes a public link. The public link is exempt from the general rate limit, like unsubscribe.
+`DELETE /v1/verifications/sms/evidence/<organization_id>/<token>` (signed in, own organization
+only) removes a file at once. An organization keeps at most 100 files; the 101st upload returns
+409 until one is deleted.
 Verbal consent needs the script and action only; its evidence link is optional.
 
 The application compiler uses the applicant's actual disclosures, recording process, evidence
