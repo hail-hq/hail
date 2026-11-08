@@ -48,6 +48,15 @@ class LegRecord:
     left_at: datetime | None
 
 
+def _priceable(provider: str, leg: LegRecord) -> bool:
+    """False when the carrier cannot look this leg up, so it is never asked."""
+    if provider == "twilio":
+        return bool(leg.carrier_call_id)
+    if provider == "didww":
+        return leg.direction == "outbound" and bool(leg.sip_call_id)
+    return bool(leg.sip_call_id)
+
+
 async def record_call_legs(call_id: UUID, legs: list[LegRecord]) -> None:
     """Store a call's legs once. Fails open: a lost leg only loses its cost."""
     if not legs:
@@ -72,6 +81,9 @@ async def record_call_legs(call_id: UUID, legs: list[LegRecord]) -> None:
                         "joined_at": leg.joined_at,
                         "answered_at": leg.answered_at,
                         "left_at": leg.left_at,
+                        "cost_status": (
+                            "pending" if _priceable(provider, leg) else "missing"
+                        ),
                     }
                     for leg in legs
                 ]
@@ -123,16 +135,17 @@ async def fetch_leg_costs(now: datetime | None = None) -> int:
 
     priced = 0
     for provider, refs in by_provider.items():
-        # A failed lookup counts as "not found yet", so a carrier that keeps
-        # failing still lets its legs reach GIVE_UP_AFTER.
+        # A skipped or failed lookup leaves the legs untouched: an outage or a
+        # missing key must not turn into lost costs.
         try:
             found = await carrier(provider).leg_costs(refs)
         except CarrierNotConfigured as exc:
+            # Our gap, not the carrier's: keep the legs pending, no give-up.
             logger.info("leg costs: %s skipped, %s", provider, exc)
-            found = {}
+            continue
         except Exception:
             logger.warning("leg costs: %s lookup failed", provider, exc_info=True)
-            found = {}
+            continue
         async with session_scope() as session:
             for leg_id, cost in found.items():
                 result = await session.execute(

@@ -507,6 +507,7 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
                 params={
                     "filter[record_type]": "sip-trunking",
                     "filter[sip_call_id]": leg.sip_call_id,
+                    "filter[date_range]": "last_7_days",
                 },
             )
         except httpx.HTTPError as exc:

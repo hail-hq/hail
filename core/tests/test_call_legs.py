@@ -163,7 +163,7 @@ async def test_pass_rechecks_only_after_the_interval(async_session, lookups):
 
 async def test_pass_gives_up_after_the_window(async_session, lookups):
     answers, _ = lookups
-    answers["telnyx"] = RuntimeError("carrier down")
+    answers["telnyx"] = {}
     call_id = await _call(async_session)
     await record_call_legs(call_id, [_leg()])
     later = NOW + call_legs.GIVE_UP_AFTER
@@ -183,13 +183,34 @@ async def test_pass_survives_an_unconfigured_carrier(async_session, lookups):
     await record_call_legs(call_id, [_leg()])
     assert await fetch_leg_costs(NOW) == 0
     (leg,) = await _legs(async_session)
-    assert (leg.cost_status, leg.cost_checked_at) == ("pending", NOW)
+    assert (leg.cost_status, leg.cost_checked_at) == ("pending", None)
+
+
+async def test_outage_never_gives_up(async_session, lookups):
+    answers, _ = lookups
+    answers["telnyx"] = RuntimeError("carrier down")
+    await record_call_legs(await _call(async_session), [_leg()])
+    await fetch_leg_costs(NOW + call_legs.GIVE_UP_AFTER)
+    (leg,) = await _legs(async_session)
+    assert leg.cost_status == "pending"
+
+
+async def test_unpriceable_legs_are_missing_at_record_time(async_session, lookups):
+    twilio = await _call(async_session, "twilio")
+    didww = await _call(async_session, "didww", "+14155550101")
+    telnyx = await _call(async_session, "telnyx", "+14155550102")
+    await record_call_legs(twilio, [_leg(sip_call_id="a", carrier_call_id=None)])
+    await record_call_legs(didww, [_leg(sip_call_id="b", direction="inbound")])
+    await record_call_legs(telnyx, [_leg(sip_call_id=None)])
+    assert {leg.cost_status for leg in await _legs(async_session)} == {"missing"}
 
 
 async def test_pass_groups_legs_by_carrier(async_session, lookups):
     _, seen = lookups
-    await record_call_legs(await _call(async_session, "twilio"), [_leg()])
+    await record_call_legs(
+        await _call(async_session, "twilio"), [_leg(carrier_call_id="CA1")]
+    )
     didww = await _call(async_session, "didww", "+14155550101")
-    await record_call_legs(didww, [_leg()])
+    await record_call_legs(didww, [_leg(direction="outbound")])
     await fetch_leg_costs(NOW)
     assert sorted(seen) == ["didww", "twilio"]
