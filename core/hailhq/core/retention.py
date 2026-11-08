@@ -186,9 +186,17 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
 
     # Public links must stop working once the account's data is gone. After
     # the commit, so an S3 failure never blocks the database scrub; every
-    # sweep retries it, since closed orgs stay past the cutoff.
+    # sweep retries it, since closed orgs stay past the cutoff. One org's
+    # failure never stops the others.
+    failed: list[UUID] = []
     for org_id in org_ids:
-        summary.evidence_files_deleted += await delete_org_evidence(org_id)
+        try:
+            summary.evidence_files_deleted += await delete_org_evidence(org_id)
+        except Exception:
+            logger.exception("could not delete evidence for org %s", org_id)
+            failed.append(org_id)
+    if failed:
+        raise RuntimeError(f"evidence delete failed for {len(failed)} org(s)")
     return summary
 
 

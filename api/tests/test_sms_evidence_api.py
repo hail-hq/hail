@@ -24,7 +24,7 @@ def _msg(resp) -> str:
 @pytest.fixture()
 def store(monkeypatch):
     monkeypatch.setattr(
-        "hailhq.api.routes.sms_evidence.settings.hail_api_url", "https://api.hail.test"
+        "hailhq.api.routes.sms_evidence.settings.hail_api_url", "https://api.hail.so"
     )
     s3 = AsyncMock()
     app.dependency_overrides[get_evidence_store] = lambda: s3
@@ -112,7 +112,7 @@ async def test_upload_refuses_a_big_body_before_reading_it(
         },
     )
     assert resp.status_code == 422
-    assert _msg(resp) == "request is too large"
+    assert "10 MB" in _msg(resp)
 
 
 async def test_upload_needs_one_file_part(
@@ -202,6 +202,9 @@ async def test_bad_links_are_refused_without_signing(
         "https://localhost",
         "https://10.0.0.5",
         "https://api",
+        "https://hail.local",
+        "https://host.docker.internal",
+        "https://[fd00::1]",
     ],
 )
 async def test_upload_refuses_a_link_reviewers_cannot_open(

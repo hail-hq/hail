@@ -17,6 +17,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import secrets
+from functools import lru_cache
 from typing import Annotated
 from urllib.parse import urlparse
 from uuid import UUID
@@ -43,13 +44,15 @@ router = APIRouter(
 
 # The link is its own credential, like an unsubscribe link. Reviewers share
 # the proxy's IP with all anonymous traffic, so the public GET is not limited.
-# It only signs a redirect: no storage call and no file bytes per request.
+# It only signs a redirect with a cached client: no storage call and no
+# file bytes per request.
 exempt_prefix("/verifications/sms/evidence/")
 
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 # Room for the multipart boundaries and part headers around the file.
 _MAX_BODY_BYTES = MAX_EVIDENCE_BYTES + 64 * 1024
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{32}")
+_TOO_BIG = "The file must be 10 MB or smaller."
 # The file's first bytes decide its type, never the name or the header the
 # client sent. Only these types are kept or served: no HTML or SVG on the
 # API's origin.
@@ -90,10 +93,17 @@ class EvidenceUploadResponse(BaseModel):
     size_bytes: int = Field(description="File size in bytes.")
 
 
+@lru_cache(maxsize=4)
+def _store_for(bucket: str) -> S3MailClient:
+    # One client per bucket: the public GET skips the rate limit, so building
+    # a boto3 client per request would let anonymous traffic burn CPU.
+    return S3MailClient(bucket=bucket)
+
+
 def get_evidence_store() -> S3MailClient | None:
     """The mail bucket, or None when this install has no bucket."""
     bucket = settings.hail_mail_bucket
-    return S3MailClient(bucket=bucket) if bucket else None
+    return _store_for(bucket) if bucket else None
 
 
 def _sniff(data: bytes) -> str | None:
@@ -103,7 +113,11 @@ def _sniff(data: bytes) -> str | None:
 async def _read_upload(request: Request) -> bytes:
     """The one file part, read with the body capped before parsing."""
     form = await parse_capped_form(
-        request, max_bytes=_MAX_BODY_BYTES, max_files=1, max_fields=1
+        request,
+        max_bytes=_MAX_BODY_BYTES,
+        max_files=1,
+        max_fields=1,
+        too_large=_TOO_BIG,
     )
     try:
         upload = form.get("file")
@@ -115,21 +129,36 @@ async def _read_upload(request: Request) -> bytes:
     finally:
         await form.close()
     if len(data) > MAX_EVIDENCE_BYTES:
-        raise unprocessable("The file must be 10 MB or smaller.", loc=["body", "file"])
+        raise unprocessable(_TOO_BIG, loc=["body", "file"])
     return data
+
+
+_PRIVATE_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".lan",
+    ".home.arpa",
+    ".test",
+    ".example",
+    ".invalid",
+)
 
 
 def _public_base() -> str | None:
     """HAIL_API_URL when carrier reviewers can reach it, else None."""
     parsed = urlparse(settings.hail_api_url)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not host or host == "localhost" or "." not in host:
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or not host:
         return None
     try:
-        if not ipaddress.ip_address(host).is_global:
-            return None
+        return settings.hail_api_url if ipaddress.ip_address(host).is_global else None
     except ValueError:
         pass
+    # A name must have a dot and must not use a suffix that only resolves
+    # inside a network.
+    if "." not in host or host.endswith(_PRIVATE_SUFFIXES):
+        return None
     return settings.hail_api_url
 
 

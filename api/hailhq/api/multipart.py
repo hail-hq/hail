@@ -24,31 +24,41 @@ class _InMemoryMultiPartParser(MultiPartParser):
     spool_max_size = _MAX_ANY_BYTES + 1
 
 
-async def _capped_body(request: Request, max_bytes: int) -> AsyncIterator[bytes]:
+async def _capped_body(
+    request: Request, max_bytes: int, too_large: str
+) -> AsyncIterator[bytes]:
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
         if total > max_bytes:
-            raise unprocessable("request is too large", loc=["body"])
+            raise unprocessable(too_large, loc=["body"])
         yield chunk
 
 
 async def parse_capped_form(
-    request: Request, *, max_bytes: int, max_files: int, max_fields: int
+    request: Request,
+    *,
+    max_bytes: int,
+    max_files: int,
+    max_fields: int,
+    too_large: str = "request is too large",
 ) -> FormData:
-    """The parsed form. 422 when the body is over ``max_bytes`` or not multipart."""
+    """The parsed form. 422 when the body is over ``max_bytes`` or not multipart.
+
+    ``too_large`` is the message for an over-cap body, so a caller can name
+    its own limit."""
     if max_bytes > _MAX_ANY_BYTES:
         raise ValueError("max_bytes is over the in-memory limit")
     length = request.headers.get("content-length")
     if length and length.isdigit() and int(length) > max_bytes:
-        raise unprocessable("request is too large", loc=["body"])
+        raise unprocessable(too_large, loc=["body"])
     content_type = request.headers.get("content-type", "")
     if not content_type.lower().startswith("multipart/form-data"):
         raise unprocessable("send multipart/form-data", loc=["body"])
     try:
         return await _InMemoryMultiPartParser(
             request.headers,
-            _capped_body(request, max_bytes),
+            _capped_body(request, max_bytes, too_large),
             max_files=max_files,
             max_fields=max_fields,
         ).parse()
