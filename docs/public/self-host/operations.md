@@ -720,8 +720,8 @@ describe-active-receipt-rule-set` again.
 
 ## Abuse monitor & channel suspensions
 
-All orgs share one Hail-owned A2P 10DLC campaign, so one org's high opt-out
-rate can cause carriers to throttle the whole platform. `AbuseMonitorWorker`
+Each org registers its own A2P 10DLC brand and campaign, but one org's high
+opt-out rate still risks Hail's standing with the carrier. `AbuseMonitorWorker`
 (hourly by default; `HAIL_ABUSE_MONITOR_POLL_SECONDS`) computes each org's
 rolling opt-out rate. Past the threshold
 (`HAIL_SMS_ABUSE_*` — window, min sends, max rate), it inserts a
@@ -736,8 +736,9 @@ recipient over `HAIL_EMAIL_ABUSE_WINDOW_HOURS`. Past
 `HAIL_EMAIL_ABUSE_MAX_BOUNCE_RATE` or `HAIL_EMAIL_ABUSE_MAX_COMPLAINT_RATE`
 (once the org has `HAIL_EMAIL_ABUSE_MIN_SENDS` recipients), it inserts a
 `channel_suspensions` row with `channel = 'email'`. `check_email_allowed`
-then blocks `POST /v1/emails` and agent sends. Forwards and Hail's own
-notices are not counted and are not blocked.
+then blocks `POST /v1/emails` and agent sends (agent handover emails
+included). Forwards and Hail's system mail (`metadata.system_kind`, such as
+forward confirmations) are not counted and are not blocked.
 
 **You must lift a suspension manually for now — there is no CLI/route/expiry.**
 An auto-suspended org stays blocked until an operator runs raw SQL. Lifting

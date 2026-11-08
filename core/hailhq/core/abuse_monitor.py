@@ -298,14 +298,14 @@ async def check_and_suspend_email_orgs(db: AsyncSession) -> int:
         select(
             email_recipients.c.organization_id,
             func.sum(email_recipients.c.recipients).label("sends"),
-        )
-        .group_by(email_recipients.c.organization_id)
+        ).group_by(email_recipients.c.organization_id)
         # Orgs under the floor are never flagged; skip their event work.
         .having(
             func.sum(email_recipients.c.recipients)
             >= settings.hail_email_abuse_min_sends
         )
-        .subquery()
+        # Used twice below (IN filter and the final FROM): computed once.
+        .cte("sends")
     )
     # Joined to the denominator's emails: a late complaint on mail sent
     # before the window must not count against a smaller recent send.

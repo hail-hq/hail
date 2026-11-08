@@ -320,7 +320,8 @@ class Settings(BaseSettings):
     hail_velocity_sms_per_hour: int = 100
     hail_velocity_sms_per_day: int = 1000
 
-    # Abuse-monitoring guardrail (SMS opt-out rate -> ChannelSuspension).
+    # Abuse-monitoring guardrail (SMS opt-out rate, email bounce and
+    # complaint rates -> ChannelSuspension).
     # Conservative starting thresholds per the design spec's own caution
     # that these are unvalidated pending real traffic data, tune post-launch.
     hail_sms_abuse_window_hours: int = 24

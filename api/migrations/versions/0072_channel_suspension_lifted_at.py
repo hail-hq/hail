@@ -54,6 +54,11 @@ def upgrade() -> None:
             postgresql_where=sa.text("direction = 'outbound'"),
             postgresql_concurrently=True,
         )
+    # autocommit_block ends env.py's transaction and starts a new one
+    # without its SET LOCAL guards. Set them again, so the ALTERs below (and
+    # any later migration in this run) cannot wait on a lock with no limit.
+    op.execute("SET LOCAL statement_timeout = '120s'")
+    op.execute("SET LOCAL lock_timeout = '5s'")
     op.add_column(
         "channel_suspensions",
         sa.Column("lifted_at", sa.DateTime(timezone=True), nullable=True),
