@@ -2689,8 +2689,9 @@ async def _run_call(
                 end_reason_override=captured["end_reason"],
                 failure_code=captured.get("failure_code"),
             )
-            await record_call_legs(call_id, legs.records())
         finally:
+            # Also when a step above raised: the carrier still billed the legs.
+            await record_call_legs(call_id, legs.records())
             if telemetry_span is not None:
                 telemetry_span.set_attribute(
                     "call.status", captured["status"] or "completed"

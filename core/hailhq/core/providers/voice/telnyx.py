@@ -499,14 +499,19 @@ async def leg_costs(legs: list[LegRef]) -> dict[UUID, LegCost]:
     for leg in legs:
         if not leg.sip_call_id:
             continue
-        body = await client.request(
-            "GET",
-            "/detail_records",
-            params={
-                "filter[record_type]": "sip-trunking",
-                "filter[sip_call_id]": leg.sip_call_id,
-            },
-        )
+        # One refused lookup must not discard the legs already priced.
+        try:
+            body = await client.request(
+                "GET",
+                "/detail_records",
+                params={
+                    "filter[record_type]": "sip-trunking",
+                    "filter[sip_call_id]": leg.sip_call_id,
+                },
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("telnyx leg %s lookup failed: %s", leg.sip_call_id, exc)
+            continue
         records = [r for r in body.get("data") or [] if r.get("cost") is not None]
         if not records:
             continue
