@@ -2,155 +2,102 @@
 target: "Claude.ai Connectors Directory"
 slug: claude-ai-connectors-directory
 category: mcp-registry
-url: "https://claude.com/docs/connectors/building/submission"
+url: "https://claude.ai/directory/manage"
 score: 5
 status: drafted
 ---
 
 # Claude.ai Connectors Directory
 
-## TODO
+Review the live [Directory Policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy) before submitting.
 
-- [ ] Confirm submitter has admin access to a Claude **Team or Enterprise** org — Team requires an **Owner**; Enterprise requires an Owner or a custom role with "Directory management" or "Libraries" permission. No such org confirmed yet.
-- [ ] Add `title` + `readOnlyHint`/`destructiveHint` annotations to all 11 tools in `mcp/hailhq/mcp/tools.py` (currently unset — verified by grep, 2026-07-07). The portal's **Tools** step auto-syncs live tool metadata and validates these annotations are present; submission will fail this step until they're added.
-- [ ] Finalize the Privacy Policy — `hail-website/content/legal/privacy.md` currently carries a "🟡 Draft pending lawyer review" banner. The **Listing** step requires a privacy policy URL; ship the reviewed version (or confirm the draft banner is acceptable to submit against) before filling that field.
-- [ ] Create and provision a **reviewer test account** on Hail Cloud: verified sending identity (SES is sandboxed to verified recipients until production access is requested — see `docs/setup/aws-ses.md`) and at least one active phone number with voice+SMS capability, so a reviewer can actually exercise `place_call` / `send_email` end-to-end, not just auth.
-- [ ] Write step-by-step reviewer access instructions (log in at hail.so with the test account, then click Allow on the Claude.ai OAuth consent screen) for the **Test & Launch** step.
-- [ ] Confirm `https://mcp.hail.so` is reachable and still 401s + `WWW-Authenticate` correctly (last verified 2026-07-06 per the official-MCP-registry submission — recheck if stale).
-- [ ] Decide and record: organization name / website / primary contact for the **Company** step (candidates below in Notes).
-- [ ] Review the seven compliance acknowledgments (Content section) against actual practice before checking them in the portal.
-- [ ] Draft copy reviewed against the feature-claim policy — done, see Notes.
-- [ ] Submitted
-- [ ] Confirmed live
+## Listing content
 
-## Steps to submit
+Paste these into the portal at <https://claude.ai/directory/manage>.
 
-This is Anthropic's guided in-product portal, not a public form — you fill it out logged into claude.ai as an admin of a Team/Enterprise org, at `claude.ai/admin-settings/directory/submissions/new`. Have the **Content** section below open in a second window; paste field-for-field.
+- **Name:** Hail
+- **Tagline (55 characters or fewer):** Phone, SMS and email for agents.
+- **Categories:** Communication, Productivity, Developer Tools
+- **Docs URL:** <https://hail.so/docs/mcp>
+- **Privacy policy URL:** <https://hail.so/legal/privacy>
+- **Support contact:** hi@hail.so
+- **Server:** `https://mcp.hail.so`, Streamable HTTP at the root path
+- **Authentication:** OAuth with Dynamic Client Registration. Public discovery precedes sign-in for tool execution.
+- **Icon:** the square monogram from the hail-website repo, `public/assets/monogram-512.png`.
 
-1. **Introduction.** Read the overview screen (explains what a directory listing does/looks like). Click through.
-2. **Connection.** Enter Server URL `https://mcp.hail.so`, transport type **HTTP** (Streamable HTTP — not SSE), and select the per-user OAuth connection model (each user authorizes individually; there is no shared/service credential).
-3. **Tools.** The portal connects to the live server and auto-syncs the tool list (11 tools — see Content). It will flag any tool missing a `title` or a `readOnlyHint`/`destructiveHint` annotation — this **will** fail until the TODO above is fixed. Re-run this step after shipping the annotation fix.
-4. **Listing.** Paste Name, Tagline, Description, Categories, Docs URL, Privacy Policy URL, Support contact, Icon, and URL slug from **Content**.
-5. **Use Cases.** Paste primary use cases, prerequisites, and data direction from **Content**.
-6. **Company.** Enter the organization name, website, and primary contact from **Content**.
-7. **Authentication.** Select **OAuth**. No fields to type here beyond confirming the method — the OAuth flow itself is auto-discovered from the server's protected-resource metadata at `https://mcp.hail.so/.well-known/oauth-protected-resource`.
-8. **Data Handling.** Select the API ownership model (first-party — Hail operates its own API in front of carrier/vendor infrastructure) and answer "no" to special data handling (no health data, no sponsored content) unless that's changed.
-9. **Test & Launch.** Paste the reviewer test account credentials and the step-by-step access instructions from **Content**. Confirm you personally ran every tool against this account before checking the "I ran all tools" box.
-10. **Compliance.** Check all seven acknowledgments listed under **Content** — read each one against actual Hail practice first; don't rubber-stamp.
-11. **Review.** Anthropic's pre-submission checklist runs here; fix anything it flags, then submit.
+**Description (2,000 characters or fewer):**
 
-After submitting, track status and any reviewer feedback in the submissions dashboard at the same `claude.ai/admin-settings/directory/submissions` area. Escalate stuck reviews to `mcp-review@anthropic.com`. Update this file's `status` field (`drafted` → `submitted` → `submitted (live)`) as it progresses.
-
-## Content
-
-**Name** (≤100 chars):
-
-> Hail
-
-**Tagline** (≤55 chars):
-
-> Phone, SMS & email — for agents.
-
-**Description** (≤2,000 chars):
-
-> Hail is a self-hostable, AGPLv3 communication platform for AI agents — voice calls, SMS, and email, all reachable from one remote MCP server. No stdio, no local install: paste `https://mcp.hail.so` into Claude.ai, click Allow, and your agent gets tools to place calls, send email, read replies, and pull deliverability data — OAuth-scoped to your Hail account.
+> Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
 >
-> Built for agents that need to actually reach people, not just draft messages: place an outbound call with an LLM-driven conversation, send transactional or outbound email, then follow up by listing inbound replies, fetching raw MIME/attachments, and pulling per-message delivery/engagement events or account-level deliverability stats. Everything is also available via CLI, Python SDK, and OpenAPI if you'd rather not go through MCP. Self-host the whole stack under AGPLv3 if you'd rather not touch Hail Cloud.
-
-**Categories** (1–5):
-
-> Communication, Productivity, Developer Tools
-
-**Docs URL:**
-
-> https://hail.so/mcp (client picker + quickstart); technical reference at the `docs/setup/mcp.md` page of the public repo (https://github.com/hail-hq/hail)
-
-**Privacy Policy URL:**
-
-> https://hail.so/legal/privacy — **note:** currently carries a draft banner pending lawyer review (see TODO). Confirm final version is live before submitting this field.
-
-**Support contact:**
-
-> hi@hail.so (only company mailbox — see `hail-website/content/legal/facts.md`)
-
-**Icon:**
-
-> `hail-website/public/assets/monogram-512.png` (also `monogram-1024.png` for higher-res slots) — square, transparent background, matches the icon already published in the official MCP registry `server.json`.
-
-**URL slug:**
-
-> hail
-
-**Primary use cases:**
-
-> - Place an outbound call with an LLM-driven conversation and get the transcript/outcome back.
-> - Send an email and later look up whether it was delivered, opened, or bounced.
-> - List and read inbound replies (including attachments) to a sent email.
-> - Pull account-level deliverability stats (rates, time series) for a sending domain.
-
-**Prerequisites:**
-
-> A Hail account (Cloud) with at least one active phone number and one verified sending identity. No API key needed for the Claude.ai connector — OAuth handles auth.
-
-**Data direction:**
-
-> Both — read (list/get calls, emails, events, stats) and write (place calls, send email).
-
-**Organization name / website / primary contact:**
-
-> Lamona Technology AB (operates the Hail product/brand) — https://hail.so — hi@hail.so. _(Confirm this is the entity Anthropic expects here vs. a "Hail" DBA; see Notes.)_
-
-**Tool inventory** (11 tools, code-verified from `mcp/hailhq/mcp/tools.py` — the portal auto-syncs this list live, this is for reference/cross-check only):
-
-| Tool                   | Does                                                               |
-| ---------------------- | ------------------------------------------------------------------ |
-| `place_call`           | Originate an outbound phone call.                                  |
-| `send_email`           | Send an outbound email.                                            |
-| `get_call`             | Fetch the current state of one call.                               |
-| `list_calls`           | List recent calls, cursor-paginated.                               |
-| `get_email`            | Fetch one email's full record (body + inbound headers/verdicts).   |
-| `list_emails`          | List emails; `direction="inbound"` for replies.                    |
-| `get_email_raw`        | Presigned URL for an inbound email's raw MIME source.              |
-| `get_email_attachment` | Presigned URL for one inbound attachment.                          |
-| `get_email_events`     | Per-message delivery/engagement timeline (sent→delivered→opened…). |
-| `get_email_stats`      | Account-level deliverability stats (rates, time series).           |
-| `get_events`           | Page through the org- or call-level event stream.                  |
-
-**Reviewer test account / access instructions** (Test & Launch step):
-
-> Account: `<reviewer test account email>` / `<password>` — _provision before submitting, see TODO._
+> Place an outbound AI call and read its transcript. Send and receive text messages. Send email, read replies and attachments, and check delivery events and stats. Buy and route phone numbers, manage saved agents, and submit carrier registrations.
 >
-> 1. Go to https://hail.so and log in with the credentials above.
-> 2. Confirm the account has an active phone number (Console → Numbers) and a verified sending identity (Console → Domains) — both pre-provisioned for this account so `place_call` and `send_email` work without further setup.
-> 3. In Claude.ai, add the connector with Server URL `https://mcp.hail.so`.
-> 4. When prompted, click **Allow** — this authorizes against the test account logged in above.
-> 5. Exercise each of the 11 tools at least once (e.g. `place_call` to a test number, `send_email` to a verified address, then the `get_*`/`list_*` reads against the results).
+> Sign in with OAuth. Each person authorizes their own Hail account. Hail is open source (AGPLv3) and can be self-hosted. The same features are available in the CLI, the Python SDK and the OpenAPI spec.
 
-**Compliance acknowledgments** (seven — review each against actual practice before checking):
+**Use cases:**
 
-1. Directory terms of service — accept as-is.
-2. First-party API — Hail operates its own API/MCP server in front of carrier and vendor infrastructure (Twilio for voice/SMS, Amazon SES for email); it is not a thin passthrough wrapper of a third-party's public API.
-3. No financial transactions are initiated by any tool.
-4. No AI-generated media (image/video/audio) is produced or returned by any tool.
-5. Prompt-injection posture: tool outputs (email bodies, call transcripts) are untrusted third-party content the calling model should treat as data, not instructions — call this out explicitly if the form has a free-text field.
-6. Data collection: covered by the Privacy Policy (finalize before submitting — see TODO).
-7. Public documentation: `docs/setup/mcp.md` and `hail.so/mcp` are public and cover setup end-to-end.
+- Place an outbound AI call and read the outcome.
+- Send an email, then check whether it was delivered, opened or bounced.
+- Send a text message and read the replies.
+- Buy a phone number and route it to a saved agent.
 
-**Install/usage snippet** (for anything mirroring the listing outside the portal itself):
+**Prerequisites:** a Hail account with credit. Calls and texts need an active phone number. Email needs a verified sending domain.
 
-```
-Server URL: https://mcp.hail.so
-Auth: OAuth — click Allow when Claude.ai prompts (cloud)
-      Bearer HAIL_API_KEY (self-host, not applicable to this Claude.ai listing)
-```
+**Data direction:** read and write.
 
-## Notes
+**Tools:** the portal syncs the live list. The server has 41 tools, listed in `mcp/hailhq/mcp/tools.py`.
 
-- **SMS is not yet an MCP tool.** `core/hailhq/core/providers/` wires up Twilio (voice + SMS capability) and Amazon SES (email) — but `mcp/hailhq/mcp/tools.py` only exposes voice and email tools today; there's no `send_sms`/`list_sms` tool yet (tracked as an approved-but-unimplemented spec, `docs/superpowers/specs/2026-07-06-sms-support-design.md`). Per the team's stated positioning call, the Description/Tagline above name SMS as a Hail capability in present tense regardless — that's a deliberate, approved brand-voice choice, not an oversight. But the **Tools** step of this portal auto-syncs the _actual_ live tool list, so SMS will correctly not appear there; don't try to force it in. Update this file (and re-sync the Tools step) once SMS tools ship.
-- **Vendor breadth stays literal:** voice and SMS ride on Twilio; email rides on Amazon SES (SESv2). No other carrier/vendor is wired up in `core/hailhq/core/providers/` today — don't imply multi-carrier routing anywhere in the listing.
-- **Privacy Policy is a live URL but a marked draft.** `hail.so/legal/privacy` resolves, but the content itself says "Draft pending lawyer review" as of 2026-07-07. Whether that's acceptable to submit against is a business call, not an engineering one — flagged in TODO, don't submit past it without an explicit decision.
-- **Entity naming ambiguity:** the legal entity is Lamona Technology AB (Swedish AB); the product/brand is "Hail." The portal's Company step may want the operating entity, the brand, or both — confirm which before submitting rather than guessing.
-- **Tool annotations are a hard blocker, not a nice-to-have.** The Tools step explicitly validates `title` + `readOnlyHint`/`destructiveHint` per tool; none of the 11 tools in `mcp/hailhq/mcp/tools.py` currently set these (verified by grep, 2026-07-07). This needs an actual code change before this submission can pass step 3, independent of anything in this doc.
-- Review turnaround: Anthropic's own docs say only "review times vary with queue volume" — no fixed SLA given.
-- Escalation contact for a stuck review: `mcp-review@anthropic.com`.
-- This target is distinct from the **Official MCP Registry** (`docs/submissions/official-mcp-registry-modelcontextprotocol-io.md`) — that one is a self-service CLI publish (`mcp-publisher`) with no review queue; this one is a human-reviewed Anthropic-specific directory requiring a Team/Enterprise org. They can be pursued independently and in either order.
+| Group | Tools |
+| --- | --- |
+| Calls | `place_call`, `get_call`, `list_calls`, `get_events` |
+| Text messages | `send_sms`, `get_sms`, `list_sms`, `preview_sms_application`, `get_sms_application`, `amend_sms_application` |
+| Email | `send_email`, `upload_email_attachment`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `list_email_domains` |
+| Agents | `create_agent`, `update_agent`, `get_agent`, `list_agents`, `delete_agent`, `route_number` |
+| Numbers | `list_number_regions`, `quote_numbers`, `acquire_number`, `list_numbers`, `get_number`, `release_number` |
+| Registrations | `get_verification_requirements`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification` |
+| Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami` |
+
+## Portal steps
+
+1. Introduction: read the overview.
+2. Connection: server URL `https://mcp.hail.so`, transport HTTP (Streamable), per-user OAuth.
+3. Tools: the portal syncs the live tools and checks `title` and the read-only and destructive hints.
+4. Listing and use cases: paste the fields above.
+5. Company: use the legal name and contact on <https://hail.so/legal>.
+6. Authentication: OAuth. Discovery is at `https://mcp.hail.so/.well-known/oauth-protected-resource`.
+7. Data handling: first-party API.
+8. Test and launch: paste reviewer access (see Reviewer testing below).
+9. Compliance: check the acknowledgements below only after reading each against current practice.
+10. Review: fix what the checklist flags, then submit.
+
+Escalate a stuck review to `mcp-review@anthropic.com`.
+
+## Policy acknowledgements
+
+1. The submitter must read the guidelines personally before affirming that statement.
+2. Hail's MCP server calls Hail's own API. The API operates the communication and registration services.
+3. Tools charge for Hail services, including number purchases. They do not transfer money or financial assets between users.
+4. **AI audio needs written permission.** Hail's live AI calls use text-to-speech. Section 4.B includes voice models and text-to-speech. The current connector cannot truthfully affirm that it generates no AI audio.
+5. Descriptions must state tool contracts without model instructions or directions to invoke other tools. Runtime consent, confirmation and authorization checks remain necessary.
+6. The MCP interface receives tool arguments, not Claude's full chat history. MCP diagnostic exports exclude request bodies, tool content, model messages and transcripts. Functional call, text, email and registration records remain subject to the privacy policy.
+7. Public documentation must remain available before publication.
+
+Code changes must be merged, deployed and verified before they support a live-server acknowledgement.
+The code review is not a legal or organization-wide privacy certification.
+
+## Reviewer testing
+
+The policy requires a review account with sample data and at least three working examples.
+A credit code alone does not supply a populated review account.
+Reviewer instructions must include account access, OAuth steps, available senders and test destinations.
+
+The self-tested statement requires actual tool execution through MCP Inspector or a custom Claude connector.
+Unit tests, tool discovery and calls through other clients are separate evidence.
+Tests that require paid actions, number release or registration documents need explicit authorization and disposable resources.
+Each tool needs a recorded result. An error response alone does not demonstrate successful functionality.
+
+## Remaining steps
+
+- Obtain written permission for AI phone calls, or agree a separate connector scope with Anthropic.
+- Deploy and verify the description and MCP telemetry changes.
+- Prepare the review account and complete the client-level tool tests.
+- Complete the truthful acknowledgements and submit the draft.
