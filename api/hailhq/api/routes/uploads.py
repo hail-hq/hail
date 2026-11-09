@@ -37,7 +37,7 @@ from hailhq.api.ratelimit import (
     merge_rate_limited_responses,
 )
 from hailhq.core.config import settings
-from hailhq.core.db import get_session, org_lock
+from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
     LINK_TTL,
     MAX_PENDING_LINKS,
@@ -159,8 +159,9 @@ async def create_file_upload(
         raise _unavailable()
     org = principal.organization_id
     now = datetime.now(timezone.utc)
-    # Two links made at once must not both pass the cap.
-    await org_lock(db, org)
+    # Two links made at once must not both pass the cap. Not org_lock: that
+    # one is held through SMS carrier calls.
+    await key_lock(db, f"upload-links:{org}")
     pending = (
         await db.execute(
             select(func.count())

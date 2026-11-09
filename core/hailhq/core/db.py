@@ -136,6 +136,17 @@ async def org_lock(db: AsyncSession, org: UUID) -> None:
     )
 
 
+async def key_lock(db: AsyncSession, key: str) -> None:
+    """Hold an advisory lock on ``key`` until the transaction ends. For
+    short work that must run in order but must not wait on ``org_lock``
+    (held through carrier calls). Prefix the key so it never matches a
+    bare organization id."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": key},
+    )
+
+
 async def try_org_lock(db: AsyncSession, org: UUID) -> bool:
     """``org_lock`` without waiting: False when another transaction holds
     it. For work that can skip a turn and try again later."""

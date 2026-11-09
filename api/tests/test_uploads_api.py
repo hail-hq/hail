@@ -546,3 +546,78 @@ async def test_create_refuses_a_filename_with_control_characters(
     )
     assert resp.status_code == 422
     assert resp.json()["detail"][0]["loc"] == ["body", "filename"]
+
+
+async def test_making_a_link_does_not_wait_for_the_org_lock(
+    client, org_and_key, s3, session_factory
+) -> None:
+    """The org lock is held through SMS carrier calls; links use their own."""
+    from hailhq.core.db import get_session, org_lock
+
+    org_id, _, plain = org_and_key
+
+    async def per_request_session():
+        async with session_factory() as session:
+            yield session
+
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        async with session_factory() as holder:
+            await org_lock(holder, org_id)
+            resp = await asyncio.wait_for(
+                client.post(
+                    "/v1/uploads",
+                    json={
+                        "purpose": "email_attachment",
+                        "filename": "a.csv",
+                        "content_type": "text/csv",
+                    },
+                    headers=_auth(plain),
+                ),
+                5,
+            )
+            await holder.rollback()
+    finally:
+        app.dependency_overrides[get_session] = saved
+    assert resp.status_code == 201, resp.text
+
+
+async def test_two_links_at_once_never_pass_the_cap(
+    client, org_and_key, s3, async_session, session_factory
+) -> None:
+    """The cap is still exact: two links made together share one lock."""
+    from hailhq.core.db import get_session
+
+    org_id, _, plain = org_and_key
+    now = datetime.now(timezone.utc)
+    for _ in range(MAX_PENDING_LINKS - 1):
+        async_session.add(
+            FileUpload(
+                organization_id=org_id,
+                filename="a",
+                content_type="text/plain",
+                s3_key="k",
+                token_hash="h",
+                link_expires_at=now + timedelta(minutes=10),
+            )
+        )
+    await async_session.commit()
+
+    async def per_request_session():
+        async with session_factory() as session:
+            yield session
+
+    body = {"purpose": "email_attachment", "filename": "a", "content_type": "a/b"}
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        results = await asyncio.gather(
+            *(
+                client.post("/v1/uploads", json=body, headers=_auth(plain))
+                for _ in range(2)
+            )
+        )
+    finally:
+        app.dependency_overrides[get_session] = saved
+    assert sorted(r.status_code for r in results) == [201, 429]
