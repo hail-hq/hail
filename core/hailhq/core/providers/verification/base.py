@@ -237,7 +237,8 @@ class Requirements(VerificationRequirements):
         default=None,
         description=(
             "Where the address may be, when the carrier says: in any country, "
-            "in the country, or in the number's area. None when unknown."
+            "in the country, or in the number's area. None when unknown. "
+            "Only DIDWW sets it, from address_area_level."
         ),
     )
 
@@ -247,16 +248,15 @@ class Requirements(VerificationRequirements):
         later change to the carrier's rules is visible. Hashes the internal
         model (with ``provider``) and sorts keys, so the value is the same
         as before the public model was split off."""
-        body = self.model_dump(mode="json", exclude={"subject_types"})
+        # address_scope is read from the carrier for the paper list, not
+        # part of the form: it never changes the hash.
+        body = self.model_dump(mode="json", exclude={"subject_types", "address_scope"})
         # Fields added after hashes were stored count only when set, so
         # older forms keep their hash.
         for field in body["fields"]:
             for key in ("min_choices", "max_choices", "max_length"):
                 if field.get(key) is None:
                     field.pop(key, None)
-        # Where the address may be is read from the carrier for the paper
-        # list, not part of the form: it never changes the hash.
-        body.pop("address_scope", None)
         raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 

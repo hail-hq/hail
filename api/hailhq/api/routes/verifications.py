@@ -1457,7 +1457,7 @@ async def get_requirements(
     )
     # The public form leaves out which carrier it is for.
     return VerificationRequirements.model_validate(
-        requirements.model_dump(exclude={"provider"})
+        requirements.model_dump(exclude={"provider", "address_scope"})
     )
 
 

@@ -196,24 +196,6 @@ TWILIO_PRICING_TYPE = {
 }
 
 
-# The in-memory key that carries Twilio's address rule from the number sample
-# to the requirements block. attach_requirements removes it from every row.
-ADDRESS_SCOPE_KEY = "_address_scope"
-
-
-def twilio_address_scope(sample: list[dict]) -> str | None:
-    """Where the address may be, from Twilio's ``address_requirements`` on
-    the sampled numbers: "country" when any number needs a local one, "any"
-    when every number takes an address anywhere. None otherwise: no address
-    asked, or ``foreign`` (outside the country), which no category says."""
-    asked = {n.get("address_requirements") or "none" for n in sample} - {"none"}
-    if "local" in asked:
-        return "country"
-    if asked == {"any"}:
-        return "any"
-    return None
-
-
 def twilio_regulated(regulations: list[dict]) -> set[tuple[str, str]]:
     """(country, type) pairs where any end-user type must hold a bundle."""
     out = set()
@@ -261,22 +243,19 @@ def map_twilio(
             address = any(
                 n.get("address_requirements", "none") != "none" for n in sample
             )
-            row = _row(
-                country_code=iso,
-                number_type=number_type,
-                country_name=name,
-                dial_code=dial_codes.get(iso, ""),
-                usd_per_month=money(price),
-                voice=caps["voice"],
-                sms=caps["sms"],
-                mms=caps["mms"],
-                verification_required=address or (iso, number_type) in regulated,
+            rows.append(
+                _row(
+                    country_code=iso,
+                    number_type=number_type,
+                    country_name=name,
+                    dial_code=dial_codes.get(iso, ""),
+                    usd_per_month=money(price),
+                    voice=caps["voice"],
+                    sms=caps["sms"],
+                    mms=caps["mms"],
+                    verification_required=address or (iso, number_type) in regulated,
+                )
             )
-            scope = twilio_address_scope(sample)
-            if scope:
-                # Read by attach_requirements, never written to the catalog.
-                row[ADDRESS_SCOPE_KEY] = scope
-            rows.append(row)
     return rows, skipped
 
 
@@ -1264,6 +1243,27 @@ def _verification_provider(provider: str) -> Any:
     return plugin
 
 
+# Paper categories that ask for an address.
+_ADDRESS_ITEMS = {
+    "proof_of_address",
+    "address_in_country",
+    "address_in_area",
+    "address_any_country",
+}
+
+
+def _union_address(lists: list[list[Any]]) -> list[Any]:
+    """The union of the lists, where "an address in any country" stays only
+    when every list that asks for an address says so. The DID group a buyer
+    gets is not known before the purchase, so one group that needs a local
+    address is enough to not promise "any country"."""
+    items = _union(lists)
+    asking = [items_ for items_ in lists if _ADDRESS_ITEMS & set(map(str, items_))]
+    if any("address_any_country" not in items_ for items_ in asking):
+        items = [i for i in items if i != "address_any_country"]
+    return items
+
+
 def _union(lists: list[list[Any]]) -> list[Any]:
     """Every item of every list once: known categories in the fixed catalog
     order, then ``{other}`` items in the order they appear."""
@@ -1278,18 +1278,11 @@ def _union(lists: list[list[Any]]) -> list[Any]:
     return [k for k in LABELS if k in keys] + others
 
 
-def fetch_requirements(
-    provider: str,
-    country_code: str,
-    number_type: str,
-    address_scope: str | None = None,
-) -> dict:
+def fetch_requirements(provider: str, country_code: str, number_type: str) -> dict:
     """The requirements block for one (country, type) at one carrier: for each
     kind of buyer, whether it may buy and which paper categories it needs.
     A kind the carrier refuses gives ``{"accepted": False, "items": []}``.
-    DIDWW lists one requirement per DID group; the items are their union.
-    ``address_scope`` is where the address may be when the number search
-    said so (Twilio); a carrier's own value wins."""
+    DIDWW lists one requirement per DID group; the items are their union."""
     from hailhq.core.requirement_categories import classify
 
     plugin = _verification_provider(provider)
@@ -1300,7 +1293,7 @@ def fetch_requirements(
         # reused for both kinds of buyer.
         rules = _run(plugin.rules(country_code, number_type))
     return _requirements_block(
-        plugin, provider, country_code, number_type, rules, classify, address_scope
+        plugin, provider, country_code, number_type, rules, classify
     )
 
 
@@ -1311,10 +1304,8 @@ def _requirements_block(
     number_type: str,
     rules: list[dict] | None,
     classify: Any,
-    address_scope: str | None = None,
 ) -> dict:
     from hailhq.core.providers.verification import UnsupportedSubjectType
-    from hailhq.core.requirement_categories import strictest_address
 
     block: dict[str, dict] = {}
     for subject in SUBJECTS:
@@ -1343,23 +1334,12 @@ def _requirements_block(
         except UnsupportedSubjectType:
             block[subject] = {"accepted": False, "items": []}
             continue
-        if address_scope:
-            # The number search says where the address may be. Only for a
-            # form that asks for an address: the paper list shows what the
-            # form collects.
-            found = [
-                (
-                    r.model_copy(update={"address_scope": address_scope})
-                    if r.address_required and not getattr(r, "address_scope", None)
-                    else r
-                )
-                for r in found
-            ]
-        items = _union([classify(r, provider, rules=rules) for r in found])
-        if provider == "didww":
-            # The DID groups of one type can name different places.
-            items = strictest_address(items)
-        block[subject] = {"accepted": True, "items": items}
+        block[subject] = {
+            "accepted": True,
+            "items": _union_address(
+                [classify(r, provider, rules=rules) for r in found]
+            ),
+        }
     return block
 
 
@@ -1449,19 +1429,13 @@ def _refreshed_line(key: str, how: str, old: dict | None, new: dict | None) -> s
 
 
 def _fetch_block(
-    provider: str,
-    row: dict,
-    previous: dict | None,
-    report: list[str],
-    address_scope: str | None = None,
+    provider: str, row: dict, previous: dict | None, report: list[str]
 ) -> dict | None:
     """The carrier's block for one row. On any error the previous block is
     returned and one line goes to ``report``."""
     key = f"{row['country_code']}:{row['number_type']}"
     try:
-        block = fetch_requirements(
-            provider, row["country_code"], row["number_type"], address_scope
-        )
+        block = fetch_requirements(provider, row["country_code"], row["number_type"])
         return block
     except Exception as exc:  # one bad row must not stop the run
         detail = _error_detail(exc)
@@ -1507,13 +1481,10 @@ def attach_requirements(
         for n in existing
     }
     for row in rows:
-        scope = row.pop(ADDRESS_SCOPE_KEY, None)
         row["requirements"] = None
         if row["verification_required"]:
             key = f"{row['country_code']}:{row['number_type']}"
-            row["requirements"] = _fetch_block(
-                provider, row, previous.get(key), report, scope
-            )
+            row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
     for row in kept_needing:
         key = f"{row['country_code']}:{row['number_type']}"
         row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
@@ -1644,9 +1615,6 @@ def run_provider(
         requirement_errors,
         kept_rows,
     )
-    # A row left out of the papers pass (out of stock) still carries the key.
-    for r in rows:
-        r.pop(ADDRESS_SCOPE_KEY, None)
     numbers, report = merge(
         existing,
         rows,

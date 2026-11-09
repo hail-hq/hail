@@ -119,28 +119,20 @@ def _problems(exc: DidwwApiError) -> list[Problem]:
     return [Problem(field="", message=NOT_ACCEPTED, raw=raw or None)]
 
 
-# DIDWW's area levels: where the address (address_area_level) and the
-# person or company (personal_/business_area_level) may be. Another value
-# leaves the place unknown.
+# DIDWW's address_area_level: where the address may be. create_draft checks
+# the same value. Another value leaves the place unknown.
 _AREA_SCOPE = {
     "world_wide": "any",
     "country": "country",
     "area": "area",
     "city": "area",
 }
-_SCOPE_RANK = {"any": 0, "country": 1, "area": 2}
 
 
-def _address_scope(attrs: dict, side: str) -> str | None:
-    """Where the buyer's address may be: the stricter of the address level
-    and the subject's own level, so "any country" is said only when both
-    allow it. None when DIDWW gives neither, or a value this file does not
-    know (then nothing is promised)."""
-    raw = [attrs.get("address_area_level"), attrs.get(f"{side}_area_level")]
-    scopes = [_AREA_SCOPE.get(lvl) for lvl in raw if lvl]
-    if not scopes or None in scopes:
-        return None
-    return max(scopes, key=lambda s: _SCOPE_RANK[s])  # type: ignore[index]
+def _address_scope(attrs: dict) -> str | None:
+    """Where the buyer's address may be, or None when DIDWW does not say in
+    a way this file knows (then nothing is promised)."""
+    return _AREA_SCOPE.get(attrs.get("address_area_level") or "")
 
 
 class DidwwVerificationProvider(VerificationProvider):
@@ -293,7 +285,7 @@ class DidwwVerificationProvider(VerificationProvider):
             documents=tuple(documents),
             address_required=True,
             subject_types=offered,
-            address_scope=_address_scope(attrs, side),
+            address_scope=_address_scope(attrs),
         )
 
     # -- draft -----------------------------------------------------------

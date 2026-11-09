@@ -16,14 +16,12 @@ if TYPE_CHECKING:
     from hailhq.core.providers.verification.base import VerificationRequirements
 
 __all__ = [
-    "ADDRESS_PLACES",
     "LABELS",
     "Category",
     "StoredItem",
     "classify",
     "is_company_document",
     "paperwork",
-    "strictest_address",
 ]
 
 logger = logging.getLogger(__name__)
@@ -251,27 +249,6 @@ def is_company_document(rule: dict) -> bool:
     return not either and bool(cats) and "company_registration" in cats  # type: ignore[operator]
 
 
-# Where the carrier lets the address be, as a category.
-_SCOPE_CATEGORY = {
-    "any": "address_any_country",
-    "country": "address_in_country",
-    "area": "address_in_area",
-}
-# The address places, from least to most strict.
-ADDRESS_PLACES = [_SCOPE_CATEGORY[s] for s in ("any", "country", "area")]
-
-
-def strictest_address(items: list[StoredItem]) -> list[StoredItem]:
-    """Items with one address place: the strictest of those listed. Used
-    where lists of several carrier groups are joined, since the group is
-    not known before the purchase."""
-    places = [i for i in items if i in ADDRESS_PLACES]
-    if len(places) < 2:
-        return items
-    keep = max(places, key=ADDRESS_PLACES.index)  # type: ignore[arg-type]
-    return [i for i in items if i not in ADDRESS_PLACES or i == keep]
-
-
 def classify(
     req: VerificationRequirements,
     provider: str,
@@ -315,12 +292,12 @@ def classify(
         if rule.get("field_type") == "address":
             add(rule.get("id") or "", rule.get("name") or "", "address")
     address_cats = {"proof_of_address", "address_in_country", "address_in_area"}
-    scope = getattr(req, "address_scope", None)
-    if req.address_required and scope is not None:
-        # The carrier said where the address may be: that decides, over a
-        # guess from a label.
+    if req.address_required and getattr(req, "address_scope", None) == "any":
+        # The carrier says the address can be in any country: that replaces
+        # the "in the country" default (or a label's guess). Other places
+        # keep the list as it was.
         found -= {"address_in_country", "address_in_area"}
-        found.add(_SCOPE_CATEGORY[scope])
+        found.add("address_any_country")
     elif req.address_required and not (found & address_cats):
         found.add("address_in_country")
 

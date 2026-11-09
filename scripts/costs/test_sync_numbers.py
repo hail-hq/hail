@@ -519,7 +519,7 @@ def test_hidden_out_of_stock_rows_are_not_sent_for_papers(tmp_path, monkeypatch)
     monkeypatch.setattr(
         sync,
         "fetch_requirements",
-        lambda provider, cc, nt, address_scope=None: (
+        lambda provider, cc, nt: (
             calls.append(cc) or {"person": {"accepted": True, "items": []}}
         ),
     )
@@ -2263,109 +2263,23 @@ def test_telnyx_page_never_touches_a_hand_verified_row():
     assert (confirmed, differs, numbers) == ([], {}, [row])
 
 
-def test_twilio_address_scope_from_the_number_sample():
-    assert sync.twilio_address_scope([{"address_requirements": "none"}]) is None
-    assert sync.twilio_address_scope([]) is None
-    assert sync.twilio_address_scope([{"address_requirements": "any"}]) == "any"
-    # "foreign" (outside the country) is not "any country": nothing is said.
-    assert (
-        sync.twilio_address_scope(
-            [{"address_requirements": "any"}, {"address_requirements": "foreign"}]
-        )
-        is None
+def test_any_country_stays_only_when_every_group_says_so():
+    both = sync._union_address(
+        [
+            ["proof_of_address", "address_any_country"],
+            ["id_document", "address_any_country"],
+        ]
     )
-    # One number that needs a local address is enough to say so.
-    assert (
-        sync.twilio_address_scope(
-            [{"address_requirements": "any"}, {"address_requirements": "local"}]
-        )
-        == "country"
+    assert both == ["id_document", "proof_of_address", "address_any_country"]
+    # One group needs an address that is not "any country": no promise.
+    mixed = sync._union_address(
+        [["proof_of_address", "address_any_country"], ["proof_of_address"]]
     )
-
-
-def test_twilio_address_scope_reaches_the_papers_and_never_the_catalog(monkeypatch):
-    fake = _FakeProvider(
-        {
-            "person": _req("person", docs=("proof_of_identity",), address=True),
-            "business": _req("business", docs=("business_address",), address=True),
-        }
-    )
-    _use(monkeypatch, fake)
-    row = _row_needing()
-    row[sync.ADDRESS_SCOPE_KEY] = "any"
-    sync.attach_requirements("twilio", [row], [], [])
-    assert sync.ADDRESS_SCOPE_KEY not in row
-    assert row["requirements"] == {
-        "person": {"accepted": True, "items": ["id_document", "address_any_country"]},
-        "business": {
-            "accepted": True,
-            "items": ["proof_of_address", "address_any_country"],
-        },
-    }
-
-
-def test_map_twilio_marks_the_address_scope_of_a_row():
-    samples = {("GB", "local"): [{"address_requirements": "any"}]}
-    rows, _ = sync.map_twilio(
-        [{"country_code": "GB", "country": "United Kingdom"}],
-        {"GB": ["local"]},
-        {
-            "GB": {
-                "phone_number_prices": [
-                    {"number_type": "local", "current_price": "1.15"}
-                ]
-            }
-        },
-        samples,
-        set(),
-        {"GB": "44"},
-        {("GB", "local"): {"voice": True, "sms": False, "mms": False}},
-    )
-    assert rows[0]["verification_required"] is True
-    assert rows[0][sync.ADDRESS_SCOPE_KEY] == "any"
-
-
-def test_address_scope_key_never_reaches_the_catalog(tmp_path, monkeypatch):
-    _use(monkeypatch, object())
-    monkeypatch.setattr(
-        sync,
-        "fetch_requirements",
-        lambda provider, cc, nt, address_scope=None: {
-            "person": {"accepted": True, "items": []}
-        },
-    )
-    fr = _kept_prev("FR", verify=True, available=False)
-    de = _kept_prev("DE", verify=False)
-    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [fr, de]}))
-    monkeypatch.setattr(sync, "COUNTRY_FLOOR", 0)
-    rows = [
-        # Out of stock and hidden: left out of the papers pass.
-        {**_empty_row(fr, verification_required=True), sync.ADDRESS_SCOPE_KEY: "any"},
-        {**_empty_row(de, verification_required=True), sync.ADDRESS_SCOPE_KEY: "any"},
-    ]
-    monkeypatch.setattr(sync, "fetch_didww", lambda *a, **k: (rows, [], {}))
-    sync.run_provider(
-        "didww", {"DIDWW_API_KEY": "k"}, tmp_path, "2026-11-04", [], not_synced=[]
-    )
-    text = (tmp_path / "didww.json").read_text()
-    assert sync.ADDRESS_SCOPE_KEY not in text
-
-
-def test_twilio_address_scope_only_for_a_form_that_asks_for_an_address(monkeypatch):
-    # No bundle: the form collects no address, so the papers name none.
-    fake = _FakeProvider({"person": _req("person"), "business": _req("business")})
-    _use(monkeypatch, fake)
-    block = sync.fetch_requirements("twilio", "DE", "local", "any")
-    assert block["person"]["items"] == []
-
-
-def test_strictest_address_wins_across_didww_groups():
-    from hailhq.core.requirement_categories import strictest_address
-
-    assert strictest_address(
-        ["proof_of_address", "address_in_country", "address_any_country"]
-    ) == ["proof_of_address", "address_in_country"]
-    assert strictest_address(["id_document"]) == ["id_document"]
+    assert mixed == ["proof_of_address"]
+    # A group with no address at all does not count against it.
+    assert sync._union_address(
+        [["proof_of_address", "address_any_country"], ["id_document"]]
+    ) == ["id_document", "proof_of_address", "address_any_country"]
 
 
 def test_schema_lists_every_paper_category():

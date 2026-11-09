@@ -13,7 +13,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
-- Number paperwork says when the address can be in any country: the new `address_any_country` item, from Twilio and DIDWW.
+- Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
 
 ### Fixed
 

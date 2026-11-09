@@ -359,9 +359,9 @@ def test_address_scope_decides_where_the_address_may_be():
         "proof_of_address",
         "address_any_country",
     ]
+    # Another place keeps the list as it was.
     assert classify(Requirements(**base, address_scope="area"), "didww") == [
-        "proof_of_address",
-        "address_in_area",
+        "proof_of_address"
     ]
     # Unknown: the old rule (a proof of address, nothing more is promised).
     assert classify(Requirements(**base), "didww") == ["proof_of_address"]
