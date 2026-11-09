@@ -1686,19 +1686,27 @@ class EmailAttachment(Base):
     )
 
 
-class EmailAttachmentUpload(Base):
-    """A caller-uploaded file, pre-send, awaiting reference from a `send`.
+class FileUpload(Base):
+    """A file an organization uploaded, kept until it is used or expires.
 
-    Distinct from ``EmailAttachment`` (which is always 1:1 with an
-    already-received inbound email, created once at ingest, never reused).
-    This row is org-owned, reusable across many outbound sends until
-    referenced or garbage-collected — see
-    ``hailhq.core.email_attachment_gc.EmailAttachmentGcWorker``, which
-    deletes rows where ``first_used_at`` is still null 24h after upload.
-    Rows that have been used at least once are kept indefinitely.
+    ``purpose`` says what it is for:
+
+    * ``email_attachment``: an outbound email attachment, reusable across
+      many sends. Distinct from ``EmailAttachment`` (always 1:1 with an
+      already-received inbound email). Rows still unused 24h after upload
+      are deleted; used rows are kept.
+    * ``verification_document``: a document for one carrier verification.
+      ``POST /verifications`` reads it and deletes it; rows left over are
+      deleted 1 hour after upload.
+
+    An upload link (``POST /uploads``) makes the row first with
+    ``uploaded_at`` null and ``token_hash`` set; the ``PUT`` that sends the
+    bytes clears the hash and sets ``uploaded_at``, ``size_bytes`` and
+    ``sha256``. A direct upload (``POST /email-attachments``) sets all of
+    them at once. See ``hailhq.core.email_attachment_gc`` for the sweeps.
     """
 
-    __tablename__ = "email_attachment_uploads"
+    __tablename__ = "file_uploads"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -1708,23 +1716,46 @@ class EmailAttachmentUpload(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
+    purpose: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'email_attachment'")
+    )
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     s3_key: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
     first_used_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # sha256 hex of the upload link's token; null once used, or for a
+    # direct upload.
+    token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    link_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        Index(
-            "email_attachment_uploads_gc_idx",
-            "created_at",
-            postgresql_where=text("first_used_at IS NULL"),
+        CheckConstraint(
+            "purpose IN ('email_attachment', 'verification_document')",
+            name="file_uploads_purpose_check",
+        ),
+        CheckConstraint(
+            "uploaded_at IS NULL OR size_bytes IS NOT NULL",
+            name="file_uploads_uploaded_has_size",
         ),
         Index(
-            "email_attachment_uploads_org_idx",
+            "file_uploads_gc_idx",
+            "purpose",
+            "uploaded_at",
+            postgresql_where=text("uploaded_at IS NOT NULL AND first_used_at IS NULL"),
+        ),
+        Index(
+            "file_uploads_link_expiry_idx",
+            "link_expires_at",
+            postgresql_where=text("uploaded_at IS NULL"),
+        ),
+        Index(
+            "file_uploads_org_idx",
             "organization_id",
         ),
     )

@@ -78,9 +78,9 @@ from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import (
     Email,
     EmailAttachment,
-    EmailAttachmentUpload,
     EmailDomain,
     EmailEvent,
+    FileUpload,
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import ProviderAttachment
@@ -295,7 +295,7 @@ async def deliver_email(
     db: AsyncSession,
     email_provider: EmailProvider,
     email: Email,
-    attachment_rows: list[EmailAttachmentUpload] | None = None,
+    attachment_rows: list[FileUpload] | None = None,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
@@ -549,11 +549,15 @@ async def create_email(
     )
     await require_agent_send_allowed(db, principal, "email", agent_recipients, idem)
 
-    attachment_rows: list[EmailAttachmentUpload] = []
+    attachment_rows: list[FileUpload] = []
     if body.attachment_ids:
-        stmt = select(EmailAttachmentUpload).where(
-            EmailAttachmentUpload.id.in_(body.attachment_ids),
-            EmailAttachmentUpload.organization_id == principal.organization_id,
+        # Only uploaded email attachments: a link not used yet, or a
+        # verification document, is "not found" like any unknown id.
+        stmt = select(FileUpload).where(
+            FileUpload.id.in_(body.attachment_ids),
+            FileUpload.organization_id == principal.organization_id,
+            FileUpload.purpose == "email_attachment",
+            FileUpload.uploaded_at.is_not(None),
         )
         attachment_rows = list((await db.execute(stmt)).scalars().all())
         found_ids = {row.id for row in attachment_rows}
