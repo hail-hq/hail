@@ -96,10 +96,16 @@ def _safe_text(value: str) -> str:
     )
 
 
-def _safe_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
+def _safe_attributes(
+    attributes: Mapping[str, Any] | None, *, include_content: bool = True
+) -> dict[str, Any]:
     result = {}
     for key, value in (attributes or {}).items():
-        if key in _KEPT_FIELDS or key in CONTENT_FIELDS:
+        if key in CONTENT_FIELDS:
+            if include_content:
+                result[key] = value
+            continue
+        if key in _KEPT_FIELDS:
             result[key] = value
             continue
         if key in {
@@ -151,21 +157,33 @@ def private_span(
     span: ReadableSpan, resource_attributes: Mapping[str, Any] | None = None
 ) -> ReadableSpan:
     """Copy, rather than mutate, spans before the export boundary."""
+    resource = (span.resource or Resource({})).merge(
+        Resource(resource_attributes or {})
+    )
+    # MCP needs operational metadata, not a second copy of tool inputs,
+    # results, message bodies or registration documents in diagnostics.
+    include_content = resource.attributes.get("service.name") != "hail-mcp"
     return ReadableSpan(
         name=_safe_text(span.name),
         context=span.context,
         parent=span.parent,
-        resource=(span.resource or Resource({})).merge(
-            Resource(resource_attributes or {})
-        ),
-        attributes=_safe_attributes(span.attributes),
+        resource=resource,
+        attributes=_safe_attributes(span.attributes, include_content=include_content),
         events=[
-            Event(_safe_text(e.name), _safe_attributes(e.attributes), e.timestamp)
+            Event(
+                _safe_text(e.name),
+                _safe_attributes(e.attributes, include_content=include_content),
+                e.timestamp,
+            )
             for e in span.events
             if not e.name.startswith("gen_ai.")
         ],
         links=[
-            Link(link.context, _safe_attributes(link.attributes)) for link in span.links
+            Link(
+                link.context,
+                _safe_attributes(link.attributes, include_content=include_content),
+            )
+            for link in span.links
         ],
         kind=span.kind,
         status=Status(

@@ -7,6 +7,8 @@ with a default (and misleading) hint set.
 from __future__ import annotations
 
 import importlib
+import re
+import unicodedata
 
 import pytest
 from mcp.types import Tool
@@ -106,6 +108,47 @@ async def test_every_tool_has_explicit_hints_and_title(tools_by_name) -> None:
         assert tool.title, f"{name} has no title"
         # Directory listings read annotations.title, hosts read Tool.title.
         assert a.title == tool.title, f"{name} annotations.title differs"
+
+
+def _schema_descriptions(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "description" and isinstance(item, str):
+                yield item
+            else:
+                yield from _schema_descriptions(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _schema_descriptions(item)
+
+
+async def test_public_descriptions_state_contracts_without_model_instructions(
+    tools_by_name,
+):
+    """Directory descriptions document tools, rather than direct the model."""
+    instructions = re.compile(
+        r"\b(?:you|your|never|prefer|ask the user|ask the person|tell the user|"
+        r"show the user|do not|don't|call this|use this|then call|first call|"
+        r"before calling|poll every|loop:)\b",
+        re.IGNORECASE,
+    )
+    cross_tool_call = re.compile(
+        r"\b(?:call|use|run|invoke|read)\s+`*(?:"
+        + "|".join(re.escape(name) for name in tools_by_name)
+        + r")\b",
+        re.IGNORECASE,
+    )
+    for name, tool in tools_by_name.items():
+        assert tool.description and tool.description.strip(), name
+        for text in [tool.description, *_schema_descriptions(tool.inputSchema)]:
+            assert not instructions.search(text), (name, instructions.search(text))
+            assert not cross_tool_call.search(text), (
+                name,
+                cross_tool_call.search(text),
+            )
+            assert all(
+                c in "\n\t" or unicodedata.category(c) not in {"Cc", "Cf"} for c in text
+            ), name
 
 
 async def test_submit_verification_params_have_schema_types(tools_by_name) -> None:

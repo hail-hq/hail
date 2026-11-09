@@ -1590,68 +1590,27 @@ def register_tools(
         message_type: str = "informational",
         agent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Originate an outbound phone call.
+        """Start an outbound AI phone call.
 
-        Provide ``system_prompt`` (mode A — Hail's bundled fallback LLM
-        uses this prompt) or ``llm`` (mode B — bring your own
-        OpenAI-compatible endpoint as
-        ``{"base_url": ..., "api_key": ..., "model": ...}``), or both, or
-        ``agent_id`` (a saved agent from ``list_agents`` supplies the
-        prompt, first message, AI line, voice and tools; fields you pass
-        here win). At least one is required. Passing both runs your prompt on your
-        own endpoint: it receives Hail's voice preamble plus your prompt
-        as the leading system message.
+        At least one of ``system_prompt``, ``llm`` or ``agent_id`` is required.
+        An ``agent_id`` selects saved settings; explicit arguments override them.
+        ``llm`` contains ``base_url``, ``api_key`` and ``model`` for a compatible endpoint.
+        A supplied prompt becomes part of the call agent's instructions.
+        ``to`` is an E.164 phone number. ``from_`` is optional.
+        ``first_message`` is spoken on pickup. Without it, the agent reacts to the answer or silence.
+        ``language`` is a supported lowercase ISO 639-1 code; English is the default.
+        AI disclosure is enabled by default. Disabling it requires a lawful basis.
+        ``recording_enabled`` overrides the agent or workspace recording setting for this call.
+        ``tools`` limits the call agent's capabilities; an empty list disables them.
 
-        ``to`` must be E.164 (e.g. ``+14155551234``). ``from_`` is
-        optional and defaults to the first active number on your org.
-        ``first_message`` is spoken verbatim on pickup; omit it to let
-        the agent open the conversation itself — it reacts to how the
-        call was answered, or introduces itself after silence.
-        ``language`` sets the call's spoken language for speech-to-text,
-        text-to-speech, and turn detection, as a lowercase ISO 639-1 code
-        (e.g. ``"da"``); 39 languages are supported (server rejects others
-        with 422); omit for English. STT provider selection is
-        console-BYO-only (no per-call override); configure it on the
-        organization to pin a provider.
-        ``ai_disclosure=False`` skips the spoken "this is an AI
-        assistant" line at the start of the call. Leave enabled unless
-        the user has verified it is not required for this call — US
-        artificial-voice calls (47 CFR 64.1200(b)(1)) and several AI
-        bot-disclosure laws require it, and Hail does not verify this.
-        The agent still identifies itself as an AI if asked.
-        ``recording_enabled``: omit it to follow the agent, then the
-        workspace recording setting. ``true`` records this call and
-        ``false`` does not, whatever the workspace setting. Pass it only
-        when the user asked for or against a recording.
-        ``metadata`` is free-form JSON attached to the call record.
-        ``tools`` are the agent tools to allow on this call. Omit for all
-        available; pass ``[]`` to disable.
+        ``recipient_consent=true`` attests to the recipient's lawful consent.
+        Other values are rejected. Hail does not verify consent.
+        ``message_type="marketing"`` also requires ``consent_source``.
+        ``metadata`` is stored on the call record.
+        A returned ``idempotency_key`` identifies the original request for a retry.
+        A different key represents a new call.
 
-        ``recipient_consent`` is required and must be the JSON boolean
-        ``true`` (strings and numbers are refused): attest that you (the caller
-        triggering this request) have obtained the lawful consent needed
-        to contact this recipient. The API rejects the request (422) if
-        this is not ``true`` — Hail does not verify consent for you, you
-        are responsible for having a lawful basis (TCPA / ePrivacy / GDPR
-        as applicable). Set ``message_type="marketing"`` for promotional
-        calls (this additionally requires a non-empty ``consent_source``
-        describing how/where consent was obtained) — leave as the default
-        ``"informational"`` for transactional/service calls.
-
-        ``idempotency_key`` defaults to a fresh UUID per invocation
-        and is returned in the response under ``idempotency_key`` — to
-        retry *this* exact request (rather than dispatch a second call),
-        pass the value back on the retry. A new key is a new call.
-
-        Example:
-            place_call(to="+14155551234",
-                       recipient_consent=True,
-                       system_prompt="You are scheduling a haircut.",
-                       first_message="Hi, I'm calling on behalf of Alex.")
-
-        Returns the API's ``CallResponse`` as a dict (id, status,
-        from_e164, to_e164, ...). On failure returns
-        ``{"error": "<message>"}`` instead.
+        Returns the call ID, status, phone numbers and ``idempotency_key``, or an error.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -1707,67 +1666,29 @@ def register_tools(
         message_type: str = "informational",
         attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Send an outbound email through your configured SES sender.
+        """Send an email from a verified workspace sender.
 
-        ``to`` is a non-empty list of RFC-style email addresses. At
-        least one of ``body_text`` / ``body_html`` is required (both
-        is fine — multipart-alternative). Prefer including
-        ``body_html``: open and click tracking only works for emails
-        with an HTML body. A plain-text-only email still gets sent,
-        delivered, and bounce events, but opens and clicks are never
-        tracked. ``cc``, ``bcc``, and
-        ``reply_to`` are optional and follow the usual mail
-        conventions. Hail sets no ``reply_to`` of its own — to have
-        replies reach the human running this session, call ``whoami``
-        and pass their ``email``.
+        ``to`` is a non-empty list of email addresses.
+        At least one of ``body_text`` or ``body_html`` is required.
+        Open and click tracking requires an HTML body.
+        Plain-text emails still have sending, delivery and bounce events.
+        ``cc``, ``bcc`` and ``reply_to`` are optional. Hail supplies no default ``reply_to``.
 
-        ``recipient_consent`` is required and must be the JSON boolean
-        ``true`` (strings and numbers are refused): attest that you (the caller
-        triggering this request) have obtained the lawful consent needed
-        to email this recipient. The API rejects the request (422) if
-        this is not ``true`` — Hail does not verify consent for you. Set
-        ``message_type="marketing"`` for promotional email (this
-        additionally requires a non-empty ``consent_source`` describing
-        how/where consent was obtained) — leave as the default
-        ``"informational"`` for transactional/service email.
+        Without ``from_``, one verified custom domain takes priority over the Hail mail address.
+        Several verified custom domains require an explicit ``from_`` address.
+        When configured, a workspace without a sender receives a Hail mail address automatically.
+        An explicit sender must match a verified workspace identity.
+        ``from_name`` is an optional display name; control characters are rejected.
+        ``attachment_ids`` contains IDs from uploaded email attachments.
+        ``metadata`` is stored on the email record.
 
-        ``from_`` is optional while the workspace has one verified custom
-        domain, which wins over the hail-mail address, or only a hail-mail
-        address. With several verified custom domains, omitting it returns
-        422 listing them — call ``list_email_domains`` and pass one. With no
-        verified sender, the server auto-mints a per-org hail-mail address
-        of the form ``<user>+<org>@<base>`` if the operator configured
-        ``HAIL_MAIL_BASE_DOMAIN`` (the ``<org>`` part is derived from your
-        organization id; the ``<user>`` part comes from ``HAIL_MAIL_FROM``,
-        from ``HAIL_MAIL_DEFAULT_USER_PREFIX`` plus a per-organization
-        token, or from an explicit row created via
-        ``POST /email-domains``). When supplied, ``from_`` must match
-        a verified row already in ``email_domains`` (register one with
-        the website console or ``POST /email-domains``).
+        ``recipient_consent=true`` attests to lawful consent. Other values are rejected.
+        Hail does not verify consent.
+        ``message_type="marketing"`` also requires ``consent_source``.
+        A returned ``idempotency_key`` identifies the original request for a retry.
+        A different key represents a new email.
 
-        ``from_name`` is an optional display name rendered on the
-        From: header ("Acme Billing <billing@acme.com>"). Control
-        characters are rejected.
-
-        ``metadata`` is free-form JSON attached to the email record.
-
-        ``idempotency_key`` defaults to a fresh UUID and is returned
-        in the response under ``idempotency_key`` — pass the same
-        value on a retry to replay rather than re-send. A new key
-        is a new message.
-
-        ``attachment_ids`` are ids returned by ``upload_email_attachment``
-        — upload a file first, then pass its id(s) here to attach it.
-
-        Example:
-            send_email(to=["alice@example.com"],
-                       subject="Welcome",
-                       recipient_consent=True,
-                       body_text="Thanks for signing up.")
-
-        Returns the ``EmailResponse`` dict (id, status, from_address,
-        to_addresses, sent_at, provider_message_id, ...). On failure
-        returns ``{"error": "<message>"}`` instead.
+        Returns the email ID, status, sender, recipients and ``idempotency_key``, or an error.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -1810,17 +1731,13 @@ def register_tools(
         filename: str,
         content_type: str,
     ) -> dict[str, Any]:
-        """Upload a file to attach to a future outbound email.
+        """Upload an attachment for outbound email.
 
-        ``content_base64`` is the file's raw bytes, base64-encoded.
-        Returns ``{"id": ..., "filename": ..., "content_type": ...,
-        "size_bytes": ...}`` — pass ``id`` in ``send_email``'s
-        ``attachment_ids`` list. The id is reusable across many sends
-        and expires in 24h if never used. Files over 25MB (combined
-        with the message body and any other attachments, per send) are
-        rejected — host large files externally and link to them in the
-        body instead.
-        """
+        ``content_base64`` contains the file bytes encoded as base64.
+        Returns ``id``, ``filename``, ``content_type`` and ``size_bytes``.
+        The ID is accepted in an email's ``attachment_ids`` and is reusable across sends.
+        Unused uploads expire after 24 hours.
+        The combined message and attachments must fit the 25 MB sending limit."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await upload_email_attachment(
@@ -1844,14 +1761,10 @@ def register_tools(
         ),
     )
     async def get_call_tool(ctx: Context, call_id: str) -> dict[str, Any]:
-        """Fetch the current state of one call by id.
+        """Read a call's current status and timing by ID.
 
-        Use this after ``place_call`` (or to check on any prior call)
-        to read the call's latest ``status`` and timing fields.
-
-        Returns the API's ``CallResponse`` as a dict, or
-        ``{"error": "call not found"}`` for an unknown id.
-        """
+        ``call_id`` identifies an existing workspace call.
+        Returns the call record, or an error when the call is unavailable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_call(client=client, call_id=call_id)
@@ -1876,15 +1789,13 @@ def register_tools(
         status: str | None = None,
         to: str | None = None,
     ) -> dict[str, Any]:
-        """List recent calls in your organization, newest first.
+        """List recent workspace calls, newest first.
 
-        Cursor-paginated: pass the previous response's ``next_cursor``
-        to fetch the next page. ``status`` (one of queued, dialing,
-        ringing, in_progress, completed, failed, busy, no_answer,
-        canceled) and ``to`` (E.164) are optional server-side filters.
-
-        Returns a dict ``{"items": [...], "next_cursor": <str|None>}``.
-        """
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        Optional filters are ``status`` and the E.164 destination ``to``.
+        Statuses include queued, dialing, ringing, in_progress, completed, failed,
+        busy, no_answer and canceled.
+        Returns ``items`` and ``next_cursor``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_calls(
@@ -1916,40 +1827,21 @@ def register_tools(
         consent_obtained_at: str | None = None,
         message_type: str = "informational",
     ) -> dict[str, Any]:
-        """Send an outbound SMS.
+        """Send an outbound text message.
 
-        ``to`` must be E.164 (e.g. ``+14155551234``). ``body`` is the
-        message text. With no ``from_``: destinations where the sender-ID
-        carrier delivers a dynamic alphanumeric sender ID unchanged (about
-        110 countries, see core/hailhq/core/sender_id_corridors.py) use
-        your organization's sender ID
-        (or ``HAIL``, the platform default); Australia (+61) may use
-        ``HAIL`` instead; every other destination,
-        including the US and Canada,
-        uses your organization's oldest active SMS-capable number and the
-        API returns 422 when there is none.
-        SMS never uses the shared voice-call pool.
+        ``to`` is an E.164 phone number and ``body`` is the message text.
+        Without ``from_``, supported destinations use the workspace's alphanumeric sender ID.
+        Other destinations use an eligible workspace SMS-capable number.
+        A missing required number returns 422. SMS does not use the shared voice-call pool.
+        US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number.
 
-        ``recipient_consent`` is required and must be the JSON boolean
-        ``true`` (strings and numbers are refused): attest that you (the caller
-        triggering this request) have obtained the lawful consent needed
-        to text this recipient. The API rejects the request (422) if
-        this is not ``true`` — Hail does not verify consent for you. Set
-        ``message_type="marketing"`` for promotional texts (this
-        additionally requires a non-empty ``consent_source``) — leave as
-        the default ``"informational"`` for transactional/service texts.
+        ``recipient_consent=true`` attests to lawful consent. Other values are rejected.
+        Hail does not verify consent.
+        ``message_type="marketing"`` also requires ``consent_source``.
+        A returned ``idempotency_key`` identifies the original request for a retry.
+        A different key represents a new message.
 
-        ``idempotency_key`` defaults to a fresh UUID and is returned in
-        the response under ``idempotency_key`` — pass the same value on
-        a retry to replay rather than re-send.
-
-        Example:
-            send_sms(to="+14155551234", body="Your order shipped!",
-                     recipient_consent=True)
-
-        Returns the ``SmsResponse`` dict (id, status, from_e164,
-        to_e164, segment_count, ...). On failure returns
-        ``{"error": "<message>"}`` instead.
+        Returns the SMS ID, status, sender, destination, segment count and retry key, or an error.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -1980,13 +1872,10 @@ def register_tools(
         ),
     )
     async def get_sms_tool(ctx: Context, sms_id: str) -> dict[str, Any]:
-        """Fetch the current state of one SMS by id.
+        """Read a text message's current state by ID.
 
-        Use this after ``send_sms`` to check delivery status.
-
-        Example:
-            get_sms(sms_id="...")
-        """
+        ``sms_id`` identifies an existing workspace message.
+        Returns the message record, including delivery status, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_sms(client=client, sms_id=sms_id)
@@ -2011,13 +1900,12 @@ def register_tools(
         status: str | None = None,
         to: str | None = None,
     ) -> dict[str, Any]:
-        """Page through recent SMS messages for your organization.
+        """List recent workspace text messages.
 
-        ``status`` filters to one of: queued, sent, delivered, failed,
-        undelivered, received. ``to`` filters to messages sent to a
-        specific E.164 number. Paginate with the returned
-        ``next_cursor``.
-        """
+        ``status`` filters by queued, sent, delivered, failed, undelivered or received.
+        ``to`` filters by E.164 destination.
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        Returns ``items`` and ``next_cursor``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_sms(
@@ -2038,16 +1926,12 @@ def register_tools(
         ),
     )
     async def get_email_tool(ctx: Context, email_id: str) -> dict[str, Any]:
-        """Fetch the full record of one email by id.
+        """Read a complete workspace email by ID.
 
-        Returns the complete row — including ``body_text`` / ``body_html``
-        and (for inbound mail) the ``in_reply_to`` / ``message_id`` headers
-        and ``spam``/``virus``/``spf``/``dkim``/``dmarc`` verdicts. Use this
-        after ``list_emails`` to read a received reply's body.
-
-        Returns the API's ``EmailResponse`` as a dict, or
-        ``{"error": "resource not found"}`` for an unknown id.
-        """
+        Returns ``body_text``, ``body_html`` and other email fields.
+        Inbound records include reply headers and spam, virus, SPF, DKIM and DMARC verdicts.
+        Attachments include IDs and file metadata.
+        An unknown or inaccessible email returns an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email(client=client, email_id=email_id)
@@ -2072,25 +1956,13 @@ def register_tools(
         status: str | None = None,
         direction: str | None = None,
     ) -> dict[str, Any]:
-        """List emails in your organization, newest first.
+        """List workspace email summaries, newest first.
 
-        Cursor-paginated: pass the previous response's ``next_cursor`` to
-        fetch the next page. Two optional server-side filters:
-
-        * ``direction`` — ``outbound`` or ``inbound``. Pass
-          ``direction="inbound"`` to read replies and other received mail.
-        * ``status`` — one of ``queued``, ``sent``, ``failed``,
-          ``bounced``, ``complained``, ``received``.
-
-        Items are trimmed summaries (no message body). Call ``get_email``
-        with an item's ``id`` to read the full body.
-
-        Example:
-            list_emails(direction="inbound")
-
-        Returns ``{"items": [...], "next_cursor": <str|None>}`` on success,
-        or ``{"error": "<message>"}`` instead.
-        """
+        ``direction`` is ``inbound`` or ``outbound``.
+        ``status`` is queued, sent, failed, bounced, complained or received.
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        Summaries contain IDs and metadata, without message bodies.
+        Returns ``items`` and ``next_cursor``, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_emails(
@@ -2115,14 +1987,11 @@ def register_tools(
         ),
     )
     async def get_email_raw_tool(ctx: Context, email_id: str) -> dict[str, Any]:
-        """Get a fetchable URL for an email's original MIME source.
+        """Return a temporary download URL for an inbound email's original MIME source.
 
-        Returns ``{"url": "<presigned-s3-url>"}`` — a short-lived
-        (~5 minute) link to the full raw RFC822 message. Fetch the URL
-        directly to read the complete original; it needs no auth header.
-        Raw source exists for **inbound** mail only — outbound ids return
-        ``{"error": "resource not found"}``.
-        """
+        The URL expires after approximately five minutes and requires no authorization header.
+        Raw source is available only for inbound emails.
+        Returns ``url``, or an error for an unavailable email."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email_raw(client=client, email_id=email_id)
@@ -2143,14 +2012,11 @@ def register_tools(
     async def get_email_attachment_tool(
         ctx: Context, email_id: str, attachment_id: str
     ) -> dict[str, Any]:
-        """Get a fetchable URL for one inbound email attachment.
+        """Return a temporary download URL for an inbound email attachment.
 
-        ``attachment_id`` comes from an item in ``get_email``'s
-        ``attachments`` list. Returns ``{"url": "<presigned-s3-url>"}`` —
-        a short-lived (~5 minute) link to the attachment bytes, fetchable
-        directly with no auth header. Unknown ids return
-        ``{"error": "resource not found"}``.
-        """
+        ``email_id`` identifies the email; ``attachment_id`` identifies one of its attachments.
+        The URL expires after approximately five minutes and requires no authorization header.
+        Returns ``url``, or an error for an unavailable attachment."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email_attachment(
@@ -2176,22 +2042,14 @@ def register_tools(
         cursor: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
-        """Delivery/engagement timeline (sent→delivered→opened…) for one email.
+        """Read one email's delivery and engagement timeline.
 
-        Chronological lifecycle events for a single email — use this to see
-        exactly what happened to one message (bounced? opened? clicked?)
-        rather than the account-wide aggregates ``get_email_stats`` returns.
-
-        Returns ``{"items": [...], "next_cursor": ...}`` where each item has
-        ``kind`` (one of sent, delivered, delivery_delayed, bounced,
-        complained, rejected, opened, clicked), ``payload``, and
-        ``occurred_at``. ``opened`` and ``clicked`` only occur for emails
-        sent with an HTML body. A plain-text-only email still gets sent,
-        delivered, and bounce events, but opens and clicks are never
-        tracked. Pass ``cursor`` from a previous ``next_cursor`` to
-        page (``limit`` 1..1000, default 100). On failure returns
-        ``{"error": "resource not found"}`` for an unknown id.
-        """
+        Events include sent, delivered, delivery_delayed, bounced, complained,
+        rejected, opened and clicked, with ``payload`` and ``occurred_at``.
+        Open and click events require an HTML email body.
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        ``limit`` is 1 to 1000; the default is 100.
+        Returns ``items`` and ``next_cursor``, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email_events(
@@ -2217,26 +2075,15 @@ def register_tools(
         to: str | None = None,
         bucket: str = "day",
     ) -> dict[str, Any]:
-        """Account-level email deliverability stats (counts, rates, time series).
+        """Read workspace email delivery counts, rates and time series.
 
-        Aggregates across your whole organization's outbound mail over a
-        window — use this for "how's deliverability doing" rather than
-        one message's history (``get_email_events`` covers that).
-
-        ``from_`` / ``to`` are ISO 8601 timestamps (defaults: last 7 days
-        ending now). ``bucket`` is ``"day"`` (default) or ``"hour"`` —
-        ``"hour"`` is limited to an 8-day span; any range is capped at 92
-        days.
-
-        Returns ``{"from": ..., "to": ..., "bucket": ..., "totals": {...},
-        "rates": {...}, "series": [...]}`` — ``totals``/each ``series``
-        bucket carry counts (sent, delivered, bounced, opened, ...) and
-        ``rates`` carries derived ratios (delivery, bounce, open, click),
-        each ``None`` when ``totals.sent`` is 0. Open and click numbers
-        only count HTML emails. Plain-text-only emails are never tracked
-        for opens or clicks, so they lower those rates. On failure returns
-        ``{"error": "<message>"}`` instead.
-        """
+        ``from_`` and ``to`` are ISO 8601 timestamps, defaulting to the last seven days.
+        ``bucket`` is ``day`` or ``hour``. Hourly ranges are limited to eight days.
+        All ranges are limited to 92 days.
+        Returns ``from``, ``to``, ``bucket``, ``totals``, ``rates`` and ``series``.
+        Rates are null when the sent count is zero.
+        Open and click counts cover HTML emails only; plain-text emails lower these rates.
+        An upstream failure returns an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email_stats(
@@ -2263,32 +2110,15 @@ def register_tools(
         cursor: str | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
-        """Page through events from across the org or one resource.
+        """Read a page of workspace events or events for one resource.
 
-        Pass ``id="<type>:<uuid>"`` to narrow to a single resource —
-        supported types are ``call``, ``email``, and ``sms`` (e.g.
-        ``id="sms:<uuid>"`` after ``send_sms``). When narrowed to a
-        call, the response includes a ``call_status`` field reflecting
-        the call's current state. Without ``id``, returns events from
-        across the whole org. ``kind`` filters server-side by event kind
-        (``state_change``, ``agent_turn``, ``user_turn``, ``tool_call``,
-        ``error``, ...).
-
-        This is **not** a streaming subscription — the call returns
-        whatever events exist now plus a ``next_cursor`` if more pages
-        remain. To follow a call to completion, loop: pass the previous
-        response's ``next_cursor`` until ``next_cursor`` is null and,
-        when narrowed to a call, ``call_status`` is one of
-        ``completed``, ``failed``, ``busy``, ``no_answer``, ``canceled``
-        (the terminal set).
-
-        Example:
-            get_events(id="call:0c2f...-...", limit=200)
-
-        Returns ``{"items": [...], "next_cursor": <str|None>,
-        "call_status": <str|None>}`` on success, or
-        ``{"error": ...}`` on a malformed ``id`` or upstream failure.
-        """
+        ``id`` optionally selects ``call:<uuid>``, ``email:<uuid>`` or ``sms:<uuid>``.
+        ``kind`` filters event types such as state_change, agent_turn, user_turn, tool_call or error.
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        A call-specific response includes the current ``call_status``.
+        Terminal call states are completed, failed, busy, no_answer and canceled.
+        The response is a snapshot, not a streaming subscription.
+        Returns ``items``, ``next_cursor`` and optional ``call_status``, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_events(
@@ -2309,15 +2139,11 @@ def register_tools(
         ),
     )
     async def list_agents_tool(ctx: Context) -> dict[str, Any]:
-        """List the workspace's saved agents: the brains that answer calls
-        and texts on its numbers, and that ``place_call`` can use via
-        ``agent_id``.
+        """List the workspace's saved agents and their settings.
 
-        Returns ``{"items": [{"id", "name", "system_prompt", "first_message",
-        "ai_disclosure", "ai_disclosure_line", "voice_config", "tools",
-        "max_duration_seconds", "handover_max_duration_seconds", "voice_enabled",
-        "sms_enabled", "status", "handover_contacts"}, ...]}``.
-        """
+        Agent records contain IDs, names, instructions, greetings, disclosure settings,
+        voice settings, enabled channels, status, duration limits and handover contacts.
+        Returns ``items`` or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_agents(client=client)
@@ -2352,25 +2178,20 @@ def register_tools(
         sms_enabled: bool = True,
         handover_contacts: list[dict] | None = None,
     ) -> dict[str, Any]:
-        """Save an agent. Then call ``route_number`` so a number answers
-        with it, or pass its id as ``agent_id`` to ``place_call``.
+        """Save an agent for phone calls and text replies.
 
-        ``system_prompt`` is what the agent follows. ``first_message`` is
-        spoken after the AI line; omit it to let the caller speak first.
-        ``ai_disclosure_line`` replaces the workspace AI line for this
-        agent; ``{org}`` becomes the organization name. ``language`` is a
-        lowercase ISO 639-1 code. ``max_duration_seconds`` is 60..3600.
-        ``handover_max_duration_seconds`` (60..3600, default 1800) is the
-        call limit once a handover contact answers.
-        ``handover_contacts``: People the agent may hand a live call to:
-        ``[{contact_id, note}]`` (max 10; ``note`` 1-200 chars says when to
-        hand over). ``contact_id`` is an id from ``list_contacts``: a
-        contact's uuid, or ``member:<user id>`` for a team member. The
-        person needs a phone number. The agent never sees it.
-
-        Returns the API's ``AgentResponse`` as a dict, or
-        ``{"error": "<message>"}``.
-        """
+        ``system_prompt`` defines the saved agent's behavior.
+        ``first_message`` is an optional greeting after the AI disclosure.
+        Without a greeting, an inbound agent waits for the caller.
+        ``ai_disclosure_line`` overrides the workspace line; ``{org}`` expands to the organization name.
+        ``language`` is a lowercase ISO 639-1 code.
+        ``max_duration_seconds`` is 60 to 3600.
+        ``handover_max_duration_seconds`` is 60 to 3600, defaulting to 1800.
+        ``handover_contacts`` contains up to ten ``{contact_id, note}`` entries.
+        Contact IDs are UUIDs or ``member:<user_id>``. Each contact needs a phone number.
+        Each note is 1 to 200 characters. The phone number is hidden from the call agent.
+        Saving an agent does not change any phone number's routing.
+        Returns the saved agent record or an error."""
         fields: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -2423,17 +2244,14 @@ def register_tools(
         clear_voice: bool = False,
         clear_sms: bool = False,
     ) -> dict[str, Any]:
-        """Choose which agent answers a number's calls and texts.
+        """Set the saved agents that answer a number's calls and texts.
 
-        ``voice_agent_id`` makes the number answer calls with that agent
-        (Hail registers it for inbound at the carrier and LiveKit);
-        ``clear_voice=True`` stops answering calls. ``sms_agent_id`` makes
-        the agent reply to texts; ``clear_sms=True`` stops that. A field
-        left out keeps its value. ``number_id`` comes from GET /numbers.
-
-        Returns the updated ``PhoneNumberResponse`` as a dict, or
-        ``{"error": "<message>"}``.
-        """
+        ``number_id`` identifies an existing workspace number.
+        ``voice_agent_id`` selects the agent for incoming calls.
+        ``sms_agent_id`` selects the agent for incoming texts.
+        ``clear_voice=true`` or ``clear_sms=true`` removes the corresponding agent.
+        Omitted settings retain their current values.
+        Returns the updated number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await route_number(
@@ -2467,55 +2285,31 @@ def register_tools(
         city: str | None = None,
         region: str | None = None,
     ) -> dict[str, Any]:
-        """Compare live phone-number offers from the carriers. Read-only: it
-        buys nothing and charges nothing.
+        """Compare available phone numbers and their prices without buying or charging.
 
-        ``country_code`` is an ISO alpha-2 code such as ``"US"``.
-        ``capabilities`` is ``["voice"]``, ``["sms"]`` or both (default).
-        ``number_type`` is ``local``, ``mobile``, ``national`` or
-        ``toll_free``; omit it to compare all types.
-        ``area_code`` is an area code or the first digits of the number, as
-        dialed in the country: ``"020"`` (London), ``"480"`` (Arizona).
-        ``city`` is a city name such as ``"London"``. Each offer has
-        ``locality`` and ``region`` (such as ``"Phoenix"``, ``"AZ"``): check
-        them, since city names repeat across states. ``region`` (optional,
-        with ``city``) is a US/CA state code; list_number_regions lists them.
-        Omit all three to search the whole country.
+        ``country_code`` is an ISO alpha-2 code, such as ``US``.
+        ``capabilities`` selects voice, SMS or both. ``number_type`` is optional:
+        local, mobile, national or toll_free.
+        ``area_code`` is an area code or number prefix in national format.
+        ``city`` is optional. ``region`` distinguishes US states or Canadian provinces.
+        Offers include ``locality`` and ``region`` because city names can repeat.
 
-        Returns ``{"offers": [...], "recommended_quote_id", "expires_at"}``.
-        Each offer has ``e164``, ``number_type``,
-        ``capabilities``, ``monthly_cents``, ``setup_cents``, ``readiness``,
-        ``requirements``, ``subject_types``, ``verifications`` and
-        ``quote_id``. Money fields are cents (USD).
-        Quotes expire in 10 minutes (``expires_at``); quote again after that.
+        Returns ``offers``, ``recommended_quote_id`` and ``expires_at``.
+        Each offer includes ``e164``, ``number_type``, ``capabilities``, ``quote_id``,
+        ``monthly_cents``, ``setup_cents``, ``readiness``, ``requirements``,
+        ``subject_types`` and ``verifications``. Prices are USD cents.
+        Quotes expire after ten minutes. Expired quotes cannot authorize a purchase.
+        ``recommended_quote_id`` identifies a ready offer or is null when none is ready.
 
-        ``subject_types`` says who may verify for the number: ``person``
-        (the user), ``business`` (the user's company), or both; empty when no
-        verification is needed. ``verifications`` lists the verifications
-        the offer can be bought with (``id``, ``state``, ``subject_type``,
-        ``subject_name``), approved first: those of an accepted subject type
-        still under review, and the approved ones the carrier still accepts
-        for the offer. ``subject_name`` is the person's or company's name from the
-        verification form. When several are approved, show the user the
-        names and ask which one buys the number; pass its ``id`` as
-        ``verification_id`` to acquire_number.
-
-        An offer with ``readiness == "verification_required"`` cannot be
-        bought until the organization is verified. Ask the user "you or your
-        company?" to pick the ``subject_type`` (one of ``subject_types``).
-        Call get_verification_requirements, ask the user for the details,
-        then submit_verification, both with the offer's ``quote_id`` and that
-        ``subject_type``, and poll get_verification (review takes business
-        days). ``requirements``
-        lists what the carrier needs. Prefer an offer whose
-        ``readiness`` is ``"ready"``; ``recommended_quote_id`` points at the
-        best one, or is null if none is ready.
-
-        An offer with ``by_request: true`` has no ``e164``: support orders
-        that number by hand. acquire_number refuses it; tell the user to ask
-        support. Its ``quote_id`` still works for verification.
-
-        Errors come back as ``{"error": "<message>"}``."""
+        ``subject_types`` identifies eligible personal or business registrations.
+        ``verifications`` contains accepted registrations, with approved entries first.
+        Entries include ``id``, ``state``, ``subject_type`` and ``subject_name``.
+        A purchase with several approved registrations requires an explicit ``verification_id``.
+        ``readiness="verification_required"`` means registration approval is still needed.
+        Registration requirements are specific to the quote and applicant type.
+        An offer with ``by_request=true`` has no assigned number and requires a manual support order.
+        Such offers remain valid for registration but are unavailable for automatic purchase.
+        An upstream failure returns an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await quote_numbers(
@@ -2551,36 +2345,25 @@ def register_tools(
         subject_type: str | None = None,
         verification_id: str | None = None,
     ) -> dict[str, Any]:
-        """Buys a real phone number. It charges the setup fee and the first
-        month now and renews monthly. Call quote_numbers first. Pass the
-        offer's quote_id, country_code, number_type, and confirm_total_cents =
-        monthly_cents + setup_cents from that offer. If the quote expired or
-        the price changed (409) you get an error: quote again. Only buy when
-        your user asked for this number. After buying, call route_number to
-        point it at an agent.
+        """Buy a quoted phone number with explicit price confirmation.
 
-        A quote buys at most one number. After a timeout, retry with the same
-        quote_id and idempotency_key, or check list_numbers. Never request a
-        new quote after a timeout.
+        This charges the setup fee and first month immediately, then renews monthly.
+        The purchase requires the user's authorization for that number and cost.
+        ``quote_id``, ``country_code`` and ``number_type`` identify a current offer.
+        ``confirm_total_cents`` must equal the offer's setup fee plus monthly fee.
+        Expired or changed offers return 409 without authorizing a different price.
+        Each quote can buy at most one number.
 
-        ``idempotency_key`` is optional; to retry after a timeout or a
-        5xx, pass the ``idempotency_key`` that result returned, so the number
-        is bought once. A 4xx error returns no key: the API remembers that
-        failure under it, so drop it and quote again.
-
-        ``verification_id`` picks which approved verification buys a number
-        that needs one: the ``id`` of an approved entry in the offer's
-        ``verifications``. Pass it when more than one is approved: show the
-        user each ``subject_name`` (the person's or company's name) and ask
-        which. With one approved, it is used. ``subject_type`` (``person`` or
-        ``business``) is optional: it keeps only that kind. A 422 on
-        ``verification_id`` means several are approved and none was picked,
-        or the id is not an approved verification for this number.
-
-        Returns the number (``id``, ``e164``, ``provisioning_state``,
-        ``verification_id``, ``subject_name``, ...)
-        plus ``idempotency_key``, or ``{"error": "<message>",
-        "idempotency_key": ...}``."""
+        A retry with the same quote and ``idempotency_key`` refers to the original purchase.
+        A returned retry key is available after a timeout or server error.
+        A 4xx failure returns no retry key; that failed request cannot be reused.
+        ``verification_id`` selects an approved registration accepted by the offer.
+        It is required when several approved registrations are eligible.
+        ``subject_type`` optionally limits eligible registrations to ``person`` or ``business``.
+        A rejected or ambiguous registration selection returns 422.
+        A purchase does not assign an answering agent automatically.
+        Returns the number record and ``idempotency_key``, or an error with any available retry key.
+        """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await acquire_number(
@@ -2612,14 +2395,12 @@ def register_tools(
         limit: int = 50,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        """List the workspace's dedicated phone numbers, newest first.
+        """List dedicated workspace phone numbers, newest first.
 
-        ``limit`` is 1..200 (default 50). Pass the returned ``next_cursor``
-        as ``cursor`` for the next page.
-
-        Returns ``{"items": [{"id", "e164", "country_code",
-        "number_type", "capabilities", "provisioning_state", "voice_agent_id",
-        "sms_agent_id", ...}], "next_cursor"}``, or ``{"error": "<message>"}``."""
+        ``limit`` is 1 to 200, defaulting to 50.
+        ``cursor`` accepts the previous page's ``next_cursor``.
+        Items include ID, E.164 number, country, type, capabilities, provisioning state and assigned agents.
+        Returns ``items`` and ``next_cursor``, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_numbers(client=client, limit=limit, cursor=cursor)
@@ -2638,12 +2419,11 @@ def register_tools(
         ),
     )
     async def list_number_regions_tool(ctx: Context) -> dict[str, Any]:
-        """List the US state and Canadian province codes that quote_numbers
-        accepts as ``region`` (optional, with ``city``).
+        """List US state and Canadian province codes supported by number searches.
 
-        Returns ``{"regions": [{"country_code", "code", "name"}]}``, such as
-        ``{"country_code": "US", "code": "AZ", "name": "Arizona"}``, or
-        ``{"error": "<message>"}``."""
+        Returns ``regions`` containing ``country_code``, ``code`` and ``name``.
+        These codes identify the optional region filter for a city search.
+        An upstream failure returns an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_number_regions(client=client)
@@ -2665,12 +2445,10 @@ def register_tools(
         ctx: Context,
         number_id: str,
     ) -> dict[str, Any]:
-        """Fetch one dedicated number by id: its state, capabilities and which
-        agents answer its calls and texts. ``number_id`` comes from
-        ``list_numbers``.
+        """Read a workspace number's state, capabilities and assigned agents.
 
-        Returns the ``PhoneNumberResponse`` as a dict, or
-        ``{"error": "<message>"}``."""
+        ``number_id`` identifies the number.
+        Returns the number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_number(client=client, number_id=number_id)
@@ -2693,22 +2471,16 @@ def register_tools(
         number_id: str,
         confirm_e164: str,
     ) -> dict[str, Any]:
-        """Release a phone number. DESTRUCTIVE and permanent.
+        """Permanently release a phone number after explicit user authorization.
 
-        Calls and texts to the number stop. This month's fee and any earlier
-        months are still billed. There is no refund. The number may not be
-        recoverable.
-        Ask the user before calling this.
-
-        ``confirm_e164`` must equal the number's ``e164`` (for example
-        ``"+14155550100"``). The tool reads the number first and refuses with
-        ``{"error": ...}`` on a mismatch, without releasing anything. A number
-        whose order is still pending cannot be released (409). A number whose
-        order failed was never bought: the call only hides it from the list
-        and returns ``{"dismissed": true, "number_id", "e164"}``.
-
-        Returns ``{"released": true, "number_id", "e164"}``, or
-        ``{"error": "<message>"}``."""
+        ``confirm_e164`` must match the number's E.164 value.
+        A mismatch returns an error without releasing anything.
+        Calls and texts to a released number stop. Recovery is not guaranteed.
+        Current and previous monthly fees remain due, without a refund.
+        Pending orders cannot be released and return 409.
+        A failed order was not purchased; this operation only dismisses it from the list.
+        Returns ``released`` or ``dismissed``, plus ``number_id`` and ``e164``, or an error.
+        """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await release_number(
@@ -2737,48 +2509,29 @@ def register_tools(
         number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
-        """Read what the carrier needs to verify the organization before it
-        can buy a number. Call this when quote_numbers shows an offer with
-        ``readiness == "verification_required"``. Read-only.
+        """Read a carrier's current registration fields, documents, address rules and fees.
 
-        ``country_code`` is ISO alpha-2 (for example ``"GB"``). ``number_type``
-        is ``local``, ``mobile``, ``national`` or ``toll_free``.
-        ``subject_type`` is required: ``person`` (the user) or ``business``
-        (the user's company). Never guess it: ask the user "you or your
-        company?". The result's ``subject_types`` lists what the carrier
-        accepts. For SMS, establish the actual sender country and whether they
-        hold a business tax number first: only US/Canadian senders without a
-        business tax number use the individual route. Collect every selected
-        consent method and its conditionally required evidence, even when
-        those method-specific fields are marked optional in the shared schema.
-        The organization may hold one verification of each. ``quote_id`` is the
-        offer's ``quote_id`` from quote_numbers. It is required for
-        ``purpose='number'``: the form is the one for that offer.
+        ``purpose`` is ``number`` or ``sms``. ``number`` is the default.
+        ``country_code`` is an ISO alpha-2 code.
+        ``number_type`` is local, mobile, national or toll_free.
+        ``subject_type`` identifies the actual applicant: ``person`` or ``business``.
+        The response's ``subject_types`` identifies the types the carrier accepts.
+        For number registration, ``quote_id`` is required and selects the exact offer's form.
 
-        ``purpose`` is ``number`` (default, to buy a number) or ``sms``.
-        ``purpose='sms'`` registers the organization to text US numbers from a
-        US number (country_code US, number_type local). Fees are charged from
-        credit per step: when the details are submitted, when the carriers
-        start their review, then monthly after approval. If the error says to pass
-        ``number_id``, pass the ``id`` of one of the organization's US numbers
-        from list_numbers.
+        US SMS registration uses ``purpose="sms"``, country ``US`` and type ``local``.
+        ``number_id`` identifies an existing workspace US number when required by the carrier.
+        Applicant country and business tax status determine the registration route.
+        The personal route is available to US or Canadian applicants without a business tax number.
+        SMS fees apply at submission, carrier review and monthly after approval.
 
-        Returns ``required`` (false means no verification is needed and
-        submit_verification would fail), ``fields`` (values to collect),
-        ``documents`` (slots, each with ``options``), ``address_required``.
-        A field of kind ``choices`` takes several of its ``options``: send
-        their keys joined by commas (for example
-        ``"CUSTOMER_CARE,DELIVERY_NOTIFICATION"``), between ``min_choices``
-        and ``max_choices`` of them.
-        A field with ``max_length`` takes at most that many characters,
-        counted in UTF-16 code units (an emoji counts as 2); a longer value
-        is refused (422).
-        Skip any document slot whose ``needs_input`` is false: do not send it.
-
-        Ask the USER for every value and every file. Never invent, guess or
-        infer personal or company data. Never reuse data from another task.
-
-        Errors come back as ``{"error": "<message>"}``."""
+        Returns ``required``, ``fields``, ``documents`` and ``address_required``.
+        ``required=false`` means a registration submission is unnecessary and would fail.
+        Fields and files require accurate information supplied by the authorized applicant.
+        Choice fields accept comma-separated option keys within their ``min_choices`` and ``max_choices``.
+        Field ``max_length`` uses UTF-16 code units; an emoji counts as two.
+        Selected consent methods can require evidence even when shared fields are optional.
+        Document slots with ``needs_input=false`` require no upload.
+        An upstream failure returns an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_verification_requirements(
@@ -2821,70 +2574,32 @@ def register_tools(
         number_id: str | None = None,
         purpose: str = "number",
     ) -> dict[str, Any]:
-        """Send the user's personal or company details and identity documents
-        to the carrier for verification. IRREVERSIBLE: once submitted it
-        cannot be cancelled, and the carrier keeps the documents.
+        """Submit authorized applicant details and documents for carrier registration.
 
-        ``attest_authorized``: pass true only if the person or company named
-        in these details and documents asked for this submission and gave you
-        the details and files in this conversation. Never invent, guess, infer
-        or reuse personal data or documents. Anything else: pass false (the
-        call then sends nothing).
+        Submission is irreversible once sent for review. Carriers retain submitted documents.
+        ``attest_authorized=true`` attests that the named person or business authorized this submission
+        and supplied the actual details and files for it. False sends nothing.
+        ``subject_type`` identifies that person or business and must match the requirements.
+        ``fields``, ``address``, ``documents`` and ``files`` follow the carrier's current requirements.
 
-        ``purpose`` is ``number`` (default) or ``sms``. ``purpose='sms'``
-        registers the organization to text US numbers from a US number
-        (country_code US, number_type local). The carrier fee is debited from
-        credit at filing. Pass the same ``purpose`` to
-        get_verification_requirements. For ``purpose='number'``, pass the
-        same ``quote_id`` you passed to get_verification_requirements. For
-        ``purpose='sms'``, pass the same ``number_id`` if you passed one, and
-        first call preview_sms_application with the same answers so the user
-        approves the campaign text the carrier will review.
+        ``purpose="number"`` requires the same ``quote_id`` as the requirements response.
+        The balance must cover the offer's setup fee plus first month; otherwise nothing is sent.
+        That amount is reserved during review and pays for a later purchase using this registration.
+        It is returned after rejection, cancellation or 30 days without purchase following approval.
+        ``purpose="sms"`` registers a US number for outbound US texting and charges carrier filing fees.
+        The same ``number_id`` identifies the sender when it was required for the form.
+        SMS campaign text requires user review and approval before submission.
 
-        ``subject_type`` is required: ``person`` (the user) or ``business``
-        (the user's company), the same one passed to
-        get_verification_requirements. Never guess it: ask the user "you or
-        your company?".
+        ``address`` contains customer_name, street, city, region, postal_code and country_code when required.
+        ``documents`` maps each needed slot to its selected ``option`` and ``fields``.
+        ``files`` contains slot, content_type and content_base64 for each required uploaded file.
+        Slot names match letters, digits, hyphens and underscores, up to 64 characters.
+        Accepted files are JPEG, PNG or PDF: at most 10 MiB each, 29 MiB total and 20 files.
+        At most 100 fields are accepted.
 
-        The verification is named after the person or company in the form
-        (for example the business name, or the first and last name); it
-        comes back as ``subject_name``. The organization may hold several
-        verifications of one subject type (several people or companies).
-
-        Steps: 1) call get_verification_requirements. 2) Ask the user for each
-        field and file. 3) Call this once. Do not submit twice: a 409 means
-        one with the same subject type and name already exists (see
-        list_verifications).
-
-        Arguments, as listed by get_verification_requirements:
-        ``fields`` is ``{field name: value}``. ``address`` is
-        ``{"customer_name", "street", "city", "region", "postal_code",
-        "country_code"}`` (all required when ``address_required``).
-        ``documents`` is ``{slot: {"option": <option key>, "fields": {...}}}``
-        for each slot with ``needs_input``. ``files`` is a list of
-        ``{"slot", "content_type", "content_base64"}``, one per slot that
-        needs a file; ``slot`` must be a key in ``documents``
-        and match letters, digits, - and _ (at most 64).
-        ``content_type`` is ``image/jpeg``, ``image/png`` or
-        ``application/pdf``. Limits: 10 MiB per file, 29 MiB in total, at
-        most 20 files and 100 fields. Compress images to JPG or PNG under about
-        7 MiB so the call stays small.
-
-        Credit: for ``purpose='number'`` the balance must cover the offer's
-        setup and first month (``setup_cents`` + ``monthly_cents`` from
-        quote_numbers), or you get a 402 error and nothing is sent: ask the
-        user to add credit in the console first. That amount is set aside
-        while the carrier checks the papers. It pays for setup and the first
-        month when the number is bought with this verification, and comes
-        back if the verification is rejected or cancelled, or if no number
-        is bought with it within 30 days of approval.
-
-        Returns the verification: ``id``, ``state`` and ``subject_name``.
-        Review takes business days and nothing notifies you: poll
-        get_verification. If the carrier finds a problem you get
-        ``{"error", "problems": [{"loc", "msg"}]}`` and nothing is stored:
-        ask the user to fix it, then submit again. After a timeout call
-        list_verifications before trying again."""
+        Returns ``id``, ``state`` and ``subject_name``. Carrier review takes business days.
+        A 409 identifies an existing registration; a timeout can leave a submission in progress.
+        Carrier field errors include ``problems`` and leave no saved submission."""
         # ``fields``, ``documents``, ``files`` and ``address`` are untyped on
         # purpose: FastMCP's schema validation echoes a rejected value
         # (``input_value=...``) into the error the agent sees. The shape is
@@ -2924,37 +2639,20 @@ def register_tools(
     async def list_verifications_tool(
         ctx: Context, purpose: str | None = None
     ) -> dict[str, Any]:
-        """List the organization's carrier verifications, newest first.
+        """List workspace carrier registrations, newest first.
 
-        ``purpose`` is ``number`` or ``sms``; only that kind is listed.
-        Omit to see every registration. ``purpose='sms'`` lists the
-        registrations to text US numbers from a US number.
-
-        Returns ``{"items": [{"id", "country_code", "number_type",
-        "subject_type", "subject_name", "purpose", "state",
-        "rejection_reason", "created_at",
-        "updated_at", "submitted_at", "approved_at", "confirmation",
-        "step", "identity_confirmed", "waiting_for_credit",
-        "credit_needed_cents"}]}``. ``step``
-        says where a US texting filing in progress is: ``confirm_identity``,
-        ``filing`` or ``carrier_review``, ``needs_information`` (repair the
-        existing application), or ``runtime_setup`` (accepted but required
-        response configuration is still pending). ``campaign_accepted`` alone
-        does not authorize sending; check ``runtime_ready`` and number
-        attachment. ``identity_confirmed`` on a person's newest filing, when
-        cancelled or rejected: the next one with the same person needs no
-        code. Dismiss a rejected filing first. ``waiting_for_credit`` true:
-        the balance does not cover the carrier fee of the next step (filing
-        the campaign); add credit and it goes on. ``credit_needed_cents``
-        is that row's share of the credit still needed (null when not
-        waiting); ask the user to add the sum over the waiting rows.
-        ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
-        ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
-        submission already exists before submitting again. ``confirmation``
-        ``code``: call confirm_verification with the code the carrier texted
-        the person.
-
-        Errors come back as ``{"error": "<message>"}``."""
+        ``purpose`` optionally selects ``number`` or ``sms`` registrations.
+        Items include IDs, applicant names and types, country, number type, purpose,
+        state, rejection details, timestamps, confirmation method and SMS progress fields.
+        States are awaiting_review, submitting, submitted, approved, rejected or cancelled.
+        SMS steps include confirm_identity, filing, carrier_review, needs_information and runtime_setup.
+        ``campaign_accepted`` alone does not authorize texting: runtime readiness and number attachment are also required.
+        ``identity_confirmed`` can carry over to a later filing for the same person.
+        ``waiting_for_credit`` means a carrier fee prevents the next step.
+        ``credit_needed_cents`` is that registration's share of the additional credit needed,
+        or null when it is not waiting. Shares across waiting registrations are additive.
+        ``confirmation="code"`` identifies a carrier-texted confirmation code.
+        Returns ``items`` or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_verifications(client=client, purpose=purpose)
@@ -2975,27 +2673,17 @@ def register_tools(
     async def get_verification_tool(
         ctx: Context, verification_id: str
     ) -> dict[str, Any]:
-        """Fetch one verification and its state. Use it to poll.
+        """Read one carrier registration's current state and reported next step.
 
-        There is no notification, and review takes business days. Poll every
-        few minutes to hours, not every few seconds; the state refreshes from
-        the carrier at most once a minute.
-
-        On SMS ``step=needs_information``: use get_sms_application, collect
-        corrections and call amend_sms_application with the SAME id. Do not
-        cancel and recreate the paid brand.
-
-        On ``approved``: call quote_numbers again. The offer is now
-        ``ready``; then acquire_number. On ``rejected``: read
-        ``rejection_reason``, ask the user, dismiss it with
-        cancel_verification, then submit a new one. ``verification_id`` comes
-        from submit_verification or list_verifications.
-        ``waiting_for_credit`` true: the campaign waits for credit;
-        ``credit_needed_cents`` is this row's share (other waiting rows
-        need their own: list_verifications shows them all).
-
-        Returns ``{"id", "state", "rejection_reason", ...}`` or
-        ``{"error": "<message>"}``."""
+        ``verification_id`` identifies an existing registration.
+        The carrier state refreshes at most once per minute. Review can take business days.
+        ``step="needs_information"`` means the existing SMS application needs corrections;
+        its saved applicant details and paid identity remain attached to the same registration.
+        An approved registration can make matching number offers ready for purchase.
+        Rejections include ``rejection_reason``.
+        ``waiting_for_credit`` indicates a fee awaiting payment.
+        ``credit_needed_cents`` is this registration's share of the additional credit needed.
+        Returns the registration record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_verification(
@@ -3018,17 +2706,13 @@ def register_tools(
     async def get_sms_application_tool(
         ctx: Context, verification_id: str
     ) -> dict[str, Any]:
-        """Read this organization's saved SMS registration answers for correction.
+        """Read saved answers for an existing workspace SMS registration.
 
-        This returns private applicant fields and address; do not publish them.
-        When get_verification reports step needs_information, retrieve these
-        answers, collect missing facts from the user using the current requirements,
-        and use amend_sms_application on the SAME verification_id. A 404 means
-        this older application did not retain its answers: ask for the actual
-        current answers. Do not cancel and recreate a paid brand for this repair.
-        This read may recover existing sender details; it never creates a brand
-        or files a campaign.
-        """
+        Returns private applicant fields, address and available sender information.
+        ``verification_id`` identifies the original application, including one needing corrections.
+        An older application without saved answers returns 404.
+        This read can recover an existing sender's details but creates no brand and files no campaign.
+        Corrections retain the existing registration and its paid identity."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_sms_application(
@@ -3055,18 +2739,14 @@ def register_tools(
         address: _JsonObjectOrNone = None,
         number_id: str | None = None,
     ) -> dict[str, Any]:
-        """Show the campaign text a carrier reviews for a US texting
-        registration, before submit_verification with purpose='sms'.
+        """Preview the campaign text for a US SMS registration without filing or charging.
 
-        Pass the same subject_type, fields, address and number_id you will
-        submit (from get_verification_requirements with purpose='sms').
-        Nothing is filed or charged. The API checks the answers' fields and
-        lengths; a field problem comes back as ``problems``. Submit can still
-        refuse for other reasons (a duplicate registration, low credit, a
-        carrier refusal). Show the
-        returned description, consent flow and samples to the user and get
-        their approval before submitting. Never invent consent evidence.
-        Maximum 100 fields and 64 KiB of fields/address combined.
+        ``subject_type``, ``fields``, ``address`` and ``number_id`` describe the proposed application.
+        The response contains the description, consent flow and samples for user review before submission.
+        Answers require actual applicant information and consent evidence.
+        Field or length errors appear in ``problems``.
+        Limits are 100 fields and 64 KiB of combined fields and address.
+        A successful preview does not guarantee submission: duplicates, low credit or carrier checks can still prevent it.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3098,20 +2778,18 @@ def register_tools(
         attest_authorized: StrictBool,
         address: _JsonObjectOrNone = None,
     ) -> dict[str, Any]:
-        """Repair consent evidence on the existing needs_information SMS registration.
+        """Correct an existing SMS registration at the needs_information step.
 
-        Read get_sms_application and current get_verification_requirements first.
-        Pass the complete corrected fields and required actual address from the
-        user; reuse the saved address only if it remains correct.
-        Keep the SAME verification_id; this preserves the paid identity/brand.
-        Identity changes are refused. Do not cancel or call submit_verification
-        to work around a refusal. The API validates facts and resumes the existing
-        application; a later campaign filing can incur its normal review fee.
-        attest_authorized must be true only after the user reviews and authorizes
-        these corrections. Never invent consent evidence or confirmation text.
-        Maximum 100 fields and 64 KiB of fields/address combined. No documents.
-        After a timeout inspect get_verification before retrying the same row.
-        """
+        ``verification_id`` identifies the same paid application and identity.
+        ``fields`` contains complete corrected answers that satisfy the current requirements.
+        The address must be accurate; saved details can be reused when still correct.
+        Identity changes are rejected. This operation does not create a replacement brand.
+        ``attest_authorized=true`` attests that the applicant reviewed and authorized the corrections.
+        Actual consent evidence is required.
+        Limits are 100 fields and 64 KiB of combined fields and address. No documents are uploaded.
+        A later campaign filing can incur the normal review fee.
+        After a timeout, the existing registration can already reflect the correction.
+        Returns the updated registration or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await amend_sms_application(
@@ -3138,23 +2816,16 @@ def register_tools(
     async def cancel_verification_tool(
         ctx: Context, verification_id: str
     ) -> dict[str, Any]:
-        """Cancel a verification that has not been sent for review, or dismiss
-        a rejected one (needed before submitting a new one for the same
-        country and number type). The draft is discarded.
+        """Cancel an eligible carrier registration after explicit user authorization.
 
-        Works in state ``awaiting_review`` or ``rejected``, and for an
-        ``approved`` US SMS registration (``purpose: "sms"``): its numbers
-        leave the campaign, US-to-US texts from them fail again, and its
-        monthly fee stops after the current month. Some registrations bill at
-        least 3 monthly fees from approval, so cancelling sooner can still
-        charge 3 months. Ask the user first. A
-        ``submitting`` or ``submitted`` verification is under review and
-        cannot be cancelled (409), except an accepted SMS campaign waiting
-        in ``runtime_setup``. To repair ``needs_information``, amend the existing
-        application instead of cancelling it.
-
-        Returns the verification with ``state: "cancelled"``, or
-        ``{"error": "<message>"}``."""
+        Awaiting-review drafts are discarded; rejected registrations are dismissed.
+        An approved US SMS registration can be cancelled: attached numbers lose US texting eligibility
+        and its monthly fee ends after the current month.
+        Some registrations have a minimum of three monthly fees even after early cancellation.
+        Submitting or submitted registrations normally return 409; an accepted SMS campaign
+        at runtime_setup is an exception.
+        An SMS application at needs_information supports correction on its existing paid identity.
+        Returns the cancelled registration or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await cancel_verification(
@@ -3177,17 +2848,14 @@ def register_tools(
     async def confirm_verification_tool(
         ctx: Context, verification_id: str, code: str
     ) -> dict[str, Any]:
-        """When a registration shows confirmation 'code', ask the person for
-        the code the carrier texted and submit it here.
+        """Confirm a registration using the code the carrier sent to the applicant.
 
-        ``verification_id`` comes from submit_verification or
-        list_verifications. ``code`` is 4 to 10 characters. A wrong or expired
-        code is an error naming ``code``; the carrier sends a new one after a
-        day. On success the registration moves on; poll get_verification
-        until ``approved``. A ``confirmation`` of ``reply`` means the person
-        answers the carrier's text instead; nothing is entered here.
-
-        Returns the verification or ``{"error": "<message>"}``."""
+        ``verification_id`` identifies a registration with ``confirmation="code"``.
+        ``code`` is the applicant-supplied code, containing 4 to 10 characters.
+        Incorrect or expired codes return a field error; the carrier can send a replacement after a day.
+        Success advances the registration but does not guarantee immediate approval.
+        A ``confirmation="reply"`` registration requires a direct reply to the carrier's text instead.
+        Returns the updated registration or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await confirm_verification(
@@ -3211,13 +2879,10 @@ def register_tools(
         ctx: Context,
         agent_id: str,
     ) -> dict[str, Any]:
-        """Fetch one saved agent by id. ``agent_id`` comes from ``list_agents``
-        or ``create_agent``.
+        """Read one saved workspace agent by ID.
 
-        Returns the ``AgentResponse`` as a dict (``name``, ``system_prompt``,
-        ``first_message``, ``ai_disclosure``, ``voice_config``, ``tools``,
-        ``voice_enabled``, ``sms_enabled``, ``status``, ...), or
-        ``{"error": "<message>"}``."""
+        Returns its name, instructions, greeting, disclosure, voice settings, enabled channels,
+        status, limits and other saved settings, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_agent(client=client, agent_id=agent_id)
@@ -3255,29 +2920,22 @@ def register_tools(
         handover_contacts: list[dict] | None = None,
         clear_fields: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Change a saved agent. Safe to repeat: the same call gives the same
-        result.
+        """Update selected fields on a saved workspace agent.
 
-        Only the fields you pass change; a field left out keeps its value.
-        ``status`` is ``"live"`` or ``"paused"``; a paused agent does not
-        answer. ``language`` is a lowercase ISO 639-1 code. Pass ``language``
-        or ``voice_id`` alone: the other value is kept. ``max_duration_seconds``
-        and ``handover_max_duration_seconds`` are 60..3600.
-        ``handover_contacts`` replaces the whole list: ``[{contact_id, note}]``
-        (max 10) as in ``create_agent``; ``[]`` removes every contact.
-
-        To remove a value, list its name in ``clear_fields``. Allowed:
-        ``first_message`` (the agent waits for the caller),
-        ``ai_disclosure_line`` (back to the workspace line), ``tools``
-        (back to all tools), ``max_duration_seconds`` (back to the workspace
-        limit), ``handover_max_duration_seconds`` (back to 1800). Any other
-        name is refused. Do not set and clear one field.
-
-        Live calls keep the settings they started with. The change applies
-        to the next call or text.
-
-        Returns the updated ``AgentResponse`` as a dict, or
-        ``{"error": "<message>"}``."""
+        Omitted fields retain their values. Repeating the same update gives the same result.
+        ``status`` is ``live`` or ``paused``; a paused agent does not answer.
+        ``language`` is a lowercase ISO 639-1 code.
+        Changing only language or voice preserves the other value.
+        Call and handover duration limits are 60 to 3600 seconds.
+        ``handover_contacts`` replaces the entire list with up to ten entries; an empty list removes them.
+        Each entry contains ``contact_id`` and a note of 1 to 200 characters.
+        ``clear_fields`` explicitly resets first_message, ai_disclosure_line, tools,
+        max_duration_seconds or handover_max_duration_seconds.
+        A field cannot be both set and cleared in the same request.
+        Removing a greeting makes an inbound agent wait for the caller.
+        Other resets restore workspace defaults; the handover limit resets to 1800 seconds.
+        Existing calls keep their starting settings; changes affect later calls and texts.
+        Returns the updated agent or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await update_agent(
@@ -3325,19 +2983,14 @@ def register_tools(
         agent_id: str,
         confirm_name: str,
     ) -> dict[str, Any]:
-        """Delete a saved agent. DESTRUCTIVE. Ask the user before calling this.
+        """Permanently delete a saved agent after explicit user authorization.
 
-        Numbers that used the agent stop answering with it: calls ring out
-        and texts reach webhooks only. Reroute them first with
-        ``route_number`` if that matters.
-
-        ``confirm_name`` must equal the agent's ``name``. The tool reads the
-        agent first and refuses with ``{"error": ...}`` on a mismatch,
-        without deleting anything. To stop an agent without deleting it, use
-        ``update_agent`` with ``status="paused"``.
-
-        Returns ``{"deleted": true, "agent_id", "name"}``, or
-        ``{"error": "<message>"}``."""
+        ``confirm_name`` must match the agent's saved name.
+        A mismatch returns an error without deleting anything.
+        Numbers assigned to the deleted agent stop answering calls with it;
+        texts are delivered to webhooks only.
+        Pausing an agent is a separate non-deleting status change.
+        Returns ``deleted``, ``agent_id`` and ``name``, or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await delete_agent(
@@ -3362,17 +3015,12 @@ def register_tools(
         q: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
-        """List the workspace's contacts: org members (with their phone/email)
-        plus manually saved contacts. Use ``lookup_contact`` for name searches.
+        """List workspace members and manually saved contacts.
 
-        ``q`` optionally filters server-side (matches name/email/phone).
-        ``limit`` caps the page (server default 100, max 500).
-
-        Returns ``{"items": [{"id", "kind", "name", "phone_e164", "email",
-        "role"}, ...]}`` — ``kind`` is ``"member"`` (id ``member:<user_id>``,
-        ``role`` set) or ``"manual"`` (id is the contact's UUID, ``role``
-        null).
-        """
+        ``q`` filters by name, email or phone. ``limit`` defaults to 100, with a maximum of 500.
+        Returns ``items`` with ID, kind, name, phone_e164, email and role.
+        Members have ``kind="member"``, an ID of ``member:<user_id>`` and a role.
+        Manual entries have ``kind="manual"``, a UUID and no role."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_contacts(client=client, q=q, limit=limit)
@@ -3391,15 +3039,10 @@ def register_tools(
         ),
     )
     async def lookup_contact_tool(ctx: Context, query: str) -> dict[str, Any]:
-        """Find a contact by name, email, or phone fragment. Resolve a person
-        to their ``phone_e164``/``email`` BEFORE calling ``place_call``,
-        ``send_sms``, or ``send_email`` — do not guess a contact's number.
+        """Find workspace contacts by name, email or phone fragment.
 
-        Returns up to 10 matches, same item shape as ``list_contacts``.
-
-        Example:
-            lookup_contact(query="maya")
-        """
+        Returns up to ten matches containing names, phone numbers, email addresses and IDs.
+        Several matches can refer to different people."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await lookup_contact(client=client, query=query)
@@ -3422,25 +3065,14 @@ def register_tools(
         cursor: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
-        """List the addresses this workspace can send email from. Call this
-        BEFORE ``send_email`` when you do not already know the ``from_``
-        address — do not guess a domain.
+        """List the workspace's sending identities and default sender address.
 
-        Returns ``{"items": [...], "next_cursor": ..., "default_from": ...}``.
-        Each item carries ``domain``, ``kind`` (``"custom"`` or
-        ``"hail_mail"``) and ``verification_status``; only ``"verified"``
-        rows can send. A ``custom`` item's ``domain`` is a bare DNS name
-        that accepts any local-part (``sales@acme.com``); a ``hail_mail``
-        item's ``domain`` is already a full address.
-
-        ``default_from`` is the address a ``send_email`` with no ``from_``
-        goes out as. A verified custom domain wins over the hail-mail
-        address. It is null when the workspace has several verified custom
-        domains — then ``send_email`` rejects a missing ``from_`` and you
-        must pass one from ``items``.
-
-        Example:
-            list_email_domains()
+        Returns ``items``, ``next_cursor`` and ``default_from``.
+        Only identities with ``verification_status="verified"`` can send.
+        For ``kind="custom"``, ``domain`` is a domain supporting any local part.
+        For ``kind="hail_mail"``, it is already a complete email address.
+        One verified custom domain takes priority over the Hail mail address.
+        With several verified custom domains, ``default_from`` is null and email sending requires an explicit sender.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3462,20 +3094,11 @@ def register_tools(
         ),
     )
     async def whoami_tool(ctx: Context) -> dict[str, Any]:
-        """Identify the human whose credentials this session runs under.
+        """Identify the account and organization authorized by the current credentials.
 
-        Use it to sign or route mail as that person: pass their address as
-        ``send_email(reply_to=...)`` so replies reach them rather than the
-        sending domain, which is often an unattended ``noreply@``.
-
-        Returns ``{"auth_kind", "organization_id", "user_id", "email",
-        "name"}``. ``user_id``/``email``/``name`` are null when the server
-        runs on a shared operator key (``auth_kind="shared"``) — there is no
-        human behind it, so send without a ``reply_to``.
-
-        Example:
-            whoami()
-        """
+        Returns ``auth_kind``, ``organization_id``, ``user_id``, ``email`` and ``name``.
+        Shared operator credentials have ``auth_kind="shared"`` with null user details.
+        The response identifies the current actor, not a message recipient."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await whoami(client=client)
@@ -3499,17 +3122,11 @@ def register_tools(
         phone_e164: str | None = None,
         email: str | None = None,
     ) -> dict[str, Any]:
-        """Save a new contact for the workspace. Provide at least one of
-        ``phone_e164`` (E.164, e.g. ``+14155551234``) or ``email`` — the API
-        rejects (422) a contact with neither. A duplicate phone or email on
-        an existing contact returns 409.
+        """Save a workspace contact with a name and a phone number or email address.
 
-        Example:
-            create_contact(name="Maya Chen", phone_e164="+14155551234")
-
-        Returns the created contact entry as a dict. On failure returns
-        ``{"error": "<message>"}`` instead.
-        """
+        At least one of ``phone_e164`` or ``email`` is required.
+        Phone numbers use E.164 format. A duplicate phone or email returns 409.
+        Returns the new contact record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_contact(
