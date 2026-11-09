@@ -89,7 +89,7 @@ _VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
 def tax_number(value: str | None, country: str | None) -> str:
     """The business tax number as carriers file it: letters and digits,
     uppercase, without the VAT prefix of the issuing country.
-    "SE 556677-8899 01" from Sweden files as "556677889901". A full Canadian
+    "GB 123 4567 89" from the UK files as "123456789". A full Canadian
     Business Number files as its first 9 digits."""
     text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
     code = (country or "").strip().upper()
@@ -125,7 +125,7 @@ _BUSINESS_FIELDS = (
         label="Country issuing the business tax number",
         pattern=r"^[A-Z]{2}$",
         max_length=2,
-        help="Two letters, like US or SE.",
+        help="Two letters, like US or GB.",
     ),
     FieldSpec(
         name="ein",
