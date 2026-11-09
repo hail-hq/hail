@@ -390,15 +390,34 @@ def test_samples_cover_one_to_five_purposes(count):
 def test_unselected_and_missing_sample_mapping_are_rejected():
     assert "sample_1_type" in error_fields({**GOOD, "sample_1_type": "MARKETING"})
     assert "sample_3" in error_fields({**GOOD, "sample_3_type": "CUSTOMER_CARE"})
-    assert "sample_3_type" in error_fields({**GOOD, "sample_3": GOOD["sample_1"]})
+    # A sample without a purpose is fine: purposes are then not checked.
+    assert not errors({**GOOD, "sample_3": GOOD["sample_1"]})
+    assert not errors({**GOOD, "sample_1_type": "", "sample_2_type": ""})
 
 
 def test_sample_identity_and_stop_must_be_real():
     assert "sample_1" in error_fields(
         {**GOOD, "sample_1": "Wrong brand: Your appointment is tomorrow. Reply STOP."}
     )
-    assert "sample_1" in error_fields(
+    # The opt-out is needed in one sample, not in each.
+    assert not errors(
         {**GOOD, "sample_1": "Acme: Your appointment is tomorrow at 2pm."}
+    )
+    no_stop = {
+        **GOOD,
+        "sample_1": "Acme: Your appointment is tomorrow at 2pm.",
+        "sample_2": "Acme: Your order 123 shipped today. Thanks!",
+    }
+    assert "sample_1" in error_fields(no_stop)
+
+
+def test_sample_name_check_ignores_spaces_dots_and_case():
+    data = {**GOOD, "program_name": "Acme Tech"}
+    for name in ("acme.tech", "AcmeTech", "ACME TECH"):
+        sample = f"{name}: Your appointment is tomorrow. Reply STOP to opt out."
+        assert "sample_1" not in error_fields({**data, "sample_1": sample})
+    assert "sample_1" in error_fields(
+        {**data, "sample_1": "Acme: Your appointment is tomorrow. Reply STOP."}
     )
 
 
