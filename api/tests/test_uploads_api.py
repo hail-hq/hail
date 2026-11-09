@@ -371,11 +371,11 @@ async def test_a_busy_server_is_503_and_keeps_the_link(
 
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    monkeypatch.setattr(uploads, "_BODY_READS", asyncio.Semaphore(0))
+    monkeypatch.setattr(uploads, "MAX_CONCURRENT_BODY_READS", 0)
     busy = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert busy.status_code == 503
     assert busy.headers["Retry-After"] == "5"
-    monkeypatch.setattr(uploads, "_BODY_READS", asyncio.Semaphore(1))
+    monkeypatch.setattr(uploads, "MAX_CONCURRENT_BODY_READS", 1)
     ok = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert ok.status_code == 200
 
@@ -730,3 +730,113 @@ async def test_one_org_runs_at_most_two_body_reads(
     # The busy org's third link was not used up.
     retry = await client.put(_path(links[2]["upload_url"]), content=_JPEG)
     assert retry.status_code == 200, retry.text
+
+
+async def test_puts_over_the_global_cap_get_503_at_once(
+    client, org_and_key, s3, async_session, session_factory, monkeypatch
+) -> None:
+    """No queueing: past the process cap a PUT answers 503 without waiting,
+    and its link is not claimed."""
+    from hailhq.api.routes import uploads as uploads_routes
+    from hailhq.core.db import get_session
+
+    monkeypatch.setattr(uploads_routes, "MAX_CONCURRENT_BODY_READS", 2)
+    keys = [org_and_key[2]]
+    for i in range(3):
+        keys.append((await insert_org_and_key(async_session, org_slug=f"o{i}"))[2])
+    links = [await _link(client, k) for k in keys]
+    release = asyncio.Event()
+    reading = asyncio.Semaphore(0)
+
+    async def held():
+        reading.release()
+        await release.wait()
+        yield _JPEG
+
+    async def per_request_session():
+        async with session_factory() as session:
+            yield session
+
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        first = [
+            asyncio.create_task(client.put(_path(link["upload_url"]), content=held()))
+            for link in links[:2]
+        ]
+        for _ in first:
+            await asyncio.wait_for(reading.acquire(), 5)
+        over = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    client.put(_path(link["upload_url"]), content=_JPEG)
+                    for link in links[2:]
+                )
+            ),
+            1,
+        )
+        release.set()
+        done = await asyncio.gather(*first)
+    finally:
+        release.set()
+        app.dependency_overrides[get_session] = saved
+    assert [r.status_code for r in over] == [503, 503]
+    assert all(r.headers["Retry-After"] for r in over)
+    assert [r.status_code for r in done] == [200, 200]
+    assert uploads_routes._reads_total == 0
+    assert uploads_routes._org_reads == {}
+    # Not claimed: the refused links still work.
+    for link in links[2:]:
+        again = await client.put(_path(link["upload_url"]), content=_JPEG)
+        assert again.status_code == 200, again.text
+
+
+async def test_a_failed_final_commit_gives_the_link_back(
+    client, org_and_key, s3, async_session, monkeypatch
+) -> None:
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    stored = asyncio.Event()
+
+    async def put(*_args):
+        stored.set()
+
+    s3.put_attachment.side_effect = put
+    real_commit = async_session.commit
+    failed = []
+
+    async def commit():
+        if stored.is_set() and not failed:
+            failed.append(True)
+            raise RuntimeError("database went away")
+        await real_commit()
+
+    monkeypatch.setattr(async_session, "commit", commit)
+    with pytest.raises(RuntimeError):
+        await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert failed
+    s3.put_attachment.side_effect = None
+    again = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert again.status_code == 200, again.text
+
+
+async def test_a_link_that_expires_before_the_claim_is_410(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    """The check and the claim read the clock apart; the claim's time wins."""
+    from hailhq.api.routes import uploads as uploads_routes
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    real_now = uploads_routes._now
+    calls = []
+
+    def later():
+        calls.append(1)
+        # The first reading (the expiry check) is now; the claim is later.
+        return real_now() + (timedelta(0) if len(calls) == 1 else timedelta(hours=1))
+
+    monkeypatch.setattr(uploads_routes, "_now", later)
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 410, resp.text
+    s3.put_attachment.assert_not_awaited()

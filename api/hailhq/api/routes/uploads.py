@@ -37,7 +37,7 @@ from hailhq.api.ratelimit import (
     merge_rate_limited_responses,
 )
 from hailhq.core.config import settings
-from hailhq.core.db import get_session, key_lock
+from hailhq.core.db import get_session, key_lock, session_scope
 from hailhq.core.file_uploads import (
     LINK_BUSY_PREFIX,
     LINK_TTL,
@@ -76,8 +76,9 @@ logger = logging.getLogger(__name__)
 _NOT_FOUND = "upload link not found, already used, or in use"
 # Body reads one process runs at once. Each can buffer up to the purpose's
 # size limit (25 MB for an email attachment), so this caps that memory.
+# Over the cap a PUT answers 503 at once; nothing waits in a queue.
 MAX_CONCURRENT_BODY_READS = 8
-_BODY_READS = asyncio.Semaphore(MAX_CONCURRENT_BODY_READS)
+_reads_total = 0
 # Body reads one organization runs at once in this process, so one tenant's
 # slow uploads cannot hold every slot above.
 MAX_BODY_READS_PER_ORG = 2
@@ -217,6 +218,51 @@ async def create_file_upload(
     )
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _take_read(org: UUID) -> bool:
+    """Count one more body read, for the process and for ``org``. False,
+    counting nothing, when either cap is reached. Synchronous: no await
+    between the check and the count."""
+    global _reads_total
+    if (
+        _reads_total >= MAX_CONCURRENT_BODY_READS
+        or _org_reads.get(org, 0) >= MAX_BODY_READS_PER_ORG
+    ):
+        return False
+    _reads_total += 1
+    _org_reads[org] = _org_reads.get(org, 0) + 1
+    return True
+
+
+def _drop_read(org: UUID) -> None:
+    """Undo ``_take_read``. Never below zero; an org at zero has no entry."""
+    global _reads_total
+    _reads_total = max(0, _reads_total - 1)
+    left = _org_reads.get(org, 0) - 1
+    if left > 0:
+        _org_reads[org] = left
+    else:
+        _org_reads.pop(org, None)
+
+
+async def _give_back(upload_id: UUID, busy: str, token_hash: str) -> None:
+    """Make a claimed link usable again. On its own session, so a broken
+    request session cannot stop it; never raises into the request."""
+    try:
+        async with session_scope() as session:
+            await session.execute(
+                update(FileUpload)
+                .where(FileUpload.id == upload_id, FileUpload.token_hash == busy)
+                .values(token_hash=token_hash)
+            )
+            await session.commit()
+    except BaseException:
+        logger.warning("upload link %s was not given back", upload_id)
+
+
 def _read_deadline(expires_at: datetime, now: datetime) -> float:
     """Seconds a body read may take: until the link expires, at most
     ``MAX_BODY_READ_SECONDS``."""
@@ -298,11 +344,6 @@ async def put_file_upload(
     """
     if s3 is None:
         raise _unavailable()
-    # Each body read can hold up to the purpose's limit in memory, so this
-    # process runs only a few at a time. Checked before the link is claimed,
-    # so a busy server never uses up a link.
-    if _BODY_READS.locked():
-        raise _busy()
     token_hash = hash_token(token)
     row = await db.get(FileUpload, upload_id)
     if (
@@ -311,124 +352,128 @@ async def put_file_upload(
         or not hmac.compare_digest(row.token_hash, token_hash)
     ):
         raise _not_found()
-    now = datetime.now(timezone.utc)
-    if row.link_expires_at is None or row.link_expires_at <= now:
+    if row.link_expires_at is None or row.link_expires_at <= _now():
         raise _expired()
+    org, expires = row.organization_id, row.link_expires_at
 
-    # One organization's slow uploads must not use up every slot. Checked
-    # before the claim, so a busy organization keeps its link. No await
-    # between the check and the count, so it is exact in this process.
-    org = row.organization_id
-    expires = row.link_expires_at
-    if _org_reads.get(org, 0) >= MAX_BODY_READS_PER_ORG:
+    # Each body read can hold up to the purpose's limit in memory, so this
+    # process runs only a few at a time, and one organization only 2 of
+    # them. Counted before the claim, so a busy server keeps the link.
+    if not _take_read(org):
         raise _busy()
-    _org_reads[org] = _org_reads.get(org, 0) + 1
     try:
-        # Claim the link before reading the body: the token hash becomes a busy
-        # marker in one atomic update, so only one body read runs per link. A
-        # second PUT meanwhile gets 404. A failed read gives the link back, so
-        # the same link can be tried again with a smaller or correct file.
-        busy = LINK_BUSY_PREFIX + token_hash
-        claimed = (
-            await db.execute(
-                update(FileUpload)
-                .where(
-                    FileUpload.id == upload_id,
-                    FileUpload.token_hash == token_hash,
-                    FileUpload.uploaded_at.is_(None),
-                    FileUpload.link_expires_at > now,
-                )
-                .values(token_hash=busy)
-                .returning(
-                    FileUpload.purpose, FileUpload.content_type, FileUpload.s3_key
-                )
-            )
-        ).one_or_none()
-        if claimed is None:
-            await db.rollback()
-            raise _not_found()
-        # Committed, so nothing is held open while the body arrives.
-        await db.commit()
-        purpose, content_type, s3_key = claimed
+        return await _claim_and_store(db, s3, request, upload_id, token_hash, expires)
+    finally:
+        _drop_read(org)
 
-        async def give_back() -> None:
-            await db.rollback()
+
+async def _claim_and_store(
+    db: AsyncSession,
+    s3: S3MailClient,
+    request: Request,
+    upload_id: UUID,
+    token_hash: str,
+    expires: datetime,
+) -> FileUploadResponse:
+    """Claim the link, read the body, store it and mark the link used.
+
+    The claim turns the token hash into a busy marker in one atomic update,
+    so only one body read runs per link; a second PUT meanwhile gets 404.
+    Anything that fails after the claim gives the link back, so the same
+    link can be tried again."""
+    busy = LINK_BUSY_PREFIX + token_hash
+    claim_now = _now()
+    claimed = (
+        await db.execute(
+            update(FileUpload)
+            .where(
+                FileUpload.id == upload_id,
+                FileUpload.token_hash == token_hash,
+                FileUpload.uploaded_at.is_(None),
+                FileUpload.link_expires_at > claim_now,
+            )
+            .values(token_hash=busy)
+            .returning(FileUpload.purpose, FileUpload.content_type, FileUpload.s3_key)
+        )
+    ).one_or_none()
+    if claimed is None:
+        await db.rollback()
+        # Expired between the check above and this claim: say so.
+        raise _expired() if expires <= claim_now else _not_found()
+    # Committed, so nothing is held open while the body arrives.
+    await db.commit()
+    purpose, content_type, s3_key = claimed
+
+    try:
+        try:
+            async with asyncio.timeout(_read_deadline(expires, _now())):
+                payload = await _read_body(request, max_bytes(purpose))
+        except TimeoutError:
+            raise HTTPException(
+                status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
+                detail=(
+                    "the file did not arrive in time; the link still works "
+                    "until it expires"
+                ),
+            ) from None
+        if not payload:
+            raise unprocessable("the file is empty", loc=["body"])
+        if purpose == "verification_document" and not matches_declared_type(
+            payload, content_type
+        ):
+            raise unprocessable(
+                f"the file does not look like {content_type}", loc=["body"]
+            )
+        try:
+            await s3.put_attachment(s3_key, payload, content_type)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="storage unavailable; try again",
+            ) from exc
+        # Mark it used only while it is still this PUT's claim.
+        stored = (
             await db.execute(
                 update(FileUpload)
                 .where(FileUpload.id == upload_id, FileUpload.token_hash == busy)
-                .values(token_hash=token_hash)
-            )
-            await db.commit()
-
-        try:
-            async with _BODY_READS:
-                try:
-                    async with asyncio.timeout(_read_deadline(expires, now)):
-                        payload = await _read_body(request, max_bytes(purpose))
-                except TimeoutError:
-                    raise HTTPException(
-                        status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
-                        detail=(
-                            "the file did not arrive in time; the link still "
-                            "works until it expires"
-                        ),
-                    ) from None
-            if not payload:
-                raise unprocessable("the file is empty", loc=["body"])
-            if purpose == "verification_document" and not matches_declared_type(
-                payload, content_type
-            ):
-                raise unprocessable(
-                    f"the file does not look like {content_type}", loc=["body"]
+                .values(
+                    token_hash=None,
+                    uploaded_at=_now(),
+                    size_bytes=len(payload),
+                    sha256=hashlib.sha256(payload).hexdigest(),
                 )
-            try:
-                await s3.put_attachment(s3_key, payload, content_type)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="storage unavailable; try again",
-                ) from exc
-        except BaseException:
-            # Includes a client that hangs up mid-body. The give-back is shielded
-            # so a cancelled request still returns the link.
-            try:
-                await asyncio.shield(give_back())
-            except Exception:
-                logger.warning("upload link %s was not given back", upload_id)
-            raise
-
-        row = (
-            await db.execute(
-                select(FileUpload).where(
-                    FileUpload.id == upload_id, FileUpload.token_hash == busy
+                .returning(
+                    FileUpload.id,
+                    FileUpload.purpose,
+                    FileUpload.filename,
+                    FileUpload.content_type,
+                    FileUpload.size_bytes,
+                    FileUpload.sha256,
                 )
             )
-        ).scalar_one_or_none()
-        if row is None:
-            # The link went away while the object was written (removed by
-            # hand, or a sweep). Nothing references the object: remove it.
-            await db.rollback()
-            try:
-                await s3.delete(s3_key)
-            except Exception:
-                logger.warning(
-                    "upload %s: could not delete an orphaned object", upload_id
-                )
-            raise _expired()
-        row.token_hash = None
-        row.uploaded_at = datetime.now(timezone.utc)
-        row.size_bytes = len(payload)
-        row.sha256 = hashlib.sha256(payload).hexdigest()
+        ).one_or_none()
         await db.commit()
-        await db.refresh(row)
-        return FileUploadResponse.model_validate(row)
+    except BaseException:
+        # Includes a client that hangs up mid-body and a failed commit. The
+        # request's own transaction ends first, so it holds no row lock the
+        # give-back would wait on; the give-back is shielded so a cancelled
+        # request still returns the link.
+        try:
+            await asyncio.shield(db.rollback())
+        except BaseException:
+            logger.warning("upload %s: request rollback failed", upload_id)
+        await asyncio.shield(_give_back(upload_id, busy, token_hash))
+        raise
 
-    finally:
-        left = _org_reads.get(org, 1) - 1
-        if left > 0:
-            _org_reads[org] = left
-        else:
-            _org_reads.pop(org, None)
+    if stored is None:
+        # The link went away while the object was written (a sweep, or by
+        # hand). Nothing references the object: remove it.
+        try:
+            await s3.delete(s3_key)
+        except Exception:
+            logger.warning("upload %s: could not delete an orphaned object", upload_id)
+        raise _expired()
+    return FileUploadResponse.model_validate(stored._mapping)
 
 
 __all__ = ["router"]
