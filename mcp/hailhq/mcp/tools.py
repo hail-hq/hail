@@ -1596,10 +1596,13 @@ def register_tools(
         An ``agent_id`` selects saved settings; explicit arguments override them.
         ``llm`` contains ``base_url``, ``api_key`` and ``model`` for a compatible endpoint.
         A supplied prompt becomes part of the call agent's instructions.
-        ``to`` is an E.164 phone number. ``from_`` is optional.
+        ``to`` is an E.164 phone number. ``from_`` is optional and defaults to the first active number.
         ``first_message`` is spoken on pickup. Without it, the agent reacts to the answer or silence.
         ``language`` is a supported lowercase ISO 639-1 code; English is the default.
-        AI disclosure is enabled by default. Disabling it requires a lawful basis.
+        An unsupported code returns 422.
+        ``ai_disclosure`` is true by default and speaks an AI notice at the start of the call.
+        ``ai_disclosure=false`` skips it. US artificial-voice calls (47 CFR 64.1200(b)(1)) require it.
+        Hail does not verify the lawful basis.
         ``recording_enabled`` overrides the agent or workspace recording setting for this call.
         ``tools`` limits the call agent's capabilities; an empty list disables them.
 
@@ -1608,7 +1611,7 @@ def register_tools(
         ``message_type="marketing"`` also requires ``consent_source``.
         ``metadata`` is stored on the call record.
         A returned ``idempotency_key`` identifies the original request for a retry.
-        A different key represents a new call.
+        A different key represents a new call. A 4xx response returns no key.
 
         Returns the call ID, status, phone numbers and ``idempotency_key``, or an error.
         """

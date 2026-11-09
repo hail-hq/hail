@@ -129,7 +129,8 @@ async def test_public_descriptions_state_contracts_without_model_instructions(
     instructions = re.compile(
         r"\b(?:you|your|never|prefer|ask the user|ask the person|tell the user|"
         r"show the user|do not|don't|call this|use this|then call|first call|"
-        r"before calling|poll every)\b|\bloop:",
+        r"before calling|poll every|should|ask|pass|make sure|remember|always|"
+        r"avoid|prefer to|be sure)\b|\bloop:",
         re.IGNORECASE,
     )
     cross_tool_call = re.compile(

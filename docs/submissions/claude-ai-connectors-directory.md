@@ -11,16 +11,65 @@ status: drafted
 
 Review the live [Directory Policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy) before submitting.
 
-## Current application
+## Listing content
 
-The owner is filling the draft. Submission is not confirmed.
-The private submission tracker holds reviewer access and credit details. Keep credentials and promotion codes out of this repository.
+Paste these into the portal at <https://claude.ai/directory/manage>.
 
-- Server: `https://mcp.hail.so`, Streamable HTTP at the root path.
-- Authentication: OAuth with Dynamic Client Registration. Public discovery precedes sign-in for tool execution.
-- Documentation: <https://hail.so/docs/mcp>.
-- Privacy policy: <https://hail.so/legal/privacy>.
-- Tool names, arguments and annotations: the live MCP catalog and `mcp/hailhq/mcp/tools.py`.
+- **Name:** Hail
+- **Tagline (55 characters or fewer):** Phone, SMS and email for agents.
+- **Categories:** Communication, Productivity, Developer Tools
+- **Docs URL:** <https://hail.so/docs/mcp>
+- **Privacy policy URL:** <https://hail.so/legal/privacy>
+- **Support contact:** hi@hail.so
+- **Server:** `https://mcp.hail.so`, Streamable HTTP at the root path
+- **Authentication:** OAuth with Dynamic Client Registration. Public discovery precedes sign-in for tool execution.
+- **Icon:** the square monogram from the hail-website repo, `public/assets/monogram-512.png`.
+
+**Description (2,000 characters or fewer):**
+
+> Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
+>
+> Place an outbound AI call and read its transcript. Send and receive text messages. Send email, read replies and attachments, and check delivery events and stats. Buy and route phone numbers, manage saved agents, and submit carrier registrations.
+>
+> Sign in with OAuth. Each person authorizes their own Hail account. Hail is open source (AGPLv3) and can be self-hosted. The same features are available in the CLI, the Python SDK and the OpenAPI spec.
+
+**Use cases:**
+
+- Place an outbound AI call and read the outcome.
+- Send an email, then check whether it was delivered, opened or bounced.
+- Send a text message and read the replies.
+- Buy a phone number and route it to a saved agent.
+
+**Prerequisites:** a Hail account with credit. Calls and texts need an active phone number. Email needs a verified sending domain.
+
+**Data direction:** read and write.
+
+**Tools:** the portal syncs the live list. The server has 41 tools, listed in `mcp/hailhq/mcp/tools.py`.
+
+| Group | Tools |
+| --- | --- |
+| Calls | `place_call`, `get_call`, `list_calls`, `get_events` |
+| Text messages | `send_sms`, `get_sms`, `list_sms`, `preview_sms_application`, `get_sms_application`, `amend_sms_application` |
+| Email | `send_email`, `upload_email_attachment`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `list_email_domains` |
+| Agents | `create_agent`, `update_agent`, `get_agent`, `list_agents`, `delete_agent`, `route_number` |
+| Numbers | `list_number_regions`, `quote_numbers`, `acquire_number`, `list_numbers`, `get_number`, `release_number` |
+| Registrations | `get_verification_requirements`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification` |
+| Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami` |
+
+## Portal steps
+
+1. Introduction: read the overview.
+2. Connection: server URL `https://mcp.hail.so`, transport HTTP (Streamable), per-user OAuth.
+3. Tools: the portal syncs the live tools and checks `title` and the read-only and destructive hints.
+4. Listing and use cases: paste the fields above.
+5. Company: use the legal name and contact on <https://hail.so/legal>.
+6. Authentication: OAuth. Discovery is at `https://mcp.hail.so/.well-known/oauth-protected-resource`.
+7. Data handling: first-party API.
+8. Test and launch: paste reviewer access (see Reviewer testing below).
+9. Compliance: check the acknowledgements below only after reading each against current practice.
+10. Review: fix what the checklist flags, then submit.
+
+Escalate a stuck review to `mcp-review@anthropic.com`.
 
 ## Policy acknowledgements
 
