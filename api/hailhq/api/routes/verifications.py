@@ -1642,65 +1642,33 @@ async def _read_file(upload) -> UploadedFile:
     )
 
 
-@router.post(
-    "",
-    response_model=VerificationResponse,
-    status_code=http_status.HTTP_201_CREATED,
-    operation_id="create_verification",
-    responses={
-        402: {
-            "description": (
-                "Not enough credit. A number verification needs the offer's "
-                "setup and first month (`setup_cents` + `monthly_cents` of the "
-                "quote) and sets that amount aside until you buy the number. "
-                "A US SMS registration needs its filing fee. Nothing is filed."
-            ),
-        },
-    },
-)
-async def create_verification(
+class _Prepared(NamedTuple):
+    """A submission that passed every check Hail runs before filing."""
+
+    sub: _Submission
+    offer: dict
+    provider_name: str
+    provider: VerificationProvider
+    hold_cents: int
+    requirements: Requirements
+    subject_name: str | None
+    documents: dict[str, DocumentInput]
+    draft_kwargs: dict
+
+
+async def _prepare_submission(
     request: Request,
-    principal: Annotated[Principal, Depends(get_current_principal)],
-    db: Annotated[AsyncSession, Depends(get_session)],
-    registry: Annotated[Registry, Depends(get_verification_registry)],
-) -> VerificationResponse:
-    """Submit your details and documents (multipart/form-data).
-
-    Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
-    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
-    are charged from credit per step, when the details are submitted and when
-    the carriers start their review, and 402 means there is not enough credit
-    to file, also when a kept brand cannot be reused and the credit does not
-    cover a new one), `country_code`, `number_type`, `subject_type` (required:
-    `person` for you, `business` for your company; ask the user which),
-    `quote_id` (required for `number`: the offer to verify for), `number_id`
-    (optional, for `sms`: one of your US numbers; needed when your US numbers
-    are with more than one carrier),
-    `fields` (JSON object), `address` (JSON object, when required), `documents`
-    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
-    part per slot named `file.<slot>`. Get the slot and field names from
-    `GET /verifications/requirements`.
-
-    The name of the person or company comes from the form you send (for
-    example the business name, or the first and last name) and is shown
-    back as `subject_name`. For a number you may hold several verifications
-    of each subject type (several people, several companies); a second live
-    one of the same subject type and the same name is a 409, and so is a
-    second live one of the same subject type when the form holds no name.
-    A 409 comes before your files are checked and before anything is filed.
-
-    A number verification needs credit for the offer's setup and first month
-    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
-    nothing is filed. That amount is set aside from your balance while the
-    carrier checks your papers. It pays for setup and the first month when
-    you buy the number with this verification, and comes back if the
-    verification is rejected or cancelled, or if no number is bought with it
-    within 30 days of approval. A by-request offer sets nothing aside.
-
-    The carrier checks the details right away. Problems come back as 422 with
-    the field named, and nothing is kept. When it passes, the verification is
-    submitted to the carrier for its review; read it back to follow the state.
-    A `provider` part is deprecated and ignored: Hail picks the carrier.
+    principal: Principal,
+    db: AsyncSession,
+    registry: Registry,
+    *,
+    lock: bool,
+) -> _Prepared:
+    """Every step of ``POST /verifications`` before anything is filed:
+    the form and purpose rules, the carrier pick, the credit checks (402),
+    the carrier's form (a read), the duplicate check (409), the length
+    limits and the files. Shared with ``POST /verifications/check``, which
+    passes ``lock=False``: it saves nothing, so it takes no lock.
     """
     form = await _parse_form(request)
     if _text_part(form, "subject_type") not in ("person", "business"):
@@ -1779,7 +1747,7 @@ async def create_verification(
         if await get_balance_cents(db, principal.organization_id) < hold_cents:
             raise _hold_402(hold_cents)
 
-    if sub.purpose == "sms":
+    if lock and sub.purpose == "sms":
         # Held until the row is saved: a second filing at the same time
         # waits here, then sees the first row and gets 409.
         await org_lock(db, principal.organization_id)
@@ -1904,6 +1872,92 @@ async def create_verification(
                 db, principal.organization_id, provider_name
             )
         )
+
+    return _Prepared(
+        sub=sub,
+        offer=offer,
+        provider_name=provider_name,
+        provider=provider,
+        hold_cents=hold_cents,
+        requirements=requirements,
+        subject_name=subject_name,
+        documents=documents,
+        draft_kwargs=draft_kwargs,
+    )
+
+
+@router.post(
+    "",
+    response_model=VerificationResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    operation_id="create_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit. A number verification needs the offer's "
+                "setup and first month (`setup_cents` + `monthly_cents` of the "
+                "quote) and sets that amount aside until you buy the number. "
+                "A US SMS registration needs its filing fee. Nothing is filed."
+            ),
+        },
+    },
+)
+async def create_verification(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+) -> VerificationResponse:
+    """Submit your details and documents (multipart/form-data).
+
+    Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
+    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+    are charged from credit per step, when the details are submitted and when
+    the carriers start their review, and 402 means there is not enough credit
+    to file, also when a kept brand cannot be reused and the credit does not
+    cover a new one), `country_code`, `number_type`, `subject_type` (required:
+    `person` for you, `business` for your company; ask the user which),
+    `quote_id` (required for `number`: the offer to verify for), `number_id`
+    (optional, for `sms`: one of your US numbers; needed when your US numbers
+    are with more than one carrier),
+    `fields` (JSON object), `address` (JSON object, when required), `documents`
+    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
+    part per slot named `file.<slot>`. Get the slot and field names from
+    `GET /verifications/requirements`.
+
+    The name of the person or company comes from the form you send (for
+    example the business name, or the first and last name) and is shown
+    back as `subject_name`. For a number you may hold several verifications
+    of each subject type (several people, several companies); a second live
+    one of the same subject type and the same name is a 409, and so is a
+    second live one of the same subject type when the form holds no name.
+    A 409 comes before your files are checked and before anything is filed.
+
+    A number verification needs credit for the offer's setup and first month
+    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+    nothing is filed. That amount is set aside from your balance while the
+    carrier checks your papers. It pays for setup and the first month when
+    you buy the number with this verification, and comes back if the
+    verification is rejected or cancelled, or if no number is bought with it
+    within 30 days of approval. A by-request offer sets nothing aside.
+
+    The carrier checks the details right away. Problems come back as 422 with
+    the field named, and nothing is kept. When it passes, the verification is
+    submitted to the carrier for its review; read it back to follow the state.
+    A `provider` part is deprecated and ignored: Hail picks the carrier.
+    """
+    prepared = await _prepare_submission(request, principal, db, registry, lock=True)
+    (
+        sub,
+        offer,
+        provider_name,
+        provider,
+        hold_cents,
+        requirements,
+        subject_name,
+        documents,
+        draft_kwargs,
+    ) = prepared
 
     try:
         draft = await provider.create_draft(
