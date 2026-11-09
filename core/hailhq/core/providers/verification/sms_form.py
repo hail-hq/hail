@@ -96,7 +96,7 @@ def tax_number(value: str | None, country: str | None) -> str:
     if code == "CA":
         full = re.fullmatch(r"([0-9]{9})[A-Z]{2}[0-9]{4}", text)
         return full.group(1) if full else text
-    if code == "US" or not re.fullmatch(r"[A-Z]{2}", code):
+    if code in NINE_DIGIT_COUNTRIES or not re.fullmatch(r"[A-Z]{2}", code):
         return text
     prefix = _VAT_PREFIXES.get(code, rf"{code}(?=[0-9])")
     return re.sub(rf"^{prefix}", "", text)
