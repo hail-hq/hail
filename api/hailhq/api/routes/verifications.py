@@ -28,7 +28,6 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Annotated, Literal, NamedTuple
 from uuid import UUID
 
@@ -49,7 +48,7 @@ from hailhq.api.sms_registration import (
 )
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import sms_registration_fees, sms_setup, verification_hold
-from hailhq.core.billing import get_balance_cents
+from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import get_session, org_lock, try_org_lock
@@ -762,17 +761,6 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     )
 
 
-async def _ledger_cents(db: AsyncSession, organization_id: UUID) -> Decimal:
-    """The organization's ledger sum, unrounded. ``int()`` of it is
-    ``get_balance_cents``."""
-    total = await db.execute(
-        select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
-            AccountCredit.organization_id == organization_id
-        )
-    )
-    return Decimal(total.scalar_one())
-
-
 # What _campaign_gated and _campaign_unfunded read of a row.
 _GATE_COLUMNS = (
     CarrierVerification.id,
@@ -832,7 +820,7 @@ async def _campaign_unfunded(
             continue
         # One read of the ledger: the check uses the balance as
         # get_balance_cents reads it (truncated toward zero).
-        ledger = await _ledger_cents(db, org)
+        ledger = await get_ledger_cents(db, org)
         balance = int(ledger)
         left = balance - await _uncharged_cents(db, org)
         # A reserved row (its campaign may be in flight) keeps its claim.
