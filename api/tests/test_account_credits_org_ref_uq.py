@@ -59,6 +59,14 @@ async def _website_insert(db, org, ref) -> int:
         return result.rowcount
 
 
+async def _indexes(db) -> set[str]:
+    async with db.begin() as connection:
+        rows = await connection.execute(
+            text("SELECT indexname FROM pg_indexes WHERE tablename = 'account_credits'")
+        )
+        return {r[0] for r in rows}
+
+
 async def _count(db, org) -> int:
     async with db.begin() as connection:
         return (
@@ -113,3 +121,26 @@ async def test_downgrade_allows_duplicates_and_upgrade_refuses_them(db) -> None:
     await _insert(db, org, "dup")
     with pytest.raises(IntegrityError):
         await _insert(db, org, "dup")
+
+
+async def test_upgrade_swaps_the_ref_index(db) -> None:
+    # The models' schema has no ref-only index; downgrade adds it back.
+    await _run(db, migration.downgrade)
+    after_down = await _indexes(db)
+    assert "idx_account_credits_ref" in after_down
+    assert "account_credits_org_ref_uq" not in after_down
+    async with db.begin() as connection:
+        definition = (
+            await connection.execute(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE indexname = 'idx_account_credits_ref'"
+                )
+            )
+        ).scalar_one()
+    assert definition.endswith("(ref) WHERE (ref IS NOT NULL)")
+
+    await _run(db, migration.upgrade)
+    after_up = await _indexes(db)
+    assert "account_credits_org_ref_uq" in after_up
+    assert "idx_account_credits_ref" not in after_up

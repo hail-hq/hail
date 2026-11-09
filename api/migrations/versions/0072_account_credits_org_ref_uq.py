@@ -20,8 +20,9 @@ hand. On a ledger this size the build holds its write lock briefly. If an open
 ledger transaction makes it wait past the lock timeout, the deploy stops with
 nothing changed and can run again.
 
-``idx_account_credits_ref`` stays: this change adds a guard and removes
-nothing.
+``idx_account_credits_ref`` (``ref`` alone, partial) is dropped. Every ledger
+lookup filters on the organization and the ref, which the new index serves, so
+the old one only cost writes.
 
 Upgrade fails if a database already holds two rows with the same
 (organization_id, ref). That stop is on purpose: the ledger is money, so the
@@ -30,7 +31,8 @@ migration does not pick a row to delete. Find the rows with
 NULL GROUP BY 1, 2 HAVING count(*) > 1``, settle each by hand, then deploy
 again.
 
-Downgrade drops the index. No rows change.
+Downgrade recreates ``idx_account_credits_ref`` as it was, then drops the
+unique index. No rows change.
 """
 
 from alembic import op
@@ -41,11 +43,16 @@ branch_labels = None
 depends_on = None
 
 INDEX = "account_credits_org_ref_uq"
+OLD_INDEX = "idx_account_credits_ref"
 
 
 def upgrade() -> None:
     op.create_index(INDEX, "account_credits", ["organization_id", "ref"], unique=True)
+    op.drop_index(OLD_INDEX, table_name="account_credits")
 
 
 def downgrade() -> None:
+    op.execute(
+        f"CREATE INDEX {OLD_INDEX} ON account_credits (ref) WHERE ref IS NOT NULL"
+    )
     op.drop_index(INDEX, table_name="account_credits")
