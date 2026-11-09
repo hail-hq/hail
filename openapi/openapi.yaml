@@ -746,11 +746,15 @@ paths:
         "Send the file's bytes to an upload link. No Authorization header.
 
 
-        Works once. Unknown id, wrong token or a used link are all 404 with one
+        Works once. Unknown id, wrong token, a used link or one another PUT is
 
-        message; an expired link is 410. Empty body: 422. A verification
+        sending to are all 404 with one message; an expired link is 410. A body
 
-        document whose first bytes are not the declared JPEG, PNG or PDF: 422."
+        that does not arrive before the link expires (10 minutes at most) is
+
+        408. Empty body: 422. A verification document whose first bytes are not
+
+        the declared JPEG, PNG or PDF: 422."
       operationId: put_file_upload
       parameters:
         - name: upload_id
@@ -797,16 +801,22 @@ paths:
               schema:
                 type: integer
         "404":
-          description: Unknown link, wrong token, or already used.
+          description:
+            Unknown link, wrong token, already used, or another PUT is
+            sending to it.
+        "408":
+          description:
+            The body did not arrive before the link expired, or within
+            10 minutes. The link is not used up.
         "410":
-          description: The link expired.
+          description: The link expired, also while its body was sent.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":
           description:
             File uploads are not configured on this server, storage failed,
-            or too many uploads are running (`Retry-After`). The link is not used
-            up.
+            or too many uploads are running, in all or for this organization (`Retry-After`).
+            The link is not used up.
         "422":
           description: Validation Error
           content:
@@ -8527,7 +8537,7 @@ components:
           maxLength: 255
           minLength: 1
           title: Filename
-          description: The file's name, 1 to 255 chars.
+          description: The file's name, 1 to 255 chars, no control characters.
         content_type:
           type: string
           title: Content Type

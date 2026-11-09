@@ -2780,7 +2780,7 @@ type FileUploadCreate struct {
 	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
 	ContentType string `json:"content_type"`
 
-	// Filename The file's name, 1 to 255 chars.
+	// Filename The file's name, 1 to 255 chars, no control characters.
 	Filename string `json:"filename"`
 
 	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
