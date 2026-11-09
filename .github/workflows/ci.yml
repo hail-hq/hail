@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Only superseded PR runs are cancelled; main pushes keep their own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -19,8 +24,14 @@ jobs:
       - run: uvx ruff==0.16.10 check .
       - run: uvx black==26.10.0 --check .
 
-  test:
+  python-tests:
+    name: Python tests (${{ matrix.package }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, api, voicebot, sdk, mcp]
     services:
       postgres:
         image: postgres:16-alpine
@@ -39,28 +50,24 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: false
-      - run: uv sync --all-packages --all-extras
-      - name: core tests
-        working-directory: core
-        run: uv run pytest tests -v
+      - run: uv sync --frozen --all-packages --all-extras
+      - name: Run tests
+        working-directory: ${{ matrix.package }}
+        run: uv run --frozen pytest tests -v --durations=20
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: api tests
-        working-directory: api
-        run: uv run pytest tests -v
+
+  # Preserve the existing required check while the suites run in parallel.
+  test:
+    if: ${{ always() }}
+    needs: python-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every Python suite to pass
         env:
-          DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: voicebot tests
-        working-directory: voicebot
-        run: uv run --frozen pytest tests -v
-        env:
-          DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: sdk tests
-        working-directory: sdk
-        run: uv run pytest tests -v
-      - name: mcp tests
-        working-directory: mcp
-        run: uv run pytest tests -v
+          RESULT: ${{ needs.python-tests.result }}
+        run: test "$RESULT" = success
 
   go:
     runs-on: ubuntu-latest

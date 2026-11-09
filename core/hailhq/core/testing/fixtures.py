@@ -2,7 +2,7 @@
 
 Import the fixtures you need from here in each package's ``conftest.py``::
 
-    from hailhq.core.testing.fixtures import async_session, database_url, db, session_factory  # noqa: F401
+    from hailhq.core.testing.fixtures import async_session, database_schemas, database_url, db, session_factory  # noqa: F401
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import pytest
 from hailhq.core import db as core_db
 from hailhq.core.db import to_async_url
 from hailhq.core.models import OrganizationMember, User
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -44,38 +45,76 @@ def database_url() -> Iterator[str]:
         yield pg.get_connection_url().replace("psycopg2", "psycopg")
 
 
+@pytest.fixture(scope="session")
+def database_schemas() -> set[str]:
+    """Databases initialized for this pytest session (no cross-run cache)."""
+    return set()
+
+
+def prepare_database(
+    conn: Connection,
+    database_url: str,
+    database_schemas: set[str],
+    *,
+    recreate: bool = False,
+) -> None:
+    """Keep real commits/concurrent sessions, but avoid per-test schema DDL.
+
+    Tests that change schema must use ``pytest.mark.recreate_schema``. They
+    get a fresh schema and invalidate it for the following test as well.
+    Migration fixtures that bypass this helper must invalidate the cache.
+    """
+    from hailhq.core.models import Base
+
+    if recreate or database_url not in database_schemas:
+        database_schemas.discard(database_url)
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        Base.metadata.drop_all(conn)
+        Base.metadata.create_all(conn)
+    else:
+        tables = ", ".join(
+            conn.dialect.identifier_preparer.format_table(table)
+            for table in Base.metadata.sorted_tables
+        )
+        conn.exec_driver_sql(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE")
+    if not recreate:
+        database_schemas.add(database_url)
+
+
 @pytest.fixture()
 async def db(
     database_url: str,
+    database_schemas: set[str],
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> AsyncGenerator[AsyncEngine, None]:
-    """Fresh async engine with recreated schema; patches the global sessionmaker.
+    """Fresh async engine with empty tables; patches the global sessionmaker.
 
     Base fixture for all async DB tests. ``async_session`` and
     ``session_factory`` compose on top of this.
     """
-    from hailhq.core.models import Base
-
     engine = create_async_engine(to_async_url(database_url))
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                prepare_database,
+                database_url,
+                database_schemas,
+                recreate=request.node.get_closest_marker("recreate_schema") is not None,
+            )
 
-    async with engine.begin() as conn:
-        await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(
+            core_db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
+        )
 
-    monkeypatch.setattr(
-        core_db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
-    )
-
-    yield engine
-
-    # A background task cut off mid-transaction keeps its row locks, and the
-    # next test's drop_all then waits on them forever.
-    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    for task in pending:
-        task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
-    await engine.dispose()
+        yield engine
+    finally:
+        # Background transactions must release locks before the next reset.
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        await engine.dispose()
 
 
 @pytest.fixture()
@@ -88,7 +127,7 @@ def session_factory(db: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 async def async_session(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
-    """A per-test ``AsyncSession`` against a freshly recreated schema.
+    """A per-test ``AsyncSession`` against empty tables.
 
     Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
     so production ``session_scope()`` callers (auth bookkeeping, audit-log

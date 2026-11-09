@@ -45,4 +45,5 @@ packages = ["hailhq"]
 dev-mode-dirs = ["."]
 
 [tool.pytest.ini_options]
+markers = ["recreate_schema: rebuild the database schema before and after schema-changing tests"]
 asyncio_mode = "auto"
