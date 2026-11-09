@@ -99,6 +99,7 @@ Some changes only work when they ship in a fixed order. Follow these every time.
    5. hail-website: the pricing copy ("from" a price per minute).
 
    The copy (step 5) never ships before the rater (step 3) is live. Otherwise the site shows prices Hail does not charge.
+   Decided on 2026-11-09: step 5 (copy) ships before step 4 (plain forwarding), once step 3 is live.
 
 ## Agent prompt maintenance
 
