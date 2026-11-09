@@ -322,11 +322,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     message="First and last name together must fit in 100 characters.",
                 )
             )
+        # Outside the US and Canada, sender_problems runs the same check.
         if (
             subject_type == "business"
             and address
-            and fields.get("registration_country")
-            not in (None, address.country_code.upper())
+            and fields.get("registration_country") in {"US", "CA"}
+            and fields.get("registration_country") != address.country_code.upper()
         ):
             problems.append(
                 Problem(

@@ -168,7 +168,7 @@ def test_businesses_from_any_country_file_their_own_number(country, number):
     "country,number",
     [
         ("US", "123456789012"),
-        ("CA", "123456789RT0001"),
+        ("CA", "123456789XY"),
         ("SE", "SE1"),
         ("SE", "ABCDEFGH"),
         ("SE", "1" * 21),
@@ -189,6 +189,9 @@ def test_bad_tax_numbers_are_refused(country, number):
         ("SC123456", "GB", "SC123456"),
         ("GB123456789", "GB", "123456789"),
         ("US123456789", "US", "US123456789"),
+        ("EL 123456789", "GR", "123456789"),
+        ("ATU12345678", "AT", "12345678"),
+        ("123456789 RT 0001", "CA", "123456789"),
     ],
 )
 def test_tax_number_files_letters_and_digits(number, country, filed):

@@ -140,6 +140,18 @@ async def test_swedish_company_files_its_vat_number_and_country() -> None:
     assert body["country"] == "SE" and body["ein"] == "556677889901"
 
 
+def test_a_foreign_tax_number_must_match_the_address_country() -> None:
+    from hailhq.core.providers.verification.sms_review import sender_problems
+
+    fields = {"sender_country": "US", "registration_country": "SE"}
+    problems = sender_problems(fields, ADDRESS, "business")
+    assert [p.field for p in problems] == ["registration_country"]
+    # A Canadian number with a US address is a carrier rule, not this one.
+    assert not sender_problems(
+        {**fields, "registration_country": "CA"}, ADDRESS, "business"
+    )
+
+
 async def test_business_draft_creates_brand_and_requests_vetting() -> None:
     calls = []
 

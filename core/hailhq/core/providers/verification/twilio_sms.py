@@ -41,18 +41,11 @@ from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
 
-# Twilio's business_registration_identifier for each issuing country it
-# names. Every other country files as "Other".
-_REGISTRATION_IDS = {
-    "US": "EIN",
-    "CA": "CBN",
-    "GB": "CN",
-    "AU": "ACN",
-    "IN": "CIN",
-    "EE": "VAT",
-    "RO": "VATRN",
-    "IL": "RN",
-}
+# Twilio's business_registration_identifier. Its per-country types (CN, ACN,
+# CIN, ...) each name one kind of number, but the form takes a VAT or a
+# company number, so every country outside the US and Canada files "Other".
+# sender_problems keeps that country equal to the address country.
+_REGISTRATION_IDS = {"US": "EIN", "CA": "CBN"}
 _REGISTRATION_COUNTRIES = {v: k for k, v in _REGISTRATION_IDS.items()}
 
 _SECONDARY_PROFILE_POLICY = "RNdfbf3fae0e1107f8aded0e7cead80bf5"
@@ -540,8 +533,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     {
                         "legal_name": business.get("business_name"),
                         "ein": business.get("business_registration_number"),
-                        "registration_country": _REGISTRATION_COUNTRIES.get(
-                            identifier, address["country_code"]
+                        "registration_country": (
+                            address["country_code"]
+                            if identifier == "Other"
+                            else _REGISTRATION_COUNTRIES.get(identifier)
                         ),
                     }
                 )

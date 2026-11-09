@@ -80,19 +80,28 @@ _TAX_NUMBER_MAX = 20
 _NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
 
 
+# VAT prefixes that are not the ISO country code.
+_VAT_PREFIXES = {"GR": "EL", "AT": "ATU"}
+
+
 def tax_number(value: str | None, country: str | None) -> str:
     """The business tax number as carriers file it: letters and digits,
-    uppercase, without a VAT prefix that repeats the issuing country.
-    "SE 556677-8899 01" from Sweden files as "556677889901"."""
+    uppercase, without the VAT prefix of the issuing country.
+    "SE 556677-8899 01" from Sweden files as "556677889901". A full Canadian
+    Business Number files as its first 9 digits."""
     text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
     code = (country or "").upper()
+    if code == "CA":
+        full = re.fullmatch(r"([0-9]{9})[A-Z]{2}[0-9]{4}", text)
+        return full.group(1) if full else text
+    prefix = _VAT_PREFIXES.get(code, code)
     if (
         code not in _NINE_DIGIT_COUNTRIES
         and len(code) == 2
-        and text.startswith(code)
-        and text[2:3].isdigit()
+        and text.startswith(prefix)
+        and text[len(prefix) : len(prefix) + 1].isdigit()
     ):
-        text = text[2:]
+        text = text[len(prefix) :]
     return text
 
 
@@ -118,14 +127,15 @@ _BUSINESS_FIELDS = (
         name="registration_country",
         label="Country issuing the business tax number",
         pattern=r"^[A-Z]{2}$",
-        help="Two-letter country code, for example US, CA or SE.",
+        max_length=2,
+        help="Two-letter country code, for example US, CA or SE. Outside the US and Canada, it must be your address country.",
     ),
     FieldSpec(
         name="ein",
         label="Business tax number",
         pattern=r"^[0-9A-Za-z][0-9A-Za-z .\-/]*$",
         max_length=30,
-        help="US: your 9-digit EIN. Canada: the first 9 digits of your Business Number. Other countries: your VAT number, or your company registration number if you have no VAT number.",
+        help="US: your 9-digit EIN. Canada: your Business Number. Other countries: your VAT number, or your company registration number if you have no VAT number.",
     ),
     FieldSpec(
         name="industry",

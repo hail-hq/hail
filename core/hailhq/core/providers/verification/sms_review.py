@@ -29,6 +29,21 @@ def sender_problems(
                 message="Use the sender country selected in eligibility.",
             )
         )
+    issuer = fields.get("registration_country", "").strip().upper()
+    if (
+        subject_type == "business"
+        and address
+        and issuer
+        and issuer not in {"US", "CA"}
+        and address.country_code.upper() != issuer
+    ):
+        # Carriers check a non-US/CA number against the address country.
+        problems.append(
+            Problem(
+                field="registration_country",
+                message="A tax number from outside the US and Canada must come from your address country.",
+            )
+        )
     if subject_type == "person":
         mobile = fields.get("mobile_phone_number", "").strip()
         if mobile:

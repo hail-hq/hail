@@ -450,7 +450,7 @@ def _calls(p, suffix):
     return [kw for n, kw in p._client.calls if n.endswith(suffix)]
 
 
-async def _draft(p, subject="business", **extra):
+async def _draft(p, subject="business", address=ADDRESS, **extra):
     fields = {**FIELDS, **extra}
     if subject == "person":
         fields.update(
@@ -466,7 +466,7 @@ async def _draft(p, subject="business", **extra):
         contact_email="ops@hail.so",
         requirements=req,
         fields=fields,
-        address=ADDRESS,
+        address=address,
         documents={},
         messaging_service_sid="MG9",
     )
@@ -955,14 +955,21 @@ async def test_business_can_file_canadian_registration_number():
     "country,number,identifier,filed",
     [
         ("SE", "SE 556677-8899 01", "Other", "556677889901"),
-        ("GB", "SC123456", "CN", "SC123456"),
+        ("GB", "SC123456", "Other", "SC123456"),
     ],
 )
 async def test_business_files_a_registration_number_from_any_country(
     country, number, identifier, filed
 ):
     provider = _provider()
-    result = await _draft(provider, registration_country=country, ein=number)
+    home = ADDRESS.model_copy(update={"country_code": country})
+    result = await _draft(
+        provider,
+        address=home,
+        sender_country=country,
+        registration_country=country,
+        ein=number,
+    )
     assert not result.problems
     business = next(
         call["attributes"]
