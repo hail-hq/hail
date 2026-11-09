@@ -1,0 +1,353 @@
+# ruff: noqa: F811  (fixtures imported from test_verifications_api)
+"""``upload.<slot>`` parts and ``POST /verifications/check``.
+
+A document sent through an upload link (``POST /uploads``) is named by its
+id in the form. The check runs every step of submit before filing and
+saves nothing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
+
+import pytest
+from hailhq.api.deps import get_s3_mail_optional
+from hailhq.api.main import app
+from hailhq.core.models import AccountCredit, CarrierVerification, FileUpload
+from hailhq.core.providers.verification import Problem
+from sqlalchemy import func, select
+
+from . import test_verifications_api as base
+from .test_verifications_api import (  # noqa: F401  (fixtures)
+    _auth,
+    _passport,
+    _sms_submission,
+    _submission,
+    carrier,
+    pinned_catalog,
+    sms_carrier,
+    us_number,
+)
+
+_JPEG = b"\xff\xd8\xff\xe0" + b"j" * 64
+
+
+@pytest.fixture()
+def s3():
+    store = AsyncMock()
+    store.fetch_raw.return_value = _JPEG
+    app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    try:
+        yield store
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+
+
+async def _upload(
+    async_session,
+    org_id,
+    *,
+    purpose: str = "verification_document",
+    age: timedelta = timedelta(minutes=5),
+    uploaded: bool = True,
+    data: bytes = _JPEG,
+) -> FileUpload:
+    upload_id = uuid.uuid4()
+    row = FileUpload(
+        id=upload_id,
+        organization_id=org_id,
+        purpose=purpose,
+        filename="passport.jpg",
+        content_type="image/jpeg",
+        size_bytes=len(data) if uploaded else None,
+        sha256=hashlib.sha256(data).hexdigest() if uploaded else None,
+        s3_key=f"verification-uploads/{org_id}/{upload_id}",
+        uploaded_at=datetime.now(timezone.utc) - age if uploaded else None,
+        token_hash=None if uploaded else "h",
+        link_expires_at=None if uploaded else datetime.now(timezone.utc),
+    )
+    async_session.add(row)
+    await async_session.commit()
+    return row
+
+
+async def _post(client, key, path="/verifications", files=None, **parts):
+    # A (None, value) file entry makes httpx send multipart/form-data.
+    return await client.post(
+        path,
+        data={**_submission(), **parts},
+        files=files or {"_": (None, "1")},
+        headers=_auth(key),
+    )
+
+
+async def _rows(async_session, model) -> int:
+    return (
+        await async_session.execute(select(func.count()).select_from(model))
+    ).scalar_one()
+
+
+# -- upload.<slot> on submit ------------------------------------------------
+
+
+async def test_submit_reads_an_uploaded_document(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(row.id)})
+    assert resp.status_code == 201, resp.text
+    doc = carrier.drafts[0]["documents"]["proof_of_identity"]
+    assert doc.file.data == _JPEG
+    assert doc.file.content_type == "image/jpeg"
+    s3.fetch_raw.assert_awaited_once_with(row.s3_key)
+    # Used: the object and the row are gone.
+    s3.delete.assert_awaited_once_with(row.s3_key)
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, row.id) is None
+
+
+async def test_submit_keeps_the_upload_when_the_carrier_refuses(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    row_id = row.id
+    carrier.problems = [Problem(field="first_name", message="First name is wrong.")]
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(row_id)})
+    assert resp.status_code == 422
+    s3.delete.assert_not_awaited()
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, row_id) is not None
+
+
+async def test_submit_keeps_the_upload_on_a_402(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row_id = (await _upload(async_session, org_id)).id
+    await base._set_balance(async_session, org_id, 0)
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(row_id)})
+    assert resp.status_code == 402
+    assert carrier.drafts == []
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, row_id) is not None
+
+
+async def test_a_failed_cleanup_does_not_fail_the_submit(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    s3.delete.side_effect = RuntimeError("s3 down")
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(row.id)})
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.parametrize(
+    "case", ["other_org", "email_attachment", "too_old", "not_uploaded", "unknown"]
+)
+async def test_submit_refuses_an_upload_it_may_not_use(
+    client, org_and_key, carrier, s3, async_session, case
+) -> None:
+    org_id, _, key = org_and_key
+    if case == "unknown":
+        upload_id = uuid.uuid4()
+    else:
+        row = await _upload(
+            async_session,
+            uuid.uuid4() if case == "other_org" else org_id,
+            purpose=(
+                "email_attachment"
+                if case == "email_attachment"
+                else ("verification_document")
+            ),
+            age=timedelta(minutes=61) if case == "too_old" else timedelta(minutes=1),
+            uploaded=case != "not_uploaded",
+        )
+        upload_id = row.id
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(upload_id)})
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail[0]["loc"] == ["body", "upload.proof_of_identity"]
+    assert carrier.drafts == []
+    s3.fetch_raw.assert_not_awaited()
+
+
+async def test_submit_refuses_a_file_and_an_upload_for_one_slot(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    resp = await _post(
+        client,
+        key,
+        files=_passport(),
+        **{"upload.proof_of_identity": str(row.id)},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "upload.proof_of_identity"]
+    assert carrier.drafts == []
+
+
+async def test_submit_refuses_an_upload_id_that_is_not_a_uuid(
+    client, org_and_key, carrier, s3
+) -> None:
+    _, _, key = org_and_key
+    resp = await _post(client, key, **{"upload.proof_of_identity": "nope"})
+    assert resp.status_code == 422
+    assert "nope" not in resp.text
+
+
+async def test_submit_refuses_an_upload_for_a_slot_not_in_documents(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    resp = await _post(client, key, **{"upload.other": str(row.id)})
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "upload.other"]
+
+
+async def test_submit_with_an_upload_needs_storage(
+    client, org_and_key, carrier, async_session, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+
+    org_id, _, key = org_and_key
+    monkeypatch.setattr(settings, "hail_mail_name_prefix", "")
+    row = await _upload(async_session, org_id)
+    resp = await _post(client, key, **{"upload.proof_of_identity": str(row.id)})
+    assert resp.status_code == 503
+    assert carrier.drafts == []
+
+
+# -- POST /verifications/check ---------------------------------------------
+
+
+async def test_check_passes_and_names_each_file(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    row_id = row.id
+    balance = await base._balance(async_session, org_id)
+    credits = await _rows(async_session, AccountCredit)
+    resp = await _post(
+        client, key, "/verifications/check", **{"upload.proof_of_identity": str(row_id)}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["files"] == [
+        {
+            "slot": "proof_of_identity",
+            "upload_id": str(row_id),
+            "size_bytes": len(_JPEG),
+            "sha256": hashlib.sha256(_JPEG).hexdigest(),
+        }
+    ]
+    assert "carrier" in body["note"]
+    # Nothing filed, nothing saved, nothing held, nothing consumed.
+    assert carrier.drafts == []
+    assert carrier.submitted == []
+    assert await _rows(async_session, CarrierVerification) == 0
+    assert await _rows(async_session, AccountCredit) == credits
+    assert await base._balance(async_session, org_id) == balance
+    s3.delete.assert_not_awaited()
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, row_id) is not None
+
+
+async def test_check_reads_file_parts_too(client, org_and_key, carrier, s3) -> None:
+    _, _, key = org_and_key
+    resp = await _post(client, key, "/verifications/check", files=_passport())
+    assert resp.status_code == 200, resp.text
+    (entry,) = resp.json()["files"]
+    assert entry["upload_id"] is None
+    assert entry["sha256"] == hashlib.sha256(b"\xff\xd8jpeg").hexdigest()
+
+
+async def test_check_returns_local_problems_as_422(
+    client, org_and_key, carrier, s3
+) -> None:
+    _, _, key = org_and_key
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        files=_passport(),
+        fields=json.dumps({"first_name": "Ada"}),
+    )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail[0]["loc"] == ["body", "last_name"]
+    assert detail[0]["type"] == "verification_problem"
+    assert carrier.drafts == []
+
+
+async def test_check_needs_the_file(client, org_and_key, carrier, s3) -> None:
+    _, _, key = org_and_key
+    resp = await _post(client, key, "/verifications/check")
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "proof_of_identity"]
+
+
+async def test_check_gives_the_same_409_as_submit(
+    client, org_and_key, carrier, s3
+) -> None:
+    _, _, key = org_and_key
+    first = await _post(client, key, files=_passport())
+    assert first.status_code == 201
+    resp = await _post(client, key, "/verifications/check", files=_passport())
+    assert resp.status_code == 409
+
+
+async def test_check_gives_the_same_402_as_submit(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await base._set_balance(async_session, org_id, 0)
+    resp = await _post(client, key, "/verifications/check", files=_passport())
+    assert resp.status_code == 402
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_check_sms_runs_the_application_check(
+    client, org_and_key, sms_carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await base._set_balance(async_session, org_id, 10_000)
+    resp = await client.post(
+        "/verifications/check",
+        data=_sms_submission(),
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    # The shared US form needs much more than the fake's two fields.
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["type"] == "verification_problem"
+    assert sms_carrier.drafts == []
+    assert await _rows(async_session, CarrierVerification) == 0
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_check_sms_passes_when_the_application_is_complete(
+    client, org_and_key, sms_carrier, s3, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await base._set_balance(async_session, org_id, 10_000)
+    monkeypatch.setattr(sms_carrier, "validate_application", lambda *a: [])
+    resp = await client.post(
+        "/verifications/check",
+        data=_sms_submission(),
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["files"] == []
+    assert sms_carrier.drafts == []

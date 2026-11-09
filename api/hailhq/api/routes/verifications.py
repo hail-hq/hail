@@ -36,7 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
-from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_optional
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.api.multipart import parse_capped_form
@@ -52,6 +52,11 @@ from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import get_session, org_lock, try_org_lock
+from hailhq.core.file_uploads import (
+    VERIFICATION_FILE_TYPES,
+    VERIFICATION_MAX_FILE_BYTES,
+    VERIFICATION_UPLOAD_TTL,
+)
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
     rate_sms_registration,
@@ -59,6 +64,7 @@ from hailhq.core.internal_webhook import (
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
+    FileUpload,
     NumberOffer,
     PhoneNumber,
 )
@@ -79,25 +85,40 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
+from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
     SmsApplicationResponse,
+    VerificationCheckFile,
+    VerificationCheckResponse,
     VerificationResponse,
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import DateTime, Row, String, case, cast, func, select, text, update
+from sqlalchemy import (
+    DateTime,
+    Row,
+    String,
+    case,
+    cast,
+    delete,
+    func,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_FILE_BYTES = VERIFICATION_MAX_FILE_BYTES
 MAX_REQUEST_BYTES = 30 * 1024 * 1024
-ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
+ALLOWED_FILE_TYPES = set(VERIFICATION_FILE_TYPES)
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
 _READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
@@ -1654,6 +1675,9 @@ class _Prepared(NamedTuple):
     subject_name: str | None
     documents: dict[str, DocumentInput]
     draft_kwargs: dict
+    # The ``upload.<slot>`` rows read, and every file read, for the check.
+    uploads: list[FileUpload]
+    files: list[VerificationCheckFile]
 
 
 async def _prepare_submission(
@@ -1661,6 +1685,7 @@ async def _prepare_submission(
     principal: Principal,
     db: AsyncSession,
     registry: Registry,
+    s3: S3MailClient | None,
     *,
     lock: bool,
 ) -> _Prepared:
@@ -1810,16 +1835,49 @@ async def _prepare_submission(
         raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
     documents: dict[str, DocumentInput] = {}
+    uploads: list[FileUpload] = []
+    files: list[VerificationCheckFile] = []
+    for key in form:
+        if key.startswith("upload.") and key[len("upload.") :] not in sub.documents:
+            raise unprocessable(
+                "this upload names a slot that is not in documents",
+                loc=["body", key],
+            )
+    total = 0
     for slot, value in sub.documents.items():
         upload = form.get(f"file.{slot}")
+        has_file = upload is not None and hasattr(upload, "read")
+        upload_ref = form.get(f"upload.{slot}")
+        file: UploadedFile | None = None
+        upload_id: UUID | None = None
+        if upload_ref is not None and upload_ref != "":
+            if has_file:
+                raise unprocessable(
+                    f"send file.{slot} or upload.{slot}, not both",
+                    loc=["body", f"upload.{slot}"],
+                )
+            row = await _usable_upload(db, principal.organization_id, slot, upload_ref)
+            file = await _read_upload(s3, row)
+            uploads.append(row)
+            upload_id = row.id
+        elif has_file:
+            file = await _read_file(upload)
+        if file is not None:
+            total += len(file.data)
+            if total > MAX_REQUEST_BYTES:
+                raise unprocessable(
+                    "the files total more than 30 MB", loc=["body", "files"]
+                )
+            files.append(
+                VerificationCheckFile(
+                    slot=slot,
+                    upload_id=upload_id,
+                    size_bytes=len(file.data),
+                    sha256=hashlib.sha256(file.data).hexdigest(),
+                )
+            )
         documents[slot] = DocumentInput(
-            option=value.option,
-            fields=value.fields,
-            file=(
-                await _read_file(upload)
-                if upload is not None and hasattr(upload, "read")
-                else None
-            ),
+            option=value.option, fields=value.fields, file=file
         )
 
     if sub.purpose == "sms":
@@ -1883,6 +1941,8 @@ async def _prepare_submission(
         subject_name=subject_name,
         documents=documents,
         draft_kwargs=draft_kwargs,
+        uploads=uploads,
+        files=files,
     )
 
 
@@ -1907,6 +1967,7 @@ async def create_verification(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
 ) -> VerificationResponse:
     """Submit your details and documents (multipart/form-data).
 
@@ -1921,9 +1982,13 @@ async def create_verification(
     (optional, for `sms`: one of your US numbers; needed when your US numbers
     are with more than one carrier),
     `fields` (JSON object), `address` (JSON object, when required), `documents`
-    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
-    part per slot named `file.<slot>`. Get the slot and field names from
-    `GET /verifications/requirements`.
+    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and for
+    each slot either a file part named `file.<slot>` or a text part named
+    `upload.<slot>` holding the id of a `verification_document` uploaded
+    with `POST /uploads` less than 1 hour ago (not both). Files are JPG, PNG
+    or PDF, 10 MB each at most. Get the slot and field names from
+    `GET /verifications/requirements`. Used uploads are deleted once the
+    verification is saved; after a failed submit they stay for a retry.
 
     The name of the person or company comes from the form you send (for
     example the business name, or the first and last name) and is shown
@@ -1946,18 +2011,11 @@ async def create_verification(
     submitted to the carrier for its review; read it back to follow the state.
     A `provider` part is deprecated and ignored: Hail picks the carrier.
     """
-    prepared = await _prepare_submission(request, principal, db, registry, lock=True)
-    (
-        sub,
-        offer,
-        provider_name,
-        provider,
-        hold_cents,
-        requirements,
-        subject_name,
-        documents,
-        draft_kwargs,
-    ) = prepared
+    prepared = await _prepare_submission(
+        request, principal, db, registry, s3, lock=True
+    )
+    sub, offer, provider_name, provider = prepared[:4]
+    hold_cents, requirements, subject_name, documents, draft_kwargs = prepared[4:9]
 
     try:
         draft = await provider.create_draft(
@@ -2079,7 +2137,141 @@ async def create_verification(
         actor=actor_of(principal),
         action="verification.submit",
     )
+    await _delete_used_uploads(db, s3, prepared.uploads)
     return _out(row, registry)
+
+
+async def _usable_upload(
+    db: AsyncSession, organization_id: UUID, slot: str, value: object
+) -> FileUpload:
+    """The ``upload.<slot>`` row: this organization's verification document,
+    uploaded less than ``VERIFICATION_UPLOAD_TTL`` ago. Else 422 naming the
+    slot only."""
+    where = ["body", f"upload.{slot}"]
+    try:
+        upload_id = UUID(str(value))
+    except ValueError:
+        raise unprocessable(f"upload.{slot} must be an upload id", loc=where) from None
+    row = (
+        await db.execute(
+            select(FileUpload).where(
+                FileUpload.id == upload_id,
+                FileUpload.organization_id == organization_id,
+                FileUpload.purpose == "verification_document",
+                FileUpload.uploaded_at.is_not(None),
+                FileUpload.uploaded_at
+                > datetime.now(timezone.utc) - VERIFICATION_UPLOAD_TTL,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise unprocessable(
+            f"upload.{slot}: no usable upload with this id; it must be a "
+            "verification_document of this organization, uploaded less than "
+            "1 hour ago",
+            loc=where,
+        )
+    return row
+
+
+async def _read_upload(s3: S3MailClient | None, row: FileUpload) -> UploadedFile:
+    """The upload's bytes from the mail bucket, in memory only."""
+    if s3 is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="file uploads are not configured on this server",
+        )
+    try:
+        data = await s3.fetch_raw(row.s3_key)
+    except Exception as exc:
+        logger.warning("verification upload read failed (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from exc
+    if row.content_type not in ALLOWED_FILE_TYPES or len(data) > MAX_FILE_BYTES:
+        # The PUT checked both; this is a guard against an edited row.
+        raise unprocessable("files must be JPG, PNG or PDF, 10 MB or smaller")
+    return UploadedFile(filename="upload", content_type=row.content_type, data=data)
+
+
+async def _delete_used_uploads(
+    db: AsyncSession, s3: S3MailClient | None, uploads: list[FileUpload]
+) -> None:
+    """Delete the uploads a saved verification used. Best effort: the GC
+    removes any left after ``VERIFICATION_UPLOAD_TTL``."""
+    if not uploads or s3 is None:
+        return
+    for upload in uploads:
+        try:
+            await s3.delete(upload.s3_key)
+            await db.execute(delete(FileUpload).where(FileUpload.id == upload.id))
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(
+                "could not delete used verification upload %s (%s); the GC "
+                "removes it later",
+                upload.id,
+                type(exc).__name__,
+            )
+
+
+@router.post(
+    "/check",
+    response_model=VerificationCheckResponse,
+    operation_id="check_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit to submit this form. Same rule as "
+                "`POST /verifications`."
+            ),
+        },
+        409: {"description": "Submit would be a duplicate. Same rule as submit."},
+    },
+)
+async def check_verification(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+) -> VerificationCheckResponse:
+    """Check a verification form without filing anything (multipart/form-data).
+
+    Takes the same parts as `POST /verifications` and runs every check Hail
+    can run before filing: the purpose rules, the credit check (402), the
+    carrier's form (a read), the duplicate check (409), field lengths, the
+    files (`file.<slot>` and `upload.<slot>`: type, size, owner, age), and
+    the form's own rules (required fields, documents, address; for `sms`
+    the US texting application). Errors are the same codes and shapes
+    submit gives.
+
+    Nothing is filed at the carrier, saved, held or charged, and uploads
+    are not used up. The carrier runs its own checks when you submit.
+    """
+    prepared = await _prepare_submission(
+        request, principal, db, registry, s3, lock=False
+    )
+    sub, provider = prepared.sub, prepared.provider
+    if sub.purpose == "sms" and isinstance(provider, SmsRegistrationProvider):
+        problems = provider.validate_application(
+            sub.fields, sub.address, sub.subject_type
+        )
+    else:
+        problems = validate_input(
+            prepared.requirements, sub.fields, sub.address, prepared.documents
+        )
+    # Nothing was written; end the read transaction.
+    await db.rollback()
+    if problems:
+        raise HTTPException(status_code=422, detail=_problem_details(problems))
+    return VerificationCheckResponse(
+        ok=True,
+        files=prepared.files,
+        note="The carrier runs its own checks when you submit.",
+    )
 
 
 async def _submit_row(
