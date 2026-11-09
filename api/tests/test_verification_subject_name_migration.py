@@ -11,6 +11,8 @@ from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+pytestmark = pytest.mark.recreate_schema
+
 spec = importlib.util.spec_from_file_location(
     "subject_name_migration",
     Path(__file__).parents[1] / "migrations/versions/0066_verification_subject_name.py",

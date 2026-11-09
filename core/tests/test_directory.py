@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from hailhq.core.directory import (
     find_by_phone,
     list_directory,
@@ -95,6 +96,7 @@ async def test_list_directory_includes_manual_contacts(async_session):
     assert vendor.has_phone is False
 
 
+@pytest.mark.recreate_schema
 async def test_list_directory_tolerates_missing_contacts_table(async_session):
     """Self-host posture: no `contacts` table -> members-only, not a 500.
 

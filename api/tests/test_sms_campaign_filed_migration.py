@@ -6,11 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.verification import base
 from sqlalchemy import select
+
+pytestmark = pytest.mark.recreate_schema
 
 spec = importlib.util.spec_from_file_location(
     "sms_campaign_filed_backfill",

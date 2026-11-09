@@ -19,6 +19,8 @@ from hailhq.core.schemas import LOCAL_PREFIX
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+pytestmark = pytest.mark.recreate_schema
+
 spec = importlib.util.spec_from_file_location(
     "hail_mail_unique_head_migration",
     Path(__file__).parents[1] / "migrations/versions/0070_hail_mail_unique_head.py",

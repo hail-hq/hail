@@ -39,6 +39,7 @@ from hailhq.core.providers.email.base import (
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.testing.fixtures import (  # noqa: F401
     async_session,
+    database_schemas,
     database_url,
     db,
     session_factory,

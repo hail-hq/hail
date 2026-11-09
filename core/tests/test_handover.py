@@ -314,6 +314,7 @@ async def test_targets_include_members_and_dedupe_across_kinds(async_session) ->
     assert "+1415" not in repr(targets)
 
 
+@pytest.mark.recreate_schema
 async def test_targets_contacts_only_without_member_tables(async_session) -> None:
     """Self-host: no website-owned users/members tables. Targets fall back to
     contacts, and the session stays usable (no aborted transaction)."""
@@ -328,6 +329,7 @@ async def test_targets_contacts_only_without_member_tables(async_session) -> Non
     assert (await async_session.execute(text("SELECT 1"))).scalar() == 1
 
 
+@pytest.mark.recreate_schema
 async def test_member_lookup_reraises_other_schema_errors(async_session) -> None:
     """Only a missing table means self-host. A renamed column (or lost
     privilege) is a real fault and must not silently drop members."""
@@ -350,6 +352,7 @@ async def test_member_lookup_reraises_other_schema_errors(async_session) -> None
         )
 
 
+@pytest.mark.recreate_schema
 async def test_missing_member_tables_warn_once(async_session, monkeypatch, caplog):
     import logging
 

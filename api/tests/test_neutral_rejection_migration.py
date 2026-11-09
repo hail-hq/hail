@@ -5,12 +5,15 @@ import importlib.util
 import uuid
 from pathlib import Path
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from hailhq.api.number_orders import REGISTRATION_REJECTED
 from hailhq.core.models import AuditLog, CarrierVerification
 from hailhq.core.providers.verification import base
 from sqlalchemy import select, text
+
+pytestmark = pytest.mark.recreate_schema
 
 spec = importlib.util.spec_from_file_location(
     "neutral_rejection_migration",

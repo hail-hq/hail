@@ -1,9 +1,12 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
+
+pytestmark = pytest.mark.recreate_schema
 
 spec = importlib.util.spec_from_file_location(
     "number_order_migration",
