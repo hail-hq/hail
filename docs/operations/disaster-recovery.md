@@ -14,38 +14,22 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
 
 ## Replace a lost or broken VM
 
-1. Create an Ubuntu 22.04+ VM with a public IPv4. Open 22/tcp, 80/tcp, 443/tcp and 443/udp (`ufw` or the cloud firewall, see [vm-deploy.md](../public/self-host/vm-deploy.md)). Caddy needs 80 and 443 to get certificates.
-2. Install Docker from the apt repository: <https://docs.docker.com/engine/install/ubuntu/>. The `docker` binary must be on the PATH of a non-interactive SSH shell, so do not use a snap package.
-3. Clone the repo to the deploy path (`/opt/hail` by default).
-
-   ```bash
-   git clone https://github.com/hail-hq/hail /opt/hail
-   ```
-
-4. Copy `.env` from your main checkout to the VM. Never copy it from the old VM.
+1. Prepare the new VM with [vm-deploy.md step 1](../public/self-host/vm-deploy.md#1-prepare-the-vm): Docker, firewall (22, 80, 443), and the repo in `/opt/hail`.
+2. Copy `.env` from your main checkout. Skip vm-deploy.md step 3: `.env.example` has no secrets. Never copy `.env` from the old VM.
 
    ```bash
    scp .env root@<NEW_IP>:/opt/hail/.env
    ssh root@<NEW_IP> 'chmod 600 /opt/hail/.env'
    ```
 
-5. Make a new CI-only deploy key and authorize it on the VM.
+3. Make a new deploy key and set the GitHub secrets with [vm-deploy.md step 5](../public/self-host/vm-deploy.md#5-configure-github-actions). Set `DEPLOY_SSH_HOST` to `<NEW_IP>`.
+4. Deploy.
 
    ```bash
-   ssh-keygen -t ed25519 -f hail-deploy -C "github-actions@hail" -N ""
-   ssh root@<NEW_IP> "echo '$(cat hail-deploy.pub)' >> ~/.ssh/authorized_keys"
-   ```
-
-6. Point GitHub at the new VM, then deploy.
-
-   ```bash
-   gh secret set DEPLOY_SSH_PRIVATE_KEY < hail-deploy
-   gh secret set DEPLOY_SSH_HOST --body <NEW_IP>
-   gh secret set DEPLOY_SSH_USER --body root
    gh workflow run deploy.yml --ref main
    ```
 
-7. Test the new VM before DNS moves. Caddy has no certificate yet, so test the services on the VM's loopback ports.
+5. Test the new VM before DNS moves. Caddy has no certificate yet, so test the services on the VM's loopback ports.
 
    ```bash
    ssh root@<NEW_IP> 'curl -fsS http://127.0.0.1:8080/healthz'
@@ -54,8 +38,8 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
 
    Both must return `{"status":"ok"}`.
 
-8. At the registrar, change the A records `api`, `mcp`, and the `HAIL_TRACKING_DOMAIN` host (`.env`) to `<NEW_IP>`. Check them with `dig +short api.<domain> @1.1.1.1`.
-9. Restart Caddy so it asks for certificates now, not after its retry wait. Then check the logs for `certificate obtained successfully`.
+6. At the registrar, change the A records `api`, `mcp`, and the `HAIL_TRACKING_DOMAIN` host (`.env`) to `<NEW_IP>`. Check them with `dig +short api.<domain> @1.1.1.1`.
+7. Restart Caddy so it asks for certificates now, not after its retry wait. Then check the logs for `certificate obtained successfully`.
 
    ```bash
    ssh root@<NEW_IP> 'cd /opt/hail && docker compose \
@@ -65,8 +49,8 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
      | grep -i certificate'
    ```
 
-10. Add shell shortcuts on the new VM (next section).
-11. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This stops the API, MCP and Caddy, and lets the old voicebot finish live calls (up to about 1 hour).
+8. Add shell shortcuts on the new VM (next section).
+9. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This stops the API, MCP and Caddy, and lets the old voicebot finish live calls (up to about 1 hour).
 
     ```bash
     ssh root@<OLD_IP> '
@@ -90,8 +74,9 @@ DNS caches can keep the old address for a while. Ask the registrar's name server
 ```bash
 ssh root@<NEW_IP> '
 ln -sfn /opt/hail ~/hail
-echo "alias comp=\"docker compose -f docker-compose.yml -f docker-compose.prod.yml\"" >> ~/.bashrc
-echo "alias gpp=\"git pull --prune\"" >> ~/.bashrc
+add() { grep -qxF "$1" ~/.bashrc || echo "$1" >> ~/.bashrc; }
+add "alias comp=\"docker compose -f docker-compose.yml -f docker-compose.prod.yml\""
+add "alias gpp=\"git pull --prune\""
 '
 ```
 
