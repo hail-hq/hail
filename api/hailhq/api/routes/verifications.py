@@ -4,8 +4,11 @@ carrier did not take at creation.
 
 Number-verification files and details pass through in memory to the carrier.
 SMS applications keep submitted text fields and address privately for repair;
-only the organization-scoped application endpoint returns them. Files are
-never stored. Other identifying data is not written to disk or logs, except
+only the organization-scoped application endpoint returns them. Files sent as
+``file.<slot>`` parts are never stored. A document uploaded with an upload link
+(``POST /uploads``, named here as ``upload.<slot>``) is kept in the mail bucket
+until a verification using it is saved, then deleted; the GC deletes any left
+1 hour after upload. Other identifying data is not written to disk or logs, except
 the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
