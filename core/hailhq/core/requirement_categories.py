@@ -34,6 +34,7 @@ Category = Literal[
     "proof_of_address",
     "address_in_country",
     "address_in_area",
+    "address_any_country",
     "company_registration",
     "company_id",
     "company_name",
@@ -50,6 +51,7 @@ LABELS: dict[str, str] = {
     "proof_of_address": "Proof of address (bill or statement under 3 months)",
     "address_in_country": "An address in the country",
     "address_in_area": "An address in the number's area",
+    "address_any_country": "An address in any country",
     "company_registration": "Company register extract or certificate",
     "company_id": "Company or tax number",
     "company_name": "Company legal name",
@@ -247,6 +249,14 @@ def is_company_document(rule: dict) -> bool:
     return not either and bool(cats) and "company_registration" in cats  # type: ignore[operator]
 
 
+# Where the carrier lets the address be, as a category.
+_SCOPE_CATEGORY = {
+    "any": "address_any_country",
+    "country": "address_in_country",
+    "area": "address_in_area",
+}
+
+
 def classify(
     req: VerificationRequirements,
     provider: str,
@@ -290,7 +300,13 @@ def classify(
         if rule.get("field_type") == "address":
             add(rule.get("id") or "", rule.get("name") or "", "address")
     address_cats = {"proof_of_address", "address_in_country", "address_in_area"}
-    if req.address_required and not (found & address_cats):
+    scope = getattr(req, "address_scope", None)
+    if req.address_required and scope is not None:
+        # The carrier said where the address may be: that decides, over a
+        # guess from a label.
+        found -= {"address_in_country", "address_in_area"}
+        found.add(_SCOPE_CATEGORY[scope])
+    elif req.address_required and not (found & address_cats):
         found.add("address_in_country")
 
     items: list[StoredItem] = [c for c in _ORDER if c in found]

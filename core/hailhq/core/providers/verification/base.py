@@ -226,10 +226,20 @@ class VerificationRequirements(BaseModel):
     )
 
 
+AddressScope = Literal["any", "country", "area"]
+
+
 class Requirements(VerificationRequirements):
     """Internal requirements: the public form plus the carrier it is for."""
 
     provider: str = Field(description="The carrier these requirements come from.")
+    address_scope: AddressScope | None = Field(
+        default=None,
+        description=(
+            "Where the address may be, when the carrier says: in any country, "
+            "in the country, or in the number's area. None when unknown."
+        ),
+    )
 
     @property
     def version(self) -> str:

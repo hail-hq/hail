@@ -341,3 +341,42 @@ def test_every_known_didww_field_maps_to_a_category_or_nothing():
             )
             items = classify(req, "didww")
             assert not any(isinstance(i, dict) for i in items), (name, items)
+
+
+def test_address_scope_decides_where_the_address_may_be():
+    base = {
+        "provider": "didww",
+        "country_code": "GB",
+        "number_type": "local",
+        "subject_type": "person",
+        "required": True,
+        "documents": (
+            DocumentSlot(name="address_proof_1", label="Proof of address", options=()),
+        ),
+        "address_required": True,
+    }
+    assert classify(Requirements(**base, address_scope="any"), "didww") == [
+        "proof_of_address",
+        "address_any_country",
+    ]
+    assert classify(Requirements(**base, address_scope="area"), "didww") == [
+        "proof_of_address",
+        "address_in_area",
+    ]
+    # Unknown: the old rule (a proof of address, nothing more is promised).
+    assert classify(Requirements(**base), "didww") == ["proof_of_address"]
+    assert LABELS["address_any_country"] == "An address in any country"
+
+
+def test_address_scope_replaces_a_guess_from_a_label():
+    req = Requirements(
+        provider="twilio",
+        country_code="GB",
+        number_type="local",
+        subject_type="person",
+        required=True,
+        address_required=True,
+        address_scope="any",
+    )
+    # Without a scope this would be address_in_country (the fallback).
+    assert classify(req, "twilio") == ["address_any_country"]

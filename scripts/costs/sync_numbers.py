@@ -196,6 +196,24 @@ TWILIO_PRICING_TYPE = {
 }
 
 
+# The in-memory key that carries Twilio's address rule from the number sample
+# to the requirements block. attach_requirements removes it from every row.
+ADDRESS_SCOPE_KEY = "_address_scope"
+
+
+def twilio_address_scope(sample: list[dict]) -> str | None:
+    """Where the address may be, from Twilio's ``address_requirements`` on
+    the sampled numbers: "country" when any number needs a local one, "any"
+    when every address asked can be anywhere (``any``, or ``foreign``: not
+    in the country), None when no number asks for an address."""
+    asked = {n.get("address_requirements") or "none" for n in sample} - {"none"}
+    if not asked:
+        return None
+    if asked <= {"any", "foreign"}:
+        return "any"
+    return "country"
+
+
 def twilio_regulated(regulations: list[dict]) -> set[tuple[str, str]]:
     """(country, type) pairs where any end-user type must hold a bundle."""
     out = set()
@@ -243,19 +261,22 @@ def map_twilio(
             address = any(
                 n.get("address_requirements", "none") != "none" for n in sample
             )
-            rows.append(
-                _row(
-                    country_code=iso,
-                    number_type=number_type,
-                    country_name=name,
-                    dial_code=dial_codes.get(iso, ""),
-                    usd_per_month=money(price),
-                    voice=caps["voice"],
-                    sms=caps["sms"],
-                    mms=caps["mms"],
-                    verification_required=address or (iso, number_type) in regulated,
-                )
+            row = _row(
+                country_code=iso,
+                number_type=number_type,
+                country_name=name,
+                dial_code=dial_codes.get(iso, ""),
+                usd_per_month=money(price),
+                voice=caps["voice"],
+                sms=caps["sms"],
+                mms=caps["mms"],
+                verification_required=address or (iso, number_type) in regulated,
             )
+            scope = twilio_address_scope(sample)
+            if scope:
+                # Read by attach_requirements, never written to the catalog.
+                row[ADDRESS_SCOPE_KEY] = scope
+            rows.append(row)
     return rows, skipped
 
 
@@ -1257,11 +1278,18 @@ def _union(lists: list[list[Any]]) -> list[Any]:
     return [k for k in LABELS if k in keys] + others
 
 
-def fetch_requirements(provider: str, country_code: str, number_type: str) -> dict:
+def fetch_requirements(
+    provider: str,
+    country_code: str,
+    number_type: str,
+    address_scope: str | None = None,
+) -> dict:
     """The requirements block for one (country, type) at one carrier: for each
     kind of buyer, whether it may buy and which paper categories it needs.
     A kind the carrier refuses gives ``{"accepted": False, "items": []}``.
-    DIDWW lists one requirement per DID group; the items are their union."""
+    DIDWW lists one requirement per DID group; the items are their union.
+    ``address_scope`` is where the address may be when the number search
+    said so (Twilio); a carrier's own value wins."""
     from hailhq.core.requirement_categories import classify
 
     plugin = _verification_provider(provider)
@@ -1272,7 +1300,7 @@ def fetch_requirements(provider: str, country_code: str, number_type: str) -> di
         # reused for both kinds of buyer.
         rules = _run(plugin.rules(country_code, number_type))
     return _requirements_block(
-        plugin, provider, country_code, number_type, rules, classify
+        plugin, provider, country_code, number_type, rules, classify, address_scope
     )
 
 
@@ -1283,6 +1311,7 @@ def _requirements_block(
     number_type: str,
     rules: list[dict] | None,
     classify: Any,
+    address_scope: str | None = None,
 ) -> dict:
     from hailhq.core.providers.verification import UnsupportedSubjectType
 
@@ -1313,6 +1342,15 @@ def _requirements_block(
         except UnsupportedSubjectType:
             block[subject] = {"accepted": False, "items": []}
             continue
+        if address_scope:
+            found = [
+                (
+                    r
+                    if getattr(r, "address_scope", None) or not r.address_required
+                    else r.model_copy(update={"address_scope": address_scope})
+                )
+                for r in found
+            ]
         block[subject] = {
             "accepted": True,
             "items": _union([classify(r, provider, rules=rules) for r in found]),
@@ -1406,13 +1444,19 @@ def _refreshed_line(key: str, how: str, old: dict | None, new: dict | None) -> s
 
 
 def _fetch_block(
-    provider: str, row: dict, previous: dict | None, report: list[str]
+    provider: str,
+    row: dict,
+    previous: dict | None,
+    report: list[str],
+    address_scope: str | None = None,
 ) -> dict | None:
     """The carrier's block for one row. On any error the previous block is
     returned and one line goes to ``report``."""
     key = f"{row['country_code']}:{row['number_type']}"
     try:
-        block = fetch_requirements(provider, row["country_code"], row["number_type"])
+        block = fetch_requirements(
+            provider, row["country_code"], row["number_type"], address_scope
+        )
         return block
     except Exception as exc:  # one bad row must not stop the run
         detail = _error_detail(exc)
@@ -1458,10 +1502,13 @@ def attach_requirements(
         for n in existing
     }
     for row in rows:
+        scope = row.pop(ADDRESS_SCOPE_KEY, None)
         row["requirements"] = None
         if row["verification_required"]:
             key = f"{row['country_code']}:{row['number_type']}"
-            row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
+            row["requirements"] = _fetch_block(
+                provider, row, previous.get(key), report, scope
+            )
     for row in kept_needing:
         key = f"{row['country_code']}:{row['number_type']}"
         row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
@@ -1592,6 +1639,9 @@ def run_provider(
         requirement_errors,
         kept_rows,
     )
+    # A row left out of the papers pass (out of stock) still carries the key.
+    for r in rows:
+        r.pop(ADDRESS_SCOPE_KEY, None)
     numbers, report = merge(
         existing,
         rows,
