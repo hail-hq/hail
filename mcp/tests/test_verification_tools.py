@@ -1762,3 +1762,307 @@ async def test_amend_sms_application_unclear_refusal_keeps_the_same_row(
     )
     assert "Keep the same verification_id" in result["error"]
     assert "<html>" not in result["error"]
+
+
+# --------------------------------------------------------------------------- #
+# Files by upload id, and check_verification
+# --------------------------------------------------------------------------- #
+
+_UPLOAD = "5a0e0c2e-0000-4000-8000-0000000000aa"
+
+
+@respx.mock
+async def test_submit_sends_an_upload_id_as_its_own_part(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(201, json=_verification())
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=_handler)
+    result = await tools.submit_verification(
+        **_kwargs(client, files=[{"slot": "identity", "upload_id": _UPLOAD.upper()}])
+    )
+    assert result["state"] == "submitted"
+    parts = captured["parts"]
+    assert parts["upload.identity"]["body"] == _UPLOAD.encode()
+    assert "file.identity" not in parts
+
+
+@respx.mock
+async def test_submit_mixes_upload_ids_and_base64_files(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(201, json=_verification())
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=_handler)
+    documents = {
+        "identity": {"option": "passport", "fields": {}},
+        "address_proof": {"option": "bill", "fields": {}},
+    }
+    await tools.submit_verification(
+        **_kwargs(
+            client,
+            documents=documents,
+            files=[
+                {"slot": "identity", "upload_id": _UPLOAD},
+                _file(slot="address_proof"),
+            ],
+        )
+    )
+    parts = captured["parts"]
+    assert parts["upload.identity"]["body"] == _UPLOAD.encode()
+    assert parts["file.address_proof"]["body"].startswith(b"%PDF")
+
+
+_BAD_UPLOAD_CASES = {
+    "not_a_uuid": [{"slot": "identity", "upload_id": _NAME}],
+    "not_a_string": [{"slot": "identity", "upload_id": 7}],
+    "upload_and_base64": [
+        {
+            "slot": "identity",
+            "upload_id": _UPLOAD,
+            "content_type": "application/pdf",
+            "content_base64": _B64,
+        }
+    ],
+    "upload_for_unknown_slot": [{"slot": "proof_of_address", "upload_id": _UPLOAD}],
+    "upload_twice_for_a_slot": [
+        {"slot": "identity", "upload_id": _UPLOAD},
+        {"slot": "identity", "upload_id": _UPLOAD},
+    ],
+    "upload_with_a_bad_slot": [{"slot": _NAME + "/x", "upload_id": _UPLOAD}],
+}
+
+
+@respx.mock
+@pytest.mark.parametrize("case", sorted(_BAD_UPLOAD_CASES))
+async def test_submit_upload_id_errors_make_no_call_and_leak_nothing(
+    client: HailClient, case: str
+) -> None:
+    catch_all = respx.route().mock(return_value=httpx.Response(500))
+    result = await tools.submit_verification(
+        **_kwargs(client, files=_BAD_UPLOAD_CASES[case])
+    )
+    assert set(result) == {"error"}
+    assert "Nothing was sent" in result["error"]
+    assert catch_all.call_count == 0
+    _assert_no_sentinel(result)
+
+
+def _check_kwargs(client: HailClient, **over) -> dict:
+    kwargs = _kwargs(client, **over)
+    kwargs.pop("attest_authorized")
+    return kwargs
+
+
+_CHECK_OK = {
+    "ok": True,
+    "files": [
+        {
+            "slot": "identity",
+            "upload_id": _UPLOAD,
+            "size_bytes": 12,
+            "sha256": "ab" * 32,
+        }
+    ],
+    "note": "The carrier runs its own checks when you submit.",
+}
+
+
+@respx.mock
+async def test_check_posts_the_same_form_to_the_check_route(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(200, json=_CHECK_OK)
+
+    route = respx.post(f"{_BASE_URL}/verifications/check").mock(side_effect=_handler)
+    submit = respx.post(f"{_BASE_URL}/verifications")
+    result = await tools.check_verification(
+        **_check_kwargs(client, files=[{"slot": "identity", "upload_id": _UPLOAD}])
+    )
+    assert route.called and not submit.called
+    assert result == _CHECK_OK
+    parts = captured["parts"]
+    assert parts["upload.identity"]["body"] == _UPLOAD.encode()
+    assert parts["quote_id"]["body"] == _QUOTE.encode()
+    assert json.loads(parts["fields"]["body"]) == {"first_name": _FIELD_VALUE}
+
+
+@respx.mock
+async def test_check_422_returns_problems_and_no_values(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/verifications/check").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "loc": ["body", "last_name"],
+                        "msg": "Last name is required.",
+                        "type": "verification_problem",
+                        "input": _NAME,
+                    }
+                ]
+            },
+        )
+    )
+    result = await tools.check_verification(**_check_kwargs(client))
+    assert result["problems"] == [
+        {"loc": ["body", "last_name"], "msg": "Last name is required."}
+    ]
+    assert "nothing was filed" in result["error"].lower()
+    _assert_no_sentinel(result)
+
+
+@respx.mock
+async def test_check_409_named_duplicate_does_not_echo_the_name(
+    client: HailClient,
+) -> None:
+    respx.post(f"{_BASE_URL}/verifications/check").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "detail": f"You already have a verification for {_NAME} as a "
+                "person for this number type."
+            },
+        )
+    )
+    result = await tools.check_verification(**_check_kwargs(client))
+    assert "already exists" in result["error"]
+    _assert_no_sentinel(result)
+
+
+@respx.mock
+@pytest.mark.parametrize("case", sorted(_BAD_CASES))
+async def test_check_local_validation_makes_no_call_and_leaks_nothing(
+    client: HailClient, case: str
+) -> None:
+    catch_all = respx.route().mock(return_value=httpx.Response(500))
+    result = await tools.check_verification(**_check_kwargs(client, **_BAD_CASES[case]))
+    assert set(result) == {"error"}
+    assert catch_all.call_count == 0
+    _assert_no_sentinel(result)
+
+
+@respx.mock
+async def test_check_unexpected_status_hides_body(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/verifications/check").mock(
+        return_value=httpx.Response(500, text=_NAME)
+    )
+    result = await tools.check_verification(**_check_kwargs(client))
+    assert "error" in result
+    _assert_no_sentinel(result)
+
+
+# --------------------------------------------------------------------------- #
+# create_file_upload
+# --------------------------------------------------------------------------- #
+
+_LINK = {
+    "id": _UPLOAD,
+    "purpose": "verification_document",
+    "upload_url": f"https://api.example.test/v1/uploads/{_UPLOAD}?token=TOK-_1",
+    "method": "PUT",
+    "content_type": "image/jpeg",
+    "max_bytes": 10 * _MIB,
+    "expires_at": "2026-11-09T18:15:00Z",
+}
+
+
+@respx.mock
+async def test_create_file_upload_returns_a_ready_curl_line(
+    client: HailClient,
+) -> None:
+    route = respx.post(f"{_BASE_URL}/uploads").mock(
+        return_value=httpx.Response(201, json=_LINK)
+    )
+    result = await tools.create_file_upload(
+        client=client,
+        purpose="verification_document",
+        filename="passport.jpg",
+        content_type="image/jpeg",
+    )
+    assert json.loads(route.calls.last.request.content) == {
+        "purpose": "verification_document",
+        "filename": "passport.jpg",
+        "content_type": "image/jpeg",
+    }
+    assert result["id"] == _UPLOAD
+    assert result["upload_url"] == _LINK["upload_url"]
+    assert result["curl"] == (
+        "curl -sS -X PUT --data-binary @<path to the file> "
+        f"-H 'Content-Type: image/jpeg' '{_LINK['upload_url']}'"
+    )
+    assert "size_bytes" in result["next"] and "sha256" in result["next"]
+
+
+async def test_create_file_upload_checks_the_purpose_locally(
+    client: HailClient,
+) -> None:
+    result = await tools.create_file_upload(
+        client=client, purpose="other", filename="a", content_type="a/b"
+    )
+    assert "purpose" in result["error"]
+
+
+@respx.mock
+async def test_create_file_upload_refuses_a_url_that_would_break_the_shell(
+    client: HailClient,
+) -> None:
+    bad = {**_LINK, "upload_url": "https://x.test/a?token=' ; rm -rf ~ '"}
+    respx.post(f"{_BASE_URL}/uploads").mock(return_value=httpx.Response(201, json=bad))
+    result = await tools.create_file_upload(
+        client=client,
+        purpose="verification_document",
+        filename="p.jpg",
+        content_type="image/jpeg",
+    )
+    assert "error" in result
+    assert "rm -rf" not in json.dumps(result)
+
+
+@respx.mock
+async def test_create_file_upload_maps_api_errors(client: HailClient) -> None:
+    respx.post(f"{_BASE_URL}/uploads").mock(
+        return_value=httpx.Response(
+            429, json={"detail": "too many unused upload links (50)"}
+        )
+    )
+    result = await tools.create_file_upload(
+        client=client,
+        purpose="email_attachment",
+        filename="a.csv",
+        content_type="text/csv",
+    )
+    assert "429" in result["error"]
+
+
+@respx.mock
+async def test_a_form_with_no_file_part_is_still_multipart(client: HailClient) -> None:
+    """The API takes multipart only; httpx sends ``data`` alone urlencoded."""
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)  # asserts multipart
+        return httpx.Response(201, json=_verification(purpose="sms"))
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=_handler)
+    result = await tools.submit_verification(
+        **_kwargs(
+            client,
+            purpose="sms",
+            quote_id=None,
+            country_code="US",
+            number_type="local",
+            documents={},
+            files=[],
+        )
+    )
+    assert "error" not in result, result
+    assert captured["parts"]["purpose"]["body"] == b"sms"

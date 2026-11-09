@@ -7,7 +7,9 @@ Exposes the following tools to the calling agent:
 * ``list_calls`` — page through recent calls
 * ``get_events`` — page through the event stream (call-narrow or org-wide)
 * ``send_email`` — send an outbound email
-* ``upload_email_attachment`` — upload a file to attach to an outbound email
+* ``upload_email_attachment`` — upload a small file (base64) to attach to an outbound email
+* ``create_file_upload`` — a one-time link to PUT a file with curl, for an
+  email attachment or a verification document
 * ``get_email`` — fetch the full record of one email
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 * ``get_email_raw`` — presigned URL for an inbound email's raw MIME
@@ -37,6 +39,8 @@ Exposes the following tools to the calling agent:
 * ``release_number`` — release a number (destructive; needs ``confirm_e164``)
 * ``get_verification_requirements`` — what a carrier needs to verify the org
   for a number type (fields, documents, address)
+* ``check_verification`` — run every check Hail can run on a verification
+  form without filing anything
 * ``submit_verification`` — send the user's details and documents to the
   carrier (irreversible once submitted; needs ``attest_authorized=True``)
 * ``list_verifications`` — the org's verifications and their states
@@ -92,6 +96,15 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 import httpx
+from hailhq.core.file_uploads import (
+    PURPOSES as _UPLOAD_PURPOSES,
+)
+from hailhq.core.file_uploads import (
+    VERIFICATION_FILE_TYPES,
+    VERIFICATION_MAX_FILE_BYTES,
+    matches_declared_type,
+    valid_content_type,
+)
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
@@ -780,29 +793,18 @@ async def release_number(
 
 _TRANSPORT_ERROR = "request timed out or failed; try again"
 _UNEXPECTED_ERROR = "unexpected error; try again"
-_VERIFICATION_FILE_TYPES = ("image/jpeg", "image/png", "application/pdf")
-_VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
+_VERIFICATION_FILE_TYPES = VERIFICATION_FILE_TYPES
+_VERIFICATION_MAX_FILE_BYTES = VERIFICATION_MAX_FILE_BYTES
 # The API caps the whole 30 MiB multipart body, so the files get 29 MiB and
 # the rest (details, boundaries) fits in the last MiB.
 _VERIFICATION_MAX_TOTAL_BYTES = 29 * 1024 * 1024
 _VERIFICATION_MAX_DETAILS_BYTES = 64 * 1024
 _SLOT_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _SLOT_RULE = "use 1 to 64 letters, digits, - or _"
-_PDF_MARKER_WINDOW = 1024
 _VERIFICATION_MAX_FILES = 20
 _VERIFICATION_MAX_FIELDS = 100
 # Largest base64 text a legal file can have; checked before decoding.
 _VERIFICATION_MAX_B64_CHARS = (_VERIFICATION_MAX_FILE_BYTES + 2) // 3 * 4
-
-
-def _matches_declared_type(content: bytes, content_type: str) -> bool:
-    if content_type == "application/pdf":
-        return b"%PDF-" in content[:_PDF_MARKER_WINDOW]
-    if content_type == "image/jpeg":
-        return content.startswith(b"\xff\xd8\xff")
-    if content_type == "image/png":
-        return content.startswith(b"\x89PNG\r\n\x1a\n")
-    return False
 
 
 def _is_str_map(value: Any) -> bool:
@@ -848,28 +850,79 @@ def _verification_shape_error(
     ):
         return "documents must be an object of {slot: {option, fields}} objects"
     if not isinstance(files, list):
-        return "files must be a list of {slot, content_type, content_base64}"
+        return (
+            "files must be a list of {slot, upload_id} or "
+            "{slot, content_type, content_base64}"
+        )
     return None
 
 
 def _check_verification_files(
     files: list[dict[str, str]], documents: dict[str, Any]
-) -> tuple[str | None, list[tuple[str, str, bytes]]]:
-    """Validate and decode the files. Returns ``(error, decoded)``.
+) -> tuple[str | None, list[tuple[str, str, bytes]], list[tuple[str, str]]]:
+    """Validate and decode the files. Returns ``(error, decoded, uploads)``:
+    ``decoded`` holds ``(slot, content_type, bytes)`` for base64 entries,
+    ``uploads`` holds ``(slot, upload_id)`` for entries that name an upload.
 
     Every message names an index, a slot, a count or a size. None of them
     contains a submitted value or any part of the base64 text.
     """
     decoded: list[tuple[str, str, bytes]] = []
+    uploads: list[tuple[str, str]] = []
     seen: set[str] = set()
     total = 0
     if any(
         not isinstance(key, str) or not _SLOT_NAME.fullmatch(key) for key in documents
     ):
-        return f"documents has a key that is not a valid slot name ({_SLOT_RULE})", []
+        return (
+            f"documents has a key that is not a valid slot name ({_SLOT_RULE})",
+            [],
+            [],
+        )
     if len(files) > _VERIFICATION_MAX_FILES:
-        return f"too many files: {len(files)} (at most {_VERIFICATION_MAX_FILES})", []
+        return (
+            f"too many files: {len(files)} (at most {_VERIFICATION_MAX_FILES})",
+            [],
+            [],
+        )
     for i, entry in enumerate(files):
+        if isinstance(entry, dict) and "upload_id" in entry:
+            if set(entry) != {"slot", "upload_id"} or not isinstance(
+                entry.get("slot"), str
+            ):
+                return (
+                    (
+                        f"files[{i}] with upload_id must have exactly the "
+                        "string keys slot and upload_id"
+                    ),
+                    [],
+                    [],
+                )
+            slot = entry["slot"]
+            # Validated before it appears in any message below.
+            if not _SLOT_NAME.fullmatch(slot):
+                return (
+                    f"files[{i}]: slot is not a valid slot name ({_SLOT_RULE})",
+                    [],
+                    [],
+                )
+            upload_id = _as_uuid(entry["upload_id"])
+            if upload_id is None:
+                return (
+                    (
+                        f"files[{i}] (slot {slot!r}): upload_id must be the id "
+                        "create_file_upload returned"
+                    ),
+                    [],
+                    [],
+                )
+            if slot in seen:
+                return f"files[{i}]: more than one file for slot {slot!r}", [], []
+            seen.add(slot)
+            if slot not in documents:
+                return f"files[{i}]: slot {slot!r} is not a key in documents", [], []
+            uploads.append((slot, upload_id))
+            continue
         if (
             not isinstance(entry, dict)
             or not isinstance(entry.get("slot"), str)
@@ -879,25 +932,27 @@ def _check_verification_files(
             return (
                 (
                     f"files[{i}] must be an object with string keys slot, "
-                    "content_type and content_base64"
+                    "content_type and content_base64, or slot and upload_id"
                 ),
+                [],
                 [],
             )
         slot = entry["slot"]
         # Validated before it appears in any message below.
         if not _SLOT_NAME.fullmatch(slot):
-            return f"files[{i}]: slot is not a valid slot name ({_SLOT_RULE})", []
+            return f"files[{i}]: slot is not a valid slot name ({_SLOT_RULE})", [], []
         if entry["content_type"] not in _VERIFICATION_FILE_TYPES:
             return (
                 f"files[{i}] (slot {slot!r}): content_type must be one of "
                 + ", ".join(_VERIFICATION_FILE_TYPES),
                 [],
+                [],
             )
         if slot in seen:
-            return f"files[{i}]: more than one file for slot {slot!r}", []
+            return f"files[{i}]: more than one file for slot {slot!r}", [], []
         seen.add(slot)
         if slot not in documents:
-            return f"files[{i}]: slot {slot!r} is not a key in documents", []
+            return f"files[{i}]: slot {slot!r} is not a key in documents", [], []
         b64 = entry["content_base64"]
         if len(b64) > _VERIFICATION_MAX_B64_CHARS:
             return (
@@ -906,13 +961,18 @@ def _check_verification_files(
                     f"{_VERIFICATION_MAX_FILE_BYTES // (1024 * 1024)} MiB"
                 ),
                 [],
+                [],
             )
         try:
             content = base64.b64decode(b64, validate=True)
         except (binascii.Error, ValueError):
-            return f"files[{i}] (slot {slot!r}): content_base64 is not valid base64", []
+            return (
+                f"files[{i}] (slot {slot!r}): content_base64 is not valid base64",
+                [],
+                [],
+            )
         if not content:
-            return f"files[{i}] (slot {slot!r}): file is empty", []
+            return f"files[{i}] (slot {slot!r}): file is empty", [], []
         if len(content) > _VERIFICATION_MAX_FILE_BYTES:
             return (
                 (
@@ -920,16 +980,17 @@ def _check_verification_files(
                     f"the limit is {_VERIFICATION_MAX_FILE_BYTES} bytes"
                 ),
                 [],
+                [],
             )
-        if not _matches_declared_type(content, entry["content_type"]):
+        if not matches_declared_type(content, entry["content_type"]):
             declared = entry["content_type"]
-            return f"files[{i}]: the content does not look like {declared}", []
+            return f"files[{i}]: the content does not look like {declared}", [], []
         total += len(content)
         if total > _VERIFICATION_MAX_TOTAL_BYTES:
             limit_mib = _VERIFICATION_MAX_TOTAL_BYTES // (1024 * 1024)
-            return f"files total more than {limit_mib} MiB", []
+            return f"files total more than {limit_mib} MiB", [], []
         decoded.append((slot, entry["content_type"], content))
-    return None, decoded
+    return None, decoded, uploads
 
 
 async def get_verification_requirements(
@@ -1215,6 +1276,71 @@ async def confirm_verification(
         return {"error": _UNEXPECTED_ERROR}
 
 
+def _verification_request(
+    *,
+    country_code: str,
+    number_type: str,
+    fields: Any,
+    documents: Any,
+    files: Any,
+    subject_type: str | None,
+    address: Any,
+    quote_id: str | None,
+    number_id: str | None,
+    purpose: str,
+) -> tuple[str | None, dict[str, Any]]:
+    """Every local check of a verification form. Returns ``(error, form)``:
+    an error ending in "Nothing was sent.", or the keyword arguments for
+    ``HailClient.submit_verification`` / ``check_verification``. Shape checks
+    live here, not in the tool signature: a typed parameter makes FastMCP
+    echo the offending value in its validation error."""
+    if subject_type not in _SUBJECT_TYPES:
+        return f"{_SUBJECT_TYPE_ERROR}. Nothing was sent.", {}
+    if purpose not in _VERIFICATION_PURPOSES:
+        return f"{_PURPOSE_ERROR}. Nothing was sent.", {}
+    if purpose == "number" and quote_id is None:
+        return f"{_QUOTE_REQUIRED}. Nothing was sent.", {}
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return "quote_id must be a UUID. Nothing was sent.", {}
+    if number_id is not None and _as_uuid(number_id) is None:
+        return "number_id must be a UUID. Nothing was sent.", {}
+    shape_error = _verification_shape_error(fields, documents, files, address)
+    if shape_error:
+        return f"{shape_error}. Nothing was sent.", {}
+    if len(fields) > _VERIFICATION_MAX_FIELDS:
+        return (
+            f"too many fields: {len(fields)} "
+            f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
+        ), {}
+    details_bytes = _details_bytes(fields, address or {}, documents)
+    if details_bytes is None:
+        return (
+            "fields, address and documents must be valid JSON text. Nothing was sent."
+        ), {}
+    if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
+        return (
+            f"fields, address and documents total {details_bytes} "
+            f"bytes; the limit is {_VERIFICATION_MAX_DETAILS_BYTES} bytes. "
+            "Nothing was sent."
+        ), {}
+    error, decoded, uploads = _check_verification_files(files, documents)
+    if error:
+        return f"{error}. Nothing was sent.", {}
+    return None, {
+        "country_code": country_code,
+        "number_type": number_type,
+        "subject_type": subject_type,
+        "fields": fields,
+        "documents": documents,
+        "files": decoded,
+        "uploads": uploads,
+        "address": address,
+        "quote_id": quote_id,
+        "number_id": number_id,
+        "purpose": purpose,
+    }
+
+
 async def submit_verification(
     *,
     client: HailClient,
@@ -1247,45 +1373,22 @@ async def submit_verification(
             "and gave you the details and files in this conversation. "
             "Nothing was sent."
         }
-    # Shape checks live here, not in the tool signature: a typed parameter
-    # makes FastMCP echo the offending value in its validation error.
-    shape_error = _verification_shape_error(fields, documents, files, address)
-    if shape_error:
-        return {"error": f"{shape_error}. Nothing was sent."}
-    if len(fields) > _VERIFICATION_MAX_FIELDS:
-        return {
-            "error": f"too many fields: {len(fields)} "
-            f"(at most {_VERIFICATION_MAX_FIELDS}). Nothing was sent."
-        }
-    details_bytes = _details_bytes(fields, address or {}, documents)
-    if details_bytes is None:
-        return {
-            "error": "fields, address and documents must be valid JSON text. Nothing was sent."
-        }
-    if details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
-        return {
-            "error": f"fields, address and documents total {details_bytes} "
-            f"bytes; the limit is {_VERIFICATION_MAX_DETAILS_BYTES} bytes. "
-            "Nothing was sent."
-        }
-    error, decoded = _check_verification_files(files, documents)
+    error, form = _verification_request(
+        country_code=country_code,
+        number_type=number_type,
+        fields=fields,
+        documents=documents,
+        files=files,
+        subject_type=subject_type,
+        address=address,
+        quote_id=quote_id,
+        number_id=number_id,
+        purpose=purpose,
+    )
     if error:
-        return {"error": f"{error}. Nothing was sent."}
+        return {"error": error}
     try:
-        return _without_carrier(
-            await client.submit_verification(
-                country_code=country_code,
-                number_type=number_type,
-                subject_type=subject_type,
-                fields=fields,
-                documents=documents,
-                files=decoded,
-                address=address,
-                quote_id=quote_id,
-                number_id=number_id,
-                purpose=purpose,
-            )
-        )
+        return _without_carrier(await client.submit_verification(**form))
     except httpx.TransportError:
         return {
             "error": "request timed out; the submission may have gone through. "
@@ -1299,6 +1402,92 @@ async def submit_verification(
             "error": "unexpected error; the submission may have gone through. "
             "Call list_verifications to check before submitting again."
         }
+
+
+async def check_verification(
+    *,
+    client: HailClient,
+    country_code: str,
+    number_type: str,
+    fields: Any,
+    documents: Any,
+    files: Any,
+    subject_type: str | None,
+    address: Any = None,
+    quote_id: str | None = None,
+    number_id: str | None = None,
+    purpose: str = "number",
+) -> dict[str, Any]:
+    error, form = _verification_request(
+        country_code=country_code,
+        number_type=number_type,
+        fields=fields,
+        documents=documents,
+        files=files,
+        subject_type=subject_type,
+        address=address,
+        quote_id=quote_id,
+        number_id=number_id,
+        purpose=purpose,
+    )
+    if error:
+        return {"error": error}
+    try:
+        return await client.check_verification(**form)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except HailAPIError as exc:
+        if exc.status == 422:
+            return {
+                "error": "the check found problems; nothing was filed. Fix the "
+                "listed problems with the user and check again.",
+                "problems": exc.problems or [],
+            }
+        return _submit_error(exc)
+    except Exception:
+        # No exception text: it could carry a request or response body.
+        return {"error": _UNEXPECTED_ERROR}
+
+
+async def create_file_upload(
+    *, client: HailClient, purpose: str, filename: str, content_type: str
+) -> dict[str, Any]:
+    if purpose not in _UPLOAD_PURPOSES:
+        return {
+            "error": "purpose must be 'email_attachment' or 'verification_document'"
+        }
+    try:
+        link = await client.create_file_upload(
+            purpose=purpose, filename=filename, content_type=content_type
+        )
+    except ValidationError as exc:
+        return {"error": _validation_error_message(exc)}
+    except HailAPIError as exc:
+        return _format_api_error(exc)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    # Both go into a shell line in single quotes: refuse anything that could
+    # end the quote (the API never sends one).
+    if not _SHELL_SAFE_URL.fullmatch(link["upload_url"]) or not valid_content_type(
+        link["content_type"]
+    ):
+        return {"error": "the API returned an upload link this tool cannot use"}
+    return {
+        **link,
+        "curl": (
+            "curl -sS -X PUT --data-binary @<path to the file> "
+            f"-H 'Content-Type: {link['content_type']}' '{link['upload_url']}'"
+        ),
+        "next": (
+            "Run the curl line from a shell, with the file's path after the @. "
+            "The response has size_bytes and sha256: compare them with the "
+            "local file (for example `wc -c` and `shasum -a 256`). The link "
+            "works once, until expires_at."
+        ),
+    }
+
+
+_SHELL_SAFE_URL = re.compile(r"https?://[A-Za-z0-9.:/?=&_%~+-]+")
 
 
 def _submit_error(exc: HailAPIError) -> dict[str, Any]:
@@ -1734,8 +1923,12 @@ def register_tools(
         filename: str,
         content_type: str,
     ) -> dict[str, Any]:
-        """Upload an attachment for outbound email.
+        """Upload a small attachment for outbound email, as base64 text.
 
+        Meant for small files (under about 50 KB): every base64 character goes
+        through the tool call itself. Larger files go through ``create_file_upload``
+        with ``purpose="email_attachment"``: its ``curl`` line sends the bytes, and its
+        ``id`` works in ``send_email``'s ``attachment_ids``.
         ``content_base64`` contains the file bytes encoded as base64.
         Returns ``id``, ``filename``, ``content_type`` and ``size_bytes``.
         The ID is accepted in an email's ``attachment_ids`` and is reusable across sends.
@@ -1746,6 +1939,48 @@ def register_tools(
                 return await upload_email_attachment(
                     client=client,
                     content_base64=content_base64,
+                    filename=filename,
+                    content_type=content_type,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+    @mcp_app.tool(
+        name="create_file_upload",
+        title="Create a file upload link",
+        annotations=ToolAnnotations(
+            title="Create a file upload link",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
+    async def create_file_upload_tool(
+        ctx: Context,
+        purpose: str,
+        filename: str,
+        content_type: str,
+    ) -> dict[str, Any]:
+        """Create a one-time link that uploads one file from a shell with curl.
+
+        The bytes go from the local disk to Hail directly, not through the tool call,
+        so any file that is not tiny goes this way.
+        ``purpose`` is ``email_attachment`` (25 MB at most; the ``id`` works in
+        ``send_email``'s ``attachment_ids``) or ``verification_document`` (JPG, PNG
+        or PDF, 10 MB at most; ``{"slot": ..., "upload_id": id}`` works in the
+        ``files`` of ``check_verification`` and ``submit_verification`` for 1 hour
+        after the upload).
+        ``content_type`` is the file's MIME type, like ``application/pdf``.
+        Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
+        and a ready ``curl`` line with a placeholder for the file's path after ``@``.
+        The link needs no key and works once. The upload response holds
+        ``size_bytes`` and ``sha256`` to compare with the local file."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await create_file_upload(
+                    client=client,
+                    purpose=purpose,
                     filename=filename,
                     content_type=content_type,
                 )
@@ -2551,6 +2786,66 @@ def register_tools(
             return {"error": str(exc)}
 
     @mcp_app.tool(
+        name="check_verification",
+        title="Check a verification",
+        annotations=ToolAnnotations(
+            title="Check a verification",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def check_verification_tool(
+        ctx: Context,
+        country_code: str,
+        number_type: str,
+        fields: _JsonObject,
+        documents: _JsonObject,
+        files: _JsonObjectList,
+        # Required, but checked inside check_verification: a missing
+        # required argument makes FastMCP echo every argument, personal data
+        # included, in its validation error.
+        subject_type: str | None = None,
+        address: _JsonObjectOrNone = None,
+        quote_id: str | None = None,
+        number_id: str | None = None,
+        purpose: str = "number",
+    ) -> dict[str, Any]:
+        """Check a carrier registration form without filing anything.
+
+        Takes the same arguments as ``submit_verification`` except ``attest_authorized``.
+        Runs every check Hail can run before filing: purpose rules, credit (402),
+        the carrier's current form, duplicates (409), field lengths, each file
+        (type, size, and for ``upload_id`` that it is this workspace's verification
+        document, uploaded within the last hour), and the form's required fields,
+        documents and address (for ``purpose="sms"``, the US texting application).
+        Nothing is filed, saved, held or charged, and uploads stay usable.
+        Returns ``ok``, ``files`` (slot, upload_id, size_bytes, sha256 per file) and
+        ``note``; problems come back as ``problems`` with the field named.
+        The carrier runs its own checks at submission."""
+        # Untyped on purpose, same as submit_verification: FastMCP's schema
+        # validation would echo a rejected value into the error.
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await check_verification(
+                    client=client,
+                    country_code=country_code,
+                    number_type=number_type,
+                    fields=fields,
+                    documents=documents,
+                    files=files,
+                    subject_type=subject_type,
+                    address=address,
+                    quote_id=quote_id,
+                    number_id=number_id,
+                    purpose=purpose,
+                )
+        except RuntimeError:
+            # Not the exception text: it must never carry submitted values.
+            return {"error": "could not authenticate the request"}
+
+    @mcp_app.tool(
         name="submit_verification",
         title="Submit a verification",
         annotations=ToolAnnotations(
@@ -2596,10 +2891,14 @@ def register_tools(
 
         ``address`` contains customer_name, street, city, region, postal_code and country_code when required.
         ``documents`` maps each needed slot to its selected ``option`` and ``fields``.
-        ``files`` contains slot, content_type and content_base64 for each required uploaded file.
+        ``files`` has one entry per required file: ``{slot, upload_id}`` with the ``id``
+        from ``create_file_upload`` (purpose ``verification_document``, uploaded within
+        the last hour), or ``{slot, content_type, content_base64}`` for a very small file.
+        With base64, every byte of the file is written into the tool call.
         Slot names match letters, digits, hyphens and underscores, up to 64 characters.
         Accepted files are JPEG, PNG or PDF: at most 10 MiB each, 29 MiB total and 20 files.
         At most 100 fields are accepted. Base64 adds about one third to each file's size in the request.
+        ``check_verification`` takes the same arguments and files nothing.
 
         Returns ``id``, ``state`` and ``subject_name``. Carrier review takes business days.
         A 409 identifies an existing registration; a timeout can leave a submission in progress.
