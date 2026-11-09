@@ -320,12 +320,20 @@ class Settings(BaseSettings):
     hail_velocity_sms_per_hour: int = 100
     hail_velocity_sms_per_day: int = 1000
 
-    # Abuse-monitoring guardrail (SMS opt-out rate -> ChannelSuspension).
+    # Abuse-monitoring guardrail (SMS opt-out rate, email bounce and
+    # complaint rates -> ChannelSuspension).
     # Conservative starting thresholds per the design spec's own caution
     # that these are unvalidated pending real traffic data, tune post-launch.
     hail_sms_abuse_window_hours: int = 24
     hail_sms_abuse_min_sends: int = 20  # floor: don't flag low-volume orgs
     hail_sms_abuse_max_opt_out_rate: float = 0.05  # 5% opt-out rate trips it
+    # Email: all orgs share one SES account. SES reviews the account at a 5%
+    # hard bounce rate or a 0.1% complaint rate and may pause it at 10% or
+    # 0.5%, so one org's trip point sits below the account pause line.
+    hail_email_abuse_window_hours: int = 168
+    hail_email_abuse_min_sends: int = 500  # recipients; floor for low volume
+    hail_email_abuse_max_bounce_rate: float = 0.04  # hard bounces / recipients
+    hail_email_abuse_max_complaint_rate: float = 0.003  # Gmail and Yahoo limit
     # Poll cadence (seconds) for the AbuseMonitorWorker's coarse-grained batch
     # check, hourly by default, not a per-send check. Set 0 to disable.
     hail_abuse_monitor_poll_seconds: int = 3600

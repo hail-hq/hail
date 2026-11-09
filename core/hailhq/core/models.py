@@ -329,8 +329,9 @@ class ChannelSuspension(Base):
     ``OrgClosure`` (whole-account closure) and from ``Suppression``
     (per-recipient opt-out). Backs the abuse-monitoring guardrail: when an
     org's opt-out rate on a channel crosses a threshold, a row here blocks
-    further sends on that channel until an operator lifts it (or, later,
-    an automated cooldown expires).
+    further sends on that channel until an operator lifts it by setting
+    ``lifted_at``. A lifted row is kept, so the monitor can count only
+    activity after the lift.
     """
 
     __tablename__ = "channel_suspensions"
@@ -346,14 +347,23 @@ class ChannelSuspension(Base):
     suspended_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+    lifted_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "channel IN ('sms','voice','email')",
             name="channel_suspensions_channel_check",
         ),
-        UniqueConstraint(
-            "organization_id", "channel", name="channel_suspensions_org_channel_uniq"
+        CheckConstraint(
+            "lifted_at IS NULL OR lifted_at >= suspended_at",
+            name="channel_suspensions_lifted_after_suspended_check",
+        ),
+        Index(
+            "channel_suspensions_active_uq",
+            "organization_id",
+            "channel",
+            unique=True,
+            postgresql_where=text("lifted_at IS NULL"),
         ),
     )
 
@@ -1039,6 +1049,14 @@ class Sms(Base):
             "to_e164",
             "requested_at",
         ),
+        # The abuse monitor's after-lift STOP check.
+        Index(
+            "sms_outbound_to_sent_idx",
+            "organization_id",
+            "to_e164",
+            "sent_at",
+            postgresql_where=text("direction = 'outbound'"),
+        ),
     )
 
 
@@ -1646,6 +1664,12 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The hourly email abuse check reads outbound mail by send time.
+        Index(
+            "emails_outbound_sent_at_idx",
+            "sent_at",
+            postgresql_where=text("direction = 'outbound'"),
+        ),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.
