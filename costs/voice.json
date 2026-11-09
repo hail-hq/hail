@@ -6019,7 +6019,7 @@
       "usd_per_minute": "1.75",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "1.75",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -6036,7 +6036,7 @@
       "usd_per_minute": "0.005",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "0.28",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14002,7 +14002,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "0.5029",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14123,7 +14123,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "0.939",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14154,7 +14154,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "1.026",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14230,7 +14230,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "1.3749",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14261,7 +14261,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "1.4621",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14382,7 +14382,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "2.5954",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14413,7 +14413,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "2.6827",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14444,7 +14444,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "2.77",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14490,7 +14490,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "3.5547",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14695,7 +14695,7 @@
       "usd_per_minute": "0.904",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "0.9127",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14728,7 +14728,7 @@
       "usd_per_minute": "0.939",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "0.9508",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14761,7 +14761,7 @@
       "usd_per_minute": "1.2876",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "1.3309",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14810,7 +14810,7 @@
       "usd_per_minute": "1.8107",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "1.9013",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14843,7 +14843,7 @@
       "usd_per_minute": "2.5954",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "2.7569",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14892,7 +14892,7 @@
       "usd_per_minute": "3.5547",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "3.8027",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -14925,7 +14925,7 @@
       "usd_per_minute": "5.2984",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "5.7039",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15022,7 +15022,7 @@
       "usd_per_minute": "4.1128",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "1.4641",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15039,7 +15039,7 @@
       "usd_per_minute": "1.898",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "1.5212",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15071,7 +15071,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "4.3044",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15088,7 +15088,7 @@
       "usd_per_minute": "6.3447",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "6.6547",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15105,7 +15105,7 @@
       "usd_per_minute": "8.5418",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "4.6202",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15185,7 +15185,7 @@
       "usd_per_minute": "1.4619",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "0.7605",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15234,7 +15234,7 @@
       "usd_per_minute": "5.2984",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "2.852",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15251,7 +15251,7 @@
       "usd_per_minute": "7.0423",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "3.8027",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15329,7 +15329,7 @@
       "usd_per_minute": "5.3273",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "4.7532",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15394,7 +15394,7 @@
       "usd_per_minute": "7.0284",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "5.7039",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -15411,7 +15411,7 @@
       "usd_per_minute": "5.9755",
       "last_changed_at": "2026-11-12",
       "usd_per_call": "6.9399",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
@@ -27175,7 +27175,7 @@
       "origination_prefixes": ["LOCAL"],
       "usd_per_minute": "1.0",
       "last_changed_at": "2026-11-12",
-      "notes": "Exact match: applies only when the dialed number equals a listed prefix."
+      "exact_match": true
     },
     {
       "provider": "telnyx",
