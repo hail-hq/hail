@@ -621,3 +621,32 @@ async def test_two_links_at_once_never_pass_the_cap(
     finally:
         app.dependency_overrides[get_session] = saved
     assert sorted(r.status_code for r in results) == [201, 429]
+
+
+async def test_a_link_swept_during_its_put_is_410_and_leaves_no_object(
+    client, org_and_key, s3, async_session
+) -> None:
+    """The row went away while the body was stored: the object is removed."""
+    from sqlalchemy import delete
+
+    org_id, _, plain = org_and_key
+    link = await _link(client, plain)
+    upload_id = UUID(link["id"])
+
+    async def swept(*_args):
+        await async_session.execute(
+            delete(FileUpload).where(FileUpload.id == upload_id)
+        )
+        await async_session.commit()
+
+    s3.put_attachment.side_effect = swept
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 410, resp.text
+    s3.delete.assert_awaited_once_with(f"verification-uploads/{org_id}/{upload_id}")
+
+
+async def test_a_link_in_use_says_so_in_its_404(client, org_and_key, s3) -> None:
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    resp = await client.put(f"/v1/uploads/{link['id']}?token=nope", content=_JPEG)
+    assert resp.json()["detail"] == "upload link not found, already used, or in use"

@@ -44,6 +44,11 @@ LINK_TTL = timedelta(minutes=15)
 MAX_PENDING_LINKS = 50
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
+# A link whose body a PUT is reading holds this before its token hash.
+LINK_BUSY_PREFIX = "busy:"
+# The GC leaves a busy link alone this long past its expiry, so a slow PUT
+# can finish; after that the PUT's process is taken to be gone.
+BUSY_LINK_GRACE = timedelta(hours=1)
 
 _PREFIXES = {
     "email_attachment": "outbound-attachments/",
@@ -112,6 +117,8 @@ async def delete_org_verification_uploads(
 
 
 __all__ = [
+    "BUSY_LINK_GRACE",
+    "LINK_BUSY_PREFIX",
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",

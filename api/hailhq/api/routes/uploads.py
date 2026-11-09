@@ -39,6 +39,7 @@ from hailhq.api.ratelimit import (
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
+    LINK_BUSY_PREFIX,
     LINK_TTL,
     MAX_PENDING_LINKS,
     hash_token,
@@ -72,9 +73,7 @@ exempt_prefix("/uploads/", methods=frozenset({"PUT"}))
 
 logger = logging.getLogger(__name__)
 
-_NOT_FOUND = "upload link not found, or already used"
-# A link whose body is being read holds this before its token hash.
-_BUSY_PREFIX = "busy:"
+_NOT_FOUND = "upload link not found, already used, or in use"
 # Body reads one process runs at once. Each can buffer up to the purpose's
 # size limit (25 MB for an email attachment), so this caps that memory.
 MAX_CONCURRENT_BODY_READS = 8
@@ -230,8 +229,13 @@ async def _read_body(request: Request, limit: int) -> bytes:
     response_model=FileUploadResponse,
     operation_id="put_file_upload",
     responses={
-        404: {"description": "Unknown link, wrong token, or already used."},
-        410: {"description": "The link expired."},
+        404: {
+            "description": (
+                "Unknown link, wrong token, already used, or another PUT is "
+                "sending to it."
+            )
+        },
+        410: {"description": "The link expired, also while its body was sent."},
         413: {"description": "The file is larger than the link's `max_bytes`."},
         503: {
             "description": (
@@ -268,8 +272,8 @@ async def put_file_upload(
 ) -> FileUploadResponse:
     """Send the file's bytes to an upload link. No Authorization header.
 
-    Works once. Unknown id, wrong token or a used link are all 404 with one
-    message; an expired link is 410. Empty body: 422. A verification
+    Works once. Unknown id, wrong token, a used link or one another PUT is
+    sending to are all 404 with one message; an expired link is 410. Empty body: 422. A verification
     document whose first bytes are not the declared JPEG, PNG or PDF: 422.
     """
     if s3 is None:
@@ -295,7 +299,7 @@ async def put_file_upload(
     # marker in one atomic update, so only one body read runs per link. A
     # second PUT meanwhile gets 404. A failed read gives the link back, so
     # the same link can be tried again with a smaller or correct file.
-    busy = _BUSY_PREFIX + token_hash
+    busy = LINK_BUSY_PREFIX + token_hash
     claimed = (
         await db.execute(
             update(FileUpload)
@@ -358,7 +362,16 @@ async def put_file_upload(
                 FileUpload.id == upload_id, FileUpload.token_hash == busy
             )
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    if row is None:
+        # The GC swept the link while the body was sent (a PUT over an hour
+        # past expiry). Nothing references the object: remove it.
+        await db.rollback()
+        try:
+            await s3.delete(s3_key)
+        except Exception:
+            logger.warning("upload %s: could not delete an orphaned object", upload_id)
+        raise _expired()
     row.token_hash = None
     row.uploaded_at = datetime.now(timezone.utc)
     row.size_bytes = len(payload)
