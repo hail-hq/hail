@@ -77,11 +77,13 @@ _OPT_IN_MAX = 1024
 # Carriers file at most 20 characters (Telnyx `ein`).
 _TAX_NUMBER_MAX = 20
 # US EINs and Canadian Business Numbers are nine digits.
-_NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
+NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
 
 
-# VAT prefixes that are not the ISO country code.
-_VAT_PREFIXES = {"GR": "EL", "AT": "ATU"}
+# The VAT prefix to strip, per country: the ISO code before a digit, unless
+# listed. Greece uses EL. An Austrian number keeps its U ("ATU12345678" files
+# as "U12345678").
+_VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
 
 
 def tax_number(value: str | None, country: str | None) -> str:
@@ -90,19 +92,14 @@ def tax_number(value: str | None, country: str | None) -> str:
     "SE 556677-8899 01" from Sweden files as "556677889901". A full Canadian
     Business Number files as its first 9 digits."""
     text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
-    code = (country or "").upper()
+    code = (country or "").strip().upper()
     if code == "CA":
         full = re.fullmatch(r"([0-9]{9})[A-Z]{2}[0-9]{4}", text)
         return full.group(1) if full else text
-    prefix = _VAT_PREFIXES.get(code, code)
-    if (
-        code not in _NINE_DIGIT_COUNTRIES
-        and len(code) == 2
-        and text.startswith(prefix)
-        and text[len(prefix) : len(prefix) + 1].isdigit()
-    ):
-        text = text[len(prefix) :]
-    return text
+    if code == "US" or not re.fullmatch(r"[A-Z]{2}", code):
+        return text
+    prefix = _VAT_PREFIXES.get(code, rf"{code}(?=[0-9])")
+    return re.sub(rf"^{prefix}", "", text)
 
 
 _ELIGIBILITY_FIELDS = (
@@ -606,11 +603,15 @@ def _application_problems(
         issue("registration_country", "Use a two-letter uppercase country code.")
     if subject_type == "business" and val("ein"):
         number = tax_number(val("ein"), issuer)
-        if issuer in _NINE_DIGIT_COUNTRIES:
+        if issuer in NINE_DIGIT_COUNTRIES:
             if not re.fullmatch(r"[0-9]{9}", number):
                 issue(
                     "ein",
-                    "Enter the 9-digit US EIN, or the first 9 digits of your Canadian Business Number.",
+                    (
+                        "Enter your 9-digit Business Number, or the full 15 characters like 123456789RT0001."
+                        if issuer == "CA"
+                        else "Enter your 9-digit EIN."
+                    ),
                 )
         elif not (4 <= len(number) <= _TAX_NUMBER_MAX and re.search(r"[0-9]", number)):
             issue(

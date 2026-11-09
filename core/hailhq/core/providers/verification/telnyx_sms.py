@@ -31,6 +31,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
+    NINE_DIGIT_COUNTRIES,
     campaign_text,
     sms_requirements,
     sms_subject_name,
@@ -323,11 +324,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 )
             )
         # Outside the US and Canada, sender_problems runs the same check.
+        issuer = (fields.get("registration_country") or "").strip().upper()
         if (
             subject_type == "business"
             and address
-            and fields.get("registration_country") in {"US", "CA"}
-            and fields.get("registration_country") != address.country_code.upper()
+            and issuer in NINE_DIGIT_COUNTRIES
+            and issuer != address.country_code.upper()
         ):
             problems.append(
                 Problem(

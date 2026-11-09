@@ -8,7 +8,10 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
-from hailhq.core.providers.verification.sms_form import tax_number
+from hailhq.core.providers.verification.sms_form import (
+    NINE_DIGIT_COUNTRIES,
+    tax_number,
+)
 from hailhq.core.urls import canonical_url
 
 LEGACY_APPLICATION = (
@@ -34,7 +37,7 @@ def sender_problems(
         subject_type == "business"
         and address
         and issuer
-        and issuer not in {"US", "CA"}
+        and issuer not in NINE_DIGIT_COUNTRIES
         and address.country_code.upper() != issuer
     ):
         # Carriers check a non-US/CA number against the address country.
