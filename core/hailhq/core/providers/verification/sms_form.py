@@ -703,7 +703,11 @@ def _application_problems(
         if not val("program_name") or not _names_sender(
             val("program_name"), confirmation
         ):
-            missing.append("public sender/program name")
+            missing.append(
+                f'your program name "{val("program_name")}"'
+                if val("program_name")
+                else "your program name"
+            )
         if (
             not val("message_frequency")
             or val("message_frequency").casefold() not in confirmation.casefold()
@@ -768,7 +772,7 @@ def _application_problems(
             if sender and not _names_sender(sender, sample):
                 issue(
                     name,
-                    "Include the public sender or program name so recipients can identify you.",
+                    f'Add your program name "{sender}" to this sample, so people know who is texting.',
                 )
             if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
                 has_stop = True
