@@ -1857,7 +1857,6 @@ async def _prepare_submission(
     # parts, then the total size from both, all before any object is fetched.
     rows: dict[str, FileUpload] = {}
     parts: dict[str, UploadedFile] = {}
-    seen: set[UUID] = set()
     total = 0
     for slot in sub.documents:
         part = form.get(f"file.{slot}")
@@ -1869,19 +1868,15 @@ async def _prepare_submission(
                     f"send file.{slot} or upload.{slot}, not both",
                     loc=["body", f"upload.{slot}"],
                 )
-            row = await _usable_upload(db, principal.organization_id, slot, upload_ref)
-            if row.id in seen:
-                raise unprocessable(
-                    f"upload.{slot} names an upload another slot already uses",
-                    loc=["body", f"upload.{slot}"],
-                )
-            seen.add(row.id)
-            rows[slot] = row
+            rows[slot] = await _usable_upload(
+                db, principal.organization_id, slot, upload_ref
+            )
         elif has_part:
             parts[slot] = await _read_file(part)
             total += len(parts[slot].data)
             if total > MAX_REQUEST_BYTES:
                 raise _files_too_large()
+    # Per slot: one upload in two slots is sent to the carrier twice.
     total += sum(row.size_bytes or 0 for row in rows.values())
     if total > MAX_REQUEST_BYTES:
         raise _files_too_large()
@@ -1896,12 +1891,25 @@ async def _prepare_submission(
         async with fetches:
             return await _read_upload(s3, row)
 
-    fetched = dict(
-        zip(rows, await asyncio.gather(*(fetch(row) for row in rows.values())))
-    )
+    # Each distinct upload once. A task group: one failed fetch cancels the
+    # others, and its own error (503 or 422) is what the caller gets.
+    distinct = {row.id: row for row in rows.values()}
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = {
+                upload_id: group.create_task(fetch(row))
+                for upload_id, row in distinct.items()
+            }
+    except Exception as failed:
+        # The group's first error, not the group: FastAPI answers it.
+        errors = getattr(failed, "exceptions", None)
+        raise (errors[0] if errors else failed) from None
+    fetched = {upload_id: task.result() for upload_id, task in tasks.items()}
     total = 0
     for slot, value in sub.documents.items():
-        file: UploadedFile | None = fetched.get(slot) or parts.get(slot)
+        file: UploadedFile | None = (
+            fetched[rows[slot].id] if slot in rows else parts.get(slot)
+        )
         if file is not None:
             # Again with the bytes read: an object may differ from its row.
             total += len(file.data)
@@ -1980,7 +1988,7 @@ async def _prepare_submission(
         subject_name=subject_name,
         documents=documents,
         draft_kwargs=draft_kwargs,
-        uploads=list(rows.values()),
+        uploads=list(distinct.values()),
         files=files,
     )
 
@@ -2053,25 +2061,15 @@ async def create_verification(
     prepared = await _prepare_submission(
         request, principal, db, registry, s3, lock=True
     )
-    sub = prepared.sub
-    offer = prepared.offer
-    provider_name = prepared.provider_name
-    provider = prepared.provider
-    hold_cents = prepared.hold_cents
-    requirements = prepared.requirements
-    subject_name = prepared.subject_name
-    documents = prepared.documents
-    draft_kwargs = prepared.draft_kwargs
-
     try:
-        draft = await provider.create_draft(
+        draft = await prepared.provider.create_draft(
             organization_id=str(principal.organization_id),
             contact_email=settings.hail_support_email,
-            requirements=requirements,
-            fields=sub.fields,
-            address=sub.address,
-            documents=documents,
-            **draft_kwargs,
+            requirements=prepared.requirements,
+            fields=prepared.sub.fields,
+            address=prepared.sub.address,
+            documents=prepared.documents,
+            **prepared.draft_kwargs,
         )
     except VerificationProviderError as exc:
         raise HTTPException(
@@ -2092,65 +2090,70 @@ async def create_verification(
                 f"applies. Add credit at {BILLING_URL} and file again."
             ),
         )
-    if sub.purpose == "sms":
+    if prepared.sub.purpose == "sms":
         # Stored privately for rejected-application repair; no files, provider
         # feedback, or arbitrary extra multipart fields belong in this record.
         draft.refs["application"] = _application_record(
-            sub.subject_type, requirements, sub.fields, sub.address
+            prepared.sub.subject_type,
+            prepared.requirements,
+            prepared.sub.fields,
+            prepared.sub.address,
         )
 
-    _stamp_campaign_filed(provider, draft.refs)
+    _stamp_campaign_filed(prepared.provider, draft.refs)
     if draft.billed_refs:
-        if sub.purpose == "sms":
+        if prepared.sub.purpose == "sms":
             draft.billed_refs["application"] = copy.deepcopy(draft.refs["application"])
-        _stamp_campaign_filed(provider, draft.billed_refs)
+        _stamp_campaign_filed(prepared.provider, draft.billed_refs)
     if draft.problems:
         if draft.billed_refs:
             await _record_billed_refusal(
                 db,
                 principal,
-                provider_name,
-                sub,
-                subject_name,
+                prepared.provider_name,
+                prepared.sub,
+                prepared.subject_name,
                 draft.billed_refs,
                 "; ".join(p.message for p in draft.problems),
-                requirements.version,
+                prepared.requirements.version,
             )
-        raise _problems_422(draft.problems, principal.organization_id, provider_name)
+        raise _problems_422(
+            draft.problems, principal.organization_id, prepared.provider_name
+        )
 
     row = CarrierVerification(
         organization_id=principal.organization_id,
-        provider=provider_name,
-        purpose=sub.purpose,
-        country_code=sub.country_code,
-        number_type=sub.number_type,
-        subject_type=sub.subject_type,
-        subject_name=subject_name,
+        provider=prepared.provider_name,
+        purpose=prepared.sub.purpose,
+        country_code=prepared.sub.country_code,
+        number_type=prepared.sub.number_type,
+        subject_type=prepared.sub.subject_type,
+        subject_name=prepared.subject_name,
         state="awaiting_review",
         provider_refs=draft.refs,
-        requirements_version=requirements.version,
+        requirements_version=prepared.requirements.version,
     )
-    if hold_cents:
+    if prepared.hold_cents:
         # Not held across the carrier calls above: a top-up must not wait.
         await org_lock(db, principal.organization_id)
-        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+        if await get_balance_cents(db, principal.organization_id) < prepared.hold_cents:
             await db.rollback()
             # Nothing of the customer's is left at the carrier.
             try:
-                await provider.discard(draft.refs)
+                await prepared.provider.discard(draft.refs)
             except Exception:
                 logger.exception("verification draft discard failed")
-            raise _hold_402(hold_cents)
+            raise _hold_402(prepared.hold_cents)
     db.add(row)
     try:
-        if hold_cents:
+        if prepared.hold_cents:
             await db.flush()
             await verification_hold.place_hold(
                 db,
                 principal.organization_id,
                 row.id,
-                hold_cents,
-                channel="voice" if "voice" in offer["capabilities"] else "sms",
+                prepared.hold_cents,
+                channel="voice" if "voice" in prepared.offer["capabilities"] else "sms",
             )
         await db.commit()
     except Exception as exc:
@@ -2160,13 +2163,13 @@ async def create_verification(
         # Not a reused brand: this request did not make it, and a filing that
         # won the race may be using it.
         if not draft.refs.get("brand_reused"):
-            await provider.discard(draft.refs)
+            await prepared.provider.discard(draft.refs)
         if isinstance(exc, IntegrityError):
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    _duplicate_detail(sub.subject_type, subject_name)
-                    if sub.purpose == "number"
+                    _duplicate_detail(prepared.sub.subject_type, prepared.subject_name)
+                    if prepared.sub.purpose == "number"
                     else "a verification already exists for this number type"
                 ),
             ) from exc
@@ -2178,7 +2181,7 @@ async def create_verification(
     await _submit_row(
         db,
         row,
-        provider,
+        prepared.provider,
         before=None,
         actor=actor_of(principal),
         action="verification.submit",

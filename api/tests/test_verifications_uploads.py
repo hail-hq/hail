@@ -493,9 +493,10 @@ async def test_used_uploads_are_deleted_in_one_statement(
     assert await async_session.get(FileUpload, second_id) is None
 
 
-async def test_one_upload_in_two_slots_is_refused(
+async def test_one_upload_can_fill_two_slots_and_is_fetched_once(
     client, org_and_key, carrier, s3, async_session
 ) -> None:
+    """Each slot gets the bytes, and each use counts toward the total."""
     org_id, _, key = org_and_key
     upload_id = str((await _upload(async_session, org_id)).id)
     resp = await _post(
@@ -507,10 +508,71 @@ async def test_one_upload_in_two_slots_is_refused(
         ),
         **{"upload.proof_of_identity": upload_id, "upload.extra_0": upload_id},
     )
+    assert resp.status_code == 200, resp.text
+    files = resp.json()["files"]
+    assert [f["slot"] for f in files] == ["proof_of_identity", "extra_0"]
+    assert {f["upload_id"] for f in files} == {upload_id}
+    assert s3.fetch_raw.await_count == 1
+
+
+async def test_one_upload_in_many_slots_counts_each_use_in_the_total(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    from hailhq.api.routes.verifications import MAX_FILE_BYTES
+
+    org_id, _, key = org_and_key
+    row = await _upload(async_session, org_id)
+    row.size_bytes = MAX_FILE_BYTES
+    upload_id = str(row.id)
+    await async_session.commit()
+    slots = ["proof_of_identity", "extra_0", "extra_1", "extra_2"]
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps({slot: {} for slot in slots}),
+        **{f"upload.{slot}": upload_id for slot in slots},
+    )
     assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"][0]["loc"] == ["body", "upload.extra_0"]
-    assert upload_id not in resp.text
+    assert resp.json()["detail"][0]["msg"] == "the files total more than 30 MB"
     s3.fetch_raw.assert_not_awaited()
+
+
+async def test_one_failed_fetch_cancels_the_others(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    import asyncio
+
+    org_id, _, key = org_and_key
+    slots = ["proof_of_identity", "extra_0"]
+    rows = [await _upload(async_session, org_id) for _ in slots]
+    failing_key = rows[0].s3_key
+    cancelled = asyncio.Event()
+
+    async def fetch(key_):
+        if key_ == failing_key:
+            await asyncio.sleep(0.05)
+            raise RuntimeError("s3 down")
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return _JPEG
+
+    s3.fetch_raw.side_effect = fetch
+    resp = await asyncio.wait_for(
+        _post(
+            client,
+            key,
+            "/verifications/check",
+            documents=json.dumps({slot: {} for slot in slots}),
+            **{f"upload.{slot}": str(row.id) for slot, row in zip(slots, rows)},
+        ),
+        5,
+    )
+    assert resp.status_code == 503, resp.text
+    assert cancelled.is_set()
 
 
 async def test_uploads_over_the_total_are_refused_before_any_fetch(
