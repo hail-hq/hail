@@ -1264,35 +1264,6 @@ def _verification_provider(provider: str) -> Any:
     return plugin
 
 
-# Address categories from least to most strict.
-_ADDRESS_PLACES = ["address_any_country", "address_in_country", "address_in_area"]
-
-
-def _strictest_address(items: list[Any]) -> list[Any]:
-    """One place for the address: DIDWW groups of one type can differ, and a
-    buyer must not read both "any country" and "in the country". The
-    strictest wins, since the group is not known before the purchase."""
-    places = [i for i in items if i in _ADDRESS_PLACES]
-    if len(places) < 2:
-        return items
-    keep = max(places, key=_ADDRESS_PLACES.index)
-    return [i for i in items if i not in _ADDRESS_PLACES or i == keep]
-
-
-def _scope_of_block(block: dict | None) -> str | None:
-    """The address place a stored block names, as a scope, for a row this
-    run did not see: it keeps it, so the weekly catalog does not flip back.
-    "In the country" needs no scope: it is the fallback."""
-    items = [i for side in (block or {}).values() for i in side.get("items", [])]
-    if "address_in_area" in items:
-        return "area"
-    if "address_in_country" in items:
-        return None
-    if "address_any_country" in items:
-        return "any"
-    return None
-
-
 def _union(lists: list[list[Any]]) -> list[Any]:
     """Every item of every list once: known categories in the fixed catalog
     order, then ``{other}`` items in the order they appear."""
@@ -1343,6 +1314,7 @@ def _requirements_block(
     address_scope: str | None = None,
 ) -> dict:
     from hailhq.core.providers.verification import UnsupportedSubjectType
+    from hailhq.core.requirement_categories import strictest_address
 
     block: dict[str, dict] = {}
     for subject in SUBJECTS:
@@ -1372,27 +1344,22 @@ def _requirements_block(
             block[subject] = {"accepted": False, "items": []}
             continue
         if address_scope:
-            # The number search says an address is asked, and where: also
-            # when the carrier's form has no address document of its own.
+            # The number search says where the address may be. Only for a
+            # form that asks for an address: the paper list shows what the
+            # form collects.
             found = [
                 (
-                    r
-                    if getattr(r, "address_scope", None)
-                    else r.model_copy(
-                        update={
-                            "address_required": True,
-                            "address_scope": address_scope,
-                        }
-                    )
+                    r.model_copy(update={"address_scope": address_scope})
+                    if r.address_required and not getattr(r, "address_scope", None)
+                    else r
                 )
                 for r in found
             ]
-        block[subject] = {
-            "accepted": True,
-            "items": _strictest_address(
-                _union([classify(r, provider, rules=rules) for r in found])
-            ),
-        }
+        items = _union([classify(r, provider, rules=rules) for r in found])
+        if provider == "didww":
+            # The DID groups of one type can name different places.
+            items = strictest_address(items)
+        block[subject] = {"accepted": True, "items": items}
     return block
 
 
@@ -1549,9 +1516,7 @@ def attach_requirements(
             )
     for row in kept_needing:
         key = f"{row['country_code']}:{row['number_type']}"
-        row["requirements"] = _fetch_block(
-            provider, row, previous.get(key), report, _scope_of_block(previous.get(key))
-        )
+        row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
 
 
 def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:

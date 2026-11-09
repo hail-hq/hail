@@ -254,8 +254,9 @@ class Requirements(VerificationRequirements):
             for key in ("min_choices", "max_choices", "max_length"):
                 if field.get(key) is None:
                     field.pop(key, None)
-        if body.get("address_scope") is None:
-            body.pop("address_scope", None)
+        # Where the address may be is read from the carrier for the paper
+        # list, not part of the form: it never changes the hash.
+        body.pop("address_scope", None)
         raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 

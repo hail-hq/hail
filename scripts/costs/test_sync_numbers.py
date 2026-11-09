@@ -2351,28 +2351,21 @@ def test_address_scope_key_never_reaches_the_catalog(tmp_path, monkeypatch):
     assert sync.ADDRESS_SCOPE_KEY not in text
 
 
-def test_twilio_address_scope_also_without_an_address_document(monkeypatch):
-    # Twilio needs only an address here: no bundle, so the form has no
-    # address document. The number search still says one is asked, anywhere.
+def test_twilio_address_scope_only_for_a_form_that_asks_for_an_address(monkeypatch):
+    # No bundle: the form collects no address, so the papers name none.
     fake = _FakeProvider({"person": _req("person"), "business": _req("business")})
     _use(monkeypatch, fake)
     block = sync.fetch_requirements("twilio", "DE", "local", "any")
-    assert block["person"]["items"] == ["address_any_country"]
+    assert block["person"]["items"] == []
 
 
-def test_strictest_address_wins_across_groups():
-    assert sync._strictest_address(
+def test_strictest_address_wins_across_didww_groups():
+    from hailhq.core.requirement_categories import strictest_address
+
+    assert strictest_address(
         ["proof_of_address", "address_in_country", "address_any_country"]
     ) == ["proof_of_address", "address_in_country"]
-    assert sync._strictest_address(["id_document"]) == ["id_document"]
-
-
-def test_a_row_not_seen_keeps_its_address_place():
-    any_block = {"person": {"accepted": True, "items": ["address_any_country"]}}
-    assert sync._scope_of_block(any_block) == "any"
-    area = {"business": {"accepted": True, "items": ["address_in_area"]}}
-    assert sync._scope_of_block(area) == "area"
-    assert sync._scope_of_block(None) is None
+    assert strictest_address(["id_document"]) == ["id_document"]
 
 
 def test_schema_lists_every_paper_category():
@@ -2381,6 +2374,18 @@ def test_schema_lists_every_paper_category():
     schema = json.loads(
         (Path(__file__).parents[2] / "costs/schema/numbers.schema.json").read_text()
     )
-    text = json.dumps(schema)
-    missing = [c for c in LABELS if c != "other" and f'"{c}"' not in text]
-    assert missing == []
+    enums: list[list[str]] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "enum" in node and "id_document" in node["enum"]:
+                enums.append(node["enum"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(schema)
+    assert len(enums) == 1
+    assert [c for c in LABELS if c != "other" and c not in enums[0]] == []

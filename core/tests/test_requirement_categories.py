@@ -382,7 +382,7 @@ def test_address_scope_replaces_a_guess_from_a_label():
     assert classify(req, "twilio") == ["address_any_country"]
 
 
-def test_address_scope_unset_keeps_the_stored_version_hash():
+def test_address_scope_never_changes_the_stored_version_hash():
     base = {
         "provider": "twilio",
         "country_code": "GB",
@@ -391,10 +391,6 @@ def test_address_scope_unset_keeps_the_stored_version_hash():
         "required": True,
         "address_required": True,
     }
-    assert (
-        Requirements(**base).version == Requirements(**base, address_scope=None).version
-    )
-    assert (
-        Requirements(**base).version
-        != Requirements(**base, address_scope="any").version
-    )
+    # Where the address may be is not part of the form: no hash moves.
+    plain = Requirements(**base).version
+    assert Requirements(**base, address_scope="any").version == plain

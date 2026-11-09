@@ -16,12 +16,14 @@ if TYPE_CHECKING:
     from hailhq.core.providers.verification.base import VerificationRequirements
 
 __all__ = [
+    "ADDRESS_PLACES",
     "LABELS",
     "Category",
     "StoredItem",
     "classify",
     "is_company_document",
     "paperwork",
+    "strictest_address",
 ]
 
 logger = logging.getLogger(__name__)
@@ -255,6 +257,19 @@ _SCOPE_CATEGORY = {
     "country": "address_in_country",
     "area": "address_in_area",
 }
+# The address places, from least to most strict.
+ADDRESS_PLACES = [_SCOPE_CATEGORY[s] for s in ("any", "country", "area")]
+
+
+def strictest_address(items: list[StoredItem]) -> list[StoredItem]:
+    """Items with one address place: the strictest of those listed. Used
+    where lists of several carrier groups are joined, since the group is
+    not known before the purchase."""
+    places = [i for i in items if i in ADDRESS_PLACES]
+    if len(places) < 2:
+        return items
+    keep = max(places, key=ADDRESS_PLACES.index)  # type: ignore[arg-type]
+    return [i for i in items if i not in ADDRESS_PLACES or i == keep]
 
 
 def classify(
