@@ -341,3 +341,72 @@ def test_every_known_didww_field_maps_to_a_category_or_nothing():
             )
             items = classify(req, "didww")
             assert not any(isinstance(i, dict) for i in items), (name, items)
+
+
+def test_address_scope_decides_where_the_address_may_be():
+    base = {
+        "provider": "didww",
+        "country_code": "GB",
+        "number_type": "local",
+        "subject_type": "person",
+        "required": True,
+        "documents": (
+            DocumentSlot(name="address_proof_1", label="Proof of address", options=()),
+        ),
+        "address_required": True,
+    }
+    assert classify(Requirements(**base, address_scope="any"), "didww") == [
+        "proof_of_address",
+        "address_any_country",
+    ]
+    # Another place keeps the list as it was.
+    assert classify(Requirements(**base, address_scope="area"), "didww") == [
+        "proof_of_address"
+    ]
+    # Unknown: the old rule (a proof of address, nothing more is promised).
+    assert classify(Requirements(**base), "didww") == ["proof_of_address"]
+    assert LABELS["address_any_country"] == "An address in any country"
+
+
+def test_address_scope_replaces_a_guess_from_a_label():
+    # The label says an address in the number's area; DIDWW says any country.
+    req = Requirements(
+        provider="didww",
+        country_code="GB",
+        number_type="local",
+        subject_type="person",
+        required=True,
+        fields=(FieldSpec(name="area_address", label="Address in the area code"),),
+        address_required=True,
+        address_scope="any",
+    )
+    assert classify(req, "didww") == ["address_any_country"]
+
+
+def test_area_scope_names_the_area_when_no_address_paper_is_listed():
+    req = Requirements(
+        provider="didww",
+        country_code="GB",
+        number_type="local",
+        subject_type="person",
+        required=True,
+        address_required=True,
+        address_scope="area",
+    )
+    assert classify(req, "didww") == ["address_in_area"]
+
+
+def test_address_scope_counts_in_the_version_hash_only_when_set():
+    base = {
+        "provider": "didww",
+        "country_code": "GB",
+        "number_type": "local",
+        "subject_type": "person",
+        "required": True,
+        "address_required": True,
+    }
+    plain = Requirements(**base).version
+    # Unset: forms stored before keep their hash.
+    assert Requirements(**base, address_scope=None).version == plain
+    # Set: a carrier change of the place is visible.
+    assert Requirements(**base, address_scope="any").version != plain

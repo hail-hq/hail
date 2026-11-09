@@ -2261,3 +2261,45 @@ def test_telnyx_page_never_touches_a_hand_verified_row():
         numbers, {"SG:national"}, {("SG", "national"): ("7.00", "8.00")}, "2026-11-14"
     )
     assert (confirmed, differs, numbers) == ([], {}, [row])
+
+
+def test_any_country_stays_only_when_every_group_says_so():
+    both = sync._union_address(
+        [
+            ["proof_of_address", "address_any_country"],
+            ["id_document", "address_any_country"],
+        ]
+    )
+    assert both == ["id_document", "proof_of_address", "address_any_country"]
+    # One group needs an address that is not "any country": no promise.
+    mixed = sync._union_address(
+        [["proof_of_address", "address_any_country"], ["proof_of_address"]]
+    )
+    assert mixed == ["proof_of_address"]
+    # A group with no address at all does not count against it.
+    assert sync._union_address(
+        [["proof_of_address", "address_any_country"], ["id_document"]]
+    ) == ["id_document", "proof_of_address", "address_any_country"]
+
+
+def test_schema_lists_every_paper_category():
+    from hailhq.core.requirement_categories import LABELS
+
+    schema = json.loads(
+        (Path(__file__).parents[2] / "costs/schema/numbers.schema.json").read_text()
+    )
+    enums: list[list[str]] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "enum" in node and "id_document" in node["enum"]:
+                enums.append(node["enum"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(schema)
+    assert len(enums) == 1
+    assert [c for c in LABELS if c != "other" and c not in enums[0]] == []
