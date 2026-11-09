@@ -174,6 +174,8 @@ class Contact(Base):
 class AccountCredit(Base):
     """Append-only ledger; balance = SUM(amount_cents) per org.
 
+    ``ref`` is unique per organization (``account_credits_org_ref_uq``).
+
     Aggregate per-batch for high-volume channels: one row per email blast
     (qty=N), not per send, otherwise the table grows linearly with traffic.
     """
@@ -210,6 +212,10 @@ class AccountCredit(Base):
             "(kind = 'debit' AND amount_cents < 0)",
             name="account_credits_amount_sign_check",
         ),
+        # One row per ref: a replayed charge or credit is refused, and
+        # writers can use ON CONFLICT (organization_id, ref) DO NOTHING.
+        # Not partial, so that clause needs no WHERE; NULL refs stay distinct.
+        Index("account_credits_org_ref_uq", "organization_id", "ref", unique=True),
     )
 
 

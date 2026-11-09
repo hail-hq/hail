@@ -354,7 +354,7 @@ async def _uncharged_sms_steps(
     the one-time debit of a filing made before fees were charged per step.
     A submission happens at filing, except for a filing that reused a brand
     (never charged one); a review once the campaign is filed. Exact refs,
-    so the ref index is used."""
+    so the ledger's (organization, ref) index is used."""
     if step == "submission":
         happened = [
             CarrierVerification.created_at > func.now() - text("interval '1 day'"),
