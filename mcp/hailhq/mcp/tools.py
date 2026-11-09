@@ -2355,6 +2355,7 @@ def register_tools(
         Each quote can buy at most one number.
 
         A retry with the same quote and ``idempotency_key`` refers to the original purchase.
+        After a timeout, a new quote starts a different purchase and can buy a second number.
         A returned retry key is available after a timeout or server error.
         A 4xx failure returns no retry key; that failed request cannot be reused.
         ``verification_id`` selects an approved registration accepted by the offer.
@@ -2595,7 +2596,7 @@ def register_tools(
         ``files`` contains slot, content_type and content_base64 for each required uploaded file.
         Slot names match letters, digits, hyphens and underscores, up to 64 characters.
         Accepted files are JPEG, PNG or PDF: at most 10 MiB each, 29 MiB total and 20 files.
-        At most 100 fields are accepted.
+        At most 100 fields are accepted. Base64 adds about one third to each file's size in the request.
 
         Returns ``id``, ``state`` and ``subject_name``. Carrier review takes business days.
         A 409 identifies an existing registration; a timeout can leave a submission in progress.
@@ -2819,6 +2820,8 @@ def register_tools(
         """Cancel an eligible carrier registration after explicit user authorization.
 
         Awaiting-review drafts are discarded; rejected registrations are dismissed.
+        A rejected registration must be dismissed before a new one is submitted
+        for the same country and number type.
         An approved US SMS registration can be cancelled: attached numbers lose US texting eligibility
         and its monthly fee ends after the current month.
         Some registrations have a minimum of three monthly fees even after early cancellation.

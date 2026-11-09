@@ -73,6 +73,7 @@ CONTENT_FIELDS = frozenset(
     }
 )
 _KEPT_FIELDS = IDENTITY_FIELDS | TAG_FIELDS
+_MCP_SERVICE = "hail-mcp"
 # MCP spans that only answer discovery and keep-alive traffic.
 _MCP_NOISE_METHODS = frozenset(
     {
@@ -162,7 +163,7 @@ def private_span(
     )
     # MCP needs operational metadata, not a second copy of tool inputs,
     # results, message bodies or registration documents in diagnostics.
-    include_content = resource.attributes.get("service.name") != "hail-mcp"
+    include_content = resource.attributes.get("service.name") != _MCP_SERVICE
     return ReadableSpan(
         name=_safe_text(span.name),
         context=span.context,
@@ -188,7 +189,10 @@ def private_span(
         kind=span.kind,
         status=Status(
             span.status.status_code,
-            _safe_text(span.status.description) if span.status.description else None,
+            # An exception message can echo tool arguments, so MCP keeps the code only.
+            _safe_text(span.status.description)
+            if include_content and span.status.description
+            else None,
         ),
         start_time=span.start_time,
         end_time=span.end_time,
@@ -232,7 +236,7 @@ class PrivateSpanExporter(SpanExporter):
         self.resource_attributes = resource_attributes
 
     def export(self, spans: Sequence[ReadableSpan]):
-        mcp = (self.resource_attributes or {}).get("service.name") == "hail-mcp"
+        mcp = (self.resource_attributes or {}).get("service.name") == _MCP_SERVICE
         filtered = [
             private_span(span, self.resource_attributes)
             for span in spans

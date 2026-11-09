@@ -7,7 +7,7 @@ from hailhq.core import telemetry
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import Link, SpanContext, TraceFlags
+from opentelemetry.trace import Link, SpanContext, Status, StatusCode, TraceFlags
 
 
 @pytest.mark.parametrize("resource_override", [False, True])
@@ -35,6 +35,7 @@ def test_mcp_export_excludes_content_from_attributes_events_and_links(
         },
         events=[Event("tool_result", {**content, "exception.type": "ValueError"}, 1)],
         links=[Link(context, {**content, "call_id": "call-123"})],
+        status=Status(StatusCode.ERROR, "ValueError: input_value=PRIVATE-MCP-CONTENT"),
         start_time=1,
         end_time=2,
     )
@@ -48,6 +49,8 @@ def test_mcp_export_excludes_content_from_attributes_events_and_links(
     }
     assert exported.events[0].attributes == {"exception.type": "ValueError"}
     assert exported.links[0].attributes == {"call_id": "call-123"}
+    assert exported.status.status_code == StatusCode.ERROR
+    assert exported.status.description is None
     assert original.attributes["gen_ai.tool.call.arguments"] == "PRIVATE-MCP-CONTENT"
 
 
