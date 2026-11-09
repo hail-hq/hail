@@ -2202,17 +2202,19 @@ async def _delete_used_uploads(
     removes any left after ``VERIFICATION_UPLOAD_TTL``."""
     if not uploads or s3 is None:
         return
-    for upload in uploads:
+    # Plain values first: a rollback below expires the ORM objects.
+    targets = [(upload.id, upload.s3_key) for upload in uploads]
+    for upload_id, s3_key in targets:
         try:
-            await s3.delete(upload.s3_key)
-            await db.execute(delete(FileUpload).where(FileUpload.id == upload.id))
+            await s3.delete(s3_key)
+            await db.execute(delete(FileUpload).where(FileUpload.id == upload_id))
             await db.commit()
         except Exception as exc:
             await db.rollback()
             logger.warning(
                 "could not delete used verification upload %s (%s); the GC "
                 "removes it later",
-                upload.id,
+                upload_id,
                 type(exc).__name__,
             )
 

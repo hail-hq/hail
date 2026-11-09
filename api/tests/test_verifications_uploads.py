@@ -141,11 +141,42 @@ async def test_submit_keeps_the_upload_on_a_402(
 async def test_a_failed_cleanup_does_not_fail_the_submit(
     client, org_and_key, carrier, s3, async_session
 ) -> None:
+    """One failed delete leaves its row for the GC; the next is still tried."""
     org_id, _, key = org_and_key
-    row = await _upload(async_session, org_id)
-    s3.delete.side_effect = RuntimeError("s3 down")
-    resp = await _post(client, key, **{"upload.proof_of_identity": str(row.id)})
+    carrier_requirements = carrier.requirements
+
+    async def two_slots(*args):
+        from hailhq.core.providers.verification import DocumentOption, DocumentSlot
+
+        req = await carrier_requirements(*args)
+        extra = DocumentSlot(
+            name="proof_of_address",
+            label="Proof of address",
+            options=(DocumentOption(key="bill", label="Bill"),),
+        )
+        return req.model_copy(update={"documents": (*req.documents, extra)})
+
+    carrier.requirements = two_slots
+    first = await _upload(async_session, org_id)
+    second = await _upload(async_session, org_id)
+    first_id, second_id = first.id, second.id
+    s3.delete.side_effect = [RuntimeError("s3 down"), None]
+    resp = await _post(
+        client,
+        key,
+        documents=json.dumps(
+            {"proof_of_identity": {"option": "passport"}, "proof_of_address": {}}
+        ),
+        **{
+            "upload.proof_of_identity": str(first_id),
+            "upload.proof_of_address": str(second_id),
+        },
+    )
     assert resp.status_code == 201, resp.text
+    assert s3.delete.await_count == 2
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, first_id) is not None
+    assert await async_session.get(FileUpload, second_id) is None
 
 
 @pytest.mark.parametrize(
