@@ -190,9 +190,11 @@ def private_span(
         status=Status(
             span.status.status_code,
             # An exception message can echo tool arguments, so MCP keeps the code only.
-            _safe_text(span.status.description)
-            if include_content and span.status.description
-            else None,
+            (
+                _safe_text(span.status.description)
+                if include_content and span.status.description
+                else None
+            ),
         ),
         start_time=span.start_time,
         end_time=span.end_time,
