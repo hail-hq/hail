@@ -80,6 +80,38 @@ _TAX_NUMBER_MAX = 20
 NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
 
 
+# Countries whose VAT number the carrier registry matches automatically
+# (Telnyx "10DLC Unverified Brand"). Every other country outside the US and
+# Canada files its company registration number.
+VAT_COUNTRIES = frozenset(
+    {
+        "AE",
+        "AU",
+        "BY",
+        "HR",
+        "HU",
+        "IE",
+        "IS",
+        "IT",
+        "LT",
+        "LU",
+        "LV",
+        "MT",
+        "MY",
+        "NL",
+        "NO",
+        "NZ",
+        "PL",
+        "PT",
+        "RO",
+        "SA",
+        "SE",
+        "SG",
+        "SI",
+        "SK",
+        "TW",
+    }
+)
 # The VAT prefix to strip, per country: the ISO code before a digit, unless
 # listed. Greece uses EL. An Austrian number keeps its U ("ATU12345678" files
 # as "U12345678").
@@ -132,7 +164,11 @@ _BUSINESS_FIELDS = (
         label="Business tax number",
         pattern=r"^[0-9A-Za-z][0-9A-Za-z .\-/]*$",
         max_length=30,
-        help="US: your EIN. Canada: your Business Number. Other countries: your VAT or company number.",
+        help=(
+            "US: your EIN. Canada: your Business Number. "
+            f"VAT number (digits only) in {', '.join(sorted(VAT_COUNTRIES))}. "
+            "Other countries, such as GB, DE and FR: your company registration number."
+        ),
     ),
     FieldSpec(
         name="industry",

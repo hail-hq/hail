@@ -722,3 +722,14 @@ def test_attestation_whitespace_does_not_change_compiled_flow():
             {**data, "consent_optional": "YES", "marketing_consent": "YES"}, "person"
         ).message_flow
     )
+
+
+def test_tax_number_help_names_the_vat_countries():
+    from hailhq.core.providers.verification.sms_form import VAT_COUNTRIES
+
+    help_text = next(
+        f.help for f in sms_requirements(TELNYX, "business").fields if f.name == "ein"
+    )
+    assert all(code in help_text for code in VAT_COUNTRIES)
+    assert "GB, DE and FR: your company registration number" in help_text
+    assert "GB" not in VAT_COUNTRIES and "DE" not in VAT_COUNTRIES
