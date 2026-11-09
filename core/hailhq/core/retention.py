@@ -201,20 +201,25 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     # the commit, so an S3 failure never blocks the database scrub; every
     # sweep retries it, since closed orgs stay past the cutoff. One org's
     # failure never stops the others.
-    failed: list[UUID] = []
+    # Each folder in its own try, so one failure never skips the other.
+    failed: set[UUID] = set()
     for org_id in org_ids:
         try:
             summary.evidence_files_deleted += await delete_org_evidence(org_id)
+        except Exception:
+            logger.exception("could not delete evidence for org %s", org_id)
+            failed.add(org_id)
+        try:
             summary.verification_uploads_deleted += (
                 await delete_org_verification_uploads(org_id)
             )
         except Exception:
-            logger.exception("could not delete evidence for org %s", org_id)
-            failed.append(org_id)
+            logger.exception("could not delete verification uploads for org %s", org_id)
+            failed.add(org_id)
     if failed:
         # The database scrub is committed; log what was done before failing.
         _log_summary(summary)
-        raise RuntimeError(f"evidence delete failed for {len(failed)} org(s)")
+        raise RuntimeError(f"evidence or upload delete failed for {len(failed)} org(s)")
     return summary
 
 

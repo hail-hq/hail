@@ -393,3 +393,35 @@ async def test_purge_expired_data_deletes_closed_org_verification_uploads(
     assert summary.verification_uploads_deleted == 3
     purposes = (await async_session.execute(select(FileUpload.purpose))).scalars().all()
     assert purposes == ["email_attachment"]
+
+
+async def test_an_evidence_failure_does_not_skip_the_verification_uploads(
+    async_session, monkeypatch
+):
+    """Each bucket folder is deleted on its own; one failure skips neither."""
+    org = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        OrgClosure(
+            organization_id=org,
+            closed_at=now - timedelta(days=400),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+    uploads_tried: list[uuid.UUID] = []
+
+    async def evidence_fails(org_id):
+        raise RuntimeError("AccessDenied")
+
+    async def uploads_delete(org_id):
+        uploads_tried.append(org_id)
+        return 1
+
+    monkeypatch.setattr("hailhq.core.retention.delete_org_evidence", evidence_fails)
+    monkeypatch.setattr(
+        "hailhq.core.retention.delete_org_verification_uploads", uploads_delete
+    )
+    with pytest.raises(RuntimeError, match="1 org"):
+        await purge_expired_data(async_session, now)
+    assert uploads_tried == [org]
