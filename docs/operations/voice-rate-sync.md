@@ -6,7 +6,8 @@
 
 [`costs/voice.json`](../../costs/voice.json) lists what each carrier charges Hail per minute of call. Schema: [`costs/schema/voice.schema.json`](../../costs/schema/voice.schema.json). Public data, CC-BY-4.0.
 
-- `outbound` row: a call Hail places through the carrier. It covers the numbers in `destination_prefixes`. It applies when the caller ID starts with one of `origination_prefixes`: `ALL` means any caller ID, `ROW` means caller IDs that no other row of that destination lists. Example: Twilio charges less for a call to a Spanish mobile from an EEA caller ID (the "From Eea" row) than from any other caller ID.
+- `outbound` row: a call Hail places through the carrier. It covers the numbers in `destination_prefixes`. It applies when the caller ID starts with one of `origination_prefixes`: `ALL` means any caller ID, `ROW` means caller IDs that no other row of that destination lists, `LOCAL` means a caller ID in the same country as the destination. Example: Twilio charges less for a call to a Spanish mobile from an EEA caller ID (the "From Eea" row) than from any other caller ID.
+- `usd_per_call` (optional, outbound only): a fixed fee per call, charged on top of `usd_per_minute`.
 - `inbound` row: a call the carrier delivers to Hail, by the `number_type` of the number that was called.
 - `line_type` (`landline`, `mobile`, `toll_free`, `special`, `other`) comes from the carrier's label. `other` is a named zone such as a city. The prefixes decide which row a number matches: take the longest matching destination prefix.
 
@@ -21,10 +22,12 @@ jq '.rates[] | select(.provider=="twilio" and .country_code=="ES" and .line_type
 | Carrier | Source                                                                                                   | Synced                                 |
 | ------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Twilio  | Elastic SIP Trunking rates from the Pricing API: `https://pricing.twilio.com/v2/Trunking/Countries/{CC}` | Yes                                    |
-| Telnyx  | No rate API is known yet. The rate deck is a file in Mission Control, under the Outbound Voice Profile.  | No: listed under "Carriers not synced" |
+| Telnyx  | No rate API is known yet. The rate deck is a file in Mission Control, under the Outbound Voice Profile.  | No: added by hand (see below)          |
 | DIDWW   | No public rate list or API is known yet.                                                                 | No: listed under "Carriers not synced" |
 
-A carrier that is not synced keeps any rows it already has. Nothing reads this file for billing yet: calls are still billed at one rate per minute.
+A carrier that is not synced keeps any rows it already has.
+
+**Telnyx rows** come from the "Global Voice Conversational" rate file (CSV), added by hand when Telnyx publishes a new one. One row per description, caller ID group, price and per-call fee; `destination_prefixes` lists every prefix of that group. Rows use `verification_method: manual-confirmed`, and `last_changed_at` is the date the rates take effect. In the file, an empty caller ID is `ALL`, `local` is `LOCAL`, and a list is kept as digit prefixes. An `X` in a prefix (Canada N11) is expanded to every digit. A row with `Exact Match` says so in `notes`. Nothing reads this file for billing yet: calls are still billed at one rate per minute.
 
 ## Build order
 

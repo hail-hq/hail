@@ -11,7 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
 - Hail records what the carrier charged for each call, from Twilio, Telnyx and DIDWW.
 - New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs.
-- Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
+- Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio, refreshed weekly, and Telnyx).
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 
 ### Fixed
