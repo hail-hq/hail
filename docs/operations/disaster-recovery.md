@@ -2,19 +2,19 @@
 
 The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Supabase Postgres.
 
-| Thing                  | Where it lives                       | If lost                                    |
-| ---------------------- | ------------------------------------ | ------------------------------------------ |
-| Code and images        | GitHub and ghcr.io                   | Nothing to restore. Deploy pulls them.     |
-| `.env`                 | Main checkout on your machine        | Re-render from `.env.example`.             |
-| Database               | Supabase Postgres                    | Restore from a Supabase backup.            |
-| TLS certificates       | Caddy volume on the VM               | Caddy gets new ones on first request.      |
-| Deploy key and host    | GitHub Actions secrets               | Make a new key and set the secrets.        |
-| DNS                    | Registrar                            | Point `api.` and `mcp.` at the new VM.     |
-| Carrier webhooks, SES  | Use the domain names, not the VM IP  | Follow DNS. No change.                     |
+| Thing                 | Where it lives                      | If lost                                   |
+| --------------------- | ----------------------------------- | ----------------------------------------- |
+| Code and images       | GitHub and ghcr.io                  | Nothing to restore. Deploy pulls them.    |
+| `.env`                | Main checkout on your machine       | Copy it again from the main checkout.     |
+| Database              | Supabase Postgres                   | Restore from a Supabase backup.           |
+| TLS certificates      | Caddy volume on the VM              | Caddy gets new ones once DNS points here. |
+| Deploy key and host   | GitHub Actions secrets              | Make a new key and set the secrets.       |
+| DNS                   | Registrar                           | Point `api.`, `mcp.`, tracking at new VM. |
+| Carrier webhooks, SES | Use the domain names, not the VM IP | Follow DNS. No change.                    |
 
 ## Replace a lost or broken VM
 
-1. Create an Ubuntu 22.04+ VM with a public IPv4. The cloud firewall may replace `ufw`.
+1. Create an Ubuntu 22.04+ VM with a public IPv4. Open 22/tcp, 80/tcp, 443/tcp and 443/udp (`ufw` or the cloud firewall, see [vm-deploy.md](../public/self-host/vm-deploy.md)). Caddy needs 80 and 443 to get certificates.
 2. Install Docker from the apt repository: <https://docs.docker.com/engine/install/ubuntu/>. The `docker` binary must be on the PATH of a non-interactive SSH shell, so do not use a snap package.
 3. Clone the repo to the deploy path (`/opt/hail` by default).
 
@@ -45,18 +45,43 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
    gh workflow run deploy.yml --ref main
    ```
 
-7. Test the new VM before DNS moves. `-k` is needed because Caddy cannot get certificates until DNS points here.
+7. Test the new VM before DNS moves. Caddy has no certificate yet, so test the services on the VM's loopback ports.
 
    ```bash
-   curl -k --resolve api.<domain>:443:<NEW_IP> https://api.<domain>/healthz
-   curl -k --resolve mcp.<domain>:443:<NEW_IP> https://mcp.<domain>/healthz
+   ssh root@<NEW_IP> 'curl -fsS http://127.0.0.1:8080/healthz'
+   ssh root@<NEW_IP> 'curl -fsS http://127.0.0.1:8081/healthz'
    ```
 
    Both must return `{"status":"ok"}`.
 
-8. At the registrar, change the A records `api` and `mcp` to `<NEW_IP>`. Check them with `dig +short api.<domain> @1.1.1.1`.
-9. Add shell shortcuts on the new VM (next section).
-10. Wait for the old voicebot to finish live calls (up to about 1 hour). Then delete the old VM.
+8. At the registrar, change the A records `api`, `mcp`, and the `HAIL_TRACKING_DOMAIN` host (`.env`) to `<NEW_IP>`. Check them with `dig +short api.<domain> @1.1.1.1`.
+9. Restart Caddy so it asks for certificates now, not after its retry wait. Then check the logs for `certificate obtained successfully`.
+
+   ```bash
+   ssh root@<NEW_IP> 'cd /opt/hail && docker compose \
+     -f docker-compose.yml -f docker-compose.prod.yml restart caddy'
+   ssh root@<NEW_IP> 'cd /opt/hail && docker compose \
+     -f docker-compose.yml -f docker-compose.prod.yml logs caddy \
+     | grep -i certificate'
+   ```
+
+10. Add shell shortcuts on the new VM (next section).
+11. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This stops the API, MCP and Caddy, and lets the old voicebot finish live calls (up to about 1 hour).
+
+    ```bash
+    ssh root@<OLD_IP> '
+    cd /opt/hail
+    C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+    $C stop caddy api mcp
+    for cid in $($C ps -q voicebot)
+    do
+    docker exec "$cid" touch /tmp/hail-draining
+    done
+    setsid nohup $C stop -t 3660 voicebot >/dev/null 2>&1 </dev/null &
+    '
+    ```
+
+    Delete the old VM when `docker ps` there shows no voicebot.
 
 DNS caches can keep the old address for a while. Ask the registrar's name server (`dig +short mcp.<domain> @<registrar-ns>`) to see the real value.
 
