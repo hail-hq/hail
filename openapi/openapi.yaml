@@ -803,7 +803,10 @@ paths:
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":
-          description: File uploads are not configured on this server.
+          description:
+            File uploads are not configured on this server, storage failed,
+            or too many uploads are running (`Retry-After`). The link is not used
+            up.
         "422":
           description: Validation Error
           content:

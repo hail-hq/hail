@@ -363,6 +363,75 @@ async def test_two_concurrent_puts_only_one_wins(
     assert s3.put_attachment.await_count == 1
 
 
+async def test_a_busy_server_is_503_and_keeps_the_link(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    """Too many body reads at once: 503 before the link is claimed."""
+    from hailhq.api.routes import uploads
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    monkeypatch.setattr(uploads, "_BODY_READS", asyncio.Semaphore(0))
+    busy = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert busy.status_code == 503
+    assert busy.headers["Retry-After"] == "5"
+    monkeypatch.setattr(uploads, "_BODY_READS", asyncio.Semaphore(1))
+    ok = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert ok.status_code == 200
+
+
+async def test_a_failed_storage_write_gives_the_link_back(
+    client, org_and_key, s3
+) -> None:
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    s3.put_attachment.side_effect = RuntimeError("s3 down")
+    failed = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert failed.status_code == 503
+    s3.put_attachment.side_effect = None
+    ok = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert ok.status_code == 200
+
+
+async def test_a_second_put_during_the_body_read_is_404(
+    client, org_and_key, s3, session_factory
+) -> None:
+    """The link is claimed before the body is read, not after."""
+    from hailhq.core.db import get_session
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_body():
+        yield _JPEG
+        started.set()
+        await release.wait()
+        yield b"rest"
+
+    async def per_request_session():
+        async with session_factory() as session:
+            yield session
+
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        first = asyncio.create_task(
+            client.put(_path(link["upload_url"]), content=slow_body())
+        )
+        await asyncio.wait_for(started.wait(), 5)
+        second = await asyncio.wait_for(
+            client.put(_path(link["upload_url"]), content=_JPEG), 5
+        )
+        release.set()
+        assert (await first).status_code == 200
+    finally:
+        release.set()
+        app.dependency_overrides[get_session] = saved
+    assert second.status_code == 404
+    assert s3.put_attachment.await_count == 1
+
+
 async def test_put_needs_no_authorization_header(client, org_and_key, s3) -> None:
     """The token is the credential; a bearer is neither needed nor used."""
     _, _, plain = org_and_key

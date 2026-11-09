@@ -18,8 +18,10 @@ large; ``POST /email-attachments`` keeps its 422).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 from urllib.parse import urlencode
@@ -53,7 +55,7 @@ from hailhq.core.schemas import (
     FileUploadResponse,
 )
 from hailhq.core.urls import join_url
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -68,7 +70,15 @@ router = APIRouter(
 # body is read, and making links is limited per caller.
 exempt_prefix("/uploads/", methods=frozenset({"PUT"}))
 
+logger = logging.getLogger(__name__)
+
 _NOT_FOUND = "upload link not found, or already used"
+# A link whose body is being read holds this before its token hash.
+_BUSY_PREFIX = "busy:"
+# Body reads one process runs at once. Each can buffer up to the purpose's
+# size limit (25 MB for an email attachment), so this caps that memory.
+MAX_CONCURRENT_BODY_READS = 8
+_BODY_READS = asyncio.Semaphore(MAX_CONCURRENT_BODY_READS)
 _UNAVAILABLE = "file uploads are not configured on this server"
 
 _PENDING_CAP_RESPONSES = merge_rate_limited_responses(
@@ -92,6 +102,14 @@ def _unavailable() -> HTTPException:
 
 def _not_found() -> HTTPException:
     return HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+
+
+def _busy() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="too many uploads at once; try again in a few seconds",
+        headers={"Retry-After": "5"},
+    )
 
 
 def _expired() -> HTTPException:
@@ -214,7 +232,13 @@ async def _read_body(request: Request, limit: int) -> bytes:
         404: {"description": "Unknown link, wrong token, or already used."},
         410: {"description": "The link expired."},
         413: {"description": "The file is larger than the link's `max_bytes`."},
-        503: {"description": "File uploads are not configured on this server."},
+        503: {
+            "description": (
+                "File uploads are not configured on this server, storage "
+                "failed, or too many uploads are running (`Retry-After`). "
+                "The link is not used up."
+            )
+        },
     },
     openapi_extra={
         "security": [],
@@ -249,6 +273,11 @@ async def put_file_upload(
     """
     if s3 is None:
         raise _unavailable()
+    # Each body read can hold up to the purpose's limit in memory, so this
+    # process runs only a few at a time. Checked before the link is claimed,
+    # so a busy server never uses up a link.
+    if _BODY_READS.locked():
+        raise _busy()
     token_hash = hash_token(token)
     row = await db.get(FileUpload, upload_id)
     if (
@@ -260,50 +289,77 @@ async def put_file_upload(
     now = datetime.now(timezone.utc)
     if row.link_expires_at is None or row.link_expires_at <= now:
         raise _expired()
-    purpose, content_type = row.purpose, row.content_type
-    # Nothing is held open while the body arrives.
-    await db.rollback()
 
-    limit = max_bytes(purpose)
-    payload = await _read_body(request, limit)
-    if not payload:
-        raise unprocessable("the file is empty", loc=["body"])
-    if purpose == "verification_document" and not matches_declared_type(
-        payload, content_type
-    ):
-        raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
-
-    # Claim the link before the S3 write: a second PUT at the same time
-    # skips the locked row and gets 404, so the object always holds the
-    # bytes of the one PUT that succeeds.
-    row = (
+    # Claim the link before reading the body: the token hash becomes a busy
+    # marker in one atomic update, so only one body read runs per link. A
+    # second PUT meanwhile gets 404. A failed read gives the link back, so
+    # the same link can be tried again with a smaller or correct file.
+    busy = _BUSY_PREFIX + token_hash
+    claimed = (
         await db.execute(
-            select(FileUpload)
+            update(FileUpload)
             .where(
                 FileUpload.id == upload_id,
                 FileUpload.token_hash == token_hash,
                 FileUpload.uploaded_at.is_(None),
+                FileUpload.link_expires_at > now,
             )
-            .with_for_update(skip_locked=True)
+            .values(token_hash=busy)
+            .returning(FileUpload.purpose, FileUpload.content_type, FileUpload.s3_key)
         )
-    ).scalar_one_or_none()
-    if row is None:
+    ).one_or_none()
+    if claimed is None:
         await db.rollback()
         raise _not_found()
-    now = datetime.now(timezone.utc)
-    if row.link_expires_at is None or row.link_expires_at <= now:
+    # Committed, so nothing is held open while the body arrives.
+    await db.commit()
+    purpose, content_type, s3_key = claimed
+
+    async def give_back() -> None:
         await db.rollback()
-        raise _expired()
+        await db.execute(
+            update(FileUpload)
+            .where(FileUpload.id == upload_id, FileUpload.token_hash == busy)
+            .values(token_hash=token_hash)
+        )
+        await db.commit()
+
     try:
-        await s3.put_attachment(row.s3_key, payload, row.content_type)
-    except Exception as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
+        async with _BODY_READS:
+            payload = await _read_body(request, max_bytes(purpose))
+        if not payload:
+            raise unprocessable("the file is empty", loc=["body"])
+        if purpose == "verification_document" and not matches_declared_type(
+            payload, content_type
+        ):
+            raise unprocessable(
+                f"the file does not look like {content_type}", loc=["body"]
+            )
+        try:
+            await s3.put_attachment(s3_key, payload, content_type)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="storage unavailable; try again",
+            ) from exc
+    except BaseException:
+        # Includes a client that hangs up mid-body. The give-back is shielded
+        # so a cancelled request still returns the link.
+        try:
+            await asyncio.shield(give_back())
+        except Exception:
+            logger.warning("upload link %s was not given back", upload_id)
+        raise
+
+    row = (
+        await db.execute(
+            select(FileUpload).where(
+                FileUpload.id == upload_id, FileUpload.token_hash == busy
+            )
+        )
+    ).scalar_one()
     row.token_hash = None
-    row.uploaded_at = now
+    row.uploaded_at = datetime.now(timezone.utc)
     row.size_bytes = len(payload)
     row.sha256 = hashlib.sha256(payload).hexdigest()
     await db.commit()
