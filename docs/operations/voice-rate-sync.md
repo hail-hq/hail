@@ -27,7 +27,7 @@ jq '.rates[] | select(.provider=="twilio" and .country_code=="ES" and .line_type
 
 A carrier that is not synced keeps any rows it already has.
 
-**Telnyx rows** come from the "Global Voice Conversational" rate file (CSV), added by hand when Telnyx publishes a new one. One row per description, caller ID group, price and per-call fee; `destination_prefixes` lists every prefix of that group. Rows use `verification_method: manual-confirmed`, and `last_changed_at` is the date the rates take effect. In the file, an empty caller ID is `ALL`, `local` is `LOCAL`, and a list is kept as digit prefixes. An `X` in a prefix (Canada N11) is expanded to every digit. A row with `Exact Match` says so in `notes`. Nothing reads this file for billing yet: calls are still billed at one rate per minute.
+**Telnyx rows** come from the "Global Voice Conversational" rate file (CSV), added by hand when Telnyx publishes a new one. One row per description, caller ID group, price and per-call fee; `destination_prefixes` lists every prefix of that group. Rows use `verification_method: manual-confirmed`, and `last_changed_at` is the date the rates take effect. In the file, an empty caller ID is `ALL`, `local` is `LOCAL`, and a list is kept as digit prefixes. A prefix with an `X` (Canada N11, `1XXX311`) is skipped, because the schema holds digits only. A row with `Exact Match` says so in `notes`. Nothing reads this file for billing yet: calls are still billed at one rate per minute.
 
 ## Build order
 
