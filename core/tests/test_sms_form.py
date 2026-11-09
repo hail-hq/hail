@@ -188,6 +188,7 @@ def test_bad_tax_numbers_are_refused(country, number):
         ("se556677889901", "SE", "556677889901"),
         ("SC123456", "GB", "SC123456"),
         ("GB123456789", "GB", "123456789"),
+        ("NL 1234.56.789.B01", "NL", "123456789B01"),
         ("US123456789", "US", "US123456789"),
         ("EL 123456789", "GR", "123456789"),
         ("ATU12345678", "AT", "U12345678"),
@@ -731,5 +732,5 @@ def test_tax_number_help_names_the_vat_countries():
         f.help for f in sms_requirements(TELNYX, "business").fields if f.name == "ein"
     )
     assert all(code in help_text for code in VAT_COUNTRIES)
-    assert "GB, DE and FR: your company registration number" in help_text
+    assert "GB, DE and FR, use their company registration number" in help_text
     assert "GB" not in VAT_COUNTRIES and "DE" not in VAT_COUNTRIES

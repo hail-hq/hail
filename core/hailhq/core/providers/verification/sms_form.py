@@ -121,7 +121,7 @@ _VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
 def tax_number(value: str | None, country: str | None) -> str:
     """The business tax number as carriers file it: letters and digits,
     uppercase, without the VAT prefix of the issuing country.
-    "GB 123 4567 89" from the UK files as "123456789". A full Canadian
+    "NL 1234.56.789.B01" from the Netherlands files as "123456789B01". A full Canadian
     Business Number files as its first 9 digits."""
     text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
     code = (country or "").strip().upper()
@@ -166,8 +166,8 @@ _BUSINESS_FIELDS = (
         max_length=30,
         help=(
             "US: your EIN. Canada: your Business Number. "
-            f"VAT number (digits only) in {', '.join(sorted(VAT_COUNTRIES))}. "
-            "Other countries, such as GB, DE and FR: your company registration number."
+            f"These countries use their VAT or GST number: {', '.join(sorted(VAT_COUNTRIES))}. "
+            "Other countries, such as GB, DE and FR, use their company registration number."
         ),
     ),
     FieldSpec(
@@ -668,7 +668,7 @@ def _application_problems(
         elif not (4 <= len(number) <= _TAX_NUMBER_MAX and re.search(r"[0-9]", number)):
             issue(
                 "ein",
-                f"Enter your VAT or company registration number: 4 to {_TAX_NUMBER_MAX} letters and digits.",
+                f"Use 4 to {_TAX_NUMBER_MAX} letters and digits.",
             )
     for name in (
         "consent_optional",
