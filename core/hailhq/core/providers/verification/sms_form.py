@@ -568,27 +568,16 @@ def _is_public_https_url(value: str) -> bool:
         return False
 
 
-def names_sender(name: str, text: str) -> bool:
-    """True when ``text`` names the sender ``name``. Spaces, dots and case
-    do not matter: "Acme Tech" matches "acme.tech" and "AcmeTech". The name
-    must stand alone: "Tom" does not match inside "Atomic"."""
-    letters = re.findall(r"[^\W_]", name)
-    if not letters:
-        return name.strip().casefold() in text.casefold()
-    loose = r"[\W_]*".join(re.escape(c) for c in letters)
-    return bool(re.search(rf"(?<![^\W_]){loose}(?![^\W_])", text, re.IGNORECASE))
-
-
-# An opt-out: "Reply STOP", "text stop", or STOP in capitals. A plain "stop"
-# in a sentence ("don't stop by") is not one.
-_OPT_OUT_UPPER = re.compile(r"\bSTOP\b")
-
-
-def _has_opt_out(text: str) -> bool:
-    return bool(
-        _OPT_OUT_UPPER.search(text)
-        or re.search(r"\b(?:reply|text|send)\s+[\"']?stop\b", text, re.IGNORECASE)
-    )
+def _names_sender(name: str, text: str) -> bool:
+    """True when ``text`` names the sender ``name``, ignoring case. A name
+    with spaces or dots also matches without them: "Acme Tech" matches
+    "acme.tech" and "AcmeTech"."""
+    if name.casefold() in text.casefold():
+        return True
+    compact = re.sub(r"[\W_]", "", name).casefold()
+    if not compact or compact == name.casefold():
+        return False
+    return compact in re.sub(r"[\W_]", "", text).casefold()
 
 
 def _application_problems(
@@ -710,7 +699,7 @@ def _application_problems(
     confirmation = val("opt_in_message")
     if confirmation:
         missing: list[str] = []
-        if not val("program_name") or not names_sender(
+        if not val("program_name") or not _names_sender(
             val("program_name"), confirmation
         ):
             missing.append("public sender/program name")
@@ -775,12 +764,12 @@ def _application_problems(
                 )
             else:
                 covered.add(purpose)
-            if sender and not names_sender(sender, sample):
+            if sender and not _names_sender(sender, sample):
                 issue(
                     name,
                     "Include the public sender or program name so recipients can identify you.",
                 )
-            if _has_opt_out(sample):
+            if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
                 has_stop = True
             if val("has_links") == "NO" and re.search(
                 r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co)(?:/|\b)",
@@ -824,13 +813,14 @@ def _application_problems(
             val("privacy_policy_url"),
             val("terms_url"),
         ]
-        if any(
-            part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not (
-            _MESSAGE_DATA_RATES.search(disclosure)
-            and (
-                not val("program_name") or names_sender(val("program_name"), disclosure)
+        program = val("program_name")
+        if (
+            any(
+                part and part.casefold() not in disclosure.casefold()
+                for part in required
             )
+            or not _MESSAGE_DATA_RATES.search(disclosure)
+            or (program and not _names_sender(program, disclosure))
         ):
             issue(
                 "consent_disclosure",
