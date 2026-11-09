@@ -2934,7 +2934,8 @@ def register_tools(
         "subject_type", "subject_name", "purpose", "state",
         "rejection_reason", "created_at",
         "updated_at", "submitted_at", "approved_at", "confirmation",
-        "step", "identity_confirmed", "waiting_for_credit"}]}``. ``step``
+        "step", "identity_confirmed", "waiting_for_credit",
+        "credit_needed_cents"}]}``. ``step``
         says where a US texting filing in progress is: ``confirm_identity``,
         ``filing`` or ``carrier_review``, ``needs_information`` (repair the
         existing application), or ``runtime_setup`` (accepted but required
@@ -2944,7 +2945,9 @@ def register_tools(
         cancelled or rejected: the next one with the same person needs no
         code. Dismiss a rejected filing first. ``waiting_for_credit`` true:
         the balance does not cover the carrier fee of the next step (filing
-        the campaign); add credit and it goes on.
+        the campaign); add credit and it goes on. ``credit_needed_cents``
+        is that row's share of the credit still needed (null when not
+        waiting); ask the user to add the sum over the waiting rows.
         ``state`` is ``awaiting_review``, ``submitting``, ``submitted``,
         ``approved``, ``rejected`` or ``cancelled``. Use it to check whether a
         submission already exists before submitting again. ``confirmation``
@@ -2987,6 +2990,9 @@ def register_tools(
         ``rejection_reason``, ask the user, dismiss it with
         cancel_verification, then submit a new one. ``verification_id`` comes
         from submit_verification or list_verifications.
+        ``waiting_for_credit`` true: the campaign waits for credit;
+        ``credit_needed_cents`` is this row's share (other waiting rows
+        need their own: list_verifications shows them all).
 
         Returns ``{"id", "state", "rejection_reason", ...}`` or
         ``{"error": "<message>"}``."""

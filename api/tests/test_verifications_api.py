@@ -11,6 +11,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -3398,6 +3399,8 @@ async def test_campaign_step_waits_without_credit(
             body = next(v for v in body if v["id"] == vid)
         assert body["state"] == "submitted"
         assert body["waiting_for_credit"] is True
+        # One cent short of the fee.
+        assert body["credit_needed_cents"] == 1
     # The poll ran, without the campaign call: nothing filed, refs kept.
     assert sms_carrier.status_calls == 1
     assert sms_carrier.campaigns_skipped == 1
@@ -3411,6 +3414,7 @@ async def test_campaign_step_waits_without_credit(
     assert resp.status_code == 200, resp.text
     assert sms_carrier.campaigns_created == 1
     assert resp.json()["waiting_for_credit"] is False
+    assert resp.json()["credit_needed_cents"] is None
 
 
 @pytest.mark.usefixtures("us_number")
@@ -3431,6 +3435,7 @@ async def test_campaign_step_runs_when_funded(
     assert sms_carrier.campaigns_created == 1
     assert (await _stored_refs(async_session, vid))["campaign_id"] == "QE1"
     assert body["waiting_for_credit"] is False
+    assert body["credit_needed_cents"] is None
     # Once the campaign is filed there is no step left to pay for.
     await _set_balance(async_session, org_id, 0)
     verifications_routes._last_polled.clear()
@@ -3452,6 +3457,9 @@ async def test_an_uncharged_submission_counts_against_the_campaign(
     await _set_balance(async_session, org_id, _campaign_fee())
     resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is True
+    # The balance less the uncharged brand: the brand's cost is missing.
+    brand = sms_registration_fees.brand_fee_cents("fake", "business")
+    assert resp.json()["credit_needed_cents"] == brand
     assert sms_carrier.campaigns_created == 0
     await _charge_submission(async_session, org_id, vid)
     await _set_balance(async_session, org_id, _campaign_fee())
@@ -3599,6 +3607,147 @@ async def test_one_credit_files_one_campaign(
     resp = await client.get(f"/verifications/{other.id}", headers=_auth(key))
     assert resp.json()["waiting_for_credit"] is False
     assert sms_carrier.campaigns_created == 2
+
+
+async def test_credit_needed_adds_up_to_one_top_up(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # Two registrations wait. Each shows its own share: the first the fee
+    # less the balance, the second its whole fee. A top-up of the sum lets
+    # both go on the next list.
+    org_id, _, key = org_and_key
+    rows = [
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type="business",
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{number_type}"},
+            requirements_version="1",
+        )
+        for number_type in ("local", "toll_free")
+    ]
+    async_session.add_all(rows)
+    await async_session.commit()
+    for row in rows:
+        await _charge_submission(async_session, org_id, row.id)
+    sms_carrier.campaign_key = "campaign_id"
+    fee = _campaign_fee()
+    await _set_balance(async_session, org_id, fee - 3)
+    verifications_routes._last_polled.clear()
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    needs = sorted(v["credit_needed_cents"] for v in resp.json())
+    assert needs == [3, fee]
+    assert all(v["waiting_for_credit"] for v in resp.json())
+    assert sms_carrier.campaigns_created == 0
+    # One row alone shows the same share as in the list.
+    by_id = {v["id"]: v["credit_needed_cents"] for v in resp.json()}
+    for row in rows:
+        one = await client.get(f"/verifications/{row.id}", headers=_auth(key))
+        assert one.json()["credit_needed_cents"] == by_id[str(row.id)]
+    # A balance below zero adds the debt to the first share.
+    await _set_balance(async_session, org_id, -5)
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert sorted(v["credit_needed_cents"] for v in resp.json()) == [fee, fee + 5]
+    # The sum is enough for both.
+    await _set_balance(async_session, org_id, 2 * fee)
+    verifications_routes._last_polled.clear()
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert sms_carrier.campaigns_created == 2
+    assert [v["credit_needed_cents"] for v in resp.json()] == [None, None]
+
+
+async def test_credit_needed_counts_the_rows_covered_after_a_waiting_one(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    # The older row's fee is 10, the newer one's 5, and the credit 8: the
+    # older waits and the newer is covered (and filed). What is left after
+    # it (3) goes to the older one: it needs 7.
+    org_id, _, key = org_and_key
+    now = datetime.now(timezone.utc)
+    rows = [
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type=number_type,
+            subject_type=subject,
+            state="submitted",
+            provider_refs={"brand_sid": f"BN-{subject}"},
+            requirements_version="1",
+            created_at=now - timedelta(hours=hours),
+        )
+        for subject, number_type, hours in (
+            ("business", "local", 2),
+            ("person", "toll_free", 1),
+        )
+    ]
+    async_session.add_all(rows)
+    await async_session.commit()
+    for row in rows:
+        await _charge(async_session, org_id, row.id, "submission", 1)
+    fees = {"business": 10, "person": 5}
+    monkeypatch.setattr(
+        sms_registration_fees,
+        "campaign_fee_cents",
+        lambda provider, subject_type: fees[subject_type],
+    )
+    sms_carrier.campaign_key = "campaign_id"
+    await _set_balance(async_session, org_id, 8)
+    verifications_routes._last_polled.clear()
+    resp = await client.get("/verifications?purpose=sms", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    by_id = {v["id"]: v for v in resp.json()}
+    assert by_id[str(rows[0].id)]["credit_needed_cents"] == 7
+    assert by_id[str(rows[1].id)]["credit_needed_cents"] is None
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_credit_needed_rounds_a_fractional_debt_up(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    # The ledger sums to -5.3 cents: the check reads -5, but a top-up of the
+    # fee plus 5 leaves 0.3 cents short of the fee. It needs one more cent.
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    await _set_balance(async_session, org_id, -5)
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="debit",
+            channel="voice",
+            amount_cents=Decimal("-0.3"),
+            qty=1,
+            ref=f"test-fraction-{uuid.uuid4()}",
+            source="test",
+        )
+    )
+    await async_session.commit()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    need = resp.json()["credit_needed_cents"]
+    assert need == _campaign_fee() + 6
+    # Exactly that top-up files the campaign.
+    async_session.add(
+        AccountCredit(
+            organization_id=org_id,
+            kind="credit",
+            channel="credit",
+            amount_cents=need,
+            qty=1,
+            ref=f"test-topup-{uuid.uuid4()}",
+            source="test",
+        )
+    )
+    await async_session.commit()
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["credit_needed_cents"] is None
+    assert sms_carrier.campaigns_created == 1
 
 
 async def test_the_oldest_registration_gets_the_credit_first(

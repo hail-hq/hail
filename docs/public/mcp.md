@@ -151,6 +151,8 @@ To register the organization to text US numbers from a US number, pass `purpose:
 
 Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files and 20 fields. Compress photos to under about 7 MiB. Slot names use letters, digits, `-` and `_` (at most 64). Each file must match its type. A second submission for the same country, number type, `subject_type` and name returns 409 while one exists.
 
+A registration with `waiting_for_credit: true` files its campaign only once the credit covers the review fee. Its `credit_needed_cents` is its own share of the credit still needed, not a running total. The first waiting registration also carries any shortfall of the balance. So ask the user to add the sum of `credit_needed_cents` over the rows `list_verifications` returns with `purpose: "sms"`. One top-up of that sum lets them all go at the next check. The number follows the balance, so read it again before the user pays.
+
 > **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
 
 ## Claude.ai (web)

@@ -2944,6 +2944,9 @@ type ObservedDnsRecordType string
 
 // OfferVerification defines model for OfferVerification.
 type OfferVerification struct {
+	// HeldCents Credit, in USD cents, set aside from your balance for this verification: setup and the first month of the offer it was started for. A purchase with this verification counts it toward the price. 0 when nothing is set aside.
+	HeldCents *int `json:"held_cents,omitempty"`
+
 	// Id Hail verification id. Read it with GET /v1/verifications/{verification_id}.
 	Id openapi_types.UUID `json:"id"`
 
@@ -3537,6 +3540,9 @@ type VerificationResponse struct {
 	// CreatedAt When the verification was created.
 	CreatedAt time.Time `json:"created_at"`
 
+	// CreditNeededCents The credit this registration still needs before Hail files its campaign, in US cents; null when `waiting_for_credit` is false. Per registration, not a running total: the first waiting registration shows the carrier's campaign fee less the credit left after the registrations already covered (more when the balance is short), each later one its whole fee. Add the sum over every registration with `waiting_for_credit` true, and one top-up lets them all go. It follows the balance, so read it again before you pay.
+	CreditNeededCents *int `json:"credit_needed_cents,omitempty"`
+
 	// Id Unique identifier for this verification.
 	Id openapi_types.UUID `json:"id"`
 
@@ -3572,6 +3578,9 @@ type VerificationResponse struct {
 
 	// UpdatedAt When it last changed.
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// WaitingForCredit True when a US texting registration waits for credit: its next step, filing the campaign, has a carrier fee your balance does not cover. Nothing is filed until it does. Add credit; Hail goes on at its next check.
+	WaitingForCredit *bool `json:"waiting_for_credit,omitempty"`
 }
 
 // VerificationResponseStep For a US texting registration that is not yet approved or rejected: 'confirm_identity' while the person must confirm (see `confirmation`), 'filing' while Hail files the details with the carriers, 'carrier_review' once the carriers are reviewing them (1 to 7 business days), or runtime_setup when accepted but required messaging responses still need configuration; needs_information when the existing sender needs current campaign evidence before filing. Null otherwise.
