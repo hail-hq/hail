@@ -274,7 +274,10 @@ def _method_spec(method: str, name: str) -> FieldSpec:
 
 _CAMPAIGN_FIELDS = (
     FieldSpec(
-        name="program_name", label="Public sender or program name", max_length=100
+        name="program_name",
+        label="Program name",
+        max_length=100,
+        help="The name people see in your texts. Each sample must include it.",
     ),
     FieldSpec(
         name="campaign_description",
@@ -704,9 +707,9 @@ def _application_problems(
             val("program_name"), confirmation
         ):
             missing.append(
-                f'your program name "{val("program_name")}"'
+                f'program name "{val("program_name")}"'
                 if val("program_name")
-                else "your program name"
+                else "program name"
             )
         if (
             not val("message_frequency")
@@ -758,7 +761,7 @@ def _application_problems(
             if text_length(sample) < 20:
                 issue(
                     name,
-                    "Use at least 20 characters with the actual sender and message content.",
+                    "Use at least 20 characters.",
                 )
             if not purpose:
                 untyped += 1
@@ -832,7 +835,11 @@ def _application_problems(
         ):
             issue(
                 "consent_disclosure",
-                "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",
+                (
+                    f'The disclosure must include your program name "{program}", your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.'
+                    if program
+                    else "The disclosure must include your program name, your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting."
+                ),
             )
     if methods and text_length(_structured_flow(fields)) > _FLOW_MAX:
         issue(
