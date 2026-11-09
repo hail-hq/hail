@@ -33,7 +33,7 @@ from fastapi import Depends, Header, HTTPException, Request, Response
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.core.db import session_scope
+from hailhq.core.db import independent_session_scope
 from hailhq.core.models import IdempotencyKey
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -129,10 +129,9 @@ class IdempotencyContext:
 
     async def store(self, status_code: int, body: dict[str, Any]) -> None:
         """Persist the final response so future requests replay it."""
-        # TODO(idempotency): fold into the route's db session to save one
-        # connection checkout + commit per request. Defer until pool pressure
-        # is measurable.
-        async with session_scope() as session:
+        # The reserved bookkeeping pool can commit this response even while
+        # the route holds a transaction in the runtime pool.
+        async with independent_session_scope() as session:
             await session.execute(
                 update(IdempotencyKey)
                 .where(IdempotencyKey.key == self.storage_key)
@@ -149,7 +148,7 @@ class IdempotencyContext:
         the 24h TTL. Scoped to ``response_status == _IN_FLIGHT_STATUS`` so it
         is a no-op once a real response has been stored — it can never clobber
         a cached success or failure."""
-        async with session_scope() as session:
+        async with independent_session_scope() as session:
             await session.execute(
                 delete(IdempotencyKey).where(
                     IdempotencyKey.key == self.storage_key,
@@ -171,7 +170,7 @@ async def _try_acquire_or_load(
     decides whether to replay, return 409 in-flight, or 409 hash-mismatch.
     """
     expires_at = datetime.now(timezone.utc) + _TTL
-    async with session_scope() as session:
+    async with independent_session_scope() as session:
         stmt = (
             pg_insert(IdempotencyKey)
             .values(

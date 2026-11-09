@@ -307,6 +307,12 @@ Each pool can open `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW` connections.
 At the limit, work waits for a returned connection. The wait times out after 30 seconds.
 Idle pools keep up to `DATABASE_POOL_SIZE` connections until disposal.
 
+Audit, usage, and idempotency writes share a separate pool with one connection per process.
+They must commit independently while request transactions remain open.
+Their reserved slot prevents request traffic from starving those commits.
+With the defaults, an API process can use three connections: two runtime connections and one independent-write connection.
+Processes that never use those independent writes do not open the extra connection.
+
 Count every process when budgeting a shared session pooler.
 Leave room for the website, migrations, operator tools, and overlapping deployments.
 A 15-connection session pooler cannot support 15 connections from each process.

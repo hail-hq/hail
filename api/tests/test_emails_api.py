@@ -1494,7 +1494,7 @@ async def test_post_emails_usage_event_failure_does_not_fail_send(
         return _BrokenSession()
 
     monkeypatch.setattr(
-        "hailhq.api.usage.session_scope",
+        "hailhq.api.usage.independent_session_scope",
         _broken_session_scope,
     )
 

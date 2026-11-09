@@ -134,3 +134,30 @@ def test_runtime_pool_rejects_unlimited_connection_settings(options):
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **options)
+
+
+@pytest.mark.asyncio
+async def test_independent_commits_share_only_one_additional_connection(
+    database_url, monkeypatch
+):
+    from hailhq.core import db
+
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(db, "_independent_engine", None)
+    monkeypatch.setattr(db, "_independent_sessionmaker", None)
+    monkeypatch.setattr(db.settings, "database_url", database_url)
+    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
+
+    async def read_one():
+        async with db.independent_session_scope() as session:
+            return (await session.execute(text("SELECT 1"))).scalar_one()
+
+    try:
+        async with db.independent_session_scope() as first:
+            await first.execute(text("SELECT 1"))
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(read_one(), timeout=0.5)
+        assert await asyncio.wait_for(read_one(), timeout=2) == 1
+    finally:
+        await db.dispose_engine()

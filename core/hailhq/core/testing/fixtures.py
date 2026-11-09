@@ -66,6 +66,11 @@ async def db(
     monkeypatch.setattr(
         core_db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
     )
+    monkeypatch.setattr(
+        core_db,
+        "_independent_sessionmaker",
+        async_sessionmaker(engine, expire_on_commit=False),
+    )
 
     yield engine
 
