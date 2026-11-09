@@ -2538,7 +2538,9 @@ async def test_a_refusal_before_any_brand_keeps_nothing(
 ) -> None:
     org_id, _, key = org_and_key
     await _set_balance(async_session, org_id, 10_000)
-    sms_carrier.problems = [Problem(field="ein", message="Check the tax ID (EIN).")]
+    sms_carrier.problems = [
+        Problem(field="ein", message="Check the business tax number.")
+    ]
     resp = await _post_sms(client, key)
     assert resp.status_code == 422, resp.text
     rows = (

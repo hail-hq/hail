@@ -91,16 +91,64 @@ def _provider(handler):
     return TelnyxSmsRegistrationProvider(api_key="k", client=client)
 
 
-async def _draft(p, subject="business", fields=FIELDS):
+async def _draft(p, subject="business", fields=FIELDS, address=ADDRESS):
     req = await p.requirements("US", "local", subject)
     return await p.create_draft(
         organization_id="org1",
         contact_email="ops@hail.so",
         requirements=req,
         fields=fields,
-        address=ADDRESS,
+        address=address,
         documents={},
         messaging_service_sid="MP1",
+    )
+
+
+async def test_swedish_company_files_its_vat_number_and_country() -> None:
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path, json.loads(req.content or b"{}")))
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(
+                200, json={"brandId": "B1", "identityStatus": "SELF_DECLARED"}
+            )
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"status": "OK"})
+        if req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    stockholm = Address(
+        customer_name="Acme AB",
+        street="Drottninggatan 1",
+        city="Stockholm",
+        region="Stockholm",
+        postal_code="111 51",
+        country_code="SE",
+    )
+    fields = {
+        **FIELDS,
+        "sender_country": "SE",
+        "registration_country": "SE",
+        "ein": "SE 556677-8899 01",
+        "rep_phone": "+46701234567",
+    }
+    draft = await _draft(_provider(handler), fields=fields, address=stockholm)
+    assert draft.problems == []
+    body = calls[0][2]
+    assert body["country"] == "SE" and body["ein"] == "556677889901"
+
+
+def test_a_foreign_tax_number_must_match_the_address_country() -> None:
+    from hailhq.core.providers.verification.sms_review import sender_problems
+
+    fields = {"sender_country": "US", "registration_country": "SE"}
+    problems = sender_problems(fields, ADDRESS, "business")
+    assert [p.field for p in problems] == ["registration_country"]
+    # A Canadian number with a US address is a carrier rule, not this one.
+    assert not sender_problems(
+        {**fields, "registration_country": "CA"}, ADDRESS, "business"
     )
 
 
@@ -2879,4 +2927,35 @@ def test_same_sender_ignores_website_scheme_and_trailing_slash() -> None:
     assert same_sender(original, fields, address, "business")
     assert not same_sender(
         original, {**fields, "website": "https://other.com"}, address, "business"
+    )
+
+
+def test_same_sender_reads_a_vat_number_with_or_without_its_prefix() -> None:
+    from hailhq.core.providers.verification.base import Address
+    from hailhq.core.providers.verification.sms_review import same_sender
+
+    location = {
+        "street": "Drottninggatan 1",
+        "city": "Stockholm",
+        "region": "Stockholm",
+        "postal_code": "111 51",
+        "country_code": "SE",
+    }
+    original = {
+        "fields": {
+            "legal_name": "Acme AB",
+            "ein": "556677889901",
+            "registration_country": "SE",
+        },
+        "address": location,
+    }
+    fields = {
+        "legal_name": "Acme AB",
+        "ein": "SE 556677-8899 01",
+        "registration_country": "SE",
+    }
+    address = Address(customer_name="Acme AB", **location)
+    assert same_sender(original, fields, address, "business")
+    assert not same_sender(
+        original, {**fields, "ein": "SE556677889902"}, address, "business"
     )

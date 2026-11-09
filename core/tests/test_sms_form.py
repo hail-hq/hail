@@ -4,6 +4,7 @@ from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
     sms_requirements,
+    tax_number,
 )
 from hailhq.core.providers.verification.telnyx_sms import TelnyxSmsRegistrationProvider
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
@@ -135,16 +136,67 @@ def test_individual_tax_id_holders_must_use_business():
     assert not errors({**GOOD, "sender_country": "CA"})
 
 
-def test_business_requires_supported_registration_but_can_operate_abroad():
+def test_business_requires_a_registration_but_can_operate_abroad():
     assert not errors({**BUSINESS, "sender_country": "GB"}, "business")
     assert not errors(
         {**BUSINESS, "registration_country": "CA", "ein": "123456789"}, "business"
     )
-    assert "registration_country" in error_fields(
-        {**BUSINESS, "registration_country": "GB"}, "business"
-    )
     assert "has_tax_id" in error_fields({**BUSINESS, "has_tax_id": "NO"}, "business")
     assert "ein" in error_fields({**BUSINESS, "ein": "made up"}, "business")
+
+
+@pytest.mark.parametrize(
+    "country,number",
+    [
+        ("SE", "SE556677889901"),
+        ("SE", "556677-8899"),
+        ("GB", "SC123456"),
+        ("DE", "DE 123 456 789"),
+    ],
+)
+def test_businesses_from_any_country_file_their_own_number(country, number):
+    data = {
+        **BUSINESS,
+        "sender_country": country,
+        "registration_country": country,
+        "ein": number,
+    }
+    assert not errors(data, "business")
+
+
+@pytest.mark.parametrize(
+    "country,number",
+    [
+        ("US", "123456789012"),
+        ("CA", "123456789XY"),
+        ("SE", "SE1"),
+        ("SE", "ABCDEFGH"),
+        ("SE", "1" * 21),
+        ("se", "556677889901"),
+    ],
+)
+def test_bad_tax_numbers_are_refused(country, number):
+    data = {**BUSINESS, "registration_country": country, "ein": number}
+    assert error_fields(data, "business") & {"ein", "registration_country"}
+
+
+@pytest.mark.parametrize(
+    "number,country,filed",
+    [
+        ("12-3456789", "US", "123456789"),
+        ("SE 556677-8899 01", "SE", "556677889901"),
+        ("se556677889901", "SE", "556677889901"),
+        ("SC123456", "GB", "SC123456"),
+        ("GB123456789", "GB", "123456789"),
+        ("US123456789", "US", "US123456789"),
+        ("EL 123456789", "GR", "123456789"),
+        ("ATU12345678", "AT", "U12345678"),
+        ("GR123456789", "GR", "123456789"),
+        ("123456789 RT 0001", "CA", "123456789"),
+    ],
+)
+def test_tax_number_files_letters_and_digits(number, country, filed):
+    assert tax_number(number, country) == filed
 
 
 @pytest.mark.parametrize(

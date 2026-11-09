@@ -74,10 +74,34 @@ def _answer(fields: dict[str, str], name: str) -> str:
 # New applications describe their actual consent journey. Never append claims
 # about consent, disclosures or confirmation that the applicant did not supply.
 _OPT_IN_MAX = 1024
-_COUNTRIES = (
-    FieldOption(key="US", label="United States"),
-    FieldOption(key="CA", label="Canada"),
-)
+# Carriers file at most 20 characters (Telnyx `ein`).
+_TAX_NUMBER_MAX = 20
+# US EINs and Canadian Business Numbers are nine digits.
+NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
+
+
+# The VAT prefix to strip, per country: the ISO code before a digit, unless
+# listed. Greece uses EL. An Austrian number keeps its U ("ATU12345678" files
+# as "U12345678").
+_VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
+
+
+def tax_number(value: str | None, country: str | None) -> str:
+    """The business tax number as carriers file it: letters and digits,
+    uppercase, without the VAT prefix of the issuing country.
+    "SE 556677-8899 01" from Sweden files as "556677889901". A full Canadian
+    Business Number files as its first 9 digits."""
+    text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
+    code = (country or "").strip().upper()
+    if code == "CA":
+        full = re.fullmatch(r"([0-9]{9})[A-Z]{2}[0-9]{4}", text)
+        return full.group(1) if full else text
+    if code in NINE_DIGIT_COUNTRIES or not re.fullmatch(r"[A-Z]{2}", code):
+        return text
+    prefix = _VAT_PREFIXES.get(code, rf"{code}(?=[0-9])")
+    return re.sub(rf"^{prefix}", "", text)
+
+
 _ELIGIBILITY_FIELDS = (
     FieldSpec(
         name="sender_country",
@@ -89,7 +113,7 @@ _ELIGIBILITY_FIELDS = (
         name="has_tax_id",
         label="Does the sender have a business tax registration number?",
         options=_YES_NO,
-        help="Answer from your actual registration, even if you work alone. US EIN or Canadian Business Number holders use the business route.",
+        help="Answer from your actual registration, even if you work alone. A company with a tax or registration number from any country uses the business route.",
     ),
 )
 
@@ -99,14 +123,16 @@ _BUSINESS_FIELDS = (
     FieldSpec(
         name="registration_country",
         label="Country issuing the business tax number",
-        options=_COUNTRIES,
-        help="Only US EIN and Canadian Business Number registrations are currently supported. This may differ from your operating address.",
+        pattern=r"^[A-Z]{2}$",
+        max_length=2,
+        help="Two-letter country code, for example US, CA or SE. Outside the US and Canada, it must be your address country.",
     ),
     FieldSpec(
         name="ein",
-        label="Business tax number (EIN or Canadian BN)",
-        pattern=r"^\d{2}-?\d{7}$",
-        help="Nine digits: US EIN for a US registration, or Canadian Business Number for a Canadian registration.",
+        label="Business tax number",
+        pattern=r"^[0-9A-Za-z][0-9A-Za-z .\-/]*$",
+        max_length=30,
+        help="US: your 9-digit EIN. Canada: your Business Number. Other countries: your VAT number, or your company registration number if you have no VAT number.",
     ),
     FieldSpec(
         name="industry",
@@ -570,17 +596,28 @@ def _application_problems(
     elif val("has_tax_id") == "NO":
         issue(
             "has_tax_id",
-            "The business route requires a supported business tax registration number.",
+            "The business route needs a business tax or registration number.",
         )
-    if (
-        subject_type == "business"
-        and val("ein")
-        and not re.fullmatch(r"[0-9]{2}-?[0-9]{7}", val("ein"))
-    ):
-        issue(
-            "ein",
-            "Enter the nine-digit US EIN or Canadian Business Number for the selected registration country.",
-        )
+    issuer = val("registration_country")
+    if subject_type == "business" and issuer and not re.fullmatch(r"[A-Z]{2}", issuer):
+        issue("registration_country", "Use a two-letter uppercase country code.")
+    if subject_type == "business" and val("ein"):
+        number = tax_number(val("ein"), issuer)
+        if issuer in NINE_DIGIT_COUNTRIES:
+            if not re.fullmatch(r"[0-9]{9}", number):
+                issue(
+                    "ein",
+                    (
+                        "Enter your 9-digit Business Number, or the full 15 characters like 123456789RT0001."
+                        if issuer == "CA"
+                        else "Enter your 9-digit EIN."
+                    ),
+                )
+        elif not (4 <= len(number) <= _TAX_NUMBER_MAX and re.search(r"[0-9]", number)):
+            issue(
+                "ein",
+                f"Enter your VAT or company registration number: 4 to {_TAX_NUMBER_MAX} letters and digits.",
+            )
     for name in (
         "consent_optional",
         "evidence_redacted",

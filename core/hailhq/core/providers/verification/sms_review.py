@@ -8,6 +8,10 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
+from hailhq.core.providers.verification.sms_form import (
+    NINE_DIGIT_COUNTRIES,
+    tax_number,
+)
 from hailhq.core.urls import canonical_url
 
 LEGACY_APPLICATION = (
@@ -26,6 +30,21 @@ def sender_problems(
             Problem(
                 field="address.country_code",
                 message="Use the sender country selected in eligibility.",
+            )
+        )
+    issuer = fields.get("registration_country", "").strip().upper()
+    if (
+        subject_type == "business"
+        and address
+        and issuer
+        and issuer not in NINE_DIGIT_COUNTRIES
+        and address.country_code.upper() != issuer
+    ):
+        # Carriers check a non-US/CA number against the address country.
+        problems.append(
+            Problem(
+                field="registration_country",
+                message="A tax number from outside the US and Canada must come from your address country.",
             )
         )
     if subject_type == "person":
@@ -204,9 +223,11 @@ def same_sender(
     ):
         return False
 
-    def normalized(key, value):
+    def normalized(key, value, source):
         text = " ".join(str(value or "").split()).casefold()
-        if key in {"mobile_phone_number", "rep_phone", "ein"}:
+        if key == "ein":
+            return tax_number(text, source.get("registration_country"))
+        if key in {"mobile_phone_number", "rep_phone"}:
             return re.sub(r"\D", "", text)
         if key == "website":
             # The carrier may hold an http:// or slash-ended form of the
@@ -215,11 +236,12 @@ def same_sender(
         return text
 
     return all(
-        normalized(key, previous[key]) == normalized(key, fields.get(key))
+        normalized(key, previous[key], previous)
+        == normalized(key, fields.get(key), fields)
         for key in _IDENTITY_FIELDS[subject_type]
         if key in previous
     ) and all(
-        normalized(key, value) == normalized(key, getattr(address, key, None))
+        normalized(key, value, {}) == normalized(key, getattr(address, key, None), {})
         for key, value in location.items()
         if key != "customer_name"
     )
