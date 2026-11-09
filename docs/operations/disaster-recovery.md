@@ -63,7 +63,9 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
    ```
 
 8. Add shell shortcuts on the new VM (next section).
-9. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This drains the old voicebot (live calls finish, up to about 1 hour). The old API, MCP and Caddy stop after it: the voicebot's tools call the local API, and clients with a cached DNS answer still reach it.
+9. Take the old VM out of service.
+   - **Old VM is down or SSH fails:** delete it (or power it off) in the cloud provider's console now. Its services use `restart: unless-stopped`, so if the VM comes back they start again. Then it takes calls and texts and runs the same background jobs as the new VM.
+   - **Old VM still runs:** stop it with the script below. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This drains the old voicebot (live calls finish, up to about 1 hour). The old API, MCP and Caddy stop after it: the voicebot's tools call the local API, and clients with a cached DNS answer still reach it.
 
    ```bash
    ssh root@<OLD_IP> '
