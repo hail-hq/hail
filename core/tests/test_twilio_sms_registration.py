@@ -599,7 +599,7 @@ async def test_draft_4xx_becomes_neutral_problem() -> None:
     r["customer_profiles.delete"] = True
     draft = await _draft(_provider(r))
     assert draft.refs == {}
-    assert [pr.message for pr in draft.problems] == ["Check the tax ID (EIN)."]
+    assert [pr.message for pr in draft.problems] == ["Check the business tax number."]
     assert "12-3456789" not in repr(draft.problems)
 
 
@@ -951,6 +951,28 @@ async def test_business_can_file_canadian_registration_number():
     assert business["business_registration_number"] == "123456789"
 
 
+@pytest.mark.parametrize(
+    "country,number,identifier,filed",
+    [
+        ("SE", "SE 556677-8899 01", "Other", "556677889901"),
+        ("GB", "SC123456", "CN", "SC123456"),
+    ],
+)
+async def test_business_files_a_registration_number_from_any_country(
+    country, number, identifier, filed
+):
+    provider = _provider()
+    result = await _draft(provider, registration_country=country, ein=number)
+    assert not result.problems
+    business = next(
+        call["attributes"]
+        for call in _calls(provider, "end_users.create")
+        if call["type"] == "customer_profile_business_information"
+    )
+    assert business["business_registration_identifier"] == identifier
+    assert business["business_registration_number"] == filed
+
+
 async def test_phone_attribute_and_all_samples_are_filed():
     responses = _ok_responses()
     responses["brand_registrations.fetch"] = SimpleNamespace(status="APPROVED")
@@ -1072,6 +1094,41 @@ async def test_legacy_sender_waits_for_information_without_new_paid_resources(su
     assert (await provider.status(refs)).state == "pending"
     assert provider.step(refs) == "needs_information" and refs["brand_sid"] == "BN1"
     assert not _calls(provider, "us_app_to_person.create")
+
+
+async def test_twilio_recovers_a_foreign_company_from_its_address_country():
+    responses = _ok_responses()
+    responses["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", customer_profile_bundle_sid="BU1"
+    )
+    responses["customer_profiles_entity_assignments.list"] = [
+        SimpleNamespace(object_sid="IT1"),
+        SimpleNamespace(object_sid="RD1"),
+    ]
+    responses["end_users.fetch"] = SimpleNamespace(
+        type="customer_profile_business_information",
+        attributes={
+            "business_name": "Acme AB",
+            "business_registration_number": "556677889901",
+            "business_registration_identifier": "Other",
+        },
+    )
+    responses["supporting_documents.fetch"] = SimpleNamespace(
+        type="customer_profile_address", attributes={"address_sids": "AD1"}
+    )
+    responses["addresses.fetch"] = SimpleNamespace(
+        street="Drottninggatan 1",
+        city="Stockholm",
+        region="Stockholm",
+        postal_code="111 51",
+        iso_country="SE",
+    )
+    provider = _provider(responses)
+    identity = await provider.application_identity(
+        {"brand_sid": "BN1", "profile_sid": "BU1"}, "business"
+    )
+    assert identity["fields"]["registration_country"] == "SE"
+    assert identity["fields"]["ein"] == "556677889901"
 
 
 @pytest.mark.parametrize("subject", ["person", "business"])

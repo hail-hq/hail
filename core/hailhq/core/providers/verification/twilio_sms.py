@@ -29,6 +29,7 @@ from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     sms_requirements,
     sms_subject_name,
+    tax_number,
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
@@ -39,6 +40,20 @@ from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
+
+# Twilio's business_registration_identifier for each issuing country it
+# names. Every other country files as "Other".
+_REGISTRATION_IDS = {
+    "US": "EIN",
+    "CA": "CBN",
+    "GB": "CN",
+    "AU": "ACN",
+    "IN": "CIN",
+    "EE": "VAT",
+    "RO": "VATRN",
+    "IL": "RN",
+}
+_REGISTRATION_COUNTRIES = {v: k for k, v in _REGISTRATION_IDS.items()}
 
 _SECONDARY_PROFILE_POLICY = "RNdfbf3fae0e1107f8aded0e7cead80bf5"
 _STARTER_PROFILE_POLICY = "RN806dd6cd175f314e1f96a9727ee271f4"
@@ -232,10 +247,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 attributes={
                     "business_name": fields["legal_name"],
                     "business_type": _business_type(fields["business_type"]),
-                    "business_registration_identifier": (
-                        "CBN" if fields.get("registration_country") == "CA" else "EIN"
+                    "business_registration_identifier": _REGISTRATION_IDS.get(
+                        fields.get("registration_country", ""), "Other"
                     ),
-                    "business_registration_number": fields["ein"].replace("-", ""),
+                    "business_registration_number": tax_number(
+                        fields["ein"], fields.get("registration_country")
+                    ),
                     "business_industry": fields["industry"],
                     "business_identity": "direct_customer",
                     "business_regions_of_operation": "USA_AND_CANADA",
@@ -523,8 +540,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     {
                         "legal_name": business.get("business_name"),
                         "ein": business.get("business_registration_number"),
-                        "registration_country": {"EIN": "US", "CBN": "CA"}.get(
-                            identifier
+                        "registration_country": _REGISTRATION_COUNTRIES.get(
+                            identifier, address["country_code"]
                         ),
                     }
                 )
@@ -754,7 +771,7 @@ def _safe_message(msg) -> str:
     """A short neutral sentence; never the carrier's own text."""
     low = (msg or "").lower()
     for words, text in (
-        (("ein", "tax id", "registration number"), "Check the tax ID (EIN)."),
+        (("ein", "tax id", "registration number"), "Check the business tax number."),
         (("website", "url"), "Check the website address."),
         (("address", "street", "postal", "zip"), "Check the address."),
         (("phone", "mobile"), "Check the phone number."),

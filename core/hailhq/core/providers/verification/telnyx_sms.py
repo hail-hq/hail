@@ -34,6 +34,7 @@ from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     sms_requirements,
     sms_subject_name,
+    tax_number,
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
@@ -507,7 +508,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 "email": fields["rep_email"],
                 "phone": fields["rep_phone"],
                 "vertical": fields["industry"],
-                "ein": fields["ein"].replace("-", ""),
+                "ein": tax_number(fields["ein"], fields.get("registration_country")),
                 "website": fields["website"],
             }
         body.update(
@@ -1287,7 +1288,7 @@ def _safe_message(response: httpx.Response) -> str:
         f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
     ).lower()
     for words, text in (
-        (("ein", "tax id", "registration number"), "Check the tax ID (EIN)."),
+        (("ein", "tax id", "registration number"), "Check the business tax number."),
         (("website", "url"), "Check the website address."),
         (("address", "street", "postal", "zip"), "Check the address."),
         (("phone", "mobile"), "Check the phone number."),

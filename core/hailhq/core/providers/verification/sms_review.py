@@ -8,6 +8,7 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
+from hailhq.core.providers.verification.sms_form import tax_number
 from hailhq.core.urls import canonical_url
 
 LEGACY_APPLICATION = (
@@ -204,9 +205,11 @@ def same_sender(
     ):
         return False
 
-    def normalized(key, value):
+    def normalized(key, value, source):
         text = " ".join(str(value or "").split()).casefold()
-        if key in {"mobile_phone_number", "rep_phone", "ein"}:
+        if key == "ein":
+            return tax_number(text, source.get("registration_country"))
+        if key in {"mobile_phone_number", "rep_phone"}:
             return re.sub(r"\D", "", text)
         if key == "website":
             # The carrier may hold an http:// or slash-ended form of the
@@ -215,11 +218,12 @@ def same_sender(
         return text
 
     return all(
-        normalized(key, previous[key]) == normalized(key, fields.get(key))
+        normalized(key, previous[key], previous)
+        == normalized(key, fields.get(key), fields)
         for key in _IDENTITY_FIELDS[subject_type]
         if key in previous
     ) and all(
-        normalized(key, value) == normalized(key, getattr(address, key, None))
+        normalized(key, value, {}) == normalized(key, getattr(address, key, None), {})
         for key, value in location.items()
         if key != "customer_name"
     )
