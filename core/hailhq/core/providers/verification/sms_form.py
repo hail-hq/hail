@@ -744,7 +744,7 @@ def _application_problems(
     covered: set[str] = set()
     # A sample's purpose is optional. Coverage is checked only when every
     # sample names one.
-    untyped = False
+    untyped = 0
     has_stop = False
     sender = val("program_name")
     for i in range(1, 6):
@@ -757,7 +757,7 @@ def _application_problems(
                     "Use at least 20 characters with the actual sender and message content.",
                 )
             if not purpose:
-                untyped = True
+                untyped += 1
             elif purpose not in purposes:
                 issue(
                     name + "_type",
@@ -805,10 +805,8 @@ def _application_problems(
             + ", ".join(p for p in purposes if p not in covered)
             + ".",
         )
-    elif untyped and len(set(purposes)) > sum(
-        1 for i in range(1, 6) if val(f"sample_{i}")
-    ):
-        # Without purposes, at least one sample for each kind of text.
+    elif untyped and len(set(purposes) - covered) > untyped:
+        # Samples without a purpose cover the kinds the others do not, one each.
         issue("text_types", "Add one sample for each kind of text you picked.")
     disclosure = val("consent_disclosure")
     if disclosure:

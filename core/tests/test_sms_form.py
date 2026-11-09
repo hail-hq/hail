@@ -403,6 +403,14 @@ def test_unselected_sample_purposes_are_rejected_and_missing_ones_allowed():
     assert "text_types" in error_fields(three)
     sample = "Acme: Your order 123 shipped today. Reply STOP to opt out."
     assert "text_types" not in error_fields({**three, "sample_3": sample})
+    # Mixed: two samples name one kind, one has none, so two kinds lack a sample.
+    mixed = {
+        **three,
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "CUSTOMER_CARE",
+        "sample_3": sample,
+    }
+    assert "text_types" in error_fields(mixed)
 
 
 def test_sample_identity_and_stop_must_be_real():
