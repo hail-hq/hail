@@ -382,3 +382,112 @@ async def test_check_sms_passes_when_the_application_is_complete(
     assert resp.status_code == 200, resp.text
     assert resp.json()["files"] == []
     assert sms_carrier.drafts == []
+
+
+async def test_twenty_uploads_fit_in_one_form(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    """The MCP sends up to 20 files; every one may be an upload.<slot> part."""
+    org_id, _, key = org_and_key
+    slots = ["proof_of_identity", *(f"extra_{i}" for i in range(19))]
+    ids = []
+    for _ in slots:
+        ids.append(str((await _upload(async_session, org_id)).id))
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps({slot: {"option": "passport"} for slot in slots}),
+        address=json.dumps(
+            {
+                "customer_name": "Ada",
+                "street": "1 Road",
+                "city": "London",
+                "region": "LDN",
+                "postal_code": "N1",
+                "country_code": "GB",
+            }
+        ),
+        **{f"upload.{slot}": upload_id for slot, upload_id in zip(slots, ids)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [f["slot"] for f in resp.json()["files"]] == slots
+    assert s3.fetch_raw.await_count == 20
+
+
+async def test_uploads_are_fetched_at_the_same_time(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    """Every fetch starts before the first one returns."""
+    import asyncio
+
+    org_id, _, key = org_and_key
+    slots = ["proof_of_identity", "extra_0", "extra_1"]
+    ids = [str((await _upload(async_session, org_id)).id) for _ in slots]
+    started, release = [], asyncio.Event()
+
+    async def fetch(key_):
+        started.append(key_)
+        if len(started) == len(slots):
+            release.set()
+        await asyncio.wait_for(release.wait(), 2)
+        return _JPEG
+
+    s3.fetch_raw.side_effect = fetch
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps({slot: {"option": "passport"} for slot in slots}),
+        **{f"upload.{slot}": upload_id for slot, upload_id in zip(slots, ids)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(started) == 3
+
+
+async def test_used_uploads_are_deleted_in_one_statement(
+    client, org_and_key, carrier, s3, async_session, monkeypatch
+) -> None:
+    from hailhq.api.routes import verifications as routes
+
+    org_id, _, key = org_and_key
+    carrier_requirements = carrier.requirements
+
+    async def two_slots(*args):
+        from hailhq.core.providers.verification import DocumentOption, DocumentSlot
+
+        req = await carrier_requirements(*args)
+        extra = DocumentSlot(
+            name="proof_of_address",
+            label="Proof of address",
+            options=(DocumentOption(key="bill", label="Bill"),),
+        )
+        return req.model_copy(update={"documents": (*req.documents, extra)})
+
+    carrier.requirements = two_slots
+    first_id = (await _upload(async_session, org_id)).id
+    second_id = (await _upload(async_session, org_id)).id
+    statements = []
+    real_delete = routes.delete
+
+    def counting_delete(*args, **kwargs):
+        statements.append(args)
+        return real_delete(*args, **kwargs)
+
+    monkeypatch.setattr(routes, "delete", counting_delete)
+    resp = await _post(
+        client,
+        key,
+        documents=json.dumps(
+            {"proof_of_identity": {"option": "passport"}, "proof_of_address": {}}
+        ),
+        **{
+            "upload.proof_of_identity": str(first_id),
+            "upload.proof_of_address": str(second_id),
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert len(statements) == 1
+    async_session.expire_all()
+    assert await async_session.get(FileUpload, first_id) is None
+    assert await async_session.get(FileUpload, second_id) is None

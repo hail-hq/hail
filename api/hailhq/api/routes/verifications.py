@@ -1639,9 +1639,17 @@ def _json_part(form, name: str, default):
         raise unprocessable(f"{name} must be valid JSON", loc=["body", name]) from exc
 
 
+# Text parts of a verification form: about 10 named parts plus one
+# ``upload.<slot>`` per file, and a file may be sent either way (20 at most).
+MAX_FORM_FIELDS = 40
+
+
 async def _parse_form(request: Request):
     return await parse_capped_form(
-        request, max_bytes=MAX_REQUEST_BYTES, max_files=20, max_fields=20
+        request,
+        max_bytes=MAX_REQUEST_BYTES,
+        max_files=20,
+        max_fields=MAX_FORM_FIELDS,
     )
 
 
@@ -1838,7 +1846,6 @@ async def _prepare_submission(
         raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
     documents: dict[str, DocumentInput] = {}
-    uploads: list[FileUpload] = []
     files: list[VerificationCheckFile] = []
     for key in form:
         if key.startswith("upload.") and key[len("upload.") :] not in sub.documents:
@@ -1846,25 +1853,40 @@ async def _prepare_submission(
                 "this upload names a slot that is not in documents",
                 loc=["body", key],
             )
+    # The upload rows first (one session: one query at a time), then every
+    # object from the bucket at once.
+    rows: dict[str, FileUpload] = {}
+    for slot in sub.documents:
+        upload_ref = form.get(f"upload.{slot}")
+        if upload_ref is None or upload_ref == "":
+            continue
+        part = form.get(f"file.{slot}")
+        if part is not None and hasattr(part, "read"):
+            raise unprocessable(
+                f"send file.{slot} or upload.{slot}, not both",
+                loc=["body", f"upload.{slot}"],
+            )
+        rows[slot] = await _usable_upload(
+            db, principal.organization_id, slot, upload_ref
+        )
+    if rows and s3 is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="file uploads are not configured on this server",
+        )
+    fetched = dict(
+        zip(
+            rows,
+            await asyncio.gather(*(_read_upload(s3, row) for row in rows.values())),
+        )
+    )
     total = 0
     for slot, value in sub.documents.items():
-        upload = form.get(f"file.{slot}")
-        has_file = upload is not None and hasattr(upload, "read")
-        upload_ref = form.get(f"upload.{slot}")
-        file: UploadedFile | None = None
-        upload_id: UUID | None = None
-        if upload_ref is not None and upload_ref != "":
-            if has_file:
-                raise unprocessable(
-                    f"send file.{slot} or upload.{slot}, not both",
-                    loc=["body", f"upload.{slot}"],
-                )
-            row = await _usable_upload(db, principal.organization_id, slot, upload_ref)
-            file = await _read_upload(s3, row)
-            uploads.append(row)
-            upload_id = row.id
-        elif has_file:
-            file = await _read_file(upload)
+        file: UploadedFile | None = fetched.get(slot)
+        if file is None:
+            part = form.get(f"file.{slot}")
+            if part is not None and hasattr(part, "read"):
+                file = await _read_file(part)
         if file is not None:
             total += len(file.data)
             if total > MAX_REQUEST_BYTES:
@@ -1874,7 +1896,7 @@ async def _prepare_submission(
             files.append(
                 VerificationCheckFile(
                     slot=slot,
-                    upload_id=upload_id,
+                    upload_id=rows[slot].id if slot in rows else None,
                     size_bytes=len(file.data),
                     sha256=hashlib.sha256(file.data).hexdigest(),
                 )
@@ -1944,7 +1966,7 @@ async def _prepare_submission(
         subject_name=subject_name,
         documents=documents,
         draft_kwargs=draft_kwargs,
-        uploads=uploads,
+        uploads=list(rows.values()),
         files=files,
     )
 
@@ -2017,8 +2039,15 @@ async def create_verification(
     prepared = await _prepare_submission(
         request, principal, db, registry, s3, lock=True
     )
-    sub, offer, provider_name, provider = prepared[:4]
-    hold_cents, requirements, subject_name, documents, draft_kwargs = prepared[4:9]
+    sub = prepared.sub
+    offer = prepared.offer
+    provider_name = prepared.provider_name
+    provider = prepared.provider
+    hold_cents = prepared.hold_cents
+    requirements = prepared.requirements
+    subject_name = prepared.subject_name
+    documents = prepared.documents
+    draft_kwargs = prepared.draft_kwargs
 
     try:
         draft = await provider.create_draft(
@@ -2177,13 +2206,8 @@ async def _usable_upload(
     return row
 
 
-async def _read_upload(s3: S3MailClient | None, row: FileUpload) -> UploadedFile:
+async def _read_upload(s3: S3MailClient, row: FileUpload) -> UploadedFile:
     """The upload's bytes from the mail bucket, in memory only."""
-    if s3 is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="file uploads are not configured on this server",
-        )
     try:
         data = await s3.fetch_raw(row.s3_key)
     except Exception as exc:
@@ -2207,19 +2231,34 @@ async def _delete_used_uploads(
         return
     # Plain values first: a rollback below expires the ORM objects.
     targets = [(upload.id, upload.s3_key) for upload in uploads]
-    for upload_id, s3_key in targets:
-        try:
-            await s3.delete(s3_key)
-            await db.execute(delete(FileUpload).where(FileUpload.id == upload_id))
-            await db.commit()
-        except Exception as exc:
-            await db.rollback()
+    results = await asyncio.gather(
+        *(s3.delete(s3_key) for _, s3_key in targets), return_exceptions=True
+    )
+    deleted = []
+    for (upload_id, _), result in zip(targets, results):
+        if isinstance(result, BaseException):
+            # The row stays, so the GC tries the object again.
             logger.warning(
                 "could not delete used verification upload %s (%s); the GC "
                 "removes it later",
                 upload_id,
-                type(exc).__name__,
+                type(result).__name__,
             )
+        else:
+            deleted.append(upload_id)
+    if not deleted:
+        return
+    try:
+        await db.execute(delete(FileUpload).where(FileUpload.id.in_(deleted)))
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not delete %d used verification upload row(s) (%s); the GC "
+            "removes them later",
+            len(deleted),
+            type(exc).__name__,
+        )
 
 
 @router.post(
