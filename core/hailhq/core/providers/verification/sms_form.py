@@ -297,13 +297,13 @@ _CAMPAIGN_FIELDS = (
                 label=f"Actual sample message {i}",
                 max_length=_SAMPLE_MAX,
                 required=i <= 2,
-                help="At least 20 characters. Include the public sender name and actual opt-out instructions. Cover every selected purpose.",
+                help='At least 20 characters, with your public sender name. One sample needs the opt-out, like "Reply STOP to opt out."',
             ),
             FieldSpec(
                 name=f"sample_{i}_type",
                 label=f"Purpose of sample {i}",
                 options=_TEXT_TYPES,
-                required=i <= 2,
+                required=False,
             ),
         )
     ),
@@ -568,6 +568,19 @@ def _is_public_https_url(value: str) -> bool:
         return False
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"[\W_]", "", text).casefold()
+
+
+def _names_sender(name: str, text: str) -> bool:
+    """True when ``text`` names the sender ``name``. Case, spaces and dots
+    do not matter: "Acme Tech", "acme.tech" and "AcmeTech" all match."""
+    compact = _compact(name)
+    if not compact:
+        return name.strip().casefold() in text.casefold()
+    return compact in _compact(text)
+
+
 def _application_problems(
     fields: dict[str, str], subject_type: SubjectType
 ) -> list[Problem]:
@@ -687,9 +700,8 @@ def _application_problems(
     confirmation = val("opt_in_message")
     if confirmation:
         missing: list[str] = []
-        if (
-            not val("program_name")
-            or val("program_name").casefold() not in confirmation.casefold()
+        if not val("program_name") or not _names_sender(
+            val("program_name"), confirmation
         ):
             missing.append("public sender/program name")
         if (
@@ -730,6 +742,11 @@ def _application_problems(
                 f"Use at least {minimum} characters describing the actual program.",
             )
     covered: set[str] = set()
+    # A sample's purpose is optional. Coverage is checked only when every
+    # sample names one.
+    untyped = 0
+    has_stop = False
+    sender = val("program_name")
     for i in range(1, 6):
         name = f"sample_{i}"
         sample, purpose = val(name), val(name + "_type")
@@ -739,25 +756,22 @@ def _application_problems(
                     name,
                     "Use at least 20 characters with the actual sender and message content.",
                 )
-            if not purpose or purpose not in purposes:
+            if not purpose:
+                untyped += 1
+            elif purpose not in purposes:
                 issue(
                     name + "_type",
                     "Choose one of your selected messaging purposes for this sample.",
                 )
             else:
                 covered.add(purpose)
-            if (
-                val("program_name")
-                and val("program_name").casefold() not in sample.casefold()
-            ):
+            if sender and not _names_sender(sender, sample):
                 issue(
                     name,
                     "Include the public sender or program name so recipients can identify you.",
                 )
-            if not re.search(r"\bSTOP\b", sample, re.IGNORECASE):
-                issue(
-                    name, "Include the actual STOP opt-out instruction in this sample."
-                )
+            if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
+                has_stop = True
             if val("has_links") == "NO" and re.search(
                 r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co)(?:/|\b)",
                 sample,
@@ -778,26 +792,40 @@ def _application_problems(
                 )
         elif purpose:
             issue(name, "Provide the sample for this purpose.")
-    if purposes and set(purposes) - covered:
+    # Carriers ask for the opt-out in at least one sample.
+    if val("sample_1") and not has_stop:
+        issue(
+            "sample_1",
+            'Add the opt-out to at least one sample, like "Reply STOP to opt out."',
+        )
+    if purposes and not untyped and set(purposes) - covered:
         issue(
             "text_types",
             "Provide a sample for every selected purpose: "
             + ", ".join(p for p in purposes if p not in covered)
             + ".",
         )
+    elif untyped and len(set(purposes) - covered) > untyped:
+        # Samples without a purpose cover the kinds the others do not, one each.
+        issue("text_types", "Add one sample for each kind of text you picked.")
     disclosure = val("consent_disclosure")
     if disclosure:
         required = [
-            val("program_name"),
             val("message_frequency"),
             "STOP",
             "HELP",
             val("privacy_policy_url"),
             val("terms_url"),
         ]
-        if any(
-            part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not _MESSAGE_DATA_RATES.search(disclosure):
+        program = val("program_name")
+        if (
+            any(
+                part and part.casefold() not in disclosure.casefold()
+                for part in required
+            )
+            or not _MESSAGE_DATA_RATES.search(disclosure)
+            or (program and not _names_sender(program, disclosure))
+        ):
             issue(
                 "consent_disclosure",
                 "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",

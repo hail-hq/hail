@@ -387,19 +387,63 @@ def test_samples_cover_one_to_five_purposes(count):
         assert "text_types" in error_fields(data)
 
 
-def test_unselected_and_missing_sample_mapping_are_rejected():
+def test_unselected_sample_purposes_are_rejected_and_missing_ones_allowed():
     assert "sample_1_type" in error_fields({**GOOD, "sample_1_type": "MARKETING"})
     assert "sample_3" in error_fields({**GOOD, "sample_3_type": "CUSTOMER_CARE"})
-    assert "sample_3_type" in error_fields({**GOOD, "sample_3": GOOD["sample_1"]})
+    # A sample without a purpose is fine: purposes are then not checked.
+    assert not errors({**GOOD, "sample_3": GOOD["sample_1"]})
+    assert not errors({**GOOD, "sample_1_type": "", "sample_2_type": ""})
+    # Without purposes: at least one sample for each kind of text.
+    three = {
+        **GOOD,
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION,DELIVERY_NOTIFICATION",
+        "sample_1_type": "",
+        "sample_2_type": "",
+    }
+    assert "text_types" in error_fields(three)
+    sample = "Acme: Your order 123 shipped today. Reply STOP to opt out."
+    assert "text_types" not in error_fields({**three, "sample_3": sample})
+    # Mixed: two samples name one kind, one has none, so two kinds lack a sample.
+    mixed = {
+        **three,
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "CUSTOMER_CARE",
+        "sample_3": sample,
+    }
+    assert "text_types" in error_fields(mixed)
 
 
 def test_sample_identity_and_stop_must_be_real():
     assert "sample_1" in error_fields(
         {**GOOD, "sample_1": "Wrong brand: Your appointment is tomorrow. Reply STOP."}
     )
-    assert "sample_1" in error_fields(
+    # The opt-out is needed in one sample, not in each.
+    assert not errors(
         {**GOOD, "sample_1": "Acme: Your appointment is tomorrow at 2pm."}
     )
+    no_stop = {
+        **GOOD,
+        "sample_1": "Acme: Your appointment is tomorrow at 2pm.",
+        "sample_2": "Acme: Your order 123 shipped today. Thanks!",
+    }
+    assert "sample_1" in error_fields(no_stop)
+
+
+def test_sample_name_check_ignores_spaces_dots_and_case():
+    data = {**GOOD, "program_name": "Acme Tech"}
+    for name in ("acme.tech", "AcmeTech", "ACME TECH"):
+        sample = f"{name}: Your appointment is tomorrow. Reply STOP to opt out."
+        assert "sample_1" not in error_fields({**data, "sample_1": sample})
+    assert "sample_1" in error_fields(
+        {**data, "sample_1": "Acme: Your appointment is tomorrow. Reply STOP."}
+    )
+    # Both ways: a name without a space matches text with one.
+    joined = {**GOOD, "program_name": "AcmeTech"}
+    sample = "Acme Tech: your appointment is tomorrow. Reply STOP to opt out."
+    assert "sample_1" not in error_fields({**joined, "sample_1": sample})
+    # A one-word name keeps the plain match: a handle like @AcmeHQ is fine.
+    one = {**GOOD, "sample_1": "@AcmeHQ: your code is 1234. Reply STOP to opt out."}
+    assert "sample_1" not in error_fields(one)
 
 
 def test_sample_link_and_phone_must_match_answers():
