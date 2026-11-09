@@ -2266,11 +2266,13 @@ def test_telnyx_page_never_touches_a_hand_verified_row():
 def test_twilio_address_scope_from_the_number_sample():
     assert sync.twilio_address_scope([{"address_requirements": "none"}]) is None
     assert sync.twilio_address_scope([]) is None
+    assert sync.twilio_address_scope([{"address_requirements": "any"}]) == "any"
+    # "foreign" (outside the country) is not "any country": nothing is said.
     assert (
         sync.twilio_address_scope(
             [{"address_requirements": "any"}, {"address_requirements": "foreign"}]
         )
-        == "any"
+        is None
     )
     # One number that needs a local address is enough to say so.
     assert (
@@ -2347,3 +2349,38 @@ def test_address_scope_key_never_reaches_the_catalog(tmp_path, monkeypatch):
     )
     text = (tmp_path / "didww.json").read_text()
     assert sync.ADDRESS_SCOPE_KEY not in text
+
+
+def test_twilio_address_scope_also_without_an_address_document(monkeypatch):
+    # Twilio needs only an address here: no bundle, so the form has no
+    # address document. The number search still says one is asked, anywhere.
+    fake = _FakeProvider({"person": _req("person"), "business": _req("business")})
+    _use(monkeypatch, fake)
+    block = sync.fetch_requirements("twilio", "DE", "local", "any")
+    assert block["person"]["items"] == ["address_any_country"]
+
+
+def test_strictest_address_wins_across_groups():
+    assert sync._strictest_address(
+        ["proof_of_address", "address_in_country", "address_any_country"]
+    ) == ["proof_of_address", "address_in_country"]
+    assert sync._strictest_address(["id_document"]) == ["id_document"]
+
+
+def test_a_row_not_seen_keeps_its_address_place():
+    any_block = {"person": {"accepted": True, "items": ["address_any_country"]}}
+    assert sync._scope_of_block(any_block) == "any"
+    area = {"business": {"accepted": True, "items": ["address_in_area"]}}
+    assert sync._scope_of_block(area) == "area"
+    assert sync._scope_of_block(None) is None
+
+
+def test_schema_lists_every_paper_category():
+    from hailhq.core.requirement_categories import LABELS
+
+    schema = json.loads(
+        (Path(__file__).parents[2] / "costs/schema/numbers.schema.json").read_text()
+    )
+    text = json.dumps(schema)
+    missing = [c for c in LABELS if c != "other" and f'"{c}"' not in text]
+    assert missing == []

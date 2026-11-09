@@ -204,14 +204,14 @@ ADDRESS_SCOPE_KEY = "_address_scope"
 def twilio_address_scope(sample: list[dict]) -> str | None:
     """Where the address may be, from Twilio's ``address_requirements`` on
     the sampled numbers: "country" when any number needs a local one, "any"
-    when every address asked can be anywhere (``any``, or ``foreign``: not
-    in the country), None when no number asks for an address."""
+    when every number takes an address anywhere. None otherwise: no address
+    asked, or ``foreign`` (outside the country), which no category says."""
     asked = {n.get("address_requirements") or "none" for n in sample} - {"none"}
-    if not asked:
-        return None
-    if asked <= {"any", "foreign"}:
+    if "local" in asked:
+        return "country"
+    if asked == {"any"}:
         return "any"
-    return "country"
+    return None
 
 
 def twilio_regulated(regulations: list[dict]) -> set[tuple[str, str]]:
@@ -1264,6 +1264,35 @@ def _verification_provider(provider: str) -> Any:
     return plugin
 
 
+# Address categories from least to most strict.
+_ADDRESS_PLACES = ["address_any_country", "address_in_country", "address_in_area"]
+
+
+def _strictest_address(items: list[Any]) -> list[Any]:
+    """One place for the address: DIDWW groups of one type can differ, and a
+    buyer must not read both "any country" and "in the country". The
+    strictest wins, since the group is not known before the purchase."""
+    places = [i for i in items if i in _ADDRESS_PLACES]
+    if len(places) < 2:
+        return items
+    keep = max(places, key=_ADDRESS_PLACES.index)
+    return [i for i in items if i not in _ADDRESS_PLACES or i == keep]
+
+
+def _scope_of_block(block: dict | None) -> str | None:
+    """The address place a stored block names, as a scope, for a row this
+    run did not see: it keeps it, so the weekly catalog does not flip back.
+    "In the country" needs no scope: it is the fallback."""
+    items = [i for side in (block or {}).values() for i in side.get("items", [])]
+    if "address_in_area" in items:
+        return "area"
+    if "address_in_country" in items:
+        return None
+    if "address_any_country" in items:
+        return "any"
+    return None
+
+
 def _union(lists: list[list[Any]]) -> list[Any]:
     """Every item of every list once: known categories in the fixed catalog
     order, then ``{other}`` items in the order they appear."""
@@ -1343,17 +1372,26 @@ def _requirements_block(
             block[subject] = {"accepted": False, "items": []}
             continue
         if address_scope:
+            # The number search says an address is asked, and where: also
+            # when the carrier's form has no address document of its own.
             found = [
                 (
                     r
-                    if getattr(r, "address_scope", None) or not r.address_required
-                    else r.model_copy(update={"address_scope": address_scope})
+                    if getattr(r, "address_scope", None)
+                    else r.model_copy(
+                        update={
+                            "address_required": True,
+                            "address_scope": address_scope,
+                        }
+                    )
                 )
                 for r in found
             ]
         block[subject] = {
             "accepted": True,
-            "items": _union([classify(r, provider, rules=rules) for r in found]),
+            "items": _strictest_address(
+                _union([classify(r, provider, rules=rules) for r in found])
+            ),
         }
     return block
 
@@ -1511,7 +1549,9 @@ def attach_requirements(
             )
     for row in kept_needing:
         key = f"{row['country_code']}:{row['number_type']}"
-        row["requirements"] = _fetch_block(provider, row, previous.get(key), report)
+        row["requirements"] = _fetch_block(
+            provider, row, previous.get(key), report, _scope_of_block(previous.get(key))
+        )
 
 
 def _section(summary: list[str], label: str, lines: list[str], cap: int = 60) -> None:
