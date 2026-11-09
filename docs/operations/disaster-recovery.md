@@ -22,6 +22,12 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
    ssh root@<NEW_IP> 'chmod 600 /opt/hail/.env'
    ```
 
+   The deploy edits `.env` as `DEPLOY_SSH_USER`. If that user is not root, give it the file.
+
+   ```bash
+   ssh root@<NEW_IP> 'chown <DEPLOY_SSH_USER>: /opt/hail/.env'
+   ```
+
 3. Make a new deploy key and set the GitHub secrets with [vm-deploy.md step 5](../public/self-host/vm-deploy.md#5-configure-github-actions). Set `DEPLOY_SSH_HOST` to `<NEW_IP>`.
 4. Deploy.
 
@@ -38,7 +44,14 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
 
    Both must return `{"status":"ok"}`.
 
-6. At the registrar, change the A records `api`, `mcp`, and the `HAIL_TRACKING_DOMAIN` host (`.env`) to `<NEW_IP>`. Check them with `dig +short api.<domain> @1.1.1.1`.
+6. At the registrar, change the A records `api`, `mcp`, and the `HAIL_TRACKING_DOMAIN` host (`.env`) to `<NEW_IP>`. Ask the registrar's name server, not a cache. Each must print `<NEW_IP>`.
+
+   ```bash
+   dig +short api.<domain> @<registrar-ns>
+   dig +short mcp.<domain> @<registrar-ns>
+   dig +short <HAIL_TRACKING_DOMAIN> @<registrar-ns>
+   ```
+
 7. Restart Caddy so it asks for certificates now, not after its retry wait. Then check the logs for `certificate obtained successfully`.
 
    ```bash
@@ -50,24 +63,29 @@ The VM is stateless. Rebuild it from the repo, `.env`, and DNS. Data lives in Su
    ```
 
 8. Add shell shortcuts on the new VM (next section).
-9. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This stops the API, MCP and Caddy, and lets the old voicebot finish live calls (up to about 1 hour).
+9. If the old VM still runs, stop it. Until then its voicebot keeps taking calls and texts, and its API runs the same background jobs as the new one. This drains the old voicebot (live calls finish, up to about 1 hour). The old API, MCP and Caddy stop after it: the voicebot's tools call the local API, and clients with a cached DNS answer still reach it.
 
-    ```bash
-    ssh root@<OLD_IP> '
-    cd /opt/hail
-    C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-    $C stop caddy api mcp
-    for cid in $($C ps -q voicebot)
-    do
-    docker exec "$cid" touch /tmp/hail-draining
-    done
-    setsid nohup $C stop -t 3660 voicebot >/dev/null 2>&1 </dev/null &
-    '
-    ```
+   ```bash
+   ssh root@<OLD_IP> '
+   cd /opt/hail
+   C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+   for cid in $($C ps -q voicebot)
+   do
+   pgrep -f "docker stop -t [0-9]+ $cid" >/dev/null && continue
+   docker exec "$cid" touch /tmp/hail-draining
+   setsid nohup docker stop -t 3660 "$cid" >/dev/null 2>&1 </dev/null &
+   done
+   setsid nohup sh -c "
+   while [ -n \"\$($C ps -q voicebot)\" ]
+   do
+   sleep 30
+   done
+   $C stop caddy api mcp
+   " >/dev/null 2>&1 </dev/null &
+   '
+   ```
 
-    Delete the old VM when `docker ps` there shows no voicebot.
-
-DNS caches can keep the old address for a while. Ask the registrar's name server (`dig +short mcp.<domain> @<registrar-ns>`) to see the real value.
+   The `pgrep` line skips a voicebot that an earlier deploy is already draining. A second stop would drop its calls. Delete the old VM when `docker ps` there shows no containers.
 
 ### Shell shortcuts on the VM
 
@@ -86,13 +104,12 @@ After the next login, `cd ~/hail` opens the repo. Then `comp ps` and `comp logs 
 
 The database is a Supabase project, not on the VM. Source: <https://supabase.com/docs/guides/platform/backups>.
 
-1. Open the Supabase Dashboard, then **Database** > **Backups**.
-2. With daily backups: pick the newest backup before the problem and confirm the restore. With point-in-time recovery: open **Point in Time**, click **Start a restore**, pick a time, and confirm.
+1. Choose where to restore. In place overwrites the current data. To keep it, restore into a new project instead ([Duplicate Project](https://supabase.com/docs/guides/platform/clone-project)), then put the new connection string in `DATABASE_URL` in `.env` and copy `.env` to the VM.
+2. In place: open [Database > Backups](https://supabase.com/dashboard/project/_/database/backups/scheduled). With daily backups: pick the newest backup before the problem and confirm the restore. With point-in-time recovery: open **Point in Time**, click **Start a restore**, pick a time, and confirm.
 3. The project is unreachable during the restore. The API returns errors until it ends.
-4. To keep the current data, restore into a new project instead (Supabase's Duplicate Project guide). Then put the new connection string in `DATABASE_URL` in `.env` and copy `.env` to the VM.
-5. Backups do not store custom role passwords. If `DATABASE_URL` uses a custom role, reset its password, update `.env`, and copy it to the VM.
-6. Run the Deploy workflow. It runs `alembic upgrade head`, then restarts the services.
-7. Check `/healthz`, one test call, and one test text.
+4. Backups do not store custom role passwords. If `DATABASE_URL` uses a custom role, reset its password, update `.env`, and copy it to the VM.
+5. Run the Deploy workflow. It runs `alembic upgrade head`, then restarts the services.
+6. `/healthz` does not touch the database. Check that the deploy log shows `=== current schema revision ===` followed by a revision, then place one test call and send one test text.
 
 Daily backups and point-in-time recovery need a paid Supabase plan. Check that backups are on, and test a restore, before you need one.
 
