@@ -97,7 +97,11 @@ def to_sync_url(url: str) -> str:
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
+        _engine = create_async_engine(
+            to_async_url(settings.database_url),
+            pool_size=settings.database_pool_size,
+            max_overflow=settings.database_max_overflow,
+        )
         if telemetry_enabled():
             # Tracing must never take the database down: the instrumentation
             # refused SQLAlchemy 2.1 and failed every request.

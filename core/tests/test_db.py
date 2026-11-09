@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import AsyncExitStack
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from hailhq.core.db import to_async_url, to_sync_url
+from pydantic import ValidationError
+from sqlalchemy import text
 
 
 def test_to_async_url_rewrites_scheme_aliases():
@@ -79,3 +83,54 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
         assert calls == [{"engine": db._engine}]
     finally:
         asyncio.run(db._engine.dispose())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("options", "capacity"),
+    [
+        ({}, 2),
+        ({"database_pool_size": 1}, 1),
+        ({"database_pool_size": 1, "database_max_overflow": 1}, 2),
+    ],
+)
+async def test_runtime_pool_waits_instead_of_exceeding_its_connection_limit(
+    database_url, monkeypatch, options, capacity
+):
+    from hailhq.core import db
+
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(db.settings, "database_url", database_url)
+    for name, value in options.items():
+        monkeypatch.setattr(db.settings, name, value)
+    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
+    factory = db._ensure_initialized()
+
+    async def read_one():
+        async with factory() as session:
+            return (await session.execute(text("SELECT 1"))).scalar_one()
+
+    try:
+        async with AsyncExitStack() as holders:
+            for _ in range(capacity):
+                session = await holders.enter_async_context(factory())
+                await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2)
+            # All runtime slots are in use. Extra work must wait rather
+            # than exceed this process's share of the session pooler.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(read_one(), timeout=0.5)
+        # A canceled waiter must not poison the pool or retain a slot.
+        assert await asyncio.wait_for(read_one(), timeout=2) == 1
+    finally:
+        await db.dispose_engine()
+
+
+@pytest.mark.parametrize(
+    "options", [{"database_pool_size": 0}, {"database_max_overflow": -1}]
+)
+def test_runtime_pool_rejects_unlimited_connection_settings(options):
+    from hailhq.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **options)
