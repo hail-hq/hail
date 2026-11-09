@@ -1356,16 +1356,6 @@ async def submit_verification(
     number_id: str | None = None,
     purpose: str = "number",
 ) -> dict[str, Any]:
-    if subject_type not in _SUBJECT_TYPES:
-        return {"error": f"{_SUBJECT_TYPE_ERROR}. Nothing was sent."}
-    if purpose not in _VERIFICATION_PURPOSES:
-        return {"error": f"{_PURPOSE_ERROR}. Nothing was sent."}
-    if purpose == "number" and quote_id is None:
-        return {"error": f"{_QUOTE_REQUIRED}. Nothing was sent."}
-    if quote_id is not None and _as_uuid(quote_id) is None:
-        return {"error": "quote_id must be a UUID. Nothing was sent."}
-    if number_id is not None and _as_uuid(number_id) is None:
-        return {"error": "number_id must be a UUID. Nothing was sent."}
     if attest_authorized is not True:
         return {
             "error": "attest_authorized must be true. Pass true only if the "
@@ -2896,7 +2886,9 @@ def register_tools(
         the last hour), or ``{slot, content_type, content_base64}`` for a very small file.
         With base64, every byte of the file is written into the tool call.
         Slot names match letters, digits, hyphens and underscores, up to 64 characters.
-        Accepted files are JPEG, PNG or PDF: at most 10 MiB each, 29 MiB total and 20 files.
+        Accepted files are JPEG, PNG or PDF: at most 10 MiB each and 20 files.
+        Base64 files total at most 29 MiB, checked here; the API checks the 30 MB
+        total of all files, uploads included.
         At most 100 fields are accepted. Base64 adds about one third to each file's size in the request.
         ``check_verification`` takes the same arguments and files nothing.
 
