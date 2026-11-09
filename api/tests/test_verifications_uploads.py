@@ -491,3 +491,80 @@ async def test_used_uploads_are_deleted_in_one_statement(
     async_session.expire_all()
     assert await async_session.get(FileUpload, first_id) is None
     assert await async_session.get(FileUpload, second_id) is None
+
+
+async def test_one_upload_in_two_slots_is_refused(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    upload_id = str((await _upload(async_session, org_id)).id)
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps(
+            {"proof_of_identity": {"option": "passport"}, "extra_0": {}}
+        ),
+        **{"upload.proof_of_identity": upload_id, "upload.extra_0": upload_id},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "upload.extra_0"]
+    assert upload_id not in resp.text
+    s3.fetch_raw.assert_not_awaited()
+
+
+async def test_uploads_over_the_total_are_refused_before_any_fetch(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    """The rows' sizes, plus the file parts, are summed before fetching."""
+    from hailhq.api.routes.verifications import MAX_FILE_BYTES
+
+    org_id, _, key = org_and_key
+    slots = ["proof_of_identity", "extra_0", "extra_1"]
+    ids = []
+    for _ in slots:
+        row = await _upload(async_session, org_id)
+        row.size_bytes = MAX_FILE_BYTES
+        ids.append(str(row.id))
+    await async_session.commit()
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        files={"file.extra_2": ("a.jpg", b"\xff\xd8\xff" + b"x" * 64, "image/jpeg")},
+        documents=json.dumps({slot: {} for slot in [*slots, "extra_2"]}),
+        **{f"upload.{slot}": upload_id for slot, upload_id in zip(slots, ids)},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["msg"] == "the files total more than 30 MB"
+    s3.fetch_raw.assert_not_awaited()
+
+
+async def test_at_most_four_uploads_are_fetched_at_once(
+    client, org_and_key, carrier, s3, async_session
+) -> None:
+    import asyncio
+
+    org_id, _, key = org_and_key
+    slots = ["proof_of_identity", *(f"extra_{i}" for i in range(7))]
+    ids = [str((await _upload(async_session, org_id)).id) for _ in slots]
+    running, peak = 0, 0
+
+    async def fetch(_key):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return _JPEG
+
+    s3.fetch_raw.side_effect = fetch
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps({slot: {"option": "passport"} for slot in slots}),
+        **{f"upload.{slot}": upload_id for slot, upload_id in zip(slots, ids)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert peak == 4

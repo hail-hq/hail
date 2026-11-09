@@ -1853,46 +1853,60 @@ async def _prepare_submission(
                 "this upload names a slot that is not in documents",
                 loc=["body", key],
             )
-    # The upload rows first (one session: one query at a time), then every
-    # object from the bucket at once.
+    # The upload rows first (one session: one query at a time), and the file
+    # parts, then the total size from both, all before any object is fetched.
     rows: dict[str, FileUpload] = {}
+    parts: dict[str, UploadedFile] = {}
+    seen: set[UUID] = set()
+    total = 0
     for slot in sub.documents:
-        upload_ref = form.get(f"upload.{slot}")
-        if upload_ref is None or upload_ref == "":
-            continue
         part = form.get(f"file.{slot}")
-        if part is not None and hasattr(part, "read"):
-            raise unprocessable(
-                f"send file.{slot} or upload.{slot}, not both",
-                loc=["body", f"upload.{slot}"],
-            )
-        rows[slot] = await _usable_upload(
-            db, principal.organization_id, slot, upload_ref
-        )
+        has_part = part is not None and hasattr(part, "read")
+        upload_ref = form.get(f"upload.{slot}")
+        if upload_ref is not None and upload_ref != "":
+            if has_part:
+                raise unprocessable(
+                    f"send file.{slot} or upload.{slot}, not both",
+                    loc=["body", f"upload.{slot}"],
+                )
+            row = await _usable_upload(db, principal.organization_id, slot, upload_ref)
+            if row.id in seen:
+                raise unprocessable(
+                    f"upload.{slot} names an upload another slot already uses",
+                    loc=["body", f"upload.{slot}"],
+                )
+            seen.add(row.id)
+            rows[slot] = row
+        elif has_part:
+            parts[slot] = await _read_file(part)
+            total += len(parts[slot].data)
+            if total > MAX_REQUEST_BYTES:
+                raise _files_too_large()
+    total += sum(row.size_bytes or 0 for row in rows.values())
+    if total > MAX_REQUEST_BYTES:
+        raise _files_too_large()
     if rows and s3 is None:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="file uploads are not configured on this server",
         )
+    fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
+
+    async def fetch(row: FileUpload) -> UploadedFile:
+        async with fetches:
+            return await _read_upload(s3, row)
+
     fetched = dict(
-        zip(
-            rows,
-            await asyncio.gather(*(_read_upload(s3, row) for row in rows.values())),
-        )
+        zip(rows, await asyncio.gather(*(fetch(row) for row in rows.values())))
     )
     total = 0
     for slot, value in sub.documents.items():
-        file: UploadedFile | None = fetched.get(slot)
-        if file is None:
-            part = form.get(f"file.{slot}")
-            if part is not None and hasattr(part, "read"):
-                file = await _read_file(part)
+        file: UploadedFile | None = fetched.get(slot) or parts.get(slot)
         if file is not None:
+            # Again with the bytes read: an object may differ from its row.
             total += len(file.data)
             if total > MAX_REQUEST_BYTES:
-                raise unprocessable(
-                    "the files total more than 30 MB", loc=["body", "files"]
-                )
+                raise _files_too_large()
             files.append(
                 VerificationCheckFile(
                     slot=slot,
@@ -2171,6 +2185,14 @@ async def create_verification(
     )
     await _delete_used_uploads(db, s3, prepared.uploads)
     return _out(row, registry)
+
+
+# ``upload.<slot>`` objects fetched from the bucket at once.
+_MAX_PARALLEL_FETCHES = 4
+
+
+def _files_too_large() -> HTTPException:
+    return unprocessable("the files total more than 30 MB", loc=["body", "files"])
 
 
 async def _usable_upload(
