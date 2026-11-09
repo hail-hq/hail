@@ -393,6 +393,16 @@ def test_unselected_sample_purposes_are_rejected_and_missing_ones_allowed():
     # A sample without a purpose is fine: purposes are then not checked.
     assert not errors({**GOOD, "sample_3": GOOD["sample_1"]})
     assert not errors({**GOOD, "sample_1_type": "", "sample_2_type": ""})
+    # Without purposes: at least one sample for each kind of text.
+    three = {
+        **GOOD,
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION,DELIVERY_NOTIFICATION",
+        "sample_1_type": "",
+        "sample_2_type": "",
+    }
+    assert "text_types" in error_fields(three)
+    sample = "Acme: Your order 123 shipped today. Reply STOP to opt out."
+    assert "text_types" not in error_fields({**three, "sample_3": sample})
 
 
 def test_sample_identity_and_stop_must_be_real():

@@ -805,6 +805,11 @@ def _application_problems(
             + ", ".join(p for p in purposes if p not in covered)
             + ".",
         )
+    elif untyped and len(set(purposes)) > sum(
+        1 for i in range(1, 6) if val(f"sample_{i}")
+    ):
+        # Without purposes, at least one sample for each kind of text.
+        issue("text_types", "Add one sample for each kind of text you picked.")
     disclosure = val("consent_disclosure")
     if disclosure:
         required = [
