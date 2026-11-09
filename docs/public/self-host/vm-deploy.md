@@ -26,7 +26,7 @@ The voicebot is a worker. It dials out to LiveKit Cloud and needs no inbound por
 
 ## Prerequisites
 
-- An Ubuntu 22.04+ VM with a public IPv4 address. 2 vCPU / 4 GB RAM is sufficient to start.
+- An Ubuntu 22.04+ VM with a public IPv4 address. 2 vCPU / 4 GB RAM is sufficient to start. The disk Docker uses needs at least 20 GiB free, or the deploy stops.
 - A managed Postgres that the VM can reach. Copy its connection string (typically `postgresql://USER:PASS@HOST/DB?sslmode=require`).
 - A domain that you control. You point `api.<domain>` and `mcp.<domain>` at the VM's IP.
 
