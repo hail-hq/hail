@@ -37,10 +37,10 @@ URL that carries its own one-time permission.
 
 Body (JSON):
 
-| field          | type   | notes                                                  |
-| -------------- | ------ | ------------------------------------------------------ |
-| `purpose`      | string | `email_attachment` or `verification_document`          |
-| `filename`     | string | 1 to 255 chars                                         |
+| field          | type   | notes                                                                      |
+| -------------- | ------ | -------------------------------------------------------------------------- |
+| `purpose`      | string | `email_attachment` or `verification_document`                              |
+| `filename`     | string | 1 to 255 chars                                                             |
 | `content_type` | string | `verification_document`: `image/jpeg`, `image/png`, `application/pdf` only |
 
 Creates a pending `file_uploads` row (see Storage) and returns 201:
@@ -61,8 +61,7 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
 - The link expires 15 minutes after it is made and works once.
 - `upload_url` is built from `settings.hail_api_url` (the public API URL; in
   the cloud this is `https://api.hail.so`, same as unsubscribe links).
-- An organization may hold at most 50 pending, unexpired links. The 51st is a
-  429.
+- An organization may hold at most 50 pending, unexpired links. The 51st is a 429.
 - 503 when the mail bucket is not configured (same as
   `POST /v1/email-attachments`).
 
@@ -81,12 +80,12 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
   logic to `core` and use it in both places.
 - The declared `content_type` from the link is what is stored. The request's
   `Content-Type` header is not trusted.
-- `email_attachment`: write the object at
-  `outbound-attachments/{org}/{id}`. The same row is now an uploaded email
+- `email_attachment`: store the object where direct email attachment
+  uploads go. The same row is now an uploaded email
   attachment, so its id works in `attachment_ids`, and the existing 24 hour
   unused-upload GC covers it.
-- `verification_document`: write the object at
-  `verification-uploads/{org}/{id}`.
+- `verification_document`: store the object in its own per-organization
+  folder for verification documents.
 - Mark the link used (clear `token_hash`, set `uploaded_at`, `size_bytes`,
   `sha256`) in the same transaction, guarded so two concurrent PUTs cannot
   both succeed.
@@ -143,7 +142,14 @@ Errors are the same codes submit gives. A pass returns 200:
 ```json
 {
   "ok": true,
-  "files": [{"slot": "id_front", "upload_id": "uuid", "size_bytes": 1, "sha256": "..."}],
+  "files": [
+    {
+      "slot": "id_front",
+      "upload_id": "uuid",
+      "size_bytes": 1,
+      "sha256": "..."
+    }
+  ],
   "note": "The carrier runs its own checks when you submit."
 }
 ```
@@ -161,7 +167,7 @@ closest table. `email_attachment_uploads` already holds org-owned uploaded
 files. Only hail reads it (`routes/email_attachments.py`, `routes/emails.py`,
 `email_attachment_gc.py`); hail-website does not.
 
-Migration `0073_file_uploads`:
+The migration:
 
 - Rename `email_attachment_uploads` to `file_uploads` (and its indexes).
   Rename the model `EmailAttachmentUpload` to `FileUpload`.
@@ -171,7 +177,7 @@ Migration `0073_file_uploads`:
   for direct uploads), `link_expires_at timestamptz null`,
   `uploaded_at timestamptz null`, `sha256 text null`.
 - Make `size_bytes` nullable. CHECK: `uploaded_at is null or size_bytes is
-  not null`.
+not null`.
 - Backfill existing rows: `uploaded_at = created_at`.
 - `POST /v1/email-attachments` (direct multipart) also sets `uploaded_at` and
   `sha256`.
@@ -179,15 +185,15 @@ Migration `0073_file_uploads`:
   `purpose = 'email_attachment'` and `uploaded_at is not null`. A pending link
   id or a verification document id is "not found", same as today.
 - Partial index for the link sweep: `(link_expires_at) where uploaded_at is
-  null`.
+null`.
 
 The migration docstring names the table checked and why it was extended, per
 the schema rules. Downgrade reverses it (delete `verification_document` and
 pending rows first, then drop the columns and rename back).
 
 Check organization-deletion / retention code (`core/hailhq/core/retention.py`,
-org closures) and add the `verification-uploads/{org}/` prefix wherever
-per-org S3 data is purged.
+org closures) and add the verification documents' folder wherever per-org
+stored files are purged.
 
 ## GC
 
