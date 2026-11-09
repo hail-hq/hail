@@ -529,3 +529,20 @@ def test_evidence_links_still_exempt_reads_only() -> None:
 
     assert _is_exempt("/v1/verifications/sms/evidence/abc", "GET")
     assert not _is_exempt("/v1/verifications/sms/evidence/abc", "PUT")
+
+
+async def test_create_refuses_a_filename_with_control_characters(
+    client, org_and_key, s3
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/v1/uploads",
+        json={
+            "purpose": "email_attachment",
+            "filename": "a.pdf\r\nBcc: x@example.com",
+            "content_type": "application/pdf",
+        },
+        headers=_auth(plain),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "filename"]

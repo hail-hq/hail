@@ -2145,7 +2145,9 @@ class FileUploadCreate(BaseModel):
         )
     )
     filename: str = Field(
-        min_length=1, max_length=255, description="The file's name, 1 to 255 chars."
+        min_length=1,
+        max_length=255,
+        description="The file's name, 1 to 255 chars, no control characters.",
     )
     content_type: str = Field(
         description=(
@@ -2155,6 +2157,15 @@ class FileUploadCreate(BaseModel):
             "own `Content-Type` header is not used."
         )
     )
+
+    @field_validator("filename")
+    @classmethod
+    def _filename_printable(cls, v: str) -> str:
+        # The name goes into a MIME header of the email; CR or LF there
+        # would start a new header.
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("filename must not contain control characters")
+        return v
 
     @field_validator("content_type")
     @classmethod
