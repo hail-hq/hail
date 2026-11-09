@@ -9,8 +9,9 @@ number the usual way), or when it stays approved and unused too long.
 A release locks the hold row first: two releases of one verification run
 one after the other, and the second sees the first one's return row and adds
 nothing. The ledger's unique (organization, ref) index is the backstop: a
-second return row would make the caller's commit raise IntegrityError (the
-caller's own error handling decides what the user sees), never credit twice.
+second return row would make the session's next flush or commit raise
+IntegrityError (the caller's own error handling decides what the user sees),
+never credit twice.
 The caller commits.
 """
 
