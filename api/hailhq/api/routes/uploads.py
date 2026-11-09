@@ -78,6 +78,12 @@ _NOT_FOUND = "upload link not found, already used, or in use"
 # size limit (25 MB for an email attachment), so this caps that memory.
 MAX_CONCURRENT_BODY_READS = 8
 _BODY_READS = asyncio.Semaphore(MAX_CONCURRENT_BODY_READS)
+# Body reads one organization runs at once in this process, so one tenant's
+# slow uploads cannot hold every slot above.
+MAX_BODY_READS_PER_ORG = 2
+_org_reads: dict[UUID, int] = {}
+# The longest one body read may take. Never past the link's expiry either.
+MAX_BODY_READ_SECONDS = 600.0
 _UNAVAILABLE = "file uploads are not configured on this server"
 
 _PENDING_CAP_RESPONSES = merge_rate_limited_responses(
@@ -211,6 +217,12 @@ async def create_file_upload(
     )
 
 
+def _read_deadline(expires_at: datetime, now: datetime) -> float:
+    """Seconds a body read may take: until the link expires, at most
+    ``MAX_BODY_READ_SECONDS``."""
+    return max(0.0, min(MAX_BODY_READ_SECONDS, (expires_at - now).total_seconds()))
+
+
 async def _read_body(request: Request, limit: int) -> bytes:
     """The raw body, stopped as soon as it passes ``limit``."""
     declared = request.headers.get("content-length")
@@ -235,13 +247,19 @@ async def _read_body(request: Request, limit: int) -> bytes:
                 "sending to it."
             )
         },
+        408: {
+            "description": (
+                "The body did not arrive before the link expired, or within "
+                "10 minutes. The link is not used up."
+            )
+        },
         410: {"description": "The link expired, also while its body was sent."},
         413: {"description": "The file is larger than the link's `max_bytes`."},
         503: {
             "description": (
                 "File uploads are not configured on this server, storage "
-                "failed, or too many uploads are running (`Retry-After`). "
-                "The link is not used up."
+                "failed, or too many uploads are running, in all or for this "
+                "organization (`Retry-After`). The link is not used up."
             )
         },
     },
@@ -273,8 +291,10 @@ async def put_file_upload(
     """Send the file's bytes to an upload link. No Authorization header.
 
     Works once. Unknown id, wrong token, a used link or one another PUT is
-    sending to are all 404 with one message; an expired link is 410. Empty body: 422. A verification
-    document whose first bytes are not the declared JPEG, PNG or PDF: 422.
+    sending to are all 404 with one message; an expired link is 410. A body
+    that does not arrive before the link expires (10 minutes at most) is
+    408. Empty body: 422. A verification document whose first bytes are not
+    the declared JPEG, PNG or PDF: 422.
     """
     if s3 is None:
         raise _unavailable()
@@ -295,90 +315,120 @@ async def put_file_upload(
     if row.link_expires_at is None or row.link_expires_at <= now:
         raise _expired()
 
-    # Claim the link before reading the body: the token hash becomes a busy
-    # marker in one atomic update, so only one body read runs per link. A
-    # second PUT meanwhile gets 404. A failed read gives the link back, so
-    # the same link can be tried again with a smaller or correct file.
-    busy = LINK_BUSY_PREFIX + token_hash
-    claimed = (
-        await db.execute(
-            update(FileUpload)
-            .where(
-                FileUpload.id == upload_id,
-                FileUpload.token_hash == token_hash,
-                FileUpload.uploaded_at.is_(None),
-                FileUpload.link_expires_at > now,
-            )
-            .values(token_hash=busy)
-            .returning(FileUpload.purpose, FileUpload.content_type, FileUpload.s3_key)
-        )
-    ).one_or_none()
-    if claimed is None:
-        await db.rollback()
-        raise _not_found()
-    # Committed, so nothing is held open while the body arrives.
-    await db.commit()
-    purpose, content_type, s3_key = claimed
-
-    async def give_back() -> None:
-        await db.rollback()
-        await db.execute(
-            update(FileUpload)
-            .where(FileUpload.id == upload_id, FileUpload.token_hash == busy)
-            .values(token_hash=token_hash)
-        )
-        await db.commit()
-
+    # One organization's slow uploads must not use up every slot. Checked
+    # before the claim, so a busy organization keeps its link. No await
+    # between the check and the count, so it is exact in this process.
+    org = row.organization_id
+    expires = row.link_expires_at
+    if _org_reads.get(org, 0) >= MAX_BODY_READS_PER_ORG:
+        raise _busy()
+    _org_reads[org] = _org_reads.get(org, 0) + 1
     try:
-        async with _BODY_READS:
-            payload = await _read_body(request, max_bytes(purpose))
-        if not payload:
-            raise unprocessable("the file is empty", loc=["body"])
-        if purpose == "verification_document" and not matches_declared_type(
-            payload, content_type
-        ):
-            raise unprocessable(
-                f"the file does not look like {content_type}", loc=["body"]
+        # Claim the link before reading the body: the token hash becomes a busy
+        # marker in one atomic update, so only one body read runs per link. A
+        # second PUT meanwhile gets 404. A failed read gives the link back, so
+        # the same link can be tried again with a smaller or correct file.
+        busy = LINK_BUSY_PREFIX + token_hash
+        claimed = (
+            await db.execute(
+                update(FileUpload)
+                .where(
+                    FileUpload.id == upload_id,
+                    FileUpload.token_hash == token_hash,
+                    FileUpload.uploaded_at.is_(None),
+                    FileUpload.link_expires_at > now,
+                )
+                .values(token_hash=busy)
+                .returning(
+                    FileUpload.purpose, FileUpload.content_type, FileUpload.s3_key
+                )
             )
-        try:
-            await s3.put_attachment(s3_key, payload, content_type)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="storage unavailable; try again",
-            ) from exc
-    except BaseException:
-        # Includes a client that hangs up mid-body. The give-back is shielded
-        # so a cancelled request still returns the link.
-        try:
-            await asyncio.shield(give_back())
-        except Exception:
-            logger.warning("upload link %s was not given back", upload_id)
-        raise
+        ).one_or_none()
+        if claimed is None:
+            await db.rollback()
+            raise _not_found()
+        # Committed, so nothing is held open while the body arrives.
+        await db.commit()
+        purpose, content_type, s3_key = claimed
 
-    row = (
-        await db.execute(
-            select(FileUpload).where(
-                FileUpload.id == upload_id, FileUpload.token_hash == busy
+        async def give_back() -> None:
+            await db.rollback()
+            await db.execute(
+                update(FileUpload)
+                .where(FileUpload.id == upload_id, FileUpload.token_hash == busy)
+                .values(token_hash=token_hash)
             )
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        # The GC swept the link while the body was sent (a PUT over an hour
-        # past expiry). Nothing references the object: remove it.
-        await db.rollback()
+            await db.commit()
+
         try:
-            await s3.delete(s3_key)
-        except Exception:
-            logger.warning("upload %s: could not delete an orphaned object", upload_id)
-        raise _expired()
-    row.token_hash = None
-    row.uploaded_at = datetime.now(timezone.utc)
-    row.size_bytes = len(payload)
-    row.sha256 = hashlib.sha256(payload).hexdigest()
-    await db.commit()
-    await db.refresh(row)
-    return FileUploadResponse.model_validate(row)
+            async with _BODY_READS:
+                try:
+                    async with asyncio.timeout(_read_deadline(expires, now)):
+                        payload = await _read_body(request, max_bytes(purpose))
+                except TimeoutError:
+                    raise HTTPException(
+                        status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
+                        detail=(
+                            "the file did not arrive in time; the link still "
+                            "works until it expires"
+                        ),
+                    ) from None
+            if not payload:
+                raise unprocessable("the file is empty", loc=["body"])
+            if purpose == "verification_document" and not matches_declared_type(
+                payload, content_type
+            ):
+                raise unprocessable(
+                    f"the file does not look like {content_type}", loc=["body"]
+                )
+            try:
+                await s3.put_attachment(s3_key, payload, content_type)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="storage unavailable; try again",
+                ) from exc
+        except BaseException:
+            # Includes a client that hangs up mid-body. The give-back is shielded
+            # so a cancelled request still returns the link.
+            try:
+                await asyncio.shield(give_back())
+            except Exception:
+                logger.warning("upload link %s was not given back", upload_id)
+            raise
+
+        row = (
+            await db.execute(
+                select(FileUpload).where(
+                    FileUpload.id == upload_id, FileUpload.token_hash == busy
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            # The link went away while the object was written (removed by
+            # hand, or a sweep). Nothing references the object: remove it.
+            await db.rollback()
+            try:
+                await s3.delete(s3_key)
+            except Exception:
+                logger.warning(
+                    "upload %s: could not delete an orphaned object", upload_id
+                )
+            raise _expired()
+        row.token_hash = None
+        row.uploaded_at = datetime.now(timezone.utc)
+        row.size_bytes = len(payload)
+        row.sha256 = hashlib.sha256(payload).hexdigest()
+        await db.commit()
+        await db.refresh(row)
+        return FileUploadResponse.model_validate(row)
+
+    finally:
+        left = _org_reads.get(org, 1) - 1
+        if left > 0:
+            _org_reads[org] = left
+        else:
+            _org_reads.pop(org, None)
 
 
 __all__ = ["router"]

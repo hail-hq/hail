@@ -650,3 +650,83 @@ async def test_a_link_in_use_says_so_in_its_404(client, org_and_key, s3) -> None
     link = await _link(client, plain)
     resp = await client.put(f"/v1/uploads/{link['id']}?token=nope", content=_JPEG)
     assert resp.json()["detail"] == "upload link not found, already used, or in use"
+
+
+async def test_a_body_read_past_its_deadline_is_408_and_gives_the_link_back(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    from hailhq.api.routes import uploads as uploads_routes
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    monkeypatch.setattr(uploads_routes, "MAX_BODY_READ_SECONDS", 0.2)
+
+    async def slow():
+        yield _JPEG[:4]
+        await asyncio.sleep(2)
+        yield _JPEG[4:]
+
+    resp = await client.put(_path(link["upload_url"]), content=slow())
+    assert resp.status_code == 408, resp.text
+    s3.put_attachment.assert_not_awaited()
+    again = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert again.status_code == 200, again.text
+
+
+def test_the_body_read_deadline_never_passes_the_link_expiry() -> None:
+    from hailhq.api.routes.uploads import MAX_BODY_READ_SECONDS, _read_deadline
+
+    now = datetime.now(timezone.utc)
+    assert _read_deadline(now + timedelta(minutes=14), now) == MAX_BODY_READ_SECONDS
+    assert _read_deadline(now + timedelta(seconds=30), now) == pytest.approx(30)
+
+
+async def test_one_org_runs_at_most_two_body_reads(
+    client, org_and_key, s3, async_session, session_factory
+) -> None:
+    """A third PUT from one org waits its turn; another org is not blocked."""
+    from hailhq.core.db import get_session
+
+    _, _, plain = org_and_key
+    _, _, other = await insert_org_and_key(async_session, org_slug="other")
+    links = [await _link(client, plain) for _ in range(3)]
+    other_link = await _link(client, other)
+    release = asyncio.Event()
+    reading = asyncio.Semaphore(0)
+
+    async def held():
+        reading.release()
+        await release.wait()
+        yield _JPEG
+
+    async def per_request_session():
+        async with session_factory() as session:
+            yield session
+
+    saved = app.dependency_overrides[get_session]
+    app.dependency_overrides[get_session] = per_request_session
+    try:
+        first = [
+            asyncio.create_task(client.put(_path(link["upload_url"]), content=held()))
+            for link in links[:2]
+        ]
+        for _ in first:
+            await asyncio.wait_for(reading.acquire(), 5)
+        third = await asyncio.wait_for(
+            client.put(_path(links[2]["upload_url"]), content=_JPEG), 5
+        )
+        elsewhere = await asyncio.wait_for(
+            client.put(_path(other_link["upload_url"]), content=_JPEG), 5
+        )
+        release.set()
+        done = await asyncio.gather(*first)
+    finally:
+        release.set()
+        app.dependency_overrides[get_session] = saved
+    assert third.status_code == 503
+    assert third.headers["Retry-After"]
+    assert elsewhere.status_code == 200, elsewhere.text
+    assert [r.status_code for r in done] == [200, 200]
+    # The busy org's third link was not used up.
+    retry = await client.put(_path(links[2]["upload_url"]), content=_JPEG)
+    assert retry.status_code == 200, retry.text
