@@ -1257,11 +1257,13 @@ def _union_address(lists: list[list[Any]]) -> list[Any]:
     when every list that asks for an address says so. The DID group a buyer
     gets is not known before the purchase, so one group that needs a local
     address is enough to not promise "any country"."""
-    items = _union(lists)
-    asking = [items_ for items_ in lists if _ADDRESS_ITEMS & set(map(str, items_))]
-    if any("address_any_country" not in items_ for items_ in asking):
-        items = [i for i in items if i != "address_any_country"]
-    return items
+    asking = [
+        items
+        for items in lists
+        if any(i in _ADDRESS_ITEMS for i in items if isinstance(i, str))
+    ]
+    drop = any("address_any_country" not in items for items in asking)
+    return [i for i in _union(lists) if not (drop and i == "address_any_country")]
 
 
 def _union(lists: list[list[Any]]) -> list[Any]:

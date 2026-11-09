@@ -292,14 +292,15 @@ def classify(
         if rule.get("field_type") == "address":
             add(rule.get("id") or "", rule.get("name") or "", "address")
     address_cats = {"proof_of_address", "address_in_country", "address_in_area"}
-    if req.address_required and getattr(req, "address_scope", None) == "any":
+    # Only the internal Requirements carry where the address may be (DIDWW).
+    scope = getattr(req, "address_scope", None)
+    if req.address_required and scope == "any":
         # The carrier says the address can be in any country: that replaces
-        # the "in the country" default (or a label's guess). Other places
-        # keep the list as it was.
+        # the "in the country" default (or a label's guess).
         found -= {"address_in_country", "address_in_area"}
         found.add("address_any_country")
     elif req.address_required and not (found & address_cats):
-        found.add("address_in_country")
+        found.add("address_in_area" if scope == "area" else "address_in_country")
 
     items: list[StoredItem] = [c for c in _ORDER if c in found]
     items.extend({"other": label} for label in others)

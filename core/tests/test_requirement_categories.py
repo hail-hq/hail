@@ -369,28 +369,44 @@ def test_address_scope_decides_where_the_address_may_be():
 
 
 def test_address_scope_replaces_a_guess_from_a_label():
+    # The label says an address in the number's area; DIDWW says any country.
     req = Requirements(
-        provider="twilio",
+        provider="didww",
+        country_code="GB",
+        number_type="local",
+        subject_type="person",
+        required=True,
+        fields=(FieldSpec(name="area_address", label="Address in the area code"),),
+        address_required=True,
+        address_scope="any",
+    )
+    assert classify(req, "didww") == ["address_any_country"]
+
+
+def test_area_scope_names_the_area_when_no_address_paper_is_listed():
+    req = Requirements(
+        provider="didww",
         country_code="GB",
         number_type="local",
         subject_type="person",
         required=True,
         address_required=True,
-        address_scope="any",
+        address_scope="area",
     )
-    # Without a scope this would be address_in_country (the fallback).
-    assert classify(req, "twilio") == ["address_any_country"]
+    assert classify(req, "didww") == ["address_in_area"]
 
 
-def test_address_scope_never_changes_the_stored_version_hash():
+def test_address_scope_counts_in_the_version_hash_only_when_set():
     base = {
-        "provider": "twilio",
+        "provider": "didww",
         "country_code": "GB",
         "number_type": "local",
         "subject_type": "person",
         "required": True,
         "address_required": True,
     }
-    # Where the address may be is not part of the form: no hash moves.
     plain = Requirements(**base).version
-    assert Requirements(**base, address_scope="any").version == plain
+    # Unset: forms stored before keep their hash.
+    assert Requirements(**base, address_scope=None).version == plain
+    # Set: a carrier change of the place is visible.
+    assert Requirements(**base, address_scope="any").version != plain

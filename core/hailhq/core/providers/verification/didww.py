@@ -18,6 +18,7 @@ from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     Address,
+    AddressScope,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -121,7 +122,7 @@ def _problems(exc: DidwwApiError) -> list[Problem]:
 
 # DIDWW's address_area_level: where the address may be. create_draft checks
 # the same value. Another value leaves the place unknown.
-_AREA_SCOPE = {
+_AREA_SCOPE: dict[str, AddressScope] = {
     "world_wide": "any",
     "country": "country",
     "area": "area",
@@ -129,7 +130,7 @@ _AREA_SCOPE = {
 }
 
 
-def _address_scope(attrs: dict) -> str | None:
+def _address_scope(attrs: dict) -> AddressScope | None:
     """Where the buyer's address may be, or None when DIDWW does not say in
     a way this file knows (then nothing is promised)."""
     return _AREA_SCOPE.get(attrs.get("address_area_level") or "")

@@ -248,11 +248,11 @@ class Requirements(VerificationRequirements):
         later change to the carrier's rules is visible. Hashes the internal
         model (with ``provider``) and sorts keys, so the value is the same
         as before the public model was split off."""
-        # address_scope is read from the carrier for the paper list, not
-        # part of the form: it never changes the hash.
-        body = self.model_dump(mode="json", exclude={"subject_types", "address_scope"})
+        body = self.model_dump(mode="json", exclude={"subject_types"})
         # Fields added after hashes were stored count only when set, so
         # older forms keep their hash.
+        if body.get("address_scope") is None:
+            body.pop("address_scope", None)
         for field in body["fields"]:
             for key in ("min_choices", "max_choices", "max_length"):
                 if field.get(key) is None:
