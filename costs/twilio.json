@@ -32,7 +32,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -67,7 +67,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -109,7 +109,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -151,7 +151,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -188,7 +188,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -235,7 +235,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -271,7 +271,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -306,7 +306,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -323,7 +323,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -341,12 +341,6 @@
       "mms": false,
       "verification_required": true,
       "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-11-04",
-      "verification_method": "carrier-sync",
-      "verified_by": "twilio-sync",
-      "source_url": "https://assets.cdn.prod.twilio.com/pricing-csv/SiteNumbersPricing.csv",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.",
       "requirements": {
         "person": {
           "accepted": true,
@@ -368,7 +362,12 @@
             }
           ]
         }
-      }
+      },
+      "last_verified": "2026-11-09",
+      "last_changed_at": "2026-11-04",
+      "verification_method": "carrier-sync",
+      "verified_by": "twilio-api-sync",
+      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
     },
     {
       "country_code": "BE",
@@ -401,7 +400,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -438,7 +437,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -455,7 +454,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -473,7 +472,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -507,7 +506,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -539,7 +538,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -556,7 +555,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -574,7 +573,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -592,7 +591,7 @@
       "mms": false,
       "verification_required": false,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -611,7 +610,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -629,7 +628,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -666,7 +665,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -703,7 +702,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -738,7 +737,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -754,13 +753,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-07-17",
+      "available": false,
+      "last_verified": "2026-11-09",
+      "last_changed_at": "2026-11-09",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://www.twilio.com/en-us/sms/pricing/cl",
-      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row."
+      "notes": "Re-verified 2026-11-02: price read on Twilio's public price list, because the sync has no stock to observe for this row.; not offered by the carrier as of 2026-11-09; kept so held numbers stay billable"
     },
     {
       "country_code": "CO",
@@ -791,7 +790,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -826,7 +825,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -909,7 +908,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -963,7 +962,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -996,7 +995,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1029,7 +1028,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1060,7 +1059,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1077,7 +1076,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1141,7 +1140,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1174,7 +1173,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1207,7 +1206,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1240,7 +1239,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1257,7 +1256,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-26",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1298,7 +1297,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1338,7 +1337,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1375,7 +1374,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1543,7 +1542,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1619,12 +1618,13 @@
       "sms": true,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-10-12",
-      "last_changed_at": "2026-09-25",
+      "available": false,
+      "last_verified": "2026-11-09",
+      "last_changed_at": "2026-11-09",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
-      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing"
+      "source_url": "https://www.twilio.com/docs/phone-numbers/pricing",
+      "notes": "not offered by the carrier as of 2026-11-09; kept so held numbers stay billable"
     },
     {
       "country_code": "HK",
@@ -1656,7 +1656,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1673,7 +1673,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1712,7 +1712,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1729,7 +1729,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1770,7 +1770,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1786,13 +1786,13 @@
       "sms": false,
       "mms": false,
       "verification_required": true,
-      "available": true,
-      "last_verified": "2026-11-02",
-      "last_changed_at": "2026-11-02",
+      "available": false,
+      "last_verified": "2026-11-09",
+      "last_changed_at": "2026-11-09",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
       "source_url": "https://www.twilio.com/en-us/voice/pricing/id",
-      "notes": "Price changed 2026-11-02: 23.00 to 24.15 on Twilio's public price list. The sync has no stock to observe for this row."
+      "notes": "Price changed 2026-11-02: 23.00 to 24.15 on Twilio's public price list. The sync has no stock to observe for this row.; not offered by the carrier as of 2026-11-09; kept so held numbers stay billable"
     },
     {
       "country_code": "ID",
@@ -1828,7 +1828,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1864,7 +1864,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1881,7 +1881,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -1900,7 +1900,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1918,7 +1918,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-07-17",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1945,7 +1945,7 @@
           "items": []
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -1988,7 +1988,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2042,7 +2042,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2085,7 +2085,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2145,7 +2145,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2162,7 +2162,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2196,7 +2196,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2233,7 +2233,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2270,7 +2270,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2287,7 +2287,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2305,7 +2305,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2323,7 +2323,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2359,7 +2359,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2403,7 +2403,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2438,7 +2438,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2473,7 +2473,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2505,7 +2505,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2554,7 +2554,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2589,7 +2589,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2620,7 +2620,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2664,7 +2664,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2691,7 +2691,7 @@
           "items": []
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2731,7 +2731,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2749,7 +2749,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-19",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2784,7 +2784,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2801,7 +2801,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-06",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-06",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2853,7 +2853,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-09-28",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -2870,7 +2870,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2888,7 +2888,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -2955,7 +2955,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3021,7 +3021,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3038,7 +3038,7 @@
       "mms": false,
       "verification_required": false,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -3076,7 +3076,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3093,7 +3093,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -3142,7 +3142,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3159,7 +3159,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -3202,7 +3202,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3251,7 +3251,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3289,7 +3289,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3307,7 +3307,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-09-25",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3361,7 +3361,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-07-15",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3379,7 +3379,7 @@
       "verification_required": false,
       "available": true,
       "requirements": null,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-07-15",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
@@ -3396,7 +3396,7 @@
       "mms": false,
       "verification_required": true,
       "available": false,
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-10-13",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-sync",
@@ -3500,7 +3500,7 @@
           ]
         }
       },
-      "last_verified": "2026-11-04",
+      "last_verified": "2026-11-09",
       "last_changed_at": "2026-11-04",
       "verification_method": "carrier-sync",
       "verified_by": "twilio-api-sync",
