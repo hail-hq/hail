@@ -80,6 +80,38 @@ _TAX_NUMBER_MAX = 20
 NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
 
 
+# Countries whose VAT number the carrier registry matches automatically
+# (Telnyx "10DLC Unverified Brand"). Every other country outside the US and
+# Canada files its company registration number.
+VAT_COUNTRIES = frozenset(
+    {
+        "AE",
+        "AU",
+        "BY",
+        "HR",
+        "HU",
+        "IE",
+        "IS",
+        "IT",
+        "LT",
+        "LU",
+        "LV",
+        "MT",
+        "MY",
+        "NL",
+        "NO",
+        "NZ",
+        "PL",
+        "PT",
+        "RO",
+        "SA",
+        "SE",
+        "SG",
+        "SI",
+        "SK",
+        "TW",
+    }
+)
 # The VAT prefix to strip, per country: the ISO code before a digit, unless
 # listed. Greece uses EL. An Austrian number keeps its U ("ATU12345678" files
 # as "U12345678").
@@ -89,7 +121,7 @@ _VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
 def tax_number(value: str | None, country: str | None) -> str:
     """The business tax number as carriers file it: letters and digits,
     uppercase, without the VAT prefix of the issuing country.
-    "GB 123 4567 89" from the UK files as "123456789". A full Canadian
+    "NL 1234.56.789.B01" from the Netherlands files as "123456789B01". A full Canadian
     Business Number files as its first 9 digits."""
     text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
     code = (country or "").strip().upper()
@@ -132,7 +164,11 @@ _BUSINESS_FIELDS = (
         label="Business tax number",
         pattern=r"^[0-9A-Za-z][0-9A-Za-z .\-/]*$",
         max_length=30,
-        help="US: your EIN. Canada: your Business Number. Other countries: your VAT or company number.",
+        help=(
+            "US: your EIN. Canada: your Business Number. "
+            f"These countries use their VAT or GST number: {', '.join(sorted(VAT_COUNTRIES))}. "
+            "Other countries, such as GB, DE and FR, use their company registration number."
+        ),
     ),
     FieldSpec(
         name="industry",
@@ -274,7 +310,10 @@ def _method_spec(method: str, name: str) -> FieldSpec:
 
 _CAMPAIGN_FIELDS = (
     FieldSpec(
-        name="program_name", label="Public sender or program name", max_length=100
+        name="program_name",
+        label="Program name",
+        max_length=100,
+        help="The name people see in your texts. Each sample must include it.",
     ),
     FieldSpec(
         name="campaign_description",
@@ -629,7 +668,7 @@ def _application_problems(
         elif not (4 <= len(number) <= _TAX_NUMBER_MAX and re.search(r"[0-9]", number)):
             issue(
                 "ein",
-                f"Enter your VAT or company registration number: 4 to {_TAX_NUMBER_MAX} letters and digits.",
+                f"Use 4 to {_TAX_NUMBER_MAX} letters and digits.",
             )
     for name in (
         "consent_optional",
@@ -703,7 +742,11 @@ def _application_problems(
         if not val("program_name") or not _names_sender(
             val("program_name"), confirmation
         ):
-            missing.append("public sender/program name")
+            missing.append(
+                f'program name "{val("program_name")}"'
+                if val("program_name")
+                else "program name"
+            )
         if (
             not val("message_frequency")
             or val("message_frequency").casefold() not in confirmation.casefold()
@@ -754,7 +797,7 @@ def _application_problems(
             if text_length(sample) < 20:
                 issue(
                     name,
-                    "Use at least 20 characters with the actual sender and message content.",
+                    "Use at least 20 characters.",
                 )
             if not purpose:
                 untyped += 1
@@ -768,7 +811,7 @@ def _application_problems(
             if sender and not _names_sender(sender, sample):
                 issue(
                     name,
-                    "Include the public sender or program name so recipients can identify you.",
+                    f'Add your program name "{sender}" to this sample, so people know who is texting.',
                 )
             if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
                 has_stop = True
@@ -828,7 +871,11 @@ def _application_problems(
         ):
             issue(
                 "consent_disclosure",
-                "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",
+                (
+                    f'The disclosure must include your program name "{program}", your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.'
+                    if program
+                    else "The disclosure must include your program name, your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting."
+                ),
             )
     if methods and text_length(_structured_flow(fields)) > _FLOW_MAX:
         issue(

@@ -188,6 +188,7 @@ def test_bad_tax_numbers_are_refused(country, number):
         ("se556677889901", "SE", "556677889901"),
         ("SC123456", "GB", "SC123456"),
         ("GB123456789", "GB", "123456789"),
+        ("NL 1234.56.789.B01", "NL", "123456789B01"),
         ("US123456789", "US", "US123456789"),
         ("EL 123456789", "GR", "123456789"),
         ("ATU12345678", "AT", "U12345678"),
@@ -429,6 +430,18 @@ def test_sample_identity_and_stop_must_be_real():
     assert "sample_1" in error_fields(no_stop)
 
 
+def test_the_name_error_quotes_the_program_name():
+    data = {
+        **GOOD,
+        "program_name": "Acme Tech",
+        "sample_1": "Hi: your code is 1234. Reply STOP.",
+    }
+    messages = [message for field, message in errors(data) if field == "sample_1"]
+    assert messages == [
+        'Add your program name "Acme Tech" to this sample, so people know who is texting.'
+    ]
+
+
 def test_sample_name_check_ignores_spaces_dots_and_case():
     data = {**GOOD, "program_name": "Acme Tech"}
     for name in ("acme.tech", "AcmeTech", "ACME TECH"):
@@ -651,7 +664,7 @@ def test_keyword_enrollment_requires_actual_confirmation_before_submission():
 @pytest.mark.parametrize(
     "missing,replace",
     [
-        ("sender", ("Acme", "Other sender")),
+        ('program name "Acme"', ("Acme", "Other sender")),
         ("frequency", ("once per appointment", "regularly")),
         ("rates", ("Msg and data rates may apply.", "Our service rates are low.")),
         ("HELP", ("HELP for help", "helpful assistance")),
@@ -710,3 +723,14 @@ def test_attestation_whitespace_does_not_change_compiled_flow():
             {**data, "consent_optional": "YES", "marketing_consent": "YES"}, "person"
         ).message_flow
     )
+
+
+def test_tax_number_help_names_the_vat_countries():
+    from hailhq.core.providers.verification.sms_form import VAT_COUNTRIES
+
+    help_text = next(
+        f.help for f in sms_requirements(TELNYX, "business").fields if f.name == "ein"
+    )
+    assert all(code in help_text for code in VAT_COUNTRIES)
+    assert "GB, DE and FR, use their company registration number" in help_text
+    assert "GB" not in VAT_COUNTRIES and "DE" not in VAT_COUNTRIES
