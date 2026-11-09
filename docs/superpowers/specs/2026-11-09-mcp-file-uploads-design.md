@@ -91,9 +91,11 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
   both succeed.
 - Response 200: `{id, purpose, filename, content_type, size_bytes, sha256}`.
 - Must be reachable without auth. Check the rate limiter and any auth
-  middleware let a request with no bearer through. The PUT is exempt from
-  the general per-caller limit (every no-bearer caller shares the proxy IP),
-  like `/unsubscribe`; the token is checked before the body is read.
+  middleware let a request with no bearer through. The general limit keys
+  the PUT on the caller's IP. In prod the API trusts the proxy's
+  `X-Forwarded-For` (`FORWARDED_ALLOW_IPS` in `docker-compose.prod.yml`, safe
+  because the API port is bound to localhost), so each caller has its own
+  bucket instead of all sharing the proxy's IP.
 
 ### Telemetry
 

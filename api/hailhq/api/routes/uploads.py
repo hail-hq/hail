@@ -33,7 +33,6 @@ from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_option
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
-    exempt_prefix,
     merge_rate_limited_responses,
 )
 from hailhq.core.config import settings
@@ -65,11 +64,9 @@ router = APIRouter(
     responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 
-# The link is its own credential, like an unsubscribe link. Every caller
-# with no bearer shares the proxy's IP, so a per-IP limit would let one
-# scanner block every customer's upload. The token is checked before the
-# body is read, and making links is limited per caller.
-exempt_prefix("/uploads/", methods=frozenset({"PUT"}))
+# The PUT has no bearer, so the general limit keys it on the caller's IP.
+# In prod the API reads that IP from Caddy's X-Forwarded-For
+# (docker-compose.prod.yml), so each caller gets its own bucket.
 
 logger = logging.getLogger(__name__)
 
