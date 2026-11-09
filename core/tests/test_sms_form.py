@@ -419,6 +419,10 @@ def test_sample_name_check_ignores_spaces_dots_and_case():
     assert "sample_1" in error_fields(
         {**data, "sample_1": "Acme: Your appointment is tomorrow. Reply STOP."}
     )
+    # Both ways: a name without a space matches text with one.
+    joined = {**GOOD, "program_name": "AcmeTech"}
+    sample = "Acme Tech: your appointment is tomorrow. Reply STOP to opt out."
+    assert "sample_1" not in error_fields({**joined, "sample_1": sample})
     # A one-word name keeps the plain match: a handle like @AcmeHQ is fine.
     one = {**GOOD, "sample_1": "@AcmeHQ: your code is 1234. Reply STOP to opt out."}
     assert "sample_1" not in error_fields(one)

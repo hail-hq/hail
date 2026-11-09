@@ -568,16 +568,17 @@ def _is_public_https_url(value: str) -> bool:
         return False
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"[\W_]", "", text).casefold()
+
+
 def _names_sender(name: str, text: str) -> bool:
-    """True when ``text`` names the sender ``name``, ignoring case. A name
-    with spaces or dots also matches without them: "Acme Tech" matches
-    "acme.tech" and "AcmeTech"."""
-    if name.casefold() in text.casefold():
-        return True
-    compact = re.sub(r"[\W_]", "", name).casefold()
-    if not compact or compact == name.casefold():
-        return False
-    return compact in re.sub(r"[\W_]", "", text).casefold()
+    """True when ``text`` names the sender ``name``. Case, spaces and dots
+    do not matter: "Acme Tech", "acme.tech" and "AcmeTech" all match."""
+    compact = _compact(name)
+    if not compact:
+        return name.strip().casefold() in text.casefold()
+    return compact in _compact(text)
 
 
 def _application_problems(
