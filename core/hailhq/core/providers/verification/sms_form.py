@@ -568,9 +568,27 @@ def _is_public_https_url(value: str) -> bool:
         return False
 
 
-def _letters_and_digits(text: str) -> str:
-    """Lowercase letters and digits only, to compare names loosely."""
-    return re.sub(r"[\W_]", "", text).casefold()
+def names_sender(name: str, text: str) -> bool:
+    """True when ``text`` names the sender ``name``. Spaces, dots and case
+    do not matter: "Acme Tech" matches "acme.tech" and "AcmeTech". The name
+    must stand alone: "Tom" does not match inside "Atomic"."""
+    letters = re.findall(r"[^\W_]", name)
+    if not letters:
+        return name.strip().casefold() in text.casefold()
+    loose = r"[\W_]*".join(re.escape(c) for c in letters)
+    return bool(re.search(rf"(?<![^\W_]){loose}(?![^\W_])", text, re.IGNORECASE))
+
+
+# An opt-out: "Reply STOP", "text stop", or STOP in capitals. A plain "stop"
+# in a sentence ("don't stop by") is not one.
+_OPT_OUT_UPPER = re.compile(r"\bSTOP\b")
+
+
+def _has_opt_out(text: str) -> bool:
+    return bool(
+        _OPT_OUT_UPPER.search(text)
+        or re.search(r"\b(?:reply|text|send)\s+[\"']?stop\b", text, re.IGNORECASE)
+    )
 
 
 def _application_problems(
@@ -692,9 +710,8 @@ def _application_problems(
     confirmation = val("opt_in_message")
     if confirmation:
         missing: list[str] = []
-        if (
-            not val("program_name")
-            or val("program_name").casefold() not in confirmation.casefold()
+        if not val("program_name") or not names_sender(
+            val("program_name"), confirmation
         ):
             missing.append("public sender/program name")
         if (
@@ -739,7 +756,7 @@ def _application_problems(
     # sample names one.
     untyped = False
     has_stop = False
-    sender = _letters_and_digits(val("program_name"))
+    sender = val("program_name")
     for i in range(1, 6):
         name = f"sample_{i}"
         sample, purpose = val(name), val(name + "_type")
@@ -758,13 +775,12 @@ def _application_problems(
                 )
             else:
                 covered.add(purpose)
-            # "Acme Tech" matches "acme.tech" and "AcmeTech".
-            if sender and sender not in _letters_and_digits(sample):
+            if sender and not names_sender(sender, sample):
                 issue(
                     name,
                     "Include the public sender or program name so recipients can identify you.",
                 )
-            if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
+            if _has_opt_out(sample):
                 has_stop = True
             if val("has_links") == "NO" and re.search(
                 r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co)(?:/|\b)",
@@ -802,7 +818,6 @@ def _application_problems(
     disclosure = val("consent_disclosure")
     if disclosure:
         required = [
-            val("program_name"),
             val("message_frequency"),
             "STOP",
             "HELP",
@@ -811,7 +826,12 @@ def _application_problems(
         ]
         if any(
             part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not _MESSAGE_DATA_RATES.search(disclosure):
+        ) or not (
+            _MESSAGE_DATA_RATES.search(disclosure)
+            and (
+                not val("program_name") or names_sender(val("program_name"), disclosure)
+            )
+        ):
             issue(
                 "consent_disclosure",
                 "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",

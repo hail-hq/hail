@@ -387,7 +387,7 @@ def test_samples_cover_one_to_five_purposes(count):
         assert "text_types" in error_fields(data)
 
 
-def test_unselected_and_missing_sample_mapping_are_rejected():
+def test_unselected_sample_purposes_are_rejected_and_missing_ones_allowed():
     assert "sample_1_type" in error_fields({**GOOD, "sample_1_type": "MARKETING"})
     assert "sample_3" in error_fields({**GOOD, "sample_3_type": "CUSTOMER_CARE"})
     # A sample without a purpose is fine: purposes are then not checked.
@@ -409,6 +409,23 @@ def test_sample_identity_and_stop_must_be_real():
         "sample_2": "Acme: Your order 123 shipped today. Thanks!",
     }
     assert "sample_1" in error_fields(no_stop)
+
+
+def test_a_plain_stop_in_a_sentence_is_not_an_opt_out():
+    data = {
+        **GOOD,
+        "sample_1": "Acme: Don't stop by without booking first. See you soon.",
+        "sample_2": "Acme: Your order 123 shipped today. Thanks!",
+    }
+    assert "sample_1" in error_fields(data)
+    data["sample_2"] = "Acme: Your order 123 shipped today. Reply stop to opt out."
+    assert "sample_1" not in error_fields(data)
+
+
+def test_a_short_name_must_stand_alone():
+    data = {**GOOD, "program_name": "Tom"}
+    sample = "Delivery at the Atomic depot today. Reply STOP to opt out."
+    assert "sample_1" in error_fields({**data, "sample_1": sample})
 
 
 def test_sample_name_check_ignores_spaces_dots_and_case():
