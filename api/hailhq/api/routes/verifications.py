@@ -22,11 +22,13 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Annotated, Literal, NamedTuple
 from uuid import UUID
 
@@ -760,16 +762,15 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     )
 
 
-async def _ledger_floor_cents(db: AsyncSession, organization_id: UUID) -> int:
-    """The organization's ledger sum rounded down to a whole cent (below
-    zero, one cent below ``get_balance_cents`` when the sum has a
-    fraction)."""
+async def _ledger_cents(db: AsyncSession, organization_id: UUID) -> Decimal:
+    """The organization's ledger sum, unrounded. ``int()`` of it is
+    ``get_balance_cents``."""
     total = await db.execute(
-        select(
-            func.floor(func.coalesce(func.sum(AccountCredit.amount_cents), 0))
-        ).where(AccountCredit.organization_id == organization_id)
+        select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
+            AccountCredit.organization_id == organization_id
+        )
     )
-    return int(total.scalar_one())
+    return Decimal(total.scalar_one())
 
 
 # What _campaign_gated and _campaign_unfunded read of a row.
@@ -829,7 +830,10 @@ async def _campaign_unfunded(
         found = found.all()
         if not any(_campaign_gated(r, registry) for r in found):
             continue
-        balance = await get_balance_cents(db, org)
+        # One read of the ledger: the check uses the balance as
+        # get_balance_cents reads it (truncated toward zero).
+        ledger = await _ledger_cents(db, org)
+        balance = int(ledger)
         left = balance - await _uncharged_cents(db, org)
         # A reserved row (its campaign may be in flight) keeps its claim.
         order = sorted(found, key=lambda r: (not r.reserved, r.created_at, r.id))
@@ -848,11 +852,9 @@ async def _campaign_unfunded(
                 waiting.append((row.id, fee))
             else:
                 left -= fee
-        if waiting and balance <= 0:
-            # The balance is the ledger's sum truncated toward zero, and a
-            # top-up adds whole cents: below zero, a fraction of a cent
-            # costs one more cent.
-            left -= balance - await _ledger_floor_cents(db, org)
+        # A top-up adds whole cents and the check truncates the sum toward
+        # zero: below zero, a fraction of a cent costs one more cent.
+        left -= balance - math.floor(ledger)
         # ``left`` only falls, so it is below each waiting row's fee: the
         # first one needs more than zero, the later ones their whole fee.
         for row_id, fee in waiting:
