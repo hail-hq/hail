@@ -444,19 +444,19 @@ async def test_a_verification_document_is_not_an_attachment(
     email_mock.send_email.assert_not_awaited()
 
 
-def test_put_is_rate_limited_by_client_address() -> None:
-    """No bearer: the general limiter keys the PUT on the remote address."""
-    from hailhq.api.ratelimit import _is_exempt, _rate_limit_key
-    from starlette.requests import Request
+def test_only_the_upload_put_skips_the_general_limit() -> None:
+    """The PUT carries its own token; every no-bearer caller shares the proxy IP."""
+    from hailhq.api.ratelimit import _is_exempt
 
-    assert not _is_exempt("/v1/uploads/abc", "PUT")
-    request = Request(
-        {
-            "type": "http",
-            "method": "PUT",
-            "path": "/v1/uploads/abc",
-            "headers": [],
-            "client": ("203.0.113.9", 5000),
-        }
-    )
-    assert _rate_limit_key(request) == "203.0.113.9"
+    assert _is_exempt("/v1/uploads/abc", "PUT")
+    assert _is_exempt("/uploads/abc", "PUT")
+    assert not _is_exempt("/v1/uploads", "POST")
+    assert not _is_exempt("/v1/uploads/abc", "GET")
+    assert not _is_exempt("/v1/uploads/abc", "DELETE")
+
+
+def test_evidence_links_still_exempt_reads_only() -> None:
+    from hailhq.api.ratelimit import _is_exempt
+
+    assert _is_exempt("/v1/verifications/sms/evidence/abc", "GET")
+    assert not _is_exempt("/v1/verifications/sms/evidence/abc", "PUT")

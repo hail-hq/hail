@@ -31,6 +31,7 @@ from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_option
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
+    exempt_prefix,
     merge_rate_limited_responses,
 )
 from hailhq.core.config import settings
@@ -60,6 +61,12 @@ router = APIRouter(
     tags=["uploads"],
     responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
+
+# The link is its own credential, like an unsubscribe link. Every caller
+# with no bearer shares the proxy's IP, so a per-IP limit would let one
+# scanner block every customer's upload. The token is checked before the
+# body is read, and making links is limited per caller.
+exempt_prefix("/uploads/", methods=frozenset({"PUT"}))
 
 _NOT_FOUND = "upload link not found, or already used"
 _UNAVAILABLE = "file uploads are not configured on this server"

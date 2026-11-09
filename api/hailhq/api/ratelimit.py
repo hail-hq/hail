@@ -117,9 +117,10 @@ _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/re
 _EXEMPT_PATHS = {"/unsubscribe", "/webhooks/event-types"}
 
 
-# Unprefixed path prefixes, for public GET routes with an id in the path.
-# Other methods under the same prefix (a signed-in DELETE) stay limited.
-_EXEMPT_PREFIXES: set[str] = set()
+# Unprefixed path prefixes, for public routes with an id in the path, each
+# with the methods it exempts (GET and HEAD by default). Other methods under
+# the same prefix (a signed-in DELETE) stay limited.
+_EXEMPT_PREFIXES: dict[str, frozenset[str]] = {}
 _READ_METHODS = frozenset({"GET", "HEAD"})
 
 
@@ -128,11 +129,11 @@ def exempt_path(path: str) -> None:
     _EXEMPT_PATHS.add(path)
 
 
-def exempt_prefix(prefix: str) -> None:
-    """Exempt GET and HEAD on every unprefixed path under ``prefix``."""
+def exempt_prefix(prefix: str, methods: frozenset[str] = _READ_METHODS) -> None:
+    """Exempt ``methods`` (GET and HEAD by default) under ``prefix``."""
     if not prefix.endswith("/"):
         raise ValueError("an exempt prefix ends with /")
-    _EXEMPT_PREFIXES.add(prefix)
+    _EXEMPT_PREFIXES[prefix] = frozenset(m.upper() for m in methods)
 
 
 def _is_exempt(path: str, method: str = "GET") -> bool:
@@ -145,8 +146,9 @@ def _is_exempt(path: str, method: str = "GET") -> bool:
     unprefixed = path[len(_V1_PREFIX) - 1 :] if path.startswith(_V1_PREFIX) else path
     if unprefixed in _EXEMPT_PATHS:
         return True
-    return method.upper() in _READ_METHODS and any(
-        unprefixed.startswith(p) for p in _EXEMPT_PREFIXES
+    return any(
+        unprefixed.startswith(prefix) and method.upper() in methods
+        for prefix, methods in _EXEMPT_PREFIXES.items()
     )
 
 

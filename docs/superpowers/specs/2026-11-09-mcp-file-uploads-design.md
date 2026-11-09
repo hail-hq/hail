@@ -92,7 +92,9 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
   both succeed.
 - Response 200: `{id, purpose, filename, content_type, size_bytes, sha256}`.
 - Must be reachable without auth. Check the rate limiter and any auth
-  middleware handle a request with no bearer (rate-limit by client IP).
+  middleware let a request with no bearer through. The PUT is exempt from
+  the general per-caller limit (every no-bearer caller shares the proxy IP),
+  like `/unsubscribe`; the token is checked before the body is read.
 
 ### Telemetry
 
