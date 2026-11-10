@@ -978,6 +978,111 @@ async def test_post_emails_named_from_still_works_with_several_senders(
     assert resp.json()["from_address"] == "sales@mail.acme.io"
 
 
+async def _block_sends(
+    client: httpx.AsyncClient, headers: dict, domain_id: str
+) -> None:
+    """Flip the send switch off for an email-domain row."""
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"sends_enabled": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["sends_enabled"] is False
+
+
+async def test_post_emails_domain_blocked_from_sending_falls_back_to_hail_mail(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A domain switched off must not be picked, and must not 422 either.
+
+    Before, the only opt-out from a verified custom domain winning every
+    ``from``-less pick was deleting it (409 once it held mail rows).
+    Switching it off falls back to the hail-mail address instead.
+    """
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id = await _register_custom_verified(client, headers, domain="acme.com")
+    await _block_sends(client, headers, domain_id)
+
+    listed = await client.get("/email-domains", headers=headers)
+    assert (
+        listed.json()["default_from"]
+        == f"admin-{org_prefix_from_id(org_id)}+{org_prefix_from_id(org_id)}@mail.hail.so"
+    )
+
+    body = await _send_email(client, plain)
+
+    assert (
+        body["from_address"]
+        == f"admin-{org_prefix_from_id(org_id)}+{org_prefix_from_id(org_id)}@mail.hail.so"
+    )
+    call_kwargs = email_mock.send_email.call_args.kwargs
+    assert call_kwargs["from_address"] == body["from_address"]
+
+
+async def test_post_emails_explicit_from_to_blocked_domain_is_refused(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+) -> None:
+    """Switched off fails closed: naming the domain explicitly is 422."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id = await _register_custom_verified(client, headers, domain="acme.com")
+    await _block_sends(client, headers, domain_id)
+
+    resp = await client.post(
+        "/emails",
+        json={
+            "from": "sales@acme.com",
+            "to": ["x@example.com"],
+            "subject": "hi",
+            "body_text": "body",
+            "recipient_consent": True,
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"][0]["msg"]
+    assert "acme.com" in detail
+    assert "blocked from sending" in detail
+    assert "sends_enabled" in detail
+    email_mock.send_email.assert_not_awaited()
+
+
+async def test_post_emails_blocked_pending_domain_lets_hail_mail_mint(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending custom row that is switched off must not raise the
+    pending-DKIM 422: the org said it must not send, so a from-less send
+    mints a hail-mail row like never-sender setup would."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+    await _block_sends(client, headers, created.json()["id"])
+
+    body = await _send_email(client, plain)
+
+    assert body["from_address"].endswith("@mail.hail.so")
+    email_mock.send_email.assert_awaited_once()
+
+
 # --------------------------------------------------------------------------- #
 # POST /emails — provider failure
 # --------------------------------------------------------------------------- #

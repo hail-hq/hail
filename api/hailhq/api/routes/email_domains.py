@@ -284,11 +284,18 @@ async def verified_senders(
     The hail-mail address is a candidate only with no verified custom domain,
     and stays available through an explicit ``from``. Ordered by ``created_at``
     so a single-identity org resolves the same row on every retry.
+
+    A row the org switched off (``sends_enabled = false``) is never a
+    candidate. Dropping it here shapes every downstream case: a ``from``-less
+    send falls back to the hail-mail address, and a pending custom row that
+    is switched off no longer causes the "pending DKIM" 422 — the org said
+    it must not send, so it must not block sending either.
     """
     stmt = (
         select(EmailDomain)
         .where(EmailDomain.organization_id == organization_id)
         .where(EmailDomain.verification_status == "verified")
+        .where(EmailDomain.sends_enabled)
         .order_by(EmailDomain.created_at.asc())
     )
     verified = list((await db.execute(stmt)).scalars().all())
@@ -296,12 +303,17 @@ async def verified_senders(
 
 
 async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str | None:
-    """The domain of one custom row still waiting on DKIM, if any."""
+    """The domain of one custom row still waiting on DKIM, if any.
+
+    Switched-off rows (``sends_enabled = false``) are excluded: they must
+    not send and must not block a from-less send either.
+    """
     stmt = (
         select(EmailDomain.domain)
         .where(EmailDomain.organization_id == organization_id)
         .where(EmailDomain.kind == "custom")
         .where(EmailDomain.verification_status == "pending")
+        .where(EmailDomain.sends_enabled)
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
@@ -790,13 +802,16 @@ async def patch_email_domain(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailDomainResponse:
-    """Edit hail-mail prefixes and/or inbound action settings.
+    """Edit hail-mail prefixes, the send switch, and/or inbound action.
 
-    Two modes, mutually compatible:
+    Three modes, mutually compatible:
 
     * **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):
       hail_mail rows only. The managed-cloud console writes here when
       an org admin changes the visible hail-mail address.
+    * **Send switch** (``sends_enabled``): custom rows only. ``false``
+      stops the domain from sending at all — it is skipped by sender
+      selection and a send that names it explicitly is refused with 422.
     * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /
       ``forward_rate_per_hour``): any row kind.
     """
@@ -828,6 +843,16 @@ async def patch_email_domain(
         updates["local_prefix_user"] = new_user
         updates["local_prefix_org"] = new_org
         updates["domain"] = new_address
+
+    # ---- send switch (custom only) ----
+    if body.sends_enabled is not None:
+        if sd.kind != "custom":
+            raise unprocessable(
+                "sends_enabled is only allowed on kind='custom' rows; the "
+                "hail-mail address is the fallback sender and always sends",
+                loc=["body", "sends_enabled"],
+            )
+        updates["sends_enabled"] = body.sends_enabled
 
     # ---- inbound action edits (any kind) ----
     if body.inbound_enabled is not None:

@@ -1858,6 +1858,7 @@ def register_tools(
 
         Without ``from_``, one verified custom domain takes priority over the Hail mail address.
         Several verified custom domains require an explicit ``from_`` address.
+        A custom domain blocked from sending (``sends_enabled`` false, PATCH ``/v1/email-domains/{id}``) is skipped for picks and refuses an explicit ``from_``.
         When configured, a workspace without a sender receives a Hail mail address automatically.
         An explicit sender must match a verified workspace identity.
         ``from_name`` is an optional display name; control characters are rejected.
@@ -3370,6 +3371,8 @@ def register_tools(
         For ``kind="hail_mail"``, it is already a complete email address.
         One verified custom domain takes priority over the Hail mail address.
         With several verified custom domains, ``default_from`` is null and email sending requires an explicit sender.
+        A custom domain with ``sends_enabled`` false cannot send: it is skipped for picks and refuses an explicit ``from_``.
+        Toggle it with PATCH ``/v1/email-domains/{id}`` (custom domains only).
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:

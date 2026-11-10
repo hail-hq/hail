@@ -137,7 +137,9 @@ async def resolve_sender(
 
     1. Explicit ``from``: look up by full address (hail-mail row's
        ``domain`` is the full address; custom row's ``domain`` is the
-       parent so we match by suffix).
+       parent so we match by suffix). A row switched off
+       (``sends_enabled = false``) matches but is refused with a
+       targeted 422, not the generic "not a verified sender".
     2. No ``from``: a verified custom domain wins over the hail-mail
        address (``verified_senders``). Exactly one candidate: that one.
     3. No ``from``, several candidates: 422 listing them. Picking one for
@@ -179,6 +181,13 @@ async def resolve_sender(
         )
         sd = (await db.execute(stmt)).scalar_one_or_none()
         if sd is not None:
+            if not sd.sends_enabled:
+                raise unprocessable(
+                    f"sender domain {dom!r} is blocked from sending "
+                    "(sends_enabled=false); re-enable it with PATCH "
+                    "/email-domains/{id} or pass another verified from address",
+                    loc=["body", "from"],
+                )
             return sd
 
         raise unprocessable(

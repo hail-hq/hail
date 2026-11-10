@@ -2252,6 +2252,10 @@ type EmailDomainListResponse struct {
 //   - Hail-mail addressing — the user/org prefix pair (only valid on
 //     “kind='hail_mail'“ rows; the handler returns 422 if a tenant tries
 //     to PATCH these on a custom row).
+//   - Send switch — “sends_enabled“ (only valid on “kind='custom'“
+//     rows; the handler returns 422 otherwise). “false“ stops the
+//     domain from sending at all: skipped by sender selection, explicit
+//     “from“ refused.
 //   - Inbound action — “inbound_enabled“ + “forward_to“ + the optional
 //     “forward_rate_per_hour“ cap. These apply to either kind, but this
 //     milestone routes inbound only to “hail_mail“ rows; custom-domain
@@ -2278,6 +2282,9 @@ type EmailDomainPatch struct {
 
 	// LocalPrefixUser New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
+
+	// SendsEnabled Send switch for kind='custom' rows. False stops the domain from sending at all: skipped by default sender selection and a send naming it explicitly returns 422. Only allowed on custom rows; Omit to leave unchanged.
+	SendsEnabled *bool `json:"sends_enabled,omitempty"`
 }
 
 // EmailDomainResponse Read view for an email domain.
@@ -2330,6 +2337,9 @@ type EmailDomainResponse struct {
 
 	// ReceiveReady True when the domain's published MX points at Hail's inbound host. Only populated by POST /{id}/verify on custom domains; null everywhere else.
 	ReceiveReady *bool `json:"receive_ready,omitempty"`
+
+	// SendsEnabled Send switch for kind='custom' rows. False stops the domain from sending at all: it is skipped by default sender selection and a send that names it explicitly returns 422. Always true for hail_mail rows.
+	SendsEnabled *bool `json:"sends_enabled,omitempty"`
 
 	// UpdatedAt When this domain was last modified, ISO 8601 timestamp.
 	UpdatedAt time.Time `json:"updated_at"`

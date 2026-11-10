@@ -440,6 +440,64 @@ async def test_patch_on_custom_domain_returns_422(
     assert "hail_mail" in resp.text
 
 
+async def test_patch_toggles_sends_enabled_on_custom_domain(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com"},
+        headers=headers,
+    )
+
+    off = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"sends_enabled": False},
+        headers=headers,
+    )
+    assert off.status_code == 200, off.text
+    assert off.json()["sends_enabled"] is False
+
+    on = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"sends_enabled": True},
+        headers=headers,
+    )
+    assert on.status_code == 200, on.text
+    assert on.json()["sends_enabled"] is True
+
+
+async def test_patch_sends_enabled_on_hail_mail_returns_422(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hail-mail is the fallback a from-less send resolves to, and system
+    mail (forward confirmations) names its address — it always sends."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "alice",
+            "local_prefix_org": "acme",
+        },
+        headers=headers,
+    )
+    resp = await client.patch(
+        f"/email-domains/{created.json()['id']}",
+        json={"sends_enabled": False},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    assert "hail-mail address" in resp.text
+    assert "sends_enabled" in resp.text
+
+
 async def test_patch_unknown_returns_404(
     client: httpx.AsyncClient,
     org_and_key: tuple,

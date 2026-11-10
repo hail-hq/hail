@@ -1864,11 +1864,14 @@ paths:
         - email-domains
       summary: Patch Email Domain
       description:
-        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo\
-        \ modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
+        "Edit hail-mail prefixes, the send switch, and/or inbound action.\n\
+        \nThree modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
         \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
-        * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
+        * **Send switch** (``sends_enabled``): custom rows only. ``false``\n  stops\
+        \ the domain from sending at all \u2014 it is skipped by sender\n  selection\
+        \ and a send that names it explicitly is refused with 422.\n* **Inbound action\
+        \ edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
         \ any row kind."
       operationId: patch_email_domain_v1_email_domains__domain_id__patch
       parameters:
@@ -7418,6 +7421,16 @@ components:
             - type: "null"
           title: Forward Rate Per Hour
           description: Cap on forwarded messages per hour. Omit to leave unchanged.
+        sends_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Sends Enabled
+          description:
+            "Send switch for kind='custom' rows. False stops the domain
+            from sending at all: skipped by default sender selection and a send naming
+            it explicitly returns 422. Only allowed on custom rows; Omit to leave
+            unchanged."
       additionalProperties: false
       type: object
       title: EmailDomainPatch
@@ -7425,7 +7438,10 @@ components:
         "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
         \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
         \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
-        \ tries\n  to PATCH these on a custom row).\n* Inbound action \u2014 ``inbound_enabled``\
+        \ tries\n  to PATCH these on a custom row).\n* Send switch \u2014 ``sends_enabled``\
+        \ (only valid on ``kind='custom'``\n  rows; the handler returns 422 otherwise).\
+        \ ``false`` stops the\n  domain from sending at all: skipped by sender selection,\
+        \ explicit\n  ``from`` refused.\n* Inbound action \u2014 ``inbound_enabled``\
         \ + ``forward_to`` + the optional\n  ``forward_rate_per_hour`` cap. These\
         \ apply to either kind, but this\n  milestone routes inbound only to ``hail_mail``\
         \ rows; custom-domain\n  inbound (MX delegation) is the next milestone.\n\n\
@@ -7522,6 +7538,14 @@ components:
           title: Inbound Enabled
           description: Whether this domain accepts and forwards inbound mail.
           default: false
+        sends_enabled:
+          type: boolean
+          title: Sends Enabled
+          description:
+            "Send switch for kind='custom' rows. False stops the domain
+            from sending at all: it is skipped by default sender selection and a send
+            that names it explicitly returns 422. Always true for hail_mail rows."
+          default: true
         forward_to:
           anyOf:
             - items:
