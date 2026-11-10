@@ -146,8 +146,9 @@ async def test_tick_deletes_expired_links_but_keeps_live_ones(
     remaining = await _ids(async_session)
     assert expired.id not in remaining
     assert live.id in remaining
-    # A cut-off PUT may have left an object; the delete is harmless if not.
-    s3.delete.assert_awaited_once_with(expired.s3_key)
+    # Cut-off PUTs may have left objects under the link's key.
+    s3.delete_prefix.assert_awaited_once_with(f"{expired.s3_key}.")
+    s3.delete.assert_not_awaited()
 
 
 async def test_tick_keeps_an_expired_link_row_when_s3_fails(
@@ -162,7 +163,7 @@ async def test_tick_keeps_an_expired_link_row_when_s3_fails(
         link_expires_at=now - timedelta(minutes=5),
     )
     s3 = AsyncMock()
-    s3.delete.side_effect = RuntimeError("s3 down")
+    s3.delete_prefix.side_effect = RuntimeError("s3 down")
     assert await _worker(async_session, s3).tick() == 1
     assert expired.id not in await _ids(async_session)
 
@@ -204,32 +205,3 @@ async def test_tick_never_treats_a_verification_document_as_an_attachment(
 def test_worker_runs_every_ten_minutes() -> None:
     worker = EmailAttachmentGcWorker(session_factory=None, s3_factory=AsyncMock)
     assert worker._poll_interval == 600.0
-
-
-async def test_tick_keeps_a_link_mid_upload_for_an_hour_past_expiry(
-    async_session: AsyncSession,
-) -> None:
-    """A PUT still reading its body marks the link busy; a crashed one is
-    swept an hour later."""
-    now = datetime.now(timezone.utc)
-    reading = await _make_row(
-        async_session,
-        created_at=now - timedelta(minutes=30),
-        uploaded=False,
-        link_expires_at=now - timedelta(minutes=15),
-    )
-    crashed = await _make_row(
-        async_session,
-        created_at=now - timedelta(hours=2),
-        uploaded=False,
-        link_expires_at=now - timedelta(minutes=61),
-    )
-    for row in (reading, crashed):
-        row.token_hash = "busy:h"
-    await async_session.commit()
-    s3 = AsyncMock()
-    assert await _worker(async_session, s3).tick() == 1
-    remaining = await _ids(async_session)
-    assert reading.id in remaining
-    assert crashed.id not in remaining
-    s3.delete.assert_awaited_once_with(crashed.s3_key)

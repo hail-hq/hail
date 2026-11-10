@@ -538,41 +538,35 @@ async def test_one_upload_in_many_slots_counts_each_use_in_the_total(
     s3.fetch_raw.assert_not_awaited()
 
 
-async def test_one_failed_fetch_cancels_the_others(
+async def test_the_first_failed_slot_decides_the_error(
     client, org_and_key, carrier, s3, async_session
 ) -> None:
+    """Two fetches fail differently. The error is the first slot's, whichever
+    fetch fails first, so a retry of the same request gets the same answer."""
     import asyncio
 
     org_id, _, key = org_and_key
     slots = ["proof_of_identity", "extra_0"]
     rows = [await _upload(async_session, org_id) for _ in slots]
-    failing_key = rows[0].s3_key
-    cancelled = asyncio.Event()
+    first_key, second_key = rows[0].s3_key, rows[1].s3_key
 
     async def fetch(key_):
-        if key_ == failing_key:
-            await asyncio.sleep(0.05)
-            raise RuntimeError("s3 down")
-        try:
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
-        return _JPEG
+        if key_ == second_key:
+            raise RuntimeError("s3 down")  # fails at once: 503
+        await asyncio.sleep(0.05)
+        return b"not an image" * 2_000_000  # over 10 MB: 422, later
 
     s3.fetch_raw.side_effect = fetch
-    resp = await asyncio.wait_for(
-        _post(
-            client,
-            key,
-            "/verifications/check",
-            documents=json.dumps({slot: {} for slot in slots}),
-            **{f"upload.{slot}": str(row.id) for slot, row in zip(slots, rows)},
-        ),
-        5,
+    resp = await _post(
+        client,
+        key,
+        "/verifications/check",
+        documents=json.dumps({slot: {} for slot in slots}),
+        **{f"upload.{slot}": str(row.id) for slot, row in zip(slots, rows)},
     )
-    assert resp.status_code == 503, resp.text
-    assert cancelled.is_set()
+    assert resp.status_code == 422, resp.text
+    assert s3.fetch_raw.await_count == 2
+    assert {c.args[0] for c in s3.fetch_raw.await_args_list} == {first_key, second_key}
 
 
 async def test_uploads_over_the_total_are_refused_before_any_fetch(

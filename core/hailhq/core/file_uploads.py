@@ -3,16 +3,20 @@
 Two kinds of upload share one table and one mail-bucket layout:
 
 * ``email_attachment``: a file to attach to outbound email. Stored under
-  ``outbound-attachments/<organization_id>/<id>``; its id works in
+  ``outbound-attachments/<organization_id>/<id>.<attempt>``; its id works in
   ``POST /emails`` ``attachment_ids``.
 * ``verification_document``: an identity or business document for a carrier
-  verification. Stored under ``verification-uploads/<organization_id>/<id>``,
+  verification. Stored under
+  ``verification-uploads/<organization_id>/<id>.<attempt>``,
   read once by ``POST /verifications`` and deleted after; the GC removes any
   left over after ``VERIFICATION_UPLOAD_TTL``.
 
 An upload link (``POST /uploads``) lets a caller with no Hail credentials
 (an agent's shell) send the bytes once with ``PUT /uploads/<id>?token=...``.
-Only the sha256 of the token is stored.
+Only the sha256 of the token is stored. Each PUT writes its own
+``<attempt>`` key, and the update that marks the link used points the row at
+it, so two PUTs to one link never overwrite each other. (A direct
+``POST /email-attachments`` upload has no attempt suffix.)
 """
 
 from __future__ import annotations
@@ -44,11 +48,6 @@ LINK_TTL = timedelta(minutes=15)
 MAX_PENDING_LINKS = 50
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
-# A link whose body a PUT is reading holds this before its token hash.
-LINK_BUSY_PREFIX = "busy:"
-# The GC leaves a busy link alone this long past its expiry, so a slow PUT
-# can finish; after that the PUT's process is taken to be gone.
-BUSY_LINK_GRACE = timedelta(hours=1)
 
 _PREFIXES = {
     "email_attachment": "outbound-attachments/",
@@ -117,8 +116,6 @@ async def delete_org_verification_uploads(
 
 
 __all__ = [
-    "BUSY_LINK_GRACE",
-    "LINK_BUSY_PREFIX",
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",

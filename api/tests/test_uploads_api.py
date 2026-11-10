@@ -217,11 +217,16 @@ async def test_put_stores_the_bytes_and_reports_size_and_sha256(
         "size_bytes": len(_JPEG),
         "sha256": hashlib.sha256(_JPEG).hexdigest(),
     }
-    key = f"verification-uploads/{org_id}/{link['id']}"
+    s3.put_attachment.assert_awaited_once()
+    key, body, stored_type = s3.put_attachment.await_args.args
+    # Each PUT writes its own key under the link's.
+    assert key.startswith(f"verification-uploads/{org_id}/{link['id']}.")
+    assert body == _JPEG
     # The declared type is stored, not the request header.
-    s3.put_attachment.assert_awaited_once_with(key, _JPEG, "image/jpeg")
+    assert stored_type == "image/jpeg"
     row = await async_session.get(FileUpload, UUID(link["id"]))
     await async_session.refresh(row)
+    assert row.s3_key == key
     assert row.token_hash is None
     assert row.uploaded_at is not None
     assert row.sha256 == hashlib.sha256(_JPEG).hexdigest()
@@ -319,26 +324,30 @@ async def test_put_email_attachment_takes_any_bytes(client, org_and_key, s3) -> 
     )
     resp = await client.put(_path(link["upload_url"]), content=b"a,b\n1,2\n")
     assert resp.status_code == 200, resp.text
-    s3.put_attachment.assert_awaited_once_with(
-        f"outbound-attachments/{org_id}/{link['id']}", b"a,b\n1,2\n", "text/csv"
-    )
+    key, body, stored_type = s3.put_attachment.await_args.args
+    assert key.startswith(f"outbound-attachments/{org_id}/{link['id']}.")
+    assert (body, stored_type) == (b"a,b\n1,2\n", "text/csv")
 
 
 async def test_two_concurrent_puts_only_one_wins(
-    client, org_and_key, s3, session_factory
+    client, org_and_key, s3, session_factory, async_session
 ) -> None:
-    """The second PUT finds the link claimed while the first writes S3."""
+    """Both write their own key; the first update wins, the other PUT gets
+    404 and deletes its object, so the row points at the winner's bytes."""
     from hailhq.core.db import get_session
 
     _, _, plain = org_and_key
     link = await _link(client, plain)
     entered, release = asyncio.Event(), asyncio.Event()
+    keys: list[str] = []
 
-    async def slow_put(*_args):
-        entered.set()
-        await release.wait()
+    async def put(key, *_args):
+        keys.append(key)
+        if len(keys) == 1:
+            entered.set()
+            await release.wait()
 
-    s3.put_attachment.side_effect = slow_put
+    s3.put_attachment.side_effect = put
 
     async def per_request_session():
         async with session_factory() as session:
@@ -355,18 +364,23 @@ async def test_two_concurrent_puts_only_one_wins(
             client.put(_path(link["upload_url"]), content=_JPEG), 5
         )
         release.set()
-        assert (await first).status_code == 200
+        first_resp = await first
     finally:
         release.set()
         app.dependency_overrides[get_session] = saved
-    assert second.status_code == 404
-    assert s3.put_attachment.await_count == 1
+    assert second.status_code == 200
+    assert first_resp.status_code == 404
+    assert len(set(keys)) == 2
+    s3.delete.assert_awaited_once_with(keys[0])
+    row = await async_session.get(FileUpload, UUID(link["id"]))
+    await async_session.refresh(row)
+    assert row.s3_key == keys[1]
 
 
 async def test_a_busy_server_is_503_and_keeps_the_link(
     client, org_and_key, s3, monkeypatch
 ) -> None:
-    """Too many body reads at once: 503 before the link is claimed."""
+    """Too many body reads at once: 503, and the link still works."""
     from hailhq.api.routes import uploads
 
     _, _, plain = org_and_key
@@ -380,7 +394,7 @@ async def test_a_busy_server_is_503_and_keeps_the_link(
     assert ok.status_code == 200
 
 
-async def test_a_failed_storage_write_gives_the_link_back(
+async def test_a_failed_storage_write_leaves_the_link_usable(
     client, org_and_key, s3
 ) -> None:
     _, _, plain = org_and_key
@@ -391,45 +405,6 @@ async def test_a_failed_storage_write_gives_the_link_back(
     s3.put_attachment.side_effect = None
     ok = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert ok.status_code == 200
-
-
-async def test_a_second_put_during_the_body_read_is_404(
-    client, org_and_key, s3, session_factory
-) -> None:
-    """The link is claimed before the body is read, not after."""
-    from hailhq.core.db import get_session
-
-    _, _, plain = org_and_key
-    link = await _link(client, plain)
-    started, release = asyncio.Event(), asyncio.Event()
-
-    async def slow_body():
-        yield _JPEG
-        started.set()
-        await release.wait()
-        yield b"rest"
-
-    async def per_request_session():
-        async with session_factory() as session:
-            yield session
-
-    saved = app.dependency_overrides[get_session]
-    app.dependency_overrides[get_session] = per_request_session
-    try:
-        first = asyncio.create_task(
-            client.put(_path(link["upload_url"]), content=slow_body())
-        )
-        await asyncio.wait_for(started.wait(), 5)
-        second = await asyncio.wait_for(
-            client.put(_path(link["upload_url"]), content=_JPEG), 5
-        )
-        release.set()
-        assert (await first).status_code == 200
-    finally:
-        release.set()
-        app.dependency_overrides[get_session] = saved
-    assert second.status_code == 404
-    assert s3.put_attachment.await_count == 1
 
 
 async def test_put_needs_no_authorization_header(client, org_and_key, s3) -> None:
@@ -623,10 +598,12 @@ async def test_two_links_at_once_never_pass_the_cap(
     assert sorted(r.status_code for r in results) == [201, 429]
 
 
-async def test_a_link_swept_during_its_put_is_410_and_leaves_no_object(
+async def test_a_link_removed_during_its_put_is_404_and_leaves_no_object(
     client, org_and_key, s3, async_session
 ) -> None:
-    """The row went away while the body was stored: the object is removed."""
+    """The row went away while the body was stored: the object is removed.
+    (The sweep removes only expired links; those answer 410, see
+    test_a_link_that_expires_during_its_put_is_410.)"""
     from sqlalchemy import delete
 
     org_id, _, plain = org_and_key
@@ -641,18 +618,25 @@ async def test_a_link_swept_during_its_put_is_410_and_leaves_no_object(
 
     s3.put_attachment.side_effect = swept
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 410, resp.text
-    s3.delete.assert_awaited_once_with(f"verification-uploads/{org_id}/{upload_id}")
+    assert resp.status_code == 404, resp.text
+    key = s3.put_attachment.await_args.args[0]
+    assert key.startswith(f"verification-uploads/{org_id}/{upload_id}.")
+    s3.delete.assert_awaited_once_with(key)
 
 
-async def test_a_link_in_use_says_so_in_its_404(client, org_and_key, s3) -> None:
+async def test_a_wrong_token_and_a_used_link_share_one_404(
+    client, org_and_key, s3
+) -> None:
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    resp = await client.put(f"/v1/uploads/{link['id']}?token=nope", content=_JPEG)
-    assert resp.json()["detail"] == "upload link not found, already used, or in use"
+    wrong = await client.put(f"/v1/uploads/{link['id']}?token=nope", content=_JPEG)
+    assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
+    used = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert wrong.json() == used.json()
+    assert wrong.json()["detail"] == "upload link not found, or already used"
 
 
-async def test_a_body_read_past_its_deadline_is_408_and_gives_the_link_back(
+async def test_a_body_read_past_its_deadline_is_408_and_keeps_the_link(
     client, org_and_key, s3, monkeypatch
 ) -> None:
     from hailhq.api.routes import uploads as uploads_routes
@@ -791,7 +775,7 @@ async def test_puts_over_the_global_cap_get_503_at_once(
         assert again.status_code == 200, again.text
 
 
-async def test_a_failed_final_commit_gives_the_link_back(
+async def test_a_failed_final_commit_leaves_the_link_usable(
     client, org_and_key, s3, async_session, monkeypatch
 ) -> None:
     _, _, plain = org_and_key
@@ -815,15 +799,19 @@ async def test_a_failed_final_commit_gives_the_link_back(
     with pytest.raises(RuntimeError):
         await client.put(_path(link["upload_url"]), content=_JPEG)
     assert failed
+    # A request's session closes at its end, which rolls back; the tests
+    # share one session, so do that here.
+    await async_session.rollback()
     s3.put_attachment.side_effect = None
     again = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert again.status_code == 200, again.text
 
 
-async def test_a_link_that_expires_before_the_claim_is_410(
+async def test_a_link_that_expires_during_its_put_is_410(
     client, org_and_key, s3, monkeypatch
 ) -> None:
-    """The check and the claim read the clock apart; the claim's time wins."""
+    """The final update reads the clock again; an expired link is not used,
+    and this PUT's object is deleted."""
     from hailhq.api.routes import uploads as uploads_routes
 
     _, _, plain = org_and_key
@@ -833,10 +821,11 @@ async def test_a_link_that_expires_before_the_claim_is_410(
 
     def later():
         calls.append(1)
-        # The first reading (the expiry check) is now; the claim is later.
-        return real_now() + (timedelta(0) if len(calls) == 1 else timedelta(hours=1))
+        # The expiry check and the read deadline are now; the final update
+        # is an hour later.
+        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(hours=1))
 
     monkeypatch.setattr(uploads_routes, "_now", later)
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 410, resp.text
-    s3.put_attachment.assert_not_awaited()
+    s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])

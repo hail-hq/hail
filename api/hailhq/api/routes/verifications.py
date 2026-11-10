@@ -1891,20 +1891,17 @@ async def _prepare_submission(
         async with fetches:
             return await _read_upload(s3, row)
 
-    # Each distinct upload once. A task group: one failed fetch cancels the
-    # others, and its own error (503 or 422) is what the caller gets.
+    # Each distinct upload once. Every fetch finishes (the total was checked
+    # above, so this is bounded), then the first failure in slot order is
+    # raised, with its cause: the same request always gets the same error.
     distinct = {row.id: row for row in rows.values()}
-    try:
-        async with asyncio.TaskGroup() as group:
-            tasks = {
-                upload_id: group.create_task(fetch(row))
-                for upload_id, row in distinct.items()
-            }
-    except Exception as failed:
-        # The group's first error, not the group: FastAPI answers it.
-        errors = getattr(failed, "exceptions", None)
-        raise (errors[0] if errors else failed) from None
-    fetched = {upload_id: task.result() for upload_id, task in tasks.items()}
+    results = await asyncio.gather(
+        *(fetch(row) for row in distinct.values()), return_exceptions=True
+    )
+    fetched = dict(zip(distinct, results))
+    for slot in sub.documents:
+        if slot in rows and isinstance(fetched[rows[slot].id], BaseException):
+            raise fetched[rows[slot].id]
     total = 0
     for slot, value in sub.documents.items():
         file: UploadedFile | None = (

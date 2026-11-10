@@ -746,9 +746,9 @@ paths:
         "Send the file's bytes to an upload link. No Authorization header.
 
 
-        Works once. Unknown id, wrong token, a used link or one another PUT is
+        Works once. Unknown id, wrong token or a used link are all 404 with one
 
-        sending to are all 404 with one message; an expired link is 410. A body
+        message; an expired link is 410. A body
 
         that does not arrive before the link expires (10 minutes at most) is
 
@@ -802,8 +802,8 @@ paths:
                 type: integer
         "404":
           description:
-            Unknown link, wrong token, already used, or another PUT is
-            sending to it.
+            Unknown link, wrong token, or already used (also when another
+            PUT to the same link finished first).
         "408":
           description:
             The body did not arrive before the link expired, or within
