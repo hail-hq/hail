@@ -807,11 +807,11 @@ async def test_a_failed_final_commit_leaves_the_link_usable(
     assert again.status_code == 200, again.text
 
 
-async def test_a_link_that_expires_during_its_put_is_410(
+async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
     client, org_and_key, s3, monkeypatch
 ) -> None:
-    """The final update reads the clock again; an expired link is not used,
-    and this PUT's object is deleted."""
+    """The whole body arrived before the expiry, the update runs after it:
+    the file is stored, not refused after it was sent."""
     from hailhq.api.routes import uploads as uploads_routes
 
     _, _, plain = org_and_key
@@ -827,5 +827,18 @@ async def test_a_link_that_expires_during_its_put_is_410(
 
     monkeypatch.setattr(uploads_routes, "_now", later)
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 410, resp.text
-    s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
+    assert resp.status_code == 200, resp.text
+    s3.delete.assert_not_awaited()
+
+
+async def test_the_winner_deletes_earlier_attempts(client, org_and_key, s3) -> None:
+    """An earlier PUT cut off after its S3 write left an object; the PUT that
+    marks the link used deletes every other object under the link's key."""
+    org_id, _, plain = org_and_key
+    link = await _link(client, plain)
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 200, resp.text
+    key = s3.put_attachment.await_args.args[0]
+    s3.delete_prefix.assert_awaited_once_with(
+        f"verification-uploads/{org_id}/{link['id']}", keep=key
+    )

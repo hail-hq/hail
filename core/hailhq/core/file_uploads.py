@@ -46,6 +46,10 @@ VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
 # How long an upload link works, and how many unused ones an org may hold.
 LINK_TTL = timedelta(minutes=15)
 MAX_PENDING_LINKS = 50
+# The link sweep waits this long past a link's expiry. A PUT's body read
+# ends by the expiry, so this leaves its S3 write and final update time to
+# finish before the sweep deletes the link's objects.
+LINK_SWEEP_GRACE = timedelta(minutes=15)
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
 
@@ -94,6 +98,15 @@ def object_key(purpose: str, organization_id: UUID, upload_id: UUID) -> str:
     return f"{_PREFIXES[purpose]}{organization_id}/{upload_id}"
 
 
+def object_prefix(s3_key: str) -> str:
+    """The prefix holding every object of one upload: its key without the
+    ``.<attempt>`` suffix. A PUT cut off between its S3 write and its update
+    can leave an attempt object behind, so cleanups delete this prefix, not
+    one key. Upload ids are UUIDs, so no other upload shares the prefix."""
+    head, _, name = s3_key.rpartition("/")
+    return f"{head}/{name.split('.', 1)[0]}"
+
+
 def new_token() -> str:
     """32 random bytes, URL-safe."""
     return secrets.token_urlsafe(32)
@@ -116,6 +129,7 @@ async def delete_org_verification_uploads(
 
 
 __all__ = [
+    "LINK_SWEEP_GRACE",
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",
@@ -130,5 +144,6 @@ __all__ = [
     "max_bytes",
     "new_token",
     "object_key",
+    "object_prefix",
     "valid_content_type",
 ]

@@ -59,6 +59,7 @@ from hailhq.core.file_uploads import (
     VERIFICATION_FILE_TYPES,
     VERIFICATION_MAX_FILE_BYTES,
     VERIFICATION_UPLOAD_TTL,
+    object_prefix,
 )
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
@@ -2254,7 +2255,8 @@ async def _delete_used_uploads(
     # Plain values first: a rollback below expires the ORM objects.
     targets = [(upload.id, upload.s3_key) for upload in uploads]
     results = await asyncio.gather(
-        *(s3.delete(s3_key) for _, s3_key in targets), return_exceptions=True
+        *(s3.delete_prefix(object_prefix(s3_key)) for _, s3_key in targets),
+        return_exceptions=True,
     )
     deleted = []
     for (upload_id, _), result in zip(targets, results):

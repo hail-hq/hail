@@ -45,6 +45,7 @@ from hailhq.core.file_uploads import (
     max_bytes,
     new_token,
     object_key,
+    object_prefix,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -218,15 +219,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _server_full() -> bool:
+    return _reads_total >= MAX_CONCURRENT_BODY_READS
+
+
 def _take_read(org: UUID) -> bool:
     """Count one more body read, for the process and for ``org``. False,
     counting nothing, when either cap is reached. Synchronous: no await
     between the check and the count."""
     global _reads_total
-    if (
-        _reads_total >= MAX_CONCURRENT_BODY_READS
-        or _org_reads.get(org, 0) >= MAX_BODY_READS_PER_ORG
-    ):
+    if _server_full() or _org_reads.get(org, 0) >= MAX_BODY_READS_PER_ORG:
         return False
     _reads_total += 1
     _org_reads[org] = _org_reads.get(org, 0) + 1
@@ -280,7 +282,12 @@ async def _read_body(request: Request, limit: int) -> bytes:
                 "10 minutes. The link is not used up."
             )
         },
-        410: {"description": "The link expired, also while its body was sent."},
+        410: {
+            "description": (
+                "The link had expired when the PUT started. A PUT that starts "
+                "in time is stored, also if it ends after the expiry."
+            )
+        },
         413: {"description": "The file is larger than the link's `max_bytes`."},
         503: {
             "description": (
@@ -318,15 +325,15 @@ async def put_file_upload(
     """Send the file's bytes to an upload link. No Authorization header.
 
     Works once. Unknown id, wrong token or a used link are all 404 with one
-    message; an expired link is 410. A body
-    that does not arrive before the link expires (10 minutes at most) is
-    408. Empty body: 422. A verification document whose first bytes are not
+    message; a link already expired when the PUT starts is 410. A PUT that
+    starts in time is stored, also if it ends after the expiry. A body that
+    does not arrive before the link expires (10 minutes at most) is 408. Empty body: 422. A verification document whose first bytes are not
     the declared JPEG, PNG or PDF: 422.
     """
     if s3 is None:
         raise _unavailable()
     # A full server refuses before it touches the database.
-    if _reads_total >= MAX_CONCURRENT_BODY_READS:
+    if _server_full():
         raise _busy()
     token_hash = hash_token(token)
     row = await db.get(FileUpload, upload_id)
@@ -336,10 +343,16 @@ async def put_file_upload(
         or not hmac.compare_digest(row.token_hash, token_hash)
     ):
         raise _not_found()
-    if row.link_expires_at is None or row.link_expires_at <= _now():
+    started = _now()
+    if row.link_expires_at is None or row.link_expires_at <= started:
         raise _expired()
     org = row.organization_id
-    link = (row.link_expires_at, row.purpose, row.content_type, row.s3_key)
+    link = {
+        "expires": row.link_expires_at,
+        "purpose": row.purpose,
+        "content_type": row.content_type,
+        "base_key": row.s3_key,
+    }
     # Nothing is held open while the body arrives.
     await db.rollback()
 
@@ -349,7 +362,15 @@ async def put_file_upload(
     if not _take_read(org):
         raise _busy()
     try:
-        return await _store(db, s3, request, upload_id, token_hash, *link)
+        return await _store(
+            db,
+            s3,
+            request,
+            upload_id=upload_id,
+            token_hash=token_hash,
+            started=started,
+            **link,
+        )
     finally:
         _drop_read(org)
 
@@ -358,7 +379,9 @@ async def _store(
     db: AsyncSession,
     s3: S3MailClient,
     request: Request,
+    *,
     upload_id: UUID,
+    started: datetime,
     token_hash: str,
     expires: datetime,
     purpose: str,
@@ -369,9 +392,10 @@ async def _store(
 
     The link has no in-between state. Each PUT writes its own object key, so
     two PUTs to one link never overwrite each other. The update that marks
-    the link used also points it at this PUT's key. If another PUT won, or
-    the link expired or went away, this PUT deletes its own object. A
-    failure before the update leaves the link usable."""
+    the link used also points it at this PUT's key, and the winner then
+    deletes any other attempt objects. If another PUT won, or the link went
+    away, this PUT deletes its own object. A failure before the update
+    leaves the link usable; the link sweep removes what it left."""
     try:
         async with asyncio.timeout(_read_deadline(expires, _now())):
             payload = await _read_body(request, max_bytes(purpose))
@@ -399,8 +423,9 @@ async def _store(
             detail="storage unavailable; try again",
         ) from exc
 
-    # If this fails, the object is left for the sweeps: the row may point at
-    # it if the commit reached the database before the error.
+    # If this fails, the object stays: the row may point at it if the commit
+    # reached the database before the error. Otherwise the next PUT that
+    # wins, or the link sweep, deletes it.
     now = _now()
     stored = (
         await db.execute(
@@ -409,7 +434,8 @@ async def _store(
                 FileUpload.id == upload_id,
                 FileUpload.token_hash == token_hash,
                 FileUpload.uploaded_at.is_(None),
-                FileUpload.link_expires_at > now,
+                # Valid when this PUT started; its read ended by the expiry.
+                FileUpload.link_expires_at > started,
             )
             .values(
                 token_hash=None,
@@ -438,6 +464,14 @@ async def _store(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
         raise _expired() if expires <= now else _not_found()
+    # Objects of earlier PUTs to this link that were cut off after their
+    # S3 write. Usually none; best effort.
+    try:
+        await s3.delete_prefix(object_prefix(key), keep=key)
+    except Exception:
+        logger.warning(
+            "upload %s: could not delete earlier attempts", upload_id, exc_info=True
+        )
     return FileUploadResponse.model_validate(stored)
 
 

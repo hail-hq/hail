@@ -748,11 +748,12 @@ paths:
 
         Works once. Unknown id, wrong token or a used link are all 404 with one
 
-        message; an expired link is 410. A body
+        message; a link already expired when the PUT starts is 410. A PUT that
 
-        that does not arrive before the link expires (10 minutes at most) is
+        starts in time is stored, also if it ends after the expiry. A body that
 
-        408. Empty body: 422. A verification document whose first bytes are not
+        does not arrive before the link expires (10 minutes at most) is 408. Empty
+        body: 422. A verification document whose first bytes are not
 
         the declared JPEG, PNG or PDF: 422."
       operationId: put_file_upload
@@ -809,7 +810,9 @@ paths:
             The body did not arrive before the link expired, or within
             10 minutes. The link is not used up.
         "410":
-          description: The link expired, also while its body was sent.
+          description:
+            The link had expired when the PUT started. A PUT that starts
+            in time is stored, also if it ends after the expiry.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":

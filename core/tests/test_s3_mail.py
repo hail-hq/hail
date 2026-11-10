@@ -69,6 +69,19 @@ def test_delete_prefix_deletes_every_page():
     assert stub.delete_objects.call_count == 2
 
 
+def test_delete_prefix_keeps_the_named_key():
+    stub = MagicMock()
+    stub.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "p/id.a"}, {"Key": "p/id.b"}]},
+    ]
+    stub.delete_objects.return_value = {}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    assert asyncio.run(client.delete_prefix("p/id", keep="p/id.b")) == 1
+    stub.delete_objects.assert_called_once_with(
+        Bucket="hail-inbound", Delete={"Objects": [{"Key": "p/id.a"}], "Quiet": True}
+    )
+
+
 def test_delete_prefix_raises_when_s3_keeps_a_file():
     stub = MagicMock()
     stub.get_paginator.return_value.paginate.return_value = [

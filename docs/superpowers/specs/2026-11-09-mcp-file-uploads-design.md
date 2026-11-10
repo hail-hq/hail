@@ -89,6 +89,16 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
 - Mark the link used (clear `token_hash`, set `uploaded_at`, `size_bytes`,
   `sha256`) in the same transaction, guarded so two concurrent PUTs cannot
   both succeed.
+  - The link has no in-between state. Each PUT writes its own object key
+    (the link's key plus `.<attempt>`), then one atomic update marks the link
+    used and points it at that key.
+  - The PUT that loses a race deletes its own object. The winner deletes any
+    other attempt objects. Cleanups delete the upload's whole key prefix.
+  - A PUT that starts before the expiry is stored, also if it ends after it.
+    The link sweep waits 15 minutes past the expiry, then deletes the objects
+    first and the row after.
+  - Body reads are capped per process (8) and per organization (2). Over
+    either cap: 503 with `Retry-After`, and the link still works.
 - Response 200: `{id, purpose, filename, content_type, size_bytes, sha256}`.
 - Must be reachable without auth. Check the rate limiter and any auth
   middleware let a request with no bearer through. The general limit keys

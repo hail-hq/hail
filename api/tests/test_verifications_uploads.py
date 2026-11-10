@@ -106,7 +106,7 @@ async def test_submit_reads_an_uploaded_document(
     assert doc.file.content_type == "image/jpeg"
     s3.fetch_raw.assert_awaited_once_with(row.s3_key)
     # Used: the object and the row are gone.
-    s3.delete.assert_awaited_once_with(row.s3_key)
+    s3.delete_prefix.assert_awaited_once_with(row.s3_key)
     async_session.expire_all()
     assert await async_session.get(FileUpload, row.id) is None
 
@@ -120,7 +120,7 @@ async def test_submit_keeps_the_upload_when_the_carrier_refuses(
     carrier.problems = [Problem(field="first_name", message="First name is wrong.")]
     resp = await _post(client, key, **{"upload.proof_of_identity": str(row_id)})
     assert resp.status_code == 422
-    s3.delete.assert_not_awaited()
+    s3.delete_prefix.assert_not_awaited()
     async_session.expire_all()
     assert await async_session.get(FileUpload, row_id) is not None
 
@@ -160,7 +160,7 @@ async def test_a_failed_cleanup_does_not_fail_the_submit(
     first = await _upload(async_session, org_id)
     second = await _upload(async_session, org_id)
     first_id, second_id = first.id, second.id
-    s3.delete.side_effect = [RuntimeError("s3 down"), None]
+    s3.delete_prefix.side_effect = [RuntimeError("s3 down"), None]
     resp = await _post(
         client,
         key,
@@ -173,7 +173,7 @@ async def test_a_failed_cleanup_does_not_fail_the_submit(
         },
     )
     assert resp.status_code == 201, resp.text
-    assert s3.delete.await_count == 2
+    assert s3.delete_prefix.await_count == 2
     async_session.expire_all()
     assert await async_session.get(FileUpload, first_id) is not None
     assert await async_session.get(FileUpload, second_id) is None
@@ -289,7 +289,7 @@ async def test_check_passes_and_names_each_file(
     assert await _rows(async_session, CarrierVerification) == 0
     assert await _rows(async_session, AccountCredit) == credits
     assert await base._balance(async_session, org_id) == balance
-    s3.delete.assert_not_awaited()
+    s3.delete_prefix.assert_not_awaited()
     async_session.expire_all()
     assert await async_session.get(FileUpload, row_id) is not None
 

@@ -79,3 +79,12 @@ async def test_delete_org_verification_uploads_deletes_the_prefix() -> None:
     org = uuid4()
     assert await file_uploads.delete_org_verification_uploads(org, store) == 2
     store.delete_prefix.assert_awaited_once_with(f"verification-uploads/{org}/")
+
+
+def test_object_prefix_drops_the_attempt_suffix() -> None:
+    from hailhq.core.file_uploads import object_prefix
+
+    base = "verification-uploads/0b6c2f1e-0000-4000-8000-000000000001/9d7e1c2a-0000-4000-8000-000000000002"
+    assert object_prefix(f"{base}.3f9a0c") == base
+    # A direct upload has no suffix.
+    assert object_prefix(base) == base

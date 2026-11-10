@@ -78,7 +78,7 @@ async def test_tick_deletes_only_stale_unused_rows(async_session: AsyncSession) 
     processed = await worker.tick()
 
     assert processed == 1
-    s3.delete.assert_awaited_once_with(stale_unused.s3_key)
+    s3.delete_prefix.assert_awaited_once_with(stale_unused.s3_key)
 
     remaining_ids = set(
         (await async_session.execute(select(FileUpload.id))).scalars().all()
@@ -103,13 +103,13 @@ async def test_tick_commits_each_row_independently_of_mid_batch_failure(
     row3 = await _make_row(async_session, created_at=now - timedelta(hours=28))
 
     s3 = AsyncMock()
-    s3.delete.side_effect = [None, RuntimeError("s3 down"), None]
+    s3.delete_prefix.side_effect = [None, RuntimeError("s3 down"), None]
     worker = _worker(async_session, s3)
 
     processed = await worker.tick()
 
     assert processed == 2
-    assert s3.delete.await_count == 3
+    assert s3.delete_prefix.await_count == 3
 
     remaining_ids = set(
         (await async_session.execute(select(FileUpload.id))).scalars().all()
@@ -131,6 +131,13 @@ async def test_tick_deletes_expired_links_but_keeps_live_ones(
     now = datetime.now(timezone.utc)
     expired = await _make_row(
         async_session,
+        created_at=now - timedelta(minutes=40),
+        uploaded=False,
+        link_expires_at=now - timedelta(minutes=20),
+    )
+    # Past its expiry but inside the grace: a PUT may still be finishing.
+    recent = await _make_row(
+        async_session,
         created_at=now - timedelta(minutes=20),
         uploaded=False,
         link_expires_at=now - timedelta(minutes=5),
@@ -145,27 +152,28 @@ async def test_tick_deletes_expired_links_but_keeps_live_ones(
     assert await _worker(async_session, s3).tick() == 1
     remaining = await _ids(async_session)
     assert expired.id not in remaining
+    assert recent.id in remaining
     assert live.id in remaining
     # Cut-off PUTs may have left objects under the link's key.
-    s3.delete_prefix.assert_awaited_once_with(f"{expired.s3_key}.")
+    s3.delete_prefix.assert_awaited_once_with(expired.s3_key)
     s3.delete.assert_not_awaited()
 
 
 async def test_tick_keeps_an_expired_link_row_when_s3_fails(
     async_session: AsyncSession,
 ) -> None:
-    """The row is deleted first; an S3 error only logs."""
+    """The objects go first; a failed S3 call keeps the row for next tick."""
     now = datetime.now(timezone.utc)
     expired = await _make_row(
         async_session,
-        created_at=now - timedelta(minutes=20),
+        created_at=now - timedelta(minutes=40),
         uploaded=False,
-        link_expires_at=now - timedelta(minutes=5),
+        link_expires_at=now - timedelta(minutes=20),
     )
     s3 = AsyncMock()
     s3.delete_prefix.side_effect = RuntimeError("s3 down")
-    assert await _worker(async_session, s3).tick() == 1
-    assert expired.id not in await _ids(async_session)
+    assert await _worker(async_session, s3).tick() == 0
+    assert expired.id in await _ids(async_session)
 
 
 async def test_tick_deletes_verification_documents_after_an_hour(
@@ -187,7 +195,7 @@ async def test_tick_deletes_verification_documents_after_an_hour(
     remaining = await _ids(async_session)
     assert old.id not in remaining
     assert fresh.id in remaining
-    s3.delete.assert_awaited_once_with(old.s3_key)
+    s3.delete_prefix.assert_awaited_once_with(old.s3_key)
 
 
 async def test_tick_never_treats_a_verification_document_as_an_attachment(
@@ -205,3 +213,22 @@ async def test_tick_never_treats_a_verification_document_as_an_attachment(
 def test_worker_runs_every_ten_minutes() -> None:
     worker = EmailAttachmentGcWorker(session_factory=None, s3_factory=AsyncMock)
     assert worker._poll_interval == 600.0
+
+
+async def test_tick_deletes_every_attempt_object_of_an_uploaded_row(
+    async_session: AsyncSession,
+) -> None:
+    """A PUT cut off before its update can leave an object beside the one the
+    row points at; the sweep deletes the upload's whole prefix."""
+    now = datetime.now(timezone.utc)
+    old = await _make_row(
+        async_session,
+        created_at=now - timedelta(minutes=61),
+        purpose="verification_document",
+    )
+    base = old.s3_key
+    old.s3_key = f"{base}.4c1d"
+    await async_session.commit()
+    s3 = AsyncMock()
+    assert await _worker(async_session, s3).tick() == 1
+    s3.delete_prefix.assert_awaited_once_with(base)
