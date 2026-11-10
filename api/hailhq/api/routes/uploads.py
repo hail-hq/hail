@@ -56,7 +56,7 @@ from hailhq.core.schemas import (
     FileUploadResponse,
 )
 from hailhq.core.urls import join_url
-from sqlalchemy import Row, func, select, update
+from sqlalchemy import Row, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -222,12 +222,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _update_now() -> datetime:
-    """The instant the final update compares with the store window. Its own
-    function so tests can move only this reading."""
-    return _now()
-
-
 def _server_full() -> bool:
     return _reads_total >= MAX_CONCURRENT_BODY_READS
 
@@ -281,14 +275,16 @@ async def _read_body(request: Request, limit: int) -> bytes:
     responses={
         404: {
             "description": (
-                "Unknown link, wrong token, or already used (also when another "
-                "PUT to the same link finished first)."
+                "Unknown link, wrong token, already used (also when another "
+                "PUT to the same link finished first), or removed while the "
+                "file was stored (a closed organization)."
             )
         },
         408: {
             "description": (
                 "The body did not arrive before the link expired, or within "
-                "10 minutes. The link is not used up."
+                f"{int(MAX_BODY_READ_SECONDS // 60)} minutes. The link is not "
+                "used up."
             )
         },
         410: {
@@ -407,8 +403,9 @@ async def _store(
     two PUTs to one link never overwrite each other. The update that marks
     the link used also points it at this PUT's key, and the winner then
     deletes any other attempt objects. If the update matches nothing, this
-    PUT deletes its own object and answers 410 when the update ran past the
-    store window (``LINK_SWEEP_GRACE`` after the expiry), 404 otherwise. A
+    PUT deletes its own object and answers from ``_miss``: 404 when another
+    PUT used the link, 410 past the store window (``LINK_SWEEP_GRACE`` after
+    the expiry, on the database clock), 404 otherwise. A
     failure before the update leaves the link usable; the link sweep
     removes what it left. Expiry is checked when the PUT starts (410) and
     again in the update (the store window)."""
@@ -431,7 +428,7 @@ async def _store(
         raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
 
     key = f"{base_key}.{uuid4().hex}"
-    stored, updated_at = await _write_and_mark(
+    stored = await _write_and_mark(
         db, s3, upload_id, token_hash, key, payload, content_type
     )
     if stored is None:
@@ -442,12 +439,7 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        # Decided with the instant the update used: past the store window
-        # is 410 (make a new link); otherwise another PUT used the link, or
-        # it was removed (used by a verification, or a closed organization).
-        if expires < updated_at - LINK_SWEEP_GRACE:
-            raise _expired()
-        raise _not_found()
+        raise await _miss(db, upload_id, expires)
     # Objects of earlier PUTs to this link that were cut off after their S3
     # write. Usually none. After the response, so no read slot waits on it.
     background.add_task(_delete_earlier_attempts, s3, upload_id, key)
@@ -462,10 +454,9 @@ async def _write_and_mark(
     key: str,
     payload: bytes,
     content_type: str,
-) -> tuple[Row | None, datetime]:
+) -> Row | None:
     """Write this PUT's object, then mark the link used and point it there.
-    Returns the stored row (None when the link is used, gone, or past the
-    store window) and the instant the update used."""
+    None when the link is used, gone, or past the store window."""
     # Hashing 25 MB takes a while: off the event loop.
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
     try:
@@ -479,7 +470,8 @@ async def _write_and_mark(
     # If this fails, the object stays: the row may point at it if the commit
     # reached the database before the error. Otherwise the next PUT that
     # wins, or the link sweep, deletes it.
-    now = _update_now()
+    # The store window is judged on the database clock, the same clock the
+    # link sweep uses, so the two rules are exact opposites on any host.
     stored = (
         await db.execute(
             update(FileUpload)
@@ -489,11 +481,11 @@ async def _write_and_mark(
                 FileUpload.uploaded_at.is_(None),
                 # The link sweep's rule, reversed: a row the sweep may take is
                 # never marked used, so the two never overlap.
-                FileUpload.link_expires_at >= now - LINK_SWEEP_GRACE,
+                FileUpload.link_expires_at >= func.now() - LINK_SWEEP_GRACE,
             )
             .values(
                 token_hash=None,
-                uploaded_at=now,
+                uploaded_at=func.now(),
                 size_bytes=len(payload),
                 sha256=digest,
                 s3_key=key,
@@ -509,7 +501,33 @@ async def _write_and_mark(
         )
     ).one_or_none()
     await db.commit()
-    return stored, now
+    return stored
+
+
+async def _miss(db: AsyncSession, upload_id: UUID, expires: datetime) -> HTTPException:
+    """Why the final update matched nothing, on the database clock: a link
+    another PUT used is 404; a link past the store window, unused or swept,
+    is 410 (make a new link); a link removed inside the window (a closed
+    organization) is 404."""
+    try:
+        used, past = (
+            await db.execute(
+                select(
+                    select(FileUpload.uploaded_at)
+                    .where(FileUpload.id == upload_id)
+                    .scalar_subquery()
+                    .is_not(None),
+                    literal(expires) < func.now() - LINK_SWEEP_GRACE,
+                )
+            )
+        ).one()
+        await db.rollback()
+    except Exception:
+        logger.warning("upload %s: could not read why it missed", upload_id)
+        return _not_found()
+    if used:
+        return _not_found()
+    return _expired() if past else _not_found()
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

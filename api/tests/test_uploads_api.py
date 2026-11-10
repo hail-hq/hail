@@ -605,9 +605,8 @@ async def test_two_links_at_once_never_pass_the_cap(
 async def test_a_link_removed_during_its_put_is_404_and_leaves_no_object(
     client, org_and_key, s3, async_session
 ) -> None:
-    """The row went away while the body was stored (used by a verification,
-    or a closed organization): the object is removed, and the answer is 404,
-    not 'make a new link'."""
+    """The row went away inside the store window (a closed organization):
+    the object is removed, and the answer is 404, not 'make a new link'."""
     from sqlalchemy import delete
 
     org_id, _, plain = org_and_key
@@ -811,79 +810,93 @@ async def test_a_failed_final_commit_leaves_the_link_usable(
     assert again.status_code == 200, again.text
 
 
-def _clock_for_final_update(monkeypatch, at: datetime) -> None:
-    """Only the final update's reading of the clock is ``at``."""
+async def _expire_link(async_session, link: dict, ago: timedelta, monkeypatch):
+    """Make the link's expiry ``ago`` before now in the database, while the
+    PUT's start check (Python clock) still sees it as open. The final update
+    then judges the store window on the database clock."""
     from hailhq.api.routes import uploads as uploads_routes
 
-    monkeypatch.setattr(uploads_routes, "_update_now", lambda: at)
-
-
-def _expires(link: dict) -> datetime:
-    return datetime.fromisoformat(link["expires_at"].replace("Z", "+00:00"))
+    expires = datetime.now(timezone.utc) - ago
+    row = await async_session.get(FileUpload, UUID(link["id"]))
+    row.link_expires_at = expires
+    await async_session.commit()
+    monkeypatch.setattr(uploads_routes, "_now", lambda: expires - timedelta(minutes=1))
 
 
 async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
-    client, org_and_key, s3, monkeypatch
+    client, org_and_key, s3, monkeypatch, async_session
 ) -> None:
     """The body arrived before the expiry, the update runs after it but
     inside the store window: the file is stored."""
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    _clock_for_final_update(
-        monkeypatch, _expires(link) + LINK_SWEEP_GRACE - timedelta(minutes=5)
+    await _expire_link(
+        async_session, link, LINK_SWEEP_GRACE - timedelta(minutes=1), monkeypatch
     )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 200, resp.text
     s3.delete.assert_not_awaited()
 
 
-async def test_the_store_window_includes_its_last_instant(
-    client, org_and_key, s3, monkeypatch
-) -> None:
-    """Exactly ``LINK_SWEEP_GRACE`` after the expiry the PUT may still store;
-    the sweep takes a link only strictly after that."""
-    _, _, plain = org_and_key
-    link = await _link(client, plain)
-    _clock_for_final_update(monkeypatch, _expires(link) + LINK_SWEEP_GRACE)
-    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 200, resp.text
-
-
 async def test_storing_past_the_window_is_410_and_leaves_no_object(
-    client, org_and_key, s3, monkeypatch
+    client, org_and_key, s3, monkeypatch, async_session
 ) -> None:
-    """One microsecond past the window the sweep may own the row, so the PUT
-    does not mark it used."""
+    """Past the window the sweep may own the row, so the PUT does not mark
+    it used, deletes its object and asks for a new link."""
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    _clock_for_final_update(
-        monkeypatch,
-        _expires(link) + LINK_SWEEP_GRACE + timedelta(microseconds=1),
+    await _expire_link(
+        async_session, link, LINK_SWEEP_GRACE + timedelta(minutes=1), monkeypatch
     )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 410, resp.text
     s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
 
 
-async def test_a_put_that_lost_to_another_is_404_and_deletes_its_object(
+async def test_a_link_swept_during_its_put_is_410(
     client, org_and_key, s3, monkeypatch, async_session
 ) -> None:
-    """The link was already used: 404 (not 410, which would ask for a new
-    link and a second upload of a file already stored)."""
+    """The sweep removed the row (past the window): make a new link."""
+    from sqlalchemy import delete
+
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
-    row = await async_session.get(FileUpload, UUID(link["id"]))
-    await async_session.refresh(row)
-    # Give the used link its token back, as if a second PUT read it in time.
+    await _expire_link(
+        async_session, link, LINK_SWEEP_GRACE + timedelta(minutes=1), monkeypatch
+    )
+
+    async def swept(*_args):
+        await async_session.execute(
+            delete(FileUpload).where(FileUpload.id == UUID(link["id"]))
+        )
+        await async_session.commit()
+
+    s3.put_attachment.side_effect = swept
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 410, resp.text
+
+
+async def test_a_put_that_lost_to_another_is_404_even_past_the_window(
+    client, org_and_key, s3, monkeypatch, async_session
+) -> None:
+    """The link was already used: 404, not 410, which would ask for a new
+    link and a second upload of a file already stored."""
     from urllib.parse import parse_qs, urlparse
 
     from hailhq.core.file_uploads import hash_token
 
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
+    # Give the used link its token back, as if a second PUT read it in time.
+    row = await async_session.get(FileUpload, UUID(link["id"]))
+    await async_session.refresh(row)
     token = parse_qs(urlparse(link["upload_url"]).query)["token"][0]
     row.token_hash = hash_token(token)
     await async_session.commit()
-    # The row is already used, so this PUT's update matches nothing.
+    await _expire_link(
+        async_session, link, LINK_SWEEP_GRACE + timedelta(hours=1), monkeypatch
+    )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 404, resp.text
     s3.delete.assert_awaited_with(s3.put_attachment.await_args.args[0])

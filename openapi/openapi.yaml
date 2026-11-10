@@ -806,8 +806,9 @@ paths:
                 type: integer
         "404":
           description:
-            Unknown link, wrong token, or already used (also when another
-            PUT to the same link finished first).
+            Unknown link, wrong token, already used (also when another
+            PUT to the same link finished first), or removed while the file was stored
+            (a closed organization).
         "408":
           description:
             The body did not arrive before the link expired, or within

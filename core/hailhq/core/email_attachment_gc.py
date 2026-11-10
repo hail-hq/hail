@@ -32,7 +32,7 @@ from hailhq.core.file_uploads import (
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class EmailAttachmentGcWorker:
     async def tick(self) -> int:
         """Run every sweep once. Returns how many rows were deleted."""
         now = datetime.now(timezone.utc)
-        deleted = await self._sweep_links(now)
+        deleted = await self._sweep_links()
         deleted += await self._sweep_uploaded(
             (FileUpload.purpose == "verification_document")
             & (FileUpload.uploaded_at < now - VERIFICATION_UPLOAD_TTL)
@@ -139,16 +139,14 @@ class EmailAttachmentGcWorker:
             deleted += 1
         return deleted
 
-    async def _sweep_links(self, now: datetime) -> int:
+    async def _sweep_links(self) -> int:
         """Delete upload links never used, ``LINK_SWEEP_GRACE`` past expiry.
 
         The row goes first, and only while it is still unused. A PUT marks a
         link used only while it is within ``LINK_SWEEP_GRACE`` of its expiry,
         the opposite of this rule, so the two never take the same row. A PUT
-        later than that deletes its own object and answers 410. Each API
-        process runs this worker in its lifespan; with several processes on
-        several hosts, their clocks must agree (NTP), or the two rules can
-        overlap by the clock difference. Then
+        later than that deletes its own object and answers 410. Both rules
+        read the database clock, so they hold with several API hosts. Then
         the objects of PUTs cut off before their update, usually none. A
         failed S3 delete only logs, so one bad row never blocks the batch;
         such an object stays. With the Terraform module, verification
@@ -156,7 +154,9 @@ class EmailAttachmentGcWorker:
         """
         expired = (
             FileUpload.uploaded_at.is_(None),
-            FileUpload.link_expires_at < now - LINK_SWEEP_GRACE,
+            # The database clock, as in the PUT's final update: the two
+            # rules are exact opposites on any host.
+            FileUpload.link_expires_at < func.now() - LINK_SWEEP_GRACE,
         )
         async with self._session_factory() as session:
             stmt = (

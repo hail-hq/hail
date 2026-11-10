@@ -206,7 +206,7 @@ async def test_a_put_that_finishes_during_the_link_sweep_keeps_its_file(
     worker = EmailAttachmentGcWorker(
         session_factory=session_factory, s3_factory=lambda: s3
     )
-    assert await worker._sweep_links(now) == 0
+    assert await worker._sweep_links() == 0
     assert late.id in await _ids(async_session)
     s3.delete_prefix.assert_not_awaited()
 
