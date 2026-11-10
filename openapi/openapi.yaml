@@ -746,15 +746,17 @@ paths:
         "Send the file's bytes to an upload link. No Authorization header.
 
 
-        Works once. Unknown id, wrong token or a used link are all 404 with one
-
-        message; a link already expired when the PUT starts is 410. The body
+        Works once. A link already expired when the PUT starts is 410. The body
 
         must arrive before the link expires (and within 10 minutes), or 408.
 
-        Storing it may end after the expiry, up to 15 minutes later; after
+        Storing it may end after the expiry, up to 15 minutes later. Unknown id,
 
-        that, 410.
+        wrong token, a used link, and a file that could not be stored at the end
+
+        are all 404 with one message: make a new link if the file is not
+
+        stored. A second upload of the same file is harmless.
 
         Empty body: 422. A verification document whose first bytes are not the
 
@@ -806,18 +808,16 @@ paths:
                 type: integer
         "404":
           description:
-            Unknown link, wrong token, already used (also when another
-            PUT to the same link finished first), or removed while the file was stored
-            (a closed organization).
+            "Unknown link, wrong token, or already used. Also when the
+            file could not be stored at the end: another PUT used the link first,
+            the link was removed, or storing ended more than 15 minutes after the
+            expiry. If your file is not stored, make a new link and send it again."
         "408":
           description:
             The body did not arrive before the link expired, or within
             10 minutes. The link is not used up.
         "410":
-          description:
-            The link had expired when the PUT started, the body arrived
-            in time but storing it ended more than 15 minutes after the expiry. Make
-            a new link.
+          description: The link had expired when the PUT started. Make a new link.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":

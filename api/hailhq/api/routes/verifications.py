@@ -2214,8 +2214,7 @@ async def _usable_upload(
                 FileUpload.organization_id == organization_id,
                 FileUpload.purpose == "verification_document",
                 FileUpload.uploaded_at.is_not(None),
-                FileUpload.uploaded_at
-                > datetime.now(timezone.utc) - VERIFICATION_UPLOAD_TTL,
+                FileUpload.uploaded_at > func.now() - VERIFICATION_UPLOAD_TTL,
             )
         )
     ).scalar_one_or_none()

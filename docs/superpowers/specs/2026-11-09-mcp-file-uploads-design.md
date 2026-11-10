@@ -94,10 +94,14 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
     used and points it at that key.
   - The PUT that loses a race deletes its own object. The winner deletes any
     other attempt objects. Cleanups delete the upload's whole key prefix.
-  - The body must arrive before the expiry. Storing it may end up to 15
-    minutes after the expiry; later, the PUT answers 410 and deletes its own
-    object. The link sweep takes only links more than 15 minutes past the
-    expiry, so the PUT and the sweep never take the same row. The sweep
+  - The body must arrive before the expiry (410 if the link is already
+    expired when the PUT starts). Storing it may end up to 15 minutes after
+    the expiry. Any PUT whose final update matches nothing (another PUT won,
+    the link was removed, or storing ended later than that) deletes its own
+    object and answers 404 "make a new link if your file is not stored"; a
+    second upload of the same file is harmless. The link sweep takes only
+    links more than 15 minutes past the expiry, so the PUT and the sweep
+    never take the same row. Every upload time is on the database clock. The sweep
     deletes the row (only while still unused), then the objects. A failed S3
     delete after that leaves an object: verification documents have the
     1-day lifecycle rule as a backstop, and email attachment leftovers are

@@ -42,6 +42,8 @@ from hailhq.core.file_uploads import (
     LINK_TTL,
     MAX_PENDING_LINKS,
     hash_token,
+    link_open,
+    link_storable,
     matches_declared_type,
     max_bytes,
     new_token,
@@ -56,7 +58,7 @@ from hailhq.core.schemas import (
     FileUploadResponse,
 )
 from hailhq.core.urls import join_url
-from sqlalchemy import Row, func, literal, select, update
+from sqlalchemy import Row, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -71,7 +73,10 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
-_NOT_FOUND = "upload link not found, or already used"
+_NOT_FOUND = (
+    "upload link not found, already used, or past its time; make a new link "
+    "if your file is not stored"
+)
 # A PUT whose body arrived by the expiry may finish storing this much later.
 _STORE_GRACE_MINUTES = int(LINK_SWEEP_GRACE.total_seconds() // 60)
 # Body reads one process runs at once. Each can buffer up to the purpose's
@@ -164,7 +169,6 @@ async def create_file_upload(
     if s3 is None:
         raise _unavailable()
     org = principal.organization_id
-    now = datetime.now(timezone.utc)
     # Two links made at once must not both pass the cap. Not org_lock: that
     # one is held through SMS carrier calls.
     await key_lock(db, f"upload-links:{org}")
@@ -175,7 +179,7 @@ async def create_file_upload(
             .where(
                 FileUpload.organization_id == org,
                 FileUpload.uploaded_at.is_(None),
-                FileUpload.link_expires_at > now,
+                link_open(),
             )
         )
     ).scalar_one()
@@ -197,7 +201,8 @@ async def create_file_upload(
         content_type=body.content_type,
         s3_key=object_key(body.purpose, org, upload_id),
         token_hash=hash_token(token),
-        link_expires_at=now + LINK_TTL,
+        # The database clock, like every other upload time.
+        link_expires_at=func.now() + LINK_TTL,
     )
     db.add(row)
     await db.commit()
@@ -275,9 +280,11 @@ async def _read_body(request: Request, limit: int) -> bytes:
     responses={
         404: {
             "description": (
-                "Unknown link, wrong token, already used (also when another "
-                "PUT to the same link finished first), or removed while the "
-                "file was stored (a closed organization)."
+                "Unknown link, wrong token, or already used. Also when the "
+                "file could not be stored at the end: another PUT used the "
+                "link first, the link was removed, or storing ended more than "
+                f"{_STORE_GRACE_MINUTES} minutes after the expiry. If your "
+                "file is not stored, make a new link and send it again."
             )
         },
         408: {
@@ -289,10 +296,7 @@ async def _read_body(request: Request, limit: int) -> bytes:
         },
         410: {
             "description": (
-                "The link had expired when the PUT started, the body arrived "
-                "in time but storing it ended more than "
-                f"{_STORE_GRACE_MINUTES} minutes after the expiry. Make a new "
-                "link."
+                "The link had expired when the PUT started. Make a new link."
             )
         },
         413: {"description": "The file is larger than the link's `max_bytes`."},
@@ -332,11 +336,12 @@ async def put_file_upload(
 ) -> FileUploadResponse:
     """Send the file's bytes to an upload link. No Authorization header.
 
-    Works once. Unknown id, wrong token or a used link are all 404 with one
-    message; a link already expired when the PUT starts is 410. The body
+    Works once. A link already expired when the PUT starts is 410. The body
     must arrive before the link expires (and within 10 minutes), or 408.
-    Storing it may end after the expiry, up to 15 minutes later; after
-    that, 410.
+    Storing it may end after the expiry, up to 15 minutes later. Unknown id,
+    wrong token, a used link, and a file that could not be stored at the end
+    are all 404 with one message: make a new link if the file is not
+    stored. A second upload of the same file is harmless.
     Empty body: 422. A verification document whose first bytes are not the
     declared JPEG, PNG or PDF: 422.
     """
@@ -346,14 +351,19 @@ async def put_file_upload(
     if _server_full():
         raise _busy()
     token_hash = hash_token(token)
-    row = await db.get(FileUpload, upload_id)
+    found = (
+        await db.execute(
+            select(FileUpload, link_open()).where(FileUpload.id == upload_id)
+        )
+    ).one_or_none()
+    row, is_open = found if found is not None else (None, False)
     if (
         row is None
         or row.token_hash is None
         or not hmac.compare_digest(row.token_hash, token_hash)
     ):
         raise _not_found()
-    if row.link_expires_at is None or row.link_expires_at <= _now():
+    if row.link_expires_at is None or not is_open:
         raise _expired()
     org = row.organization_id
     link = {
@@ -403,12 +413,10 @@ async def _store(
     two PUTs to one link never overwrite each other. The update that marks
     the link used also points it at this PUT's key, and the winner then
     deletes any other attempt objects. If the update matches nothing, this
-    PUT deletes its own object and answers from ``_miss``: 404 when another
-    PUT used the link, 410 past the store window (``LINK_SWEEP_GRACE`` after
-    the expiry, on the database clock), 404 otherwise. A
-    failure before the update leaves the link usable; the link sweep
-    removes what it left. Expiry is checked when the PUT starts (410) and
-    again in the update (the store window)."""
+    PUT deletes its own object and answers 404. A failure before the update
+    leaves the link usable; the link sweep removes what it left. Expiry is
+    checked when the PUT starts (410) and again in the update (the store
+    window), both on the database clock."""
     try:
         async with asyncio.timeout(_read_deadline(expires, _now())):
             payload = await _read_body(request, max_bytes(purpose))
@@ -439,7 +447,7 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        raise await _miss(db, upload_id, expires)
+        raise _not_found()
     # Objects of earlier PUTs to this link that were cut off after their S3
     # write. Usually none. After the response, so no read slot waits on it.
     background.add_task(_delete_earlier_attempts, s3, upload_id, key)
@@ -481,7 +489,7 @@ async def _write_and_mark(
                 FileUpload.uploaded_at.is_(None),
                 # The link sweep's rule, reversed: a row the sweep may take is
                 # never marked used, so the two never overlap.
-                FileUpload.link_expires_at >= func.now() - LINK_SWEEP_GRACE,
+                link_storable(),
             )
             .values(
                 token_hash=None,
@@ -502,32 +510,6 @@ async def _write_and_mark(
     ).one_or_none()
     await db.commit()
     return stored
-
-
-async def _miss(db: AsyncSession, upload_id: UUID, expires: datetime) -> HTTPException:
-    """Why the final update matched nothing, on the database clock: a link
-    another PUT used is 404; a link past the store window, unused or swept,
-    is 410 (make a new link); a link removed inside the window (a closed
-    organization) is 404."""
-    try:
-        used, past = (
-            await db.execute(
-                select(
-                    select(FileUpload.uploaded_at)
-                    .where(FileUpload.id == upload_id)
-                    .scalar_subquery()
-                    .is_not(None),
-                    literal(expires) < func.now() - LINK_SWEEP_GRACE,
-                )
-            )
-        ).one()
-        await db.rollback()
-    except Exception:
-        logger.warning("upload %s: could not read why it missed", upload_id)
-        return _not_found()
-    if used:
-        return _not_found()
-    return _expired() if past else _not_found()
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

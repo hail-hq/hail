@@ -636,7 +636,7 @@ async def test_a_wrong_token_and_a_used_link_share_one_404(
     assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
     used = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert wrong.json() == used.json()
-    assert wrong.json()["detail"] == "upload link not found, or already used"
+    assert wrong.json()["detail"].startswith("upload link not found, already used")
 
 
 async def test_a_body_read_past_its_deadline_is_408_and_keeps_the_link(
@@ -810,96 +810,106 @@ async def test_a_failed_final_commit_leaves_the_link_usable(
     assert again.status_code == 200, again.text
 
 
-async def _expire_link(async_session, link: dict, ago: timedelta, monkeypatch):
-    """Make the link's expiry ``ago`` before now in the database, while the
-    PUT's start check (Python clock) still sees it as open. The final update
-    then judges the store window on the database clock."""
-    from hailhq.api.routes import uploads as uploads_routes
+def _expire_during_store(async_session, s3, link: dict, ago: timedelta, then=None):
+    """While the PUT writes S3 (after its start check), move the link's
+    expiry to ``ago`` before now, as if that much time had passed. The final
+    update then judges the store window on the database clock."""
 
-    expires = datetime.now(timezone.utc) - ago
-    row = await async_session.get(FileUpload, UUID(link["id"]))
-    row.link_expires_at = expires
-    await async_session.commit()
-    monkeypatch.setattr(uploads_routes, "_now", lambda: expires - timedelta(minutes=1))
+    async def put(*_args):
+        row = await async_session.get(FileUpload, UUID(link["id"]))
+        if row is not None:
+            row.link_expires_at = datetime.now(timezone.utc) - ago
+            await async_session.commit()
+        if then is not None:
+            await then()
+
+    s3.put_attachment.side_effect = put
 
 
 async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
-    client, org_and_key, s3, monkeypatch, async_session
+    client, org_and_key, s3, async_session
 ) -> None:
     """The body arrived before the expiry, the update runs after it but
     inside the store window: the file is stored."""
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    await _expire_link(
-        async_session, link, LINK_SWEEP_GRACE - timedelta(minutes=1), monkeypatch
+    _expire_during_store(
+        async_session, s3, link, LINK_SWEEP_GRACE - timedelta(minutes=1)
     )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 200, resp.text
     s3.delete.assert_not_awaited()
 
 
-async def test_storing_past_the_window_is_410_and_leaves_no_object(
-    client, org_and_key, s3, monkeypatch, async_session
+async def test_storing_past_the_window_is_404_and_leaves_no_object(
+    client, org_and_key, s3, async_session
 ) -> None:
     """Past the window the sweep may own the row, so the PUT does not mark
-    it used, deletes its object and asks for a new link."""
+    it used and deletes its own object."""
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    await _expire_link(
-        async_session, link, LINK_SWEEP_GRACE + timedelta(minutes=1), monkeypatch
+    _expire_during_store(
+        async_session, s3, link, LINK_SWEEP_GRACE + timedelta(minutes=1)
     )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 410, resp.text
+    assert resp.status_code == 404, resp.text
+    assert "make a new link" in resp.json()["detail"]
     s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
 
 
-async def test_a_link_swept_during_its_put_is_410(
-    client, org_and_key, s3, monkeypatch, async_session
+async def test_a_link_swept_during_its_put_is_404(
+    client, org_and_key, s3, async_session
 ) -> None:
-    """The sweep removed the row (past the window): make a new link."""
     from sqlalchemy import delete
 
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    await _expire_link(
-        async_session, link, LINK_SWEEP_GRACE + timedelta(minutes=1), monkeypatch
-    )
 
-    async def swept(*_args):
+    async def sweep():
         await async_session.execute(
             delete(FileUpload).where(FileUpload.id == UUID(link["id"]))
         )
         await async_session.commit()
 
-    s3.put_attachment.side_effect = swept
-    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 410, resp.text
-
-
-async def test_a_put_that_lost_to_another_is_404_even_past_the_window(
-    client, org_and_key, s3, monkeypatch, async_session
-) -> None:
-    """The link was already used: 404, not 410, which would ask for a new
-    link and a second upload of a file already stored."""
-    from urllib.parse import parse_qs, urlparse
-
-    from hailhq.core.file_uploads import hash_token
-
-    _, _, plain = org_and_key
-    link = await _link(client, plain)
-    assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
-    # Give the used link its token back, as if a second PUT read it in time.
-    row = await async_session.get(FileUpload, UUID(link["id"]))
-    await async_session.refresh(row)
-    token = parse_qs(urlparse(link["upload_url"]).query)["token"][0]
-    row.token_hash = hash_token(token)
-    await async_session.commit()
-    await _expire_link(
-        async_session, link, LINK_SWEEP_GRACE + timedelta(hours=1), monkeypatch
+    _expire_during_store(
+        async_session, s3, link, LINK_SWEEP_GRACE + timedelta(minutes=1), sweep
     )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 404, resp.text
-    s3.delete.assert_awaited_with(s3.put_attachment.await_args.args[0])
+
+
+async def test_the_store_window_rules_meet_exactly(org_and_key, async_session) -> None:
+    """At exactly LINK_SWEEP_GRACE past the expiry a PUT may store and the
+    sweep may not; one microsecond later, the reverse. now() is one value
+    inside a transaction, so the edge is set exactly."""
+    from hailhq.core.file_uploads import link_storable, link_sweepable
+    from sqlalchemy import func, select
+
+    org_id, _, _ = org_and_key
+    await async_session.commit()  # start a fresh transaction below
+    db_now = (await async_session.execute(select(func.now()))).scalar_one()
+    for offset, storable in (
+        (timedelta(0), True),
+        (timedelta(microseconds=1), False),
+    ):
+        row = FileUpload(
+            organization_id=org_id,
+            purpose="email_attachment",
+            filename="f",
+            content_type="text/plain",
+            s3_key=f"outbound-attachments/{org_id}/{uuid4()}",
+            token_hash="h",
+            link_expires_at=db_now - LINK_SWEEP_GRACE - offset,
+        )
+        async_session.add(row)
+        await async_session.flush()
+        got = (
+            await async_session.execute(
+                select(link_storable(), link_sweepable()).where(FileUpload.id == row.id)
+            )
+        ).one()
+        assert tuple(got) == (storable, not storable)
+    await async_session.rollback()
 
 
 def test_the_documented_upload_times() -> None:

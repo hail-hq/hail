@@ -23,12 +23,12 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from hailhq.core.file_uploads import (
-    LINK_SWEEP_GRACE,
     VERIFICATION_UPLOAD_TTL,
     delete_upload_objects,
+    link_sweepable,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -79,16 +79,16 @@ class EmailAttachmentGcWorker:
 
     async def tick(self) -> int:
         """Run every sweep once. Returns how many rows were deleted."""
-        now = datetime.now(timezone.utc)
+        # The database clock, the one every upload time is written with.
         deleted = await self._sweep_links()
         deleted += await self._sweep_uploaded(
             (FileUpload.purpose == "verification_document")
-            & (FileUpload.uploaded_at < now - VERIFICATION_UPLOAD_TTL)
+            & (FileUpload.uploaded_at < func.now() - VERIFICATION_UPLOAD_TTL)
         )
         deleted += await self._sweep_uploaded(
             (FileUpload.purpose == "email_attachment")
             & FileUpload.first_used_at.is_(None)
-            & (FileUpload.uploaded_at < now - UNUSED_TTL)
+            & (FileUpload.uploaded_at < func.now() - UNUSED_TTL)
         )
         return deleted
 
@@ -145,8 +145,9 @@ class EmailAttachmentGcWorker:
         The row goes first, and only while it is still unused. A PUT marks a
         link used only while it is within ``LINK_SWEEP_GRACE`` of its expiry,
         the opposite of this rule, so the two never take the same row. A PUT
-        later than that deletes its own object and answers 410. Both rules
-        read the database clock, so they hold with several API hosts. Then
+        later than that deletes its own object and answers 404. Both rules
+        (``link_storable`` and ``link_sweepable``) read the database clock,
+        so they hold with several API hosts. Then
         the objects of PUTs cut off before their update, usually none. A
         failed S3 delete only logs, so one bad row never blocks the batch;
         such an object stays. With the Terraform module, verification
@@ -154,9 +155,7 @@ class EmailAttachmentGcWorker:
         """
         expired = (
             FileUpload.uploaded_at.is_(None),
-            # The database clock, as in the PUT's final update: the two
-            # rules are exact opposites on any host.
-            FileUpload.link_expires_at < func.now() - LINK_SWEEP_GRACE,
+            link_sweepable(),
         )
         async with self._session_factory() as session:
             stmt = (

@@ -12,7 +12,6 @@ metadata + first-use so the GC worker knows what's safe to delete.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 from typing import Annotated
 from uuid import uuid4
 
@@ -29,6 +28,7 @@ from hailhq.core.file_uploads import object_key
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import EmailAttachmentUploadResponse
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -98,7 +98,7 @@ async def create_email_attachment(
         content_type=content_type,
         size_bytes=len(payload),
         s3_key=key,
-        uploaded_at=datetime.now(timezone.utc),
+        uploaded_at=func.now(),
         sha256=hashlib.sha256(payload).hexdigest(),
     )
     db.add(row)
