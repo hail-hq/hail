@@ -369,6 +369,20 @@ describe("outbound", () => {
     ).rejects.toThrow(/API key/i);
   });
 });
+describe("scaffold environment", () => {
+  it("uses the default API origin when the generated optional variable is empty", async () => {
+    vi.stubEnv("HAIL_API_URL", "");
+    const urls: string[] = [];
+    await adapter({
+      fetch: async (url: URL) => {
+        urls.push(String(url));
+        return Response.json(sms);
+      },
+    }).postMessage(threadId, "Hello");
+    expect(urls).toEqual(["https://api.hail.so/v1/sms"]);
+  });
+});
+
 describe("isolation", () => {
   it("validates IDs and prevents sending from other numbers", async () => {
     const hail = adapter();

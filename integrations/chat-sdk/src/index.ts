@@ -271,7 +271,7 @@ export class HailAdapter implements Adapter<HailThreadId, HailSms> {
     if (!apiKey)
       throw new Error("An API key is required: set HAIL_API_KEY or apiKey");
     const origin = new URL(
-      this.config.apiUrl ?? process.env.HAIL_API_URL ?? "https://api.hail.so",
+      this.config.apiUrl ?? (process.env.HAIL_API_URL || "https://api.hail.so"),
     );
     if (
       !["https:", "http:"].includes(origin.protocol) ||
