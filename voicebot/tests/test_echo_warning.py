@@ -4,7 +4,16 @@ import numpy as np
 import pytest
 from hailhq.voicebot.echo_warning import WINDOW, EchoDetector, EchoWarning
 
-from .test_recovery import Session
+from .test_recovery import Session as RecoverySession
+
+
+class Session(RecoverySession):
+    def __init__(self):
+        from livekit.agents import Agent
+
+        super().__init__()
+        self.current_agent = Agent(instructions="test")
+
 
 RATE = 8000
 
@@ -71,6 +80,12 @@ async def test_warning_is_deferred_and_spoken_only_once():
     assert "headphones" not in kwargs["instructions"]
     assert kwargs["allow_interruptions"] is False
     assert kwargs["tool_choice"] == "none"
+    # The next turn must also know that echo was confirmed and already warned.
+    context = session.current_agent.chat_ctx.copy()
+    assert any(
+        item.role == "system" and '"echo_only":true' in (item.text_content or "")
+        for item in context.messages()
+    )
     await warning.aclose()
 
 

@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import numpy as np
+from hailhq.core.prompts import ECHO_CONFIRMED_CONTEXT
 from livekit import rtc
 from livekit.agents import AgentSession
 from livekit.agents.voice import io
@@ -311,6 +312,12 @@ class EchoWarning:
             or self.session.agent_state in ("speaking", "thinking")
         ):
             return
+        # Keep the condition available after this one reply. Otherwise the
+        # warning's own returned words can prompt another, longer explanation.
+        agent = self.session.current_agent
+        context = agent.chat_ctx.copy()
+        context.add_message(role="system", content=ECHO_CONFIRMED_CONTEXT)
+        await agent.update_chat_ctx(context)
         self.session.generate_reply(
             instructions=(
                 "In the conversation's language, say only this short sentence: "

@@ -29,7 +29,33 @@ without tools and with interruptions disabled, so returned audio cannot
 immediately cut it off. It may overlap caller VAD because echo itself triggers
 VAD; there is no blanket caller-muting rule.
 
+After confirmation, private conversation context tells subsequent replies that
+returned fragments may be echo and the warning has already been requested.
+For fragments without new intent, the model returns a structured silence marker
+which the existing speech sanitizer drops. This is model-dependent handling,
+not acoustic echo cancellation or a guarantee against self-replies.
+
 The worker keeps at most 20 s of incoming samples and 12 s of generated reference
 per segment in memory. Buffers and native streams close on warning or shutdown.
 No audio is saved; `audio_echo_warning` records only delay, correlation, and
 matched-window count when the warning is requested. It is not a delivery receipt.
+
+## Phone smoke test before release
+
+Deploy the task branch to a non-production worker with the flag enabled and use
+a consenting test caller. A Vercel website preview does not run this worker.
+
+1. With a headset and a quiet line, converse normally: no echo warning or missing
+   caller turns.
+2. With repeatable speakerphone echo, let the agent finish a few sentences. Expect
+   one short warning in the call's language and one `audio_echo_warning` event.
+   Verify the line is audible and no extra explanation or stage direction follows.
+3. After the warning, ask a new question, interrupt, and request that the call end.
+   Verify real caller speech remains responsive and the warning never repeats.
+4. Check opening, IVR, and handover flows: no warning in blocked phases and no
+   warnings from expired evidence. End the call and inspect worker logs for
+   stream/task errors.
+
+Keep recordings and event timestamps together. A local loopback with real
+STT/LLM/TTS checks the pipeline, but does not validate the SIP/PSTN path,
+physical speaker/microphone acoustics, or LiveKit Cloud filter licensing.

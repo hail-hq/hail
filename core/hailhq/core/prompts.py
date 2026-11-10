@@ -64,6 +64,22 @@ PLATFORM_PRIVACY = (
     "or claim that Hail built the underlying voice technology."
 )
 
+# Added to private conversation context only after waveform-confirmed echo.
+ECHO_CONFIRMED_CONTEXT = (
+    "Echo has been confirmed on this call: copies of your own voice are returning. "
+    "A dedicated reply requests the one short warning. Follow that explicit "
+    "request for the warning reply only. On other turns, do not repeat or expand "
+    "the warning, apologize for the echo, or ask audio-check questions "
+    "unless the caller clearly asks a new question about it. Short fragments "
+    "repeating words you just spoke can be returned audio. If such a fragment "
+    'contains no new request or intent, return exactly {"echo_only":true} with '
+    "no other content. The speech layer suppresses this marker. Do not output "
+    "stage directions, describe waiting, or explain your reasoning. "
+    "Continue normally on genuinely new speech or "
+    "questions, and always honor requests to stop or end the call. If the caller "
+    "explicitly asks for help, keep it short and phrase advice as a recommendation."
+)
+
 # In every call's prompt, inbound and outbound. The full guide below is returned
 # by the hail_settings_help tool, so calls that never ask about settings do not
 # carry it.
