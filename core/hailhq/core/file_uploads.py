@@ -46,11 +46,8 @@ VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
 # How long an upload link works, and how many unused ones an org may hold.
 LINK_TTL = timedelta(minutes=15)
 MAX_PENDING_LINKS = 50
-# After its body read, which ends by the link's expiry, a PUT has at most
-# this long to write S3 and mark the link used.
-STORE_TIMEOUT = timedelta(minutes=5)
-# The link sweep waits this long past a link's expiry, longer than
-# STORE_TIMEOUT, so no PUT is still running when it deletes the objects.
+# The link sweep waits this long past a link's expiry, so a PUT whose body
+# arrived in time can still write S3 and mark the link used.
 LINK_SWEEP_GRACE = timedelta(minutes=15)
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
@@ -141,7 +138,6 @@ __all__ = [
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",
-    "STORE_TIMEOUT",
     "VERIFICATION_FILE_TYPES",
     "VERIFICATION_MAX_FILE_BYTES",
     "VERIFICATION_UPLOADS_PREFIX",

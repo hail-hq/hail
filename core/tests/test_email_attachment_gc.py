@@ -159,10 +159,11 @@ async def test_tick_deletes_expired_links_but_keeps_live_ones(
     s3.delete.assert_not_awaited()
 
 
-async def test_tick_keeps_an_expired_link_row_when_s3_fails(
+async def test_tick_deletes_an_expired_link_row_even_when_s3_fails(
     async_session: AsyncSession,
 ) -> None:
-    """The objects go first; a failed S3 call keeps the row for next tick."""
+    """The row goes first, so one failing row never blocks the batch; a
+    failed S3 call only logs."""
     now = datetime.now(timezone.utc)
     expired = await _make_row(
         async_session,
@@ -172,8 +173,42 @@ async def test_tick_keeps_an_expired_link_row_when_s3_fails(
     )
     s3 = AsyncMock()
     s3.delete_prefix.side_effect = RuntimeError("s3 down")
-    assert await _worker(async_session, s3).tick() == 0
-    assert expired.id in await _ids(async_session)
+    assert await _worker(async_session, s3).tick() == 1
+    assert expired.id not in await _ids(async_session)
+
+
+async def test_a_put_that_finishes_during_the_link_sweep_keeps_its_file(
+    async_session: AsyncSession,
+) -> None:
+    """The PUT marks the link used between the sweep's select and its row
+    delete: the guarded delete matches nothing, and no object is deleted."""
+    now = datetime.now(timezone.utc)
+    late = await _make_row(
+        async_session,
+        created_at=now - timedelta(minutes=40),
+        uploaded=False,
+        link_expires_at=now - timedelta(minutes=20),
+    )
+    calls = 0
+
+    @asynccontextmanager
+    async def session_factory():
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # the row delete, after the select
+            late.uploaded_at = now
+            late.size_bytes = 10
+            late.token_hash = None
+            await async_session.commit()
+        yield async_session
+
+    s3 = AsyncMock()
+    worker = EmailAttachmentGcWorker(
+        session_factory=session_factory, s3_factory=lambda: s3
+    )
+    assert await worker._sweep_links(now) == 0
+    assert late.id in await _ids(async_session)
+    s3.delete_prefix.assert_not_awaited()
 
 
 async def test_tick_deletes_verification_documents_after_an_hour(

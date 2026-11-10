@@ -94,11 +94,3 @@ def test_object_prefix_of_a_key_with_no_folder() -> None:
     from hailhq.core.file_uploads import object_prefix
 
     assert object_prefix("id.3f9a0c") == "id"
-
-
-def test_no_put_outlives_the_link_sweep_grace() -> None:
-    """The sweep deletes objects before the row. That is safe only while a
-    PUT's store step is bounded below the grace (its read ends by expiry)."""
-    from hailhq.core.file_uploads import LINK_SWEEP_GRACE, STORE_TIMEOUT
-
-    assert STORE_TIMEOUT * 2 <= LINK_SWEEP_GRACE

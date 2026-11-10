@@ -40,7 +40,6 @@ from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
     LINK_TTL,
     MAX_PENDING_LINKS,
-    STORE_TIMEOUT,
     hash_token,
     matches_declared_type,
     max_bytes,
@@ -113,6 +112,13 @@ def _busy() -> HTTPException:
         status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="too many uploads at once; try again in a few seconds",
         headers={"Retry-After": "5"},
+    )
+
+
+def _storage_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="storage unavailable; try again",
     )
 
 
@@ -418,18 +424,9 @@ async def _store(
         raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
 
     key = f"{base_key}.{uuid4().hex}"
-    try:
-        # Bounded, so the link sweep (LINK_SWEEP_GRACE past the expiry) never
-        # runs while this PUT is still writing.
-        async with asyncio.timeout(STORE_TIMEOUT.total_seconds()):
-            stored = await _write_and_mark(
-                db, s3, upload_id, token_hash, key, payload, content_type
-            )
-    except TimeoutError:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from None
+    stored = await _write_and_mark(
+        db, s3, upload_id, token_hash, key, payload, content_type
+    )
     if stored is None:
         # Nothing references this PUT's object: remove it.
         try:
@@ -457,13 +454,12 @@ async def _write_and_mark(
 ) -> Row | None:
     """Write this PUT's object, then mark the link used and point it there.
     None when the link is already used or gone."""
+    # Hashing 25 MB takes a while: off the event loop.
+    digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
     try:
         await s3.put_attachment(key, payload, content_type)
     except Exception as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
+        raise _storage_unavailable() from exc
 
     # If this fails, the object stays: the row may point at it if the commit
     # reached the database before the error. Otherwise the next PUT that
@@ -481,7 +477,7 @@ async def _write_and_mark(
                 token_hash=None,
                 uploaded_at=now,
                 size_bytes=len(payload),
-                sha256=hashlib.sha256(payload).hexdigest(),
+                sha256=digest,
                 s3_key=key,
             )
             .returning(
