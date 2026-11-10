@@ -1,0 +1,295 @@
+Prepared against vercel/chat 09cb11eca12de74e99dcad96b1c9876f63e0c54b
+Hail adapter source: 9492e5b071be1c5ae6ebfa717de03751b5a9381e
+Listing submission requires npm publication, live Hail docs, and a public announcement.
+
+diff --git a/.changeset/hail-adapter.md b/.changeset/hail-adapter.md
+new file mode 100644
+index 00000000..ca52f80c
+--- /dev/null
++++ b/.changeset/hail-adapter.md
+@@ -0,0 +1,6 @@
++---
++"@chat-adapter/catalog": patch
++"create-chat-sdk": patch
++---
++
++Add the Hail vendor-official SMS adapter to the catalog, docs, and CLI scaffold.
+diff --git a/apps/docs/content/adapters/vendor-official/hail.mdx b/apps/docs/content/adapters/vendor-official/hail.mdx
+new file mode 100644
+index 00000000..389d89a3
+--- /dev/null
++++ b/apps/docs/content/adapters/vendor-official/hail.mdx
+@@ -0,0 +1,159 @@
++---
++title: Hail
++description: Send and receive SMS through a Hail phone number, with signed webhooks, rotating credentials, and Chat SDK state-backed conversation history.
++packageName: "@hail-hq/chat-sdk-adapter"
++slug: hail
++type: platform
++tagline: Connect your Chat SDK bot to SMS through a Hail phone number.
++community: true
++vendorOfficial: true
++author: Hail
++mdxBody: true
++---
++
++## Create a new bot
++
++Scaffold a bot with the Hail adapter:
++
++<CreateChatSdk adapters="hail memory" />
++
++For an existing app, start at [Install](#install).
++
++## Install
++
++<PackageInstall package="@hail-hq/chat-sdk-adapter chat @chat-adapter/state-memory" />
++
++## Quick start
++
++```typescript title="lib/bot.ts" lineNumbers
++import { Chat } from "chat";
++import { createMemoryState } from "@chat-adapter/state-memory";
++import { createHailAdapter } from "@hail-hq/chat-sdk-adapter";
++
++export const bot = new Chat({
++  userName: "mybot",
++  adapters: { hail: createHailAdapter() },
++  state: createMemoryState(),
++});
++
++bot.onDirectMessage(async (thread, message) => {
++  await thread.post(`You said: ${message.text}`);
++});
++```
++
++Use a persistent state adapter such as [Redis](/adapters/official/redis) in production.
++The adapter requires Node.js 20+ and `chat ^4.44.0`.
++
++```typescript title="app/api/webhooks/hail/route.ts" lineNumbers
++import { after } from "next/server";
++import { bot } from "@/lib/bot";
++
++export const runtime = "nodejs";
++export async function POST(request: Request): Promise<Response> {
++  return bot.webhooks.hail(request, { waitUntil: (task) => after(() => task) });
++}
++```
++
++## Platform setup
++
++1. Create a key in [Hail API keys](https://hail.so/console/keys) and set `HAIL_API_KEY`.
++2. Set `HAIL_FROM_NUMBER` to your Hail-owned, SMS-capable E.164 phone number. Clear its `sms_agent_id` if a Hail text agent would also answer it.
++3. Subscribe to `sms.received` at your deployed webhook URL:
++
++   ```bash
++   curl https://api.hail.so/v1/webhooks \
++     -H "Authorization: Bearer $HAIL_API_KEY" \
++     -H 'Content-Type: application/json' \
++     -d '{"target_url":"https://your-bot.example/api/webhooks/hail","event_types":["sms.received"]}'
++   ```
++
++4. Save the once-shown `secret` from the response as `HAIL_WEBHOOK_SECRET`.
++5. Set `HAIL_RECIPIENT_CONSENT=true` only when you attest to the required consent for every recipient this bot contacts. Otherwise, sending fails before calling Hail.
++
++Replies incur outbound SMS charges and require workspace credit. Carrier registration requirements still apply.
++
++## Configuration
++
++<TypeTable
++  type={{
++    apiKey: {
++      type: "string | (() => string | Promise<string>)",
++      description: "API key, resolved before each API request. Falls back to HAIL_API_KEY.",
++    },
++    webhookSecret: {
++      type: "string | (() => string | Promise<string>)",
++      description: "Signing secret, resolved for each webhook. Falls back to HAIL_WEBHOOK_SECRET.",
++    },
++    fromNumber: {
++      type: "string",
++      description: "Hail-owned E.164 number. Falls back to HAIL_FROM_NUMBER.",
++    },
++    apiUrl: {
++      type: "string",
++      description: "HTTP(S) API origin without /v1. Falls back to HAIL_API_URL, then https://api.hail.so. Use HTTPS for remote servers.",
++    },
++    recipientConsent: {
++      type: "boolean | ((to: string) => boolean | Promise<boolean>)",
++      description: "Explicit consent attestation, checked before each send. Defaults to HAIL_RECIPIENT_CONSENT === 'true'.",
++    },
++    userName: {
++      type: "string",
++      description: "Bot display name. Defaults to hail-bot.",
++    },
++    fetch: {
++      type: "typeof fetch",
++      description: "HTTP implementation. Defaults to globalThis.fetch.",
++    },
++  }}
++/>
++
++### Environment variables
++
++| Variable | Required | Description |
++| --- | --- | --- |
++| `HAIL_API_KEY` | Yes, unless configured | Hail API key |
++| `HAIL_WEBHOOK_SECRET` | Yes, unless configured | Subscription signing secret |
++| `HAIL_FROM_NUMBER` | Yes, unless configured | Hail-owned E.164 number |
++| `HAIL_RECIPIENT_CONSENT` | Yes for sends, unless configured | Explicit consent attestation; only `true` enables sending |
++| `HAIL_API_URL` | No | API origin; defaults to `https://api.hail.so` |
++
++Credential resolvers support rotating or short-lived tokens. They do not register Hail with Vercel Connect.
++
++## Webhooks
++
++The adapter verifies HMAC-SHA256 over the raw request body and requires a signed timestamp within five minutes.
++Invalid signatures return `401`; a missing signing secret returns `503`.
++Other event types and texts addressed to other Hail numbers are acknowledged without calling your handlers.
++
++Chat SDK deduplicates message IDs within its configured dedupe window. Hail retries can outlive this window, so processing is not exactly once.
++Refer to [Hail webhooks](https://hail.so/docs/webhooks) for signing and retry details.
++
++## Message history
++
++Chat SDK persists observed inbound and outbound messages in your state adapter.
++`thread.messages` uses this cache; the adapter does not backfill older workspace messages.
++`fetchMessage()` reads an SMS by UUID and checks that it belongs to the exact phone pair.
++
++## Thread IDs
++
++A thread is one configured Hail number and one peer: `hail:{yourNumber}:{peerNumber}`.
++The channel ID is the same phone pair, so conversation state remains isolated.
++
++## Limitations
++
++- The adapter supports SMS. It does not implement MMS, iMessage, RCS, voice, or email.
++- Sends are informational messages. Empty text and text over 1,600 Unicode code points are rejected before calling Hail.
++- Markdown is sent as text with Markdown syntax. Files, attachments, and cards are rejected.
++- Editing, deletion, and reactions throw `NotImplementedError`. `startTyping()` does nothing because SMS has no typing indicator.
++- The adapter requires the Node.js runtime and does not support the Edge runtime.
++- Requests time out after 30 seconds and do not follow redirects. Outbound sends are not automatically retried; a timeout does not establish that a chargeable send failed.
++
++## Feature support
++
++<FeatureSupport />
++
++## Resources
++
++- [Adapter source and Next.js example](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk)
++- [Hail Chat SDK documentation](https://hail.so/docs/webhooks#chat-sdk)
++- [Adapter issues](https://github.com/hail-hq/hail/issues)
+diff --git a/apps/docs/content/adapters/vendor-official/meta.json b/apps/docs/content/adapters/vendor-official/meta.json
+index c95c8667..5ba304a8 100644
+--- a/apps/docs/content/adapters/vendor-official/meta.json
++++ b/apps/docs/content/adapters/vendor-official/meta.json
+@@ -15,6 +15,7 @@
+     "photon",
+     "cloudflare-agents",
+     "dial",
+-    "adeli"
++    "adeli",
++    "hail"
+   ]
+ }
+diff --git a/packages/catalog/src/adapters/index.ts b/packages/catalog/src/adapters/index.ts
+index ae88f7db..dd1d0b0a 100644
+--- a/packages/catalog/src/adapters/index.ts
++++ b/packages/catalog/src/adapters/index.ts
+@@ -39,6 +39,7 @@ import { adeli } from "./vendor-official/adeli";
+ import { agentphone } from "./vendor-official/agentphone";
+ import { cloudflareAgents } from "./vendor-official/cloudflare-agents";
+ import { dial } from "./vendor-official/dial";
++import { hail } from "./vendor-official/hail";
+ import { kapso } from "./vendor-official/kapso";
+ import { lark } from "./vendor-official/lark";
+ import { linq } from "./vendor-official/linq";
+@@ -93,6 +94,7 @@ export const ADAPTERS = {
+   photon,
+   dial,
+   adeli,
++  hail,
+ } as const satisfies Record<string, CatalogAdapter>;
+ 
+ /**
+diff --git a/packages/catalog/src/adapters/vendor-official/hail.ts b/packages/catalog/src/adapters/vendor-official/hail.ts
+new file mode 100644
+index 00000000..f91cbf53
+--- /dev/null
++++ b/packages/catalog/src/adapters/vendor-official/hail.ts
+@@ -0,0 +1,61 @@
++import { env, secretEnv, urlEnv } from "../../env";
++import type { CatalogAdapter } from "../../types";
++
++export const hail = {
++  author: "Hail",
++  description:
++    "Send and receive SMS through a Hail phone number, with signed webhooks, rotating credentials, and Chat SDK state-backed conversation history.",
++  env: {
++    config: ["userName", "fetch"],
++    notes:
++      "apiKey and webhookSecret accept credential resolver functions. recipientConsent accepts a boolean or a per-recipient resolver. Sending requires explicit consent.",
++    optional: [
++      urlEnv(
++        "HAIL_API_URL",
++        "API origin without /v1. Defaults to https://api.hail.so."
++      ),
++    ],
++    required: [
++      secretEnv(
++        "HAIL_API_KEY",
++        "Hail API key from https://hail.so/console/keys."
++      ),
++      secretEnv(
++        "HAIL_WEBHOOK_SECRET",
++        "Signing secret returned when creating the Hail webhook subscription."
++      ),
++      env(
++        "HAIL_FROM_NUMBER",
++        "Hail-owned, SMS-capable phone number in E.164 format."
++      ),
++      env(
++        "HAIL_RECIPIENT_CONSENT",
++        "Set true only when you attest to required consent for every recipient this bot contacts."
++      ),
++    ],
++  },
++  factoryExport: "createHailAdapter",
++  features: {
++    postMessage: "yes",
++    mentions: {
++      status: "partial",
++      label: "Every inbound SMS is a direct message",
++    },
++    directMessages: "yes",
++    customApiEndpoint: { status: "yes", label: "apiUrl" },
++    fetchMessages: {
++      status: "partial",
++      label: "Chat SDK state-backed history; no API backfill",
++    },
++    fetchSingleMessage: "yes",
++    fetchThreadInfo: "yes",
++  },
++  group: "vendor-official",
++  name: "Hail",
++  packageName: "@hail-hq/chat-sdk-adapter",
++  peerDeps: [],
++  readme:
++    "https://github.com/hail-hq/hail/tree/9492e5b071be1c5ae6ebfa717de03751b5a9381e/integrations/chat-sdk",
++  slug: "hail",
++  type: "platform",
++} as const satisfies CatalogAdapter;
+diff --git a/packages/create-chat-sdk/src/catalog/scaffold-spec.ts b/packages/create-chat-sdk/src/catalog/scaffold-spec.ts
+index dab448a2..a8e8d3cc 100644
+--- a/packages/create-chat-sdk/src/catalog/scaffold-spec.ts
++++ b/packages/create-chat-sdk/src/catalog/scaffold-spec.ts
+@@ -205,6 +205,9 @@ export const CLI_SCAFFOLD_SPEC = {
+     },
+     stateHint: "production - ioredis driver",
+   },
++  hail: {
++    invocation: { kind: "zero-arg" },
++  },
+   instagram: {
+     invocation: { kind: "zero-arg" },
+   },
