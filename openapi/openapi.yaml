@@ -748,13 +748,13 @@ paths:
 
         Works once. Unknown id, wrong token or a used link are all 404 with one
 
-        message; a link already expired when the PUT starts is 410. A PUT that
+        message; a link already expired when the PUT starts is 410. The body
 
-        starts in time is stored, also if it ends after the expiry, as long as
+        must arrive before the link expires (and within 10 minutes), or 408.
 
-        it finishes within 15 minutes of it. A body that
+        Storing it may end after the expiry, up to ``LINK_SWEEP_GRACE`` (15
 
-        does not arrive before the link expires (10 minutes at most) is 408.
+        minutes) later; after that, 410.
 
         Empty body: 422. A verification document whose first bytes are not the
 
@@ -814,9 +814,8 @@ paths:
             10 minutes. The link is not used up.
         "410":
           description:
-            The link had expired when the PUT started. A PUT that starts
-            in time is stored, also if it ends after the expiry, as long as it finishes
-            within 15 minutes of it.
+            The link had expired when the PUT started, or the body arrived
+            in time but storing it ended more than 15 minutes after the expiry.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":

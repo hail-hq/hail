@@ -108,7 +108,8 @@ def object_prefix(s3_key: str) -> str:
 
 async def delete_upload_objects(s3: S3MailClient, s3_key: str) -> None:
     """Delete every object of one upload. Listing the prefix needs
-    ``s3:ListBucket`` on the upload folders (``infra/terraform/iam.tf``)."""
+    ``s3:ListBucket`` on the bucket ARN with an ``s3:prefix`` condition for
+    the upload folders (``infra/terraform/iam.tf``)."""
     await s3.delete_prefix(object_prefix(s3_key))
 
 

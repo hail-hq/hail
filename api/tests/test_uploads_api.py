@@ -822,13 +822,35 @@ async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
     def later():
         calls.append(1)
         # The expiry check and the read deadline are now; the final update
-        # is an hour later.
-        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(hours=1))
+        # is 10 minutes after the expiry, inside the 15-minute window.
+        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(minutes=25))
 
     monkeypatch.setattr(uploads_routes, "_now", later)
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 200, resp.text
     s3.delete.assert_not_awaited()
+
+
+async def test_storing_past_the_window_is_410_and_leaves_no_object(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    """Storing ended more than 15 minutes after the expiry: the link sweep
+    may own the row by then, so the PUT does not mark it used."""
+    from hailhq.api.routes import uploads as uploads_routes
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    real_now = uploads_routes._now
+    calls = []
+
+    def later():
+        calls.append(1)
+        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(hours=1))
+
+    monkeypatch.setattr(uploads_routes, "_now", later)
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 410, resp.text
+    s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
 
 
 async def test_the_winner_deletes_earlier_attempts(client, org_and_key, s3) -> None:

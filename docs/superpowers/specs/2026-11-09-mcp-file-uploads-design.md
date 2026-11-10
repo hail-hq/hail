@@ -94,14 +94,17 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
     used and points it at that key.
   - The PUT that loses a race deletes its own object. The winner deletes any
     other attempt objects. Cleanups delete the upload's whole key prefix.
-  - A PUT that starts before the expiry is stored, also if it ends after it.
-    Expiry is checked once, when the PUT starts. The link sweep waits 15
-    minutes past the expiry, deletes the row (only while still unused), then
-    the objects. A PUT that finishes within those 15 minutes keeps its row and object; a later one gets 404 and deletes its own object.
-    A failed S3 delete after the row is gone leaves an object; verification
-    documents have the 1-day lifecycle rule as a backstop, email attachment
-    leftovers are accepted (rare). Cleanups list the upload's prefix, so the
-    API needs `s3:ListBucket` on the upload folders (`infra/terraform/iam.tf`).
+  - The body must arrive before the expiry. Storing it may end up to 15
+    minutes after the expiry; later, the PUT answers 410 and deletes its own
+    object. The link sweep takes only links more than 15 minutes past the
+    expiry, so the PUT and the sweep never take the same row. The sweep
+    deletes the row (only while still unused), then the objects. A failed S3
+    delete after that leaves an object: verification documents have the
+    1-day lifecycle rule as a backstop, and email attachment leftovers are
+    accepted (rare, logged).
+  - Cleanups list the upload's prefix, so the API needs `s3:ListBucket` on
+    the bucket ARN with an `s3:prefix` condition for the upload folders
+    (`infra/terraform/iam.tf`).
   - Body reads are capped per process (8) and per organization (2). Over
     either cap: 503 with `Retry-After`, and the link still works.
 - Response 200: `{id, purpose, filename, content_type, size_bytes, sha256}`.

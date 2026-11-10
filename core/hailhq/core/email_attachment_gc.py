@@ -142,10 +142,10 @@ class EmailAttachmentGcWorker:
     async def _sweep_links(self, now: datetime) -> int:
         """Delete upload links never used, ``LINK_SWEEP_GRACE`` past expiry.
 
-        The row goes first, and only while it is still unused: a PUT that
-        marks the link used before this delete keeps its row and its object.
-        A PUT that finishes after it (more than ``LINK_SWEEP_GRACE`` past the
-        expiry) finds no row, answers 404 and deletes its own object. Then
+        The row goes first, and only while it is still unused. A PUT marks a
+        link used only while it is within ``LINK_SWEEP_GRACE`` of its expiry,
+        the opposite of this rule, so the two never take the same row; a PUT
+        later than that answers 410 and deletes its own object. Then
         the objects of PUTs cut off before their update, usually none. A
         failed S3 delete only logs, so one bad row never blocks the batch;
         such an object stays. With the Terraform module, verification

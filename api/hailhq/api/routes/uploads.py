@@ -38,6 +38,7 @@ from hailhq.api.ratelimit import (
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
+    LINK_SWEEP_GRACE,
     LINK_TTL,
     MAX_PENDING_LINKS,
     hash_token,
@@ -71,6 +72,8 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 _NOT_FOUND = "upload link not found, or already used"
+# A PUT whose body arrived by the expiry may finish storing this much later.
+_STORE_GRACE_MINUTES = int(LINK_SWEEP_GRACE.total_seconds() // 60)
 # Body reads one process runs at once. Each can buffer up to the purpose's
 # size limit (25 MB for an email attachment), so this caps that memory.
 # Over the cap a PUT answers 503 at once; nothing waits in a queue.
@@ -284,9 +287,9 @@ async def _read_body(request: Request, limit: int) -> bytes:
         },
         410: {
             "description": (
-                "The link had expired when the PUT started. A PUT that starts "
-                "in time is stored, also if it ends after the expiry, as long "
-                "as it finishes within 15 minutes of it."
+                "The link had expired when the PUT started, or the body "
+                "arrived in time but storing it ended more than "
+                f"{_STORE_GRACE_MINUTES} minutes after the expiry."
             )
         },
         413: {"description": "The file is larger than the link's `max_bytes`."},
@@ -327,10 +330,10 @@ async def put_file_upload(
     """Send the file's bytes to an upload link. No Authorization header.
 
     Works once. Unknown id, wrong token or a used link are all 404 with one
-    message; a link already expired when the PUT starts is 410. A PUT that
-    starts in time is stored, also if it ends after the expiry, as long as
-    it finishes within 15 minutes of it. A body that
-    does not arrive before the link expires (10 minutes at most) is 408.
+    message; a link already expired when the PUT starts is 410. The body
+    must arrive before the link expires (and within 10 minutes), or 408.
+    Storing it may end after the expiry, up to ``LINK_SWEEP_GRACE`` (15
+    minutes) later; after that, 410.
     Empty body: 422. A verification document whose first bytes are not the
     declared JPEG, PNG or PDF: 422.
     """
@@ -430,7 +433,10 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        # Another PUT finished first, or the link went away.
+        # Too late to store (the link sweep's window), another PUT finished
+        # first, or the link went away.
+        if _now() >= expires + LINK_SWEEP_GRACE:
+            raise _expired()
         raise _not_found()
     # Objects of earlier PUTs to this link that were cut off after their S3
     # write. Usually none. After the response, so no read slot waits on it.
@@ -470,6 +476,9 @@ async def _write_and_mark(
                 FileUpload.id == upload_id,
                 FileUpload.token_hash == token_hash,
                 FileUpload.uploaded_at.is_(None),
+                # The link sweep's rule, reversed: a row the sweep may take is
+                # never marked used, so the two never overlap.
+                FileUpload.link_expires_at >= now - LINK_SWEEP_GRACE,
             )
             .values(
                 token_hash=None,
