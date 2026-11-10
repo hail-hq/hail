@@ -6,6 +6,7 @@ endpoint is the bare host URL). ``/healthz`` is mounted on the same
 Starlette parent app so the compose healthcheck stays a one-line probe.
 ``/.well-known/glama.json`` is mounted the same way, to verify ownership
 of the Glama MCP connector listing for this domain.
+``/.well-known/openai-apps-challenge`` serves the OpenAI app ownership token.
 
 Two boot modes (see ``hailhq.mcp.auth.select_auth_mode``):
 
@@ -47,7 +48,12 @@ from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import (
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Route
 
 from mcp.server.auth.settings import AuthSettings
@@ -146,6 +152,9 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             }
         )
 
+    async def openai_apps_challenge(_request: Request) -> Response:
+        return PlainTextResponse("POAuiIrWlgcsgNoQiGI4OhKFQLOqtQoDpweSKl4fGkY")
+
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
         async with mcp_app.session_manager.run():
@@ -170,6 +179,11 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             Route("/healthz", healthz, methods=["GET"]),
             Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
+            Route(
+                "/.well-known/openai-apps-challenge",
+                openai_apps_challenge,
+                methods=["GET"],
+            ),
             *http_app.routes,
         ],
         middleware=[Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware],
