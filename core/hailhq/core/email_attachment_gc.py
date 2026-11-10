@@ -3,8 +3,8 @@
 Three rules, run on every tick:
 
 * An upload link never used, ``LINK_SWEEP_GRACE`` past ``link_expires_at``:
-  any object a cut-off PUT left behind (each PUT writes
-  ``<s3_key>.<attempt>``), then the row.
+  the row, then any object a cut-off PUT left behind (each PUT writes
+  ``<s3_key>.<attempt>``).
 * A verification document uploaded more than ``VERIFICATION_UPLOAD_TTL``
   ago (1 hour): ``POST /verifications`` deletes the ones it uses, so these
   are left over. Ticks run every 10 minutes so a document never stays long
@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from hailhq.core.file_uploads import (
     LINK_SWEEP_GRACE,
     VERIFICATION_UPLOAD_TTL,
-    object_prefix,
+    delete_upload_objects,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -124,7 +124,7 @@ class EmailAttachmentGcWorker:
         deleted = 0
         for row_id, s3_key in candidates:
             try:
-                await s3.delete_prefix(object_prefix(s3_key))
+                await delete_upload_objects(s3, s3_key)
             except Exception:
                 logger.warning(
                     "GC: failed to delete S3 object for upload_id=%s; "
@@ -142,9 +142,11 @@ class EmailAttachmentGcWorker:
     async def _sweep_links(self, now: datetime) -> int:
         """Delete upload links never used, ``LINK_SWEEP_GRACE`` past expiry.
 
-        The objects go first, so a failed S3 call keeps the row for the next
-        tick. That order is safe because no PUT can still finish: its body
-        read ends by the expiry, and the grace covers its S3 write and update.
+        The row goes first, and only while it is still not uploaded, so a PUT
+        that finishes meanwhile, however late, keeps its row and its object.
+        Then the objects of PUTs cut off before their update, usually none.
+        A failed S3 delete only logs: the bucket's lifecycle rule removes
+        verification documents within a day.
         """
         expired = (
             FileUpload.uploaded_at.is_(None),
@@ -163,22 +165,23 @@ class EmailAttachmentGcWorker:
 
         deleted = 0
         for row_id, s3_key in candidates:
-            try:
-                await self._get_s3().delete_prefix(object_prefix(s3_key))
-            except Exception:
-                logger.warning(
-                    "GC: failed to delete S3 objects for expired link "
-                    "upload_id=%s; keeping the row for the next tick",
-                    row_id,
-                    exc_info=True,
-                )
-                continue
             async with self._session_factory() as session:
+                # Same rule again: a PUT may have finished meanwhile.
                 result = await session.execute(
                     delete(FileUpload).where(FileUpload.id == row_id, *expired)
                 )
                 await session.commit()
-            deleted += result.rowcount or 0
+            if not result.rowcount:
+                continue
+            deleted += 1
+            try:
+                await delete_upload_objects(self._get_s3(), s3_key)
+            except Exception:
+                logger.warning(
+                    "GC: failed to delete S3 objects for expired link upload_id=%s",
+                    row_id,
+                    exc_info=True,
+                )
         return deleted
 
 

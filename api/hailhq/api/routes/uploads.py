@@ -27,7 +27,7 @@ from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
 from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_optional
 from hailhq.api.errors import unprocessable
@@ -321,14 +321,16 @@ async def put_file_upload(
     ],
     db: Annotated[AsyncSession, Depends(get_session)],
     s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+    background: BackgroundTasks,
 ) -> FileUploadResponse:
     """Send the file's bytes to an upload link. No Authorization header.
 
     Works once. Unknown id, wrong token or a used link are all 404 with one
     message; a link already expired when the PUT starts is 410. A PUT that
     starts in time is stored, also if it ends after the expiry. A body that
-    does not arrive before the link expires (10 minutes at most) is 408. Empty body: 422. A verification document whose first bytes are not
-    the declared JPEG, PNG or PDF: 422.
+    does not arrive before the link expires (10 minutes at most) is 408.
+    Empty body: 422. A verification document whose first bytes are not the
+    declared JPEG, PNG or PDF: 422.
     """
     if s3 is None:
         raise _unavailable()
@@ -343,8 +345,7 @@ async def put_file_upload(
         or not hmac.compare_digest(row.token_hash, token_hash)
     ):
         raise _not_found()
-    started = _now()
-    if row.link_expires_at is None or row.link_expires_at <= started:
+    if row.link_expires_at is None or row.link_expires_at <= _now():
         raise _expired()
     org = row.organization_id
     link = {
@@ -366,9 +367,9 @@ async def put_file_upload(
             db,
             s3,
             request,
+            background,
             upload_id=upload_id,
             token_hash=token_hash,
-            started=started,
             **link,
         )
     finally:
@@ -379,9 +380,9 @@ async def _store(
     db: AsyncSession,
     s3: S3MailClient,
     request: Request,
+    background: BackgroundTasks,
     *,
     upload_id: UUID,
-    started: datetime,
     token_hash: str,
     expires: datetime,
     purpose: str,
@@ -394,8 +395,9 @@ async def _store(
     two PUTs to one link never overwrite each other. The update that marks
     the link used also points it at this PUT's key, and the winner then
     deletes any other attempt objects. If another PUT won, or the link went
-    away, this PUT deletes its own object. A failure before the update
-    leaves the link usable; the link sweep removes what it left."""
+    away, this PUT deletes its own object and answers 404. A failure before
+    the update leaves the link usable; the link sweep removes what it left.
+    Expiry is checked once, when the PUT starts."""
     try:
         async with asyncio.timeout(_read_deadline(expires, _now())):
             payload = await _read_body(request, max_bytes(purpose))
@@ -434,8 +436,6 @@ async def _store(
                 FileUpload.id == upload_id,
                 FileUpload.token_hash == token_hash,
                 FileUpload.uploaded_at.is_(None),
-                # Valid when this PUT started; its read ended by the expiry.
-                FileUpload.link_expires_at > started,
             )
             .values(
                 token_hash=None,
@@ -463,16 +463,22 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        raise _expired() if expires <= now else _not_found()
-    # Objects of earlier PUTs to this link that were cut off after their
-    # S3 write. Usually none; best effort.
+        # Another PUT finished first, or the link went away.
+        raise _not_found()
+    # Objects of earlier PUTs to this link that were cut off after their S3
+    # write. Usually none. After the response, so no read slot waits on it.
+    background.add_task(_delete_earlier_attempts, s3, upload_id, key)
+    return FileUploadResponse.model_validate(stored)
+
+
+async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:
+    """Best effort: a failure only logs."""
     try:
         await s3.delete_prefix(object_prefix(key), keep=key)
     except Exception:
         logger.warning(
             "upload %s: could not delete earlier attempts", upload_id, exc_info=True
         )
-    return FileUploadResponse.model_validate(stored)
 
 
 __all__ = ["router"]

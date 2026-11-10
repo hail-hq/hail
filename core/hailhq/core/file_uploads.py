@@ -22,6 +22,7 @@ it, so two PUTs to one link never overwrite each other. (A direct
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets
 from datetime import timedelta
@@ -31,6 +32,8 @@ from uuid import UUID
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
+
+logger = logging.getLogger(__name__)
 
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
@@ -103,8 +106,19 @@ def object_prefix(s3_key: str) -> str:
     ``.<attempt>`` suffix. A PUT cut off between its S3 write and its update
     can leave an attempt object behind, so cleanups delete this prefix, not
     one key. Upload ids are UUIDs, so no other upload shares the prefix."""
-    head, _, name = s3_key.rpartition("/")
-    return f"{head}/{name.split('.', 1)[0]}"
+    head, sep, name = s3_key.rpartition("/")
+    return f"{head}{sep}{name.split('.', 1)[0]}"
+
+
+async def delete_upload_objects(s3: S3MailClient, s3_key: str) -> None:
+    """Delete every object of one upload. Listing a prefix needs
+    ``s3:ListBucket``; where the bucket policy lacks it, the one key the row
+    points at is deleted instead. Raises only if that fails too."""
+    try:
+        await s3.delete_prefix(object_prefix(s3_key))
+    except Exception:
+        logger.warning("upload prefix delete failed; deleting the one key")
+        await s3.delete(s3_key)
 
 
 def new_token() -> str:
@@ -139,6 +153,7 @@ __all__ = [
     "VERIFICATION_UPLOAD_TTL",
     "Purpose",
     "delete_org_verification_uploads",
+    "delete_upload_objects",
     "hash_token",
     "matches_declared_type",
     "max_bytes",

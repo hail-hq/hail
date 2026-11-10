@@ -103,7 +103,9 @@ async def test_tick_commits_each_row_independently_of_mid_batch_failure(
     row3 = await _make_row(async_session, created_at=now - timedelta(hours=28))
 
     s3 = AsyncMock()
+    # Row 2's prefix delete and its one-key fallback both fail.
     s3.delete_prefix.side_effect = [None, RuntimeError("s3 down"), None]
+    s3.delete.side_effect = RuntimeError("s3 down")
     worker = _worker(async_session, s3)
 
     processed = await worker.tick()
@@ -159,10 +161,11 @@ async def test_tick_deletes_expired_links_but_keeps_live_ones(
     s3.delete.assert_not_awaited()
 
 
-async def test_tick_keeps_an_expired_link_row_when_s3_fails(
+async def test_tick_deletes_an_expired_link_row_even_when_s3_fails(
     async_session: AsyncSession,
 ) -> None:
-    """The objects go first; a failed S3 call keeps the row for next tick."""
+    """The row goes first, so a late PUT can never lose its object; a failed
+    S3 call only logs (the lifecycle rule is the backstop)."""
     now = datetime.now(timezone.utc)
     expired = await _make_row(
         async_session,
@@ -172,8 +175,9 @@ async def test_tick_keeps_an_expired_link_row_when_s3_fails(
     )
     s3 = AsyncMock()
     s3.delete_prefix.side_effect = RuntimeError("s3 down")
-    assert await _worker(async_session, s3).tick() == 0
-    assert expired.id in await _ids(async_session)
+    s3.delete.side_effect = RuntimeError("s3 down")
+    assert await _worker(async_session, s3).tick() == 1
+    assert expired.id not in await _ids(async_session)
 
 
 async def test_tick_deletes_verification_documents_after_an_hour(

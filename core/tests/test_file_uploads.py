@@ -88,3 +88,35 @@ def test_object_prefix_drops_the_attempt_suffix() -> None:
     assert object_prefix(f"{base}.3f9a0c") == base
     # A direct upload has no suffix.
     assert object_prefix(base) == base
+
+
+def test_object_prefix_of_a_key_with_no_folder() -> None:
+    from hailhq.core.file_uploads import object_prefix
+
+    assert object_prefix("id.3f9a0c") == "id"
+
+
+async def test_delete_upload_objects_falls_back_to_the_one_key() -> None:
+    """A bucket policy without s3:ListBucket: the row's key is still deleted."""
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.file_uploads import delete_upload_objects
+
+    s3 = AsyncMock()
+    s3.delete_prefix.side_effect = RuntimeError("AccessDenied")
+    await delete_upload_objects(s3, "p/o/id.a1")
+    s3.delete_prefix.assert_awaited_once_with("p/o/id")
+    s3.delete.assert_awaited_once_with("p/o/id.a1")
+
+
+async def test_delete_upload_objects_raises_when_both_fail() -> None:
+    from unittest.mock import AsyncMock
+
+    import pytest
+    from hailhq.core.file_uploads import delete_upload_objects
+
+    s3 = AsyncMock()
+    s3.delete_prefix.side_effect = RuntimeError("AccessDenied")
+    s3.delete.side_effect = RuntimeError("s3 down")
+    with pytest.raises(RuntimeError):
+        await delete_upload_objects(s3, "p/o/id.a1")

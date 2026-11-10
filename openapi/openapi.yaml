@@ -752,10 +752,11 @@ paths:
 
         starts in time is stored, also if it ends after the expiry. A body that
 
-        does not arrive before the link expires (10 minutes at most) is 408. Empty
-        body: 422. A verification document whose first bytes are not
+        does not arrive before the link expires (10 minutes at most) is 408.
 
-        the declared JPEG, PNG or PDF: 422."
+        Empty body: 422. A verification document whose first bytes are not the
+
+        declared JPEG, PNG or PDF: 422."
       operationId: put_file_upload
       parameters:
         - name: upload_id
