@@ -55,7 +55,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
     finished = False
     deadline = None
     setup_deadline = None
-    tasks = set()
+    finalization = None
 
     async def finish(*, failed=False):
         nonlocal finished
@@ -102,17 +102,26 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             finally:
                 ctx.shutdown(reason="browser_ended")
 
+    def begin_finish(*, failed=False):
+        nonlocal finalization
+        if finalization is None:
+            finalization = asyncio.create_task(finish(failed=failed))
+        return finalization
+
+    async def wait_finish(*, failed=False):
+        # A timer or the entrypoint may be cancelled by room shutdown. The
+        # dedicated finalizer must finish settlement independently of either.
+        await asyncio.shield(begin_finish(failed=failed))
+
     def schedule_finish(*, failed=False):
-        task = asyncio.create_task(finish(failed=failed))
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        begin_finish(failed=failed)
 
     async def shutdown():
         if deadline is not None:
             deadline.cancel()
         if setup_deadline is not None:
             setup_deadline.cancel()
-        await finish()
+        await wait_finish()
 
     ctx.add_shutdown_callback(shutdown)
     try:
@@ -132,7 +141,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
 
         async def expire_setup():
             await asyncio.sleep(SETUP_SECONDS)
-            await finish(failed=True)
+            await wait_finish(failed=True)
 
         setup_deadline = asyncio.create_task(expire_setup())
         await ctx.connect()
@@ -225,7 +234,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
 
         async def expire():
             await asyncio.sleep(seconds)
-            await finish()
+            await wait_finish()
 
         deadline = asyncio.create_task(expire())
         await ctx.room.local_participant.set_attributes({"hail.browser_ready": "true"})
@@ -234,4 +243,4 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
         )
     except Exception:
         logger.exception("browser session failed call_id=%s", call_id)
-        await finish(failed=True)
+        await wait_finish(failed=True)

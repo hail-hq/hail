@@ -277,3 +277,30 @@ async def test_finalization_refreshes_stale_identity_map_and_uses_media_end_time
     assert refunds[0].amount_cents == Decimal("10") - session_charge_cents(
         10000, "10", 60
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_deleted", [False, True])
+async def test_stop_is_idempotent_and_releases_unstarted_reservations(
+    client, async_session, livekit_mock, monkeypatch, already_deleted
+):
+    from livekit import api
+
+    body = await setup_agent(async_session)
+    started = await post(client, monkeypatch, "", body)
+    assert started.status_code == 200
+    if already_deleted:
+        livekit_mock.delete_room.side_effect = api.TwirpError(
+            "not_found", "room gone", status=404
+        )
+    control = {"organization_id": body["organization_id"], "id": started.json()["id"]}
+    stopped = await post(client, monkeypatch, "/stop", control)
+    assert stopped.status_code == 200, stopped.text
+    assert stopped.json()["status"] == "completed"
+    assert stopped.json()["used_ms"] == 0
+    assert (await post(client, monkeypatch, "/stop", control)).status_code == 200
+    next_call = await post(
+        client, monkeypatch, "", {**body, "request_id": str(uuid.uuid4())}
+    )
+    assert next_call.status_code == 200
+    assert next_call.json()["seconds"] == 60

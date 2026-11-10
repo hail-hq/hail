@@ -19,8 +19,9 @@ def test_server_deadline_uses_persisted_budget_not_dispatch_input():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delete_fails", [False, True])
+@pytest.mark.parametrize("shutdown_during_disconnect", [False, True])
 async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_timer(
-    async_session, monkeypatch, delete_fails
+    async_session, monkeypatch, delete_fails, shutdown_during_disconnect
 ):
     import asyncio
     import uuid
@@ -90,6 +91,12 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
     monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
     monkeypatch.setattr(browser, "build_session", lambda *a, **kw: Session())
     ctx = Context()
+    if shutdown_during_disconnect:
+
+        async def disconnected():
+            asyncio.create_task(ctx.callback())
+
+        ctx.room.disconnect.side_effect = disconnected
     await browser.run_browser_session(ctx, call.id)
     await asyncio.wait_for(closed.wait(), timeout=3)
     await asyncio.sleep(0.1)

@@ -4,7 +4,7 @@ The website checks membership/admin permissions. No public client can choose
 an organization, price, billing mode, tool set, or duration via this route.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -66,6 +66,14 @@ def view(call: Call) -> dict:
         "transcript": call.transcript,
         "rate_cents_per_minute": call.metadata_.get("browser_rate_cents"),
     }
+
+
+async def delete_browser_room(lk, room_name):
+    try:
+        await lk.delete_room(room_name)
+    except api.TwirpError as exc:
+        if exc.code != "not_found":
+            raise
 
 
 async def scoped(db, body):
@@ -225,7 +233,7 @@ async def start(
         return {**view(call), "token": token, "url": settings.livekit_url}
     except Exception:
         try:
-            await lk.delete_room(call.livekit_room)
+            await delete_browser_room(lk, call.livekit_room)
         finally:
             await finish_browser_call(db, call.id, failed=True)
             await db.commit()
@@ -250,7 +258,7 @@ async def stop(
         # Only settle after the room is gone; a teardown failure keeps its
         # reservation, preventing another start while audio may still run.
         media_ended_at = datetime.now(timezone.utc)
-        await lk.delete_room(call.livekit_room)
+        await delete_browser_room(lk, call.livekit_room)
         await finish_browser_call(db, call.id, ended_at=media_ended_at)
         await db.commit()
     return view(call)
