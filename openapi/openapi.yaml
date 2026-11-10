@@ -752,9 +752,9 @@ paths:
 
         must arrive before the link expires (and within 10 minutes), or 408.
 
-        Storing it may end after the expiry, up to ``LINK_SWEEP_GRACE`` (15
+        Storing it may end after the expiry, up to 15 minutes later; after
 
-        minutes) later; after that, 410.
+        that, 410.
 
         Empty body: 422. A verification document whose first bytes are not the
 
@@ -814,8 +814,9 @@ paths:
             10 minutes. The link is not used up.
         "410":
           description:
-            The link had expired when the PUT started, or the body arrived
-            in time but storing it ended more than 15 minutes after the expiry.
+            The link had expired when the PUT started, the body arrived
+            in time but storing it ended more than 15 minutes after the expiry, or
+            the link was removed meanwhile. Make a new link.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":

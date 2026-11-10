@@ -15,7 +15,11 @@ from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
-from hailhq.core.file_uploads import MAX_PENDING_LINKS, VERIFICATION_MAX_FILE_BYTES
+from hailhq.core.file_uploads import (
+    LINK_SWEEP_GRACE,
+    MAX_PENDING_LINKS,
+    VERIFICATION_MAX_FILE_BYTES,
+)
 from hailhq.core.models import FileUpload
 from sqlalchemy import select, update
 
@@ -598,12 +602,11 @@ async def test_two_links_at_once_never_pass_the_cap(
     assert sorted(r.status_code for r in results) == [201, 429]
 
 
-async def test_a_link_removed_during_its_put_is_404_and_leaves_no_object(
+async def test_a_link_removed_during_its_put_is_410_and_leaves_no_object(
     client, org_and_key, s3, async_session
 ) -> None:
-    """The row went away while the body was stored: the object is removed.
-    (The sweep removes only expired links; those answer 410, see
-    test_a_link_that_expires_during_its_put_is_410.)"""
+    """The row went away while the body was stored: the object is removed,
+    and the caller is told to make a new link."""
     from sqlalchemy import delete
 
     org_id, _, plain = org_and_key
@@ -618,7 +621,7 @@ async def test_a_link_removed_during_its_put_is_404_and_leaves_no_object(
 
     s3.put_attachment.side_effect = swept
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 404, resp.text
+    assert resp.status_code == 410, resp.text
     key = s3.put_attachment.await_args.args[0]
     assert key.startswith(f"verification-uploads/{org_id}/{upload_id}.")
     s3.delete.assert_awaited_once_with(key)
@@ -807,50 +810,97 @@ async def test_a_failed_final_commit_leaves_the_link_usable(
     assert again.status_code == 200, again.text
 
 
-async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
-    client, org_and_key, s3, monkeypatch
-) -> None:
-    """The whole body arrived before the expiry, the update runs after it:
-    the file is stored, not refused after it was sent."""
+def _clock_for_final_update(monkeypatch, at: datetime) -> None:
+    """``_now`` is real for the expiry check and the read deadline, then
+    ``at`` for the final update and anything after it."""
     from hailhq.api.routes import uploads as uploads_routes
 
-    _, _, plain = org_and_key
-    link = await _link(client, plain)
     real_now = uploads_routes._now
     calls = []
 
-    def later():
+    def clock():
         calls.append(1)
-        # The expiry check and the read deadline are now; the final update
-        # is 10 minutes after the expiry, inside the 15-minute window.
-        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(minutes=25))
+        return real_now() if len(calls) <= 2 else at
 
-    monkeypatch.setattr(uploads_routes, "_now", later)
+    monkeypatch.setattr(uploads_routes, "_now", clock)
+
+
+def _expires(link: dict) -> datetime:
+    return datetime.fromisoformat(link["expires_at"].replace("Z", "+00:00"))
+
+
+async def test_a_put_that_starts_in_time_is_stored_after_the_expiry(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    """The body arrived before the expiry, the update runs after it but
+    inside the store window: the file is stored."""
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    _clock_for_final_update(
+        monkeypatch, _expires(link) + LINK_SWEEP_GRACE - timedelta(minutes=5)
+    )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 200, resp.text
     s3.delete.assert_not_awaited()
 
 
+async def test_the_store_window_includes_its_last_instant(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    """Exactly ``LINK_SWEEP_GRACE`` after the expiry the PUT may still store;
+    the sweep takes a link only strictly after that."""
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    _clock_for_final_update(monkeypatch, _expires(link) + LINK_SWEEP_GRACE)
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 200, resp.text
+
+
 async def test_storing_past_the_window_is_410_and_leaves_no_object(
     client, org_and_key, s3, monkeypatch
 ) -> None:
-    """Storing ended more than 15 minutes after the expiry: the link sweep
-    may own the row by then, so the PUT does not mark it used."""
-    from hailhq.api.routes import uploads as uploads_routes
-
+    """One microsecond past the window the sweep may own the row, so the PUT
+    does not mark it used."""
     _, _, plain = org_and_key
     link = await _link(client, plain)
-    real_now = uploads_routes._now
-    calls = []
-
-    def later():
-        calls.append(1)
-        return real_now() + (timedelta(0) if len(calls) <= 2 else timedelta(hours=1))
-
-    monkeypatch.setattr(uploads_routes, "_now", later)
+    _clock_for_final_update(
+        monkeypatch,
+        _expires(link) + LINK_SWEEP_GRACE + timedelta(microseconds=1),
+    )
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 410, resp.text
     s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
+
+
+async def test_a_put_that_lost_to_another_is_404_even_past_the_window(
+    client, org_and_key, s3, monkeypatch, async_session
+) -> None:
+    """The link was already used: 404 (not 410, which would ask for a new
+    link and a second upload of a file already stored)."""
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    assert (await client.put(_path(link["upload_url"]), content=_JPEG)).is_success
+    row = await async_session.get(FileUpload, UUID(link["id"]))
+    await async_session.refresh(row)
+    # Give the used link its token back, as if a second PUT read it in time.
+    from urllib.parse import parse_qs, urlparse
+
+    from hailhq.core.file_uploads import hash_token
+
+    token = parse_qs(urlparse(link["upload_url"]).query)["token"][0]
+    row.token_hash = hash_token(token)
+    await async_session.commit()
+    _clock_for_final_update(monkeypatch, _expires(link) + timedelta(hours=1))
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 404, resp.text
+
+
+def test_the_documented_upload_times() -> None:
+    """The PUT's description says 10 and 15 minutes in plain words."""
+    from hailhq.api.routes.uploads import MAX_BODY_READ_SECONDS
+
+    assert MAX_BODY_READ_SECONDS == 600
+    assert LINK_SWEEP_GRACE == timedelta(minutes=15)
 
 
 async def test_the_winner_deletes_earlier_attempts(client, org_and_key, s3) -> None:

@@ -287,9 +287,10 @@ async def _read_body(request: Request, limit: int) -> bytes:
         },
         410: {
             "description": (
-                "The link had expired when the PUT started, or the body "
-                "arrived in time but storing it ended more than "
-                f"{_STORE_GRACE_MINUTES} minutes after the expiry."
+                "The link had expired when the PUT started, the body arrived "
+                "in time but storing it ended more than "
+                f"{_STORE_GRACE_MINUTES} minutes after the expiry, or the "
+                "link was removed meanwhile. Make a new link."
             )
         },
         413: {"description": "The file is larger than the link's `max_bytes`."},
@@ -332,8 +333,8 @@ async def put_file_upload(
     Works once. Unknown id, wrong token or a used link are all 404 with one
     message; a link already expired when the PUT starts is 410. The body
     must arrive before the link expires (and within 10 minutes), or 408.
-    Storing it may end after the expiry, up to ``LINK_SWEEP_GRACE`` (15
-    minutes) later; after that, 410.
+    Storing it may end after the expiry, up to 15 minutes later; after
+    that, 410.
     Empty body: 422. A verification document whose first bytes are not the
     declared JPEG, PNG or PDF: 422.
     """
@@ -399,10 +400,13 @@ async def _store(
     The link has no in-between state. Each PUT writes its own object key, so
     two PUTs to one link never overwrite each other. The update that marks
     the link used also points it at this PUT's key, and the winner then
-    deletes any other attempt objects. If another PUT won, or the link went
-    away, this PUT deletes its own object and answers 404. A failure before
-    the update leaves the link usable; the link sweep removes what it left.
-    Expiry is checked once, when the PUT starts."""
+    deletes any other attempt objects. If the update matches nothing, this
+    PUT deletes its own object and answers from the row as it is then: 404
+    if the link was used by another PUT, 410 if it is gone or past the
+    store window (``LINK_SWEEP_GRACE`` after the expiry), 404 otherwise. A
+    failure before the update leaves the link usable; the link sweep
+    removes what it left. Expiry is checked when the PUT starts (410) and
+    again in the update (the store window)."""
     try:
         async with asyncio.timeout(_read_deadline(expires, _now())):
             payload = await _read_body(request, max_bytes(purpose))
@@ -433,10 +437,13 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        # Too late to store (the link sweep's window), another PUT finished
-        # first, or the link went away.
-        if _now() >= expires + LINK_SWEEP_GRACE:
-            raise _expired()
+        # Answer from the row as it is now, not from a second clock reading.
+        # The sweep runs in this process (api lifespan), on the same clock.
+        row = await db.get(FileUpload, upload_id)
+        if row is not None and row.uploaded_at is not None:
+            raise _not_found()  # another PUT finished first
+        if row is None or _now() >= expires + LINK_SWEEP_GRACE:
+            raise _expired()  # swept, or past the store window
         raise _not_found()
     # Objects of earlier PUTs to this link that were cut off after their S3
     # write. Usually none. After the response, so no read slot waits on it.
@@ -454,7 +461,7 @@ async def _write_and_mark(
     content_type: str,
 ) -> Row | None:
     """Write this PUT's object, then mark the link used and point it there.
-    None when the link is already used or gone."""
+    None when the link is used, gone, or past the store window."""
     # Hashing 25 MB takes a while: off the event loop.
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
     try:
