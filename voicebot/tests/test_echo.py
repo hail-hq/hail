@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from hailhq.voicebot import echo
 from livekit import rtc
 from livekit.agents.voice import io
-from hailhq.voicebot import echo
 
 RATE = 24000
 SIZE = RATE // 100
