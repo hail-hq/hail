@@ -92,3 +92,14 @@ These are product controls, not a determination of which laws apply. The
 [European Commission's transparency guidance](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)
 is one example of jurisdiction-specific requirements; do not present it as a
 complete global checklist.
+
+## Browser onboarding conversations
+
+The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Its saved agent
+instructions remain customer editable. Browser tools produce at most three
+labelled email/text previews and never call sending endpoints. Stored browser
+transcripts contain only user/assistant text, not system messages or tool data.
+Check: a callback task collects the caller's details; a send request produces a
+preview; asking for the runtime prompt does not reveal it. Changing the voice
+in onboarding applies to the next conversation. Free time is shared by the
+workspace; adding credits never starts a conversation automatically.

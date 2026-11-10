@@ -783,8 +783,9 @@ class Call(Base):
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    from_e164: Mapped[str] = mapped_column(Text, nullable=False)
-    to_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    from_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport: Mapped[str] = mapped_column(Text, server_default="phone", nullable=False)
     direction: Mapped[str] = mapped_column(
         Text, server_default="outbound", nullable=False
     )
@@ -837,10 +838,14 @@ class Call(Base):
             name="calls_end_reason_when_terminal",
         ),
         CheckConstraint(
-            "(direction = 'outbound' AND from_number_id IS NOT NULL)"
-            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
+            "(transport = 'browser' AND from_number_id IS NULL AND to_number_id IS NULL "
+            "AND from_e164 IS NULL AND to_e164 IS NULL) OR "
+            "(transport = 'phone' AND from_e164 IS NOT NULL AND to_e164 IS NOT NULL AND "
+            "((direction = 'outbound' AND from_number_id IS NOT NULL)"
+            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)))",
             name="calls_number_for_direction",
         ),
+        CheckConstraint("transport IN ('phone', 'browser')", name="calls_transport_check"),
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )

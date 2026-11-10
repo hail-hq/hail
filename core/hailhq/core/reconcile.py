@@ -57,11 +57,35 @@ async def sweep_stale_calls(
     row). The terminal guard (``status NOT IN terminal``) makes a redundant
     sweep idempotent.
     """
+    from hailhq.core.browser_voice import finish_browser_call, SETUP_SECONDS
+    from sqlalchemy import select
+    from datetime import datetime, timezone, timedelta
+
+    browser_calls = (
+        (
+            await session.execute(
+                select(Call).where(
+                    Call.transport == "browser",
+                    Call.status.not_in(TERMINAL_CALL_STATUSES),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for call in browser_calls:
+        origin = call.answered_at or call.requested_at
+        ceiling = call.max_duration_seconds if call.answered_at else SETUP_SECONDS
+        if datetime.now(timezone.utc) > origin + timedelta(
+            seconds=ceiling + grace_seconds
+        ):
+            await finish_browser_call(session, call.id, failed=True)
+
     select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,
                c.direction, c.from_e164, c.to_e164, c.agent_id
           FROM calls c
-         WHERE c.status NOT IN :terminal_statuses
+         WHERE c.transport = 'phone' AND c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
            AND (
              (now() > COALESCE(c.started_at, c.requested_at)

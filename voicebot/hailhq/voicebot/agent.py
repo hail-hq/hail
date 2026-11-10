@@ -2264,6 +2264,11 @@ async def _run_call(
     """The function ``WorkerOptions.entrypoint_fnc`` points at."""
     metadata = parse_metadata(ctx.job.metadata)
 
+    if metadata.get("transport") == "browser":
+        from hailhq.voicebot.browser import run_browser_session
+        await run_browser_session(ctx, metadata["call_id"])
+        return
+
     await ctx.connect()
 
     inbound = metadata.get("direction") == "inbound"
