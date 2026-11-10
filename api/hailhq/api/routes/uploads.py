@@ -222,6 +222,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _update_now() -> datetime:
+    """The instant the final update compares with the store window. Its own
+    function so tests can move only this reading."""
+    return _now()
+
+
 def _server_full() -> bool:
     return _reads_total >= MAX_CONCURRENT_BODY_READS
 
@@ -289,8 +295,8 @@ async def _read_body(request: Request, limit: int) -> bytes:
             "description": (
                 "The link had expired when the PUT started, the body arrived "
                 "in time but storing it ended more than "
-                f"{_STORE_GRACE_MINUTES} minutes after the expiry, or the "
-                "link was removed meanwhile. Make a new link."
+                f"{_STORE_GRACE_MINUTES} minutes after the expiry. Make a new "
+                "link."
             )
         },
         413: {"description": "The file is larger than the link's `max_bytes`."},
@@ -401,8 +407,7 @@ async def _store(
     two PUTs to one link never overwrite each other. The update that marks
     the link used also points it at this PUT's key, and the winner then
     deletes any other attempt objects. If the update matches nothing, this
-    PUT deletes its own object and answers from the row as it is then: 404
-    if the link was used by another PUT, 410 if it is gone or past the
+    PUT deletes its own object and answers 410 when the update ran past the
     store window (``LINK_SWEEP_GRACE`` after the expiry), 404 otherwise. A
     failure before the update leaves the link usable; the link sweep
     removes what it left. Expiry is checked when the PUT starts (410) and
@@ -426,7 +431,7 @@ async def _store(
         raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
 
     key = f"{base_key}.{uuid4().hex}"
-    stored = await _write_and_mark(
+    stored, updated_at = await _write_and_mark(
         db, s3, upload_id, token_hash, key, payload, content_type
     )
     if stored is None:
@@ -437,13 +442,11 @@ async def _store(
             logger.warning(
                 "upload %s: could not delete an unused object", upload_id, exc_info=True
             )
-        # Answer from the row as it is now, not from a second clock reading.
-        # The sweep runs in this process (api lifespan), on the same clock.
-        row = await db.get(FileUpload, upload_id)
-        if row is not None and row.uploaded_at is not None:
-            raise _not_found()  # another PUT finished first
-        if row is None or _now() >= expires + LINK_SWEEP_GRACE:
-            raise _expired()  # swept, or past the store window
+        # Decided with the instant the update used: past the store window
+        # is 410 (make a new link); otherwise another PUT used the link, or
+        # it was removed (used by a verification, or a closed organization).
+        if expires < updated_at - LINK_SWEEP_GRACE:
+            raise _expired()
         raise _not_found()
     # Objects of earlier PUTs to this link that were cut off after their S3
     # write. Usually none. After the response, so no read slot waits on it.
@@ -459,9 +462,10 @@ async def _write_and_mark(
     key: str,
     payload: bytes,
     content_type: str,
-) -> Row | None:
+) -> tuple[Row | None, datetime]:
     """Write this PUT's object, then mark the link used and point it there.
-    None when the link is used, gone, or past the store window."""
+    Returns the stored row (None when the link is used, gone, or past the
+    store window) and the instant the update used."""
     # Hashing 25 MB takes a while: off the event loop.
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
     try:
@@ -475,7 +479,7 @@ async def _write_and_mark(
     # If this fails, the object stays: the row may point at it if the commit
     # reached the database before the error. Otherwise the next PUT that
     # wins, or the link sweep, deletes it.
-    now = _now()
+    now = _update_now()
     stored = (
         await db.execute(
             update(FileUpload)
@@ -505,7 +509,7 @@ async def _write_and_mark(
         )
     ).one_or_none()
     await db.commit()
-    return stored
+    return stored, now
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

@@ -602,11 +602,12 @@ async def test_two_links_at_once_never_pass_the_cap(
     assert sorted(r.status_code for r in results) == [201, 429]
 
 
-async def test_a_link_removed_during_its_put_is_410_and_leaves_no_object(
+async def test_a_link_removed_during_its_put_is_404_and_leaves_no_object(
     client, org_and_key, s3, async_session
 ) -> None:
-    """The row went away while the body was stored: the object is removed,
-    and the caller is told to make a new link."""
+    """The row went away while the body was stored (used by a verification,
+    or a closed organization): the object is removed, and the answer is 404,
+    not 'make a new link'."""
     from sqlalchemy import delete
 
     org_id, _, plain = org_and_key
@@ -621,7 +622,7 @@ async def test_a_link_removed_during_its_put_is_410_and_leaves_no_object(
 
     s3.put_attachment.side_effect = swept
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
-    assert resp.status_code == 410, resp.text
+    assert resp.status_code == 404, resp.text
     key = s3.put_attachment.await_args.args[0]
     assert key.startswith(f"verification-uploads/{org_id}/{upload_id}.")
     s3.delete.assert_awaited_once_with(key)
@@ -811,18 +812,10 @@ async def test_a_failed_final_commit_leaves_the_link_usable(
 
 
 def _clock_for_final_update(monkeypatch, at: datetime) -> None:
-    """``_now`` is real for the expiry check and the read deadline, then
-    ``at`` for the final update and anything after it."""
+    """Only the final update's reading of the clock is ``at``."""
     from hailhq.api.routes import uploads as uploads_routes
 
-    real_now = uploads_routes._now
-    calls = []
-
-    def clock():
-        calls.append(1)
-        return real_now() if len(calls) <= 2 else at
-
-    monkeypatch.setattr(uploads_routes, "_now", clock)
+    monkeypatch.setattr(uploads_routes, "_update_now", lambda: at)
 
 
 def _expires(link: dict) -> datetime:
@@ -872,7 +865,7 @@ async def test_storing_past_the_window_is_410_and_leaves_no_object(
     s3.delete.assert_awaited_once_with(s3.put_attachment.await_args.args[0])
 
 
-async def test_a_put_that_lost_to_another_is_404_even_past_the_window(
+async def test_a_put_that_lost_to_another_is_404_and_deletes_its_object(
     client, org_and_key, s3, monkeypatch, async_session
 ) -> None:
     """The link was already used: 404 (not 410, which would ask for a new
@@ -890,17 +883,22 @@ async def test_a_put_that_lost_to_another_is_404_even_past_the_window(
     token = parse_qs(urlparse(link["upload_url"]).query)["token"][0]
     row.token_hash = hash_token(token)
     await async_session.commit()
-    _clock_for_final_update(monkeypatch, _expires(link) + timedelta(hours=1))
+    # The row is already used, so this PUT's update matches nothing.
     resp = await client.put(_path(link["upload_url"]), content=_JPEG)
     assert resp.status_code == 404, resp.text
+    s3.delete.assert_awaited_with(s3.put_attachment.await_args.args[0])
 
 
 def test_the_documented_upload_times() -> None:
-    """The PUT's description says 10 and 15 minutes in plain words."""
-    from hailhq.api.routes.uploads import MAX_BODY_READ_SECONDS
+    """The PUT's description says 10 and 15 minutes in plain words; they
+    must match the constants."""
+    from hailhq.api.routes.uploads import MAX_BODY_READ_SECONDS, put_file_upload
 
-    assert MAX_BODY_READ_SECONDS == 600
-    assert LINK_SWEEP_GRACE == timedelta(minutes=15)
+    doc = " ".join(put_file_upload.__doc__.split())
+    assert f"within {int(MAX_BODY_READ_SECONDS // 60)} minutes" in doc
+    grace = int(LINK_SWEEP_GRACE.total_seconds() // 60)
+    assert f"up to {grace} minutes later" in doc
+    assert LINK_SWEEP_GRACE.total_seconds() % 60 == 0
 
 
 async def test_the_winner_deletes_earlier_attempts(client, org_and_key, s3) -> None:

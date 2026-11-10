@@ -815,8 +815,8 @@ paths:
         "410":
           description:
             The link had expired when the PUT started, the body arrived
-            in time but storing it ended more than 15 minutes after the expiry, or
-            the link was removed meanwhile. Make a new link.
+            in time but storing it ended more than 15 minutes after the expiry. Make
+            a new link.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":

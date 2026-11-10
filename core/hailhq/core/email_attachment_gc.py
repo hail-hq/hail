@@ -145,9 +145,10 @@ class EmailAttachmentGcWorker:
         The row goes first, and only while it is still unused. A PUT marks a
         link used only while it is within ``LINK_SWEEP_GRACE`` of its expiry,
         the opposite of this rule, so the two never take the same row. A PUT
-        later than that deletes its own object and answers 410 (404 when
-        another PUT used the link first). Both sides read this process's
-        clock: the worker runs in the API's lifespan. Then
+        later than that deletes its own object and answers 410. Each API
+        process runs this worker in its lifespan; with several processes on
+        several hosts, their clocks must agree (NTP), or the two rules can
+        overlap by the clock difference. Then
         the objects of PUTs cut off before their update, usually none. A
         failed S3 delete only logs, so one bad row never blocks the batch;
         such an object stays. With the Terraform module, verification
