@@ -17,12 +17,46 @@ data "aws_iam_policy_document" "main" {
     resources = ["${aws_s3_bucket.inbound.arn}/outbound-attachments/*"]
   }
 
+  # The upload-link sweep lists an expired link's key to delete what a
+  # cut-off PUT left (each PUT writes <key>.<attempt>; routes/uploads.py).
+  statement {
+    sid       = "OutboundAttachmentsList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.inbound.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["outbound-attachments/*"]
+    }
+  }
+
   # Consent screenshots for US SMS registration. Carrier reviewers open
   # them through the API's public link (routes/sms_evidence.py).
   statement {
     sid       = "SmsEvidenceReadWriteDelete"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.inbound.arn}/sms-evidence/*"]
+  }
+
+  # Verification documents sent with an upload link (routes/uploads.py).
+  # Read once by POST /verifications, then deleted; the GC deletes any left.
+  statement {
+    sid       = "VerificationUploadsReadWriteDelete"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.inbound.arn}/verification-uploads/*"]
+  }
+
+  # The retention sweep lists a closed organization's folder to delete it,
+  # and the upload-link sweep an expired link's attempts.
+  statement {
+    sid       = "VerificationUploadsList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.inbound.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["verification-uploads/*"]
+    }
   }
 
   # The retention sweep lists a closed organization's evidence to delete it.

@@ -99,8 +99,10 @@ def rate_limit_string() -> str:
 _HEALTHZ_PATH = "/healthz"
 
 # Unauthenticated, static docs/spec endpoints (never dual-mounted under /v1).
-# Anonymous callers share one remote-IP bucket behind the proxy, so without
-# this exemption an anonymous flood would 429 the spec agents fetch.
+# Anonymous callers are keyed on their IP (in prod read from Caddy's
+# X-Forwarded-For, see docker-compose.prod.yml). Many share one IP behind a
+# NAT or a hosted sandbox, so without this exemption an anonymous flood from
+# one of those would 429 the spec agents fetch.
 _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"})
 
 # Self-credentialed public routes with no Authorization header by design
@@ -109,9 +111,9 @@ _DOCS_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/re
 # plus the static public webhook event catalog that the console fetches
 # without a key.
 # Without this exemption they fall back to the
-# remote-IP rate-limit key (_rate_limit_key below) — and in production every
-# anonymous caller resolves to the same upstream-proxy IP, so all anonymous
-# traffic would share one bucket with these legitimate routes. Listed
+# client-IP rate-limit key (_rate_limit_key below). A carrier sends its
+# webhooks from a few IPs, and many callers share one IP behind a NAT, so
+# these routes would share buckets with unrelated anonymous traffic. Listed
 # unprefixed; dual-mounted at both /v1/... and the legacy path (main.py), so
 # matching strips a leading /v1 before comparing.
 _EXEMPT_PATHS = {"/unsubscribe", "/webhooks/event-types"}

@@ -45,7 +45,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from hailhq.core.models import Call, Contact, Email, OrgClosure, Sms
+from hailhq.core.file_uploads import delete_org_verification_uploads
+from hailhq.core.models import Call, Contact, Email, FileUpload, OrgClosure, Sms
 from hailhq.core.recordings import delete_recording
 from hailhq.core.sms_evidence import delete_org_evidence
 from sqlalchemy import delete, or_, select, update
@@ -70,6 +71,7 @@ class PurgeSummary:
     emails_scrubbed: int = 0
     contacts_deleted: int = 0
     evidence_files_deleted: int = 0
+    verification_uploads_deleted: int = 0
     # Compatibility counter for older operator consumers. Audio is now optional.
     calls_with_unexpected_recording: int = 0
 
@@ -91,8 +93,10 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
       CHECK constraint requires at least one of ``body_text``/
       ``body_html`` to be non-NULL; an empty string satisfies the
       constraint while still clearing the actual content.
-    * SMS registration evidence files (public consent screenshots) are
-      deleted from the mail bucket.
+    * SMS registration evidence files (public consent screenshots) and
+      verification documents (``verification-uploads/``; the GC normally
+      removes them within the hour) are deleted from the mail bucket, and
+      the documents' ``file_uploads`` rows with them.
     * ``Contact`` rows scoped to the org are deleted outright — see module
       docstring; this is the explicit replacement for the FK cascade that
       isn't possible across the two databases.
@@ -182,23 +186,40 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
     )
     summary.contacts_deleted = contact_result.rowcount or 0
 
+    await session.execute(
+        delete(FileUpload)
+        .where(
+            FileUpload.organization_id.in_(org_ids),
+            FileUpload.purpose == "verification_document",
+        )
+        .execution_options(synchronize_session=False)
+    )
+
     await session.commit()
 
     # Public links must stop working once the account's data is gone. After
     # the commit, so an S3 failure never blocks the database scrub; every
     # sweep retries it, since closed orgs stay past the cutoff. One org's
     # failure never stops the others.
-    failed: list[UUID] = []
+    # Each folder in its own try, so one failure never skips the other.
+    failed: set[UUID] = set()
     for org_id in org_ids:
         try:
             summary.evidence_files_deleted += await delete_org_evidence(org_id)
         except Exception:
             logger.exception("could not delete evidence for org %s", org_id)
-            failed.append(org_id)
+            failed.add(org_id)
+        try:
+            summary.verification_uploads_deleted += (
+                await delete_org_verification_uploads(org_id)
+            )
+        except Exception:
+            logger.exception("could not delete verification uploads for org %s", org_id)
+            failed.add(org_id)
     if failed:
         # The database scrub is committed; log what was done before failing.
         _log_summary(summary)
-        raise RuntimeError(f"evidence delete failed for {len(failed)} org(s)")
+        raise RuntimeError(f"evidence or upload delete failed for {len(failed)} org(s)")
     return summary
 
 
@@ -206,13 +227,15 @@ def _log_summary(summary: PurgeSummary) -> None:
     logger.info(
         "retention sweep: %d org(s) past retention, %d call(s) scrubbed, "
         "%d sms scrubbed, %d email(s) scrubbed, %d contact(s) deleted, "
-        "%d evidence file(s) deleted, %d unexpected recording anomaly(ies)",
+        "%d evidence file(s) deleted, %d verification upload(s) deleted, "
+        "%d unexpected recording anomaly(ies)",
         len(summary.organizations_purged),
         summary.calls_scrubbed,
         summary.sms_scrubbed,
         summary.emails_scrubbed,
         summary.contacts_deleted,
         summary.evidence_files_deleted,
+        summary.verification_uploads_deleted,
         summary.calls_with_unexpected_recording,
     )
 

@@ -21,7 +21,7 @@ Example. Ask your agent: "Find me a US number that can call and text." It calls 
 { "country_code": "US", "capabilities": ["voice", "sms"] }
 ```
 
-The server exposes 36 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+The server exposes 43 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
 Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` needs `attest_authorized: true`.
 
@@ -36,7 +36,8 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `get_sms`                       | Fetch the current state of one SMS.                                                                |
 | `list_sms`                      | List recent SMS messages (cursor-paginated).                                                       |
 | `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                |
-| `upload_email_attachment`       | Upload a file, get back a reusable id.                                                             |
+| `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                         |
+| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.  |
 | `get_email`                     | Fetch one email's full record (body + inbound headers).                                            |
 | `list_emails`                   | List emails (`direction="inbound"` for replies).                                                   |
 | `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                     |
@@ -62,11 +63,31 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `get_number`                    | Fetch one number.                                                                                  |
 | `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                 |
 | `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                         |
+| `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                    |
 | `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                |
 | `list_verifications`            | List the org's verifications and their states (read-only).                                         |
 | `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                        |
 | `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration. |
 | `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                               |
+
+### Sending a file
+
+A tool call carries text only, so a file in base64 makes the model write every character into the call. That is slow and fails for most real files. `create_file_upload` returns a one-time link instead, and the agent's shell sends the bytes:
+
+1. `create_file_upload`: `{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}`. The result has `id`, `upload_url`, `expires_at` (15 minutes) and a ready `curl` line.
+2. Run the `curl` line with the file's path after the `@`:
+
+   ```bash
+   curl -sS -X PUT --data-binary @invoice.pdf \
+     -H 'Content-Type: application/pdf' \
+     'https://api.hail.so/v1/uploads/<id>?token=<token>'
+   ```
+
+   The link needs no key and works once. The response has `size_bytes` and `sha256`; compare them with the local file (`wc -c`, `shasum -a 256`).
+
+3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
+
+This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 
 ### Getting a number over MCP
 
@@ -97,7 +118,9 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
 4. Ask the user for every field and file. The agent must not invent or guess any value.
    The balance must cover the offer's `setup_cents` plus `monthly_cents`, or `submit_verification` returns a 402 error and sends nothing. Ask the user to add credit first. That amount is set aside while the carrier checks the papers. It pays for setup and the first month when the number is bought with this verification, and comes back if the verification is rejected or cancelled, or if no number is bought within 30 days of approval. Each entry in the offer's `verifications` shows it as `held_cents`.
-5. `submit_verification`. `files[].content_base64` is the file's bytes in base64. Slot names in `files` must be keys in `documents`:
+5. Upload each file with `create_file_upload` (see [Sending a file](#sending-a-file)): `{"purpose": "verification_document", "filename": "passport.jpg", "content_type": "image/jpeg"}`. Run the `curl` line it returns. The upload id works for 1 hour.
+6. `check_verification` with the same arguments as `submit_verification`, minus `attest_authorized`. It runs every check Hail can run (credit, duplicates, required fields, documents, file types and sizes) and files nothing. Fix any `problems` with the user.
+7. `submit_verification`. Each `files` entry is `{"slot", "upload_id"}`, or `{"slot", "content_type", "content_base64"}` for a very small file. Slot names in `files` must be keys in `documents`:
 
    ```json
    {
@@ -116,21 +139,17 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
      },
      "documents": { "identity": { "option": "passport", "fields": {} } },
      "files": [
-       {
-         "slot": "identity",
-         "content_type": "image/jpeg",
-         "content_base64": "<base64 of the passport photo>"
-       }
+       { "slot": "identity", "upload_id": "<id from create_file_upload>" }
      ],
      "attest_authorized": true
    }
    ```
 
-   The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again.
+   The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again. A used upload is deleted once the verification is saved; after a failed submit it stays for the retry.
 
-6. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-7. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
-8. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+8. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+9. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
+10. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 
@@ -153,7 +172,7 @@ Limits: JPG, PNG or PDF files, 10 MiB each, 29 MiB in total, at most 20 files an
 
 A registration with `waiting_for_credit: true` files its campaign only once the credit covers the review fee. Its `credit_needed_cents` is its own share of the credit still needed, not a running total. The first waiting registration also carries any shortfall of the balance. So ask the user to add the sum of `credit_needed_cents` over the rows `list_verifications` returns with `purpose: "sms"`. One top-up of that sum lets them all go at the next check. The number follows the balance, so read it again before the user pays.
 
-> **Warning:** The user's details and documents pass through the model's context and are kept in the client's transcript. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
+> **Warning:** The user's details, and any document sent as base64, pass through the model's context and are kept in the client's transcript. A document sent with an upload link does not. Keep the human approval prompt on for `submit_verification`, and have the user hand over each value and file in the conversation. A submitted verification cannot be cancelled, and the carrier keeps the documents. Only `awaiting_review` and `rejected` ones can be cancelled, plus an approved US SMS registration.
 
 ## Claude.ai (web)
 

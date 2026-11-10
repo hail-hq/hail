@@ -44,17 +44,17 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 
 **Data direction:** read and write.
 
-**Tools:** the portal syncs the live list. The server has 41 tools, listed in `mcp/hailhq/mcp/tools.py`.
+**Tools:** the portal syncs the live list. The server has 43 tools, listed in `mcp/hailhq/mcp/tools.py`.
 
-| Group | Tools |
-| --- | --- |
-| Calls | `place_call`, `get_call`, `list_calls`, `get_events` |
-| Text messages | `send_sms`, `get_sms`, `list_sms`, `preview_sms_application`, `get_sms_application`, `amend_sms_application` |
-| Email | `send_email`, `upload_email_attachment`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `list_email_domains` |
-| Agents | `create_agent`, `update_agent`, `get_agent`, `list_agents`, `delete_agent`, `route_number` |
-| Numbers | `list_number_regions`, `quote_numbers`, `acquire_number`, `list_numbers`, `get_number`, `release_number` |
-| Registrations | `get_verification_requirements`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification` |
-| Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami` |
+| Group                | Tools                                                                                                                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Calls                | `place_call`, `get_call`, `list_calls`, `get_events`                                                                                                                                            |
+| Text messages        | `send_sms`, `get_sms`, `list_sms`, `preview_sms_application`, `get_sms_application`, `amend_sms_application`                                                                                    |
+| Email                | `send_email`, `upload_email_attachment`, `create_file_upload`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `list_email_domains` |
+| Agents               | `create_agent`, `update_agent`, `get_agent`, `list_agents`, `delete_agent`, `route_number`                                                                                                      |
+| Numbers              | `list_number_regions`, `quote_numbers`, `acquire_number`, `list_numbers`, `get_number`, `release_number`                                                                                        |
+| Registrations        | `get_verification_requirements`, `check_verification`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification`                           |
+| Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami`                                                                                                                                   |
 
 ## Portal steps
 

@@ -9,6 +9,7 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.file_uploads import VERIFICATION_FILE_TYPES, valid_content_type
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
@@ -2130,6 +2131,121 @@ class EmailAttachmentUploadResponse(BaseModel):
     size_bytes: int = Field(description="Size of the uploaded file in bytes.")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FileUploadCreate(BaseModel):
+    """Body of ``POST /uploads``: what the file is for, and its name and type."""
+
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description=(
+            "What the file is for. `email_attachment`: the id works in "
+            "`POST /v1/emails` `attachment_ids`. `verification_document`: the "
+            "id works as the `upload.<slot>` part of `POST /v1/verifications` "
+            "and `POST /v1/verifications/check`."
+        )
+    )
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The file's name, 1 to 255 chars, no control characters.",
+    )
+    content_type: str = Field(
+        description=(
+            "MIME type, `type/subtype` with no parameters. A "
+            "`verification_document` takes `image/jpeg`, `image/png` or "
+            "`application/pdf` only. This type is stored; the PUT request's "
+            "own `Content-Type` header is not used."
+        )
+    )
+
+    @field_validator("filename")
+    @classmethod
+    def _filename_printable(cls, v: str) -> str:
+        # The name goes into a MIME header of the email; CR or LF there
+        # would start a new header.
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("filename must not contain control characters")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_shape(cls, v: str) -> str:
+        if not valid_content_type(v):
+            raise ValueError(
+                "content_type must be a MIME type like application/pdf, "
+                "with no parameters"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _verification_types(self) -> "FileUploadCreate":
+        if (
+            self.purpose == "verification_document"
+            and self.content_type not in VERIFICATION_FILE_TYPES
+        ):
+            raise ValueError(
+                "a verification_document must be image/jpeg, image/png or "
+                "application/pdf"
+            )
+        return self
+
+
+class FileUploadLinkResponse(BaseModel):
+    """Returned by ``POST /uploads``: a one-time link to send the bytes to."""
+
+    id: UUID = Field(description="The upload's id.")
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description="What the file is for."
+    )
+    upload_url: str = Field(
+        description=(
+            "Send the raw file bytes here with `PUT`. No Authorization "
+            "header: the `token` in the URL is the only credential. Works "
+            "once, until `expires_at`. Treat it like a password."
+        )
+    )
+    method: Literal["PUT"] = Field(description="The HTTP method for `upload_url`.")
+    content_type: str = Field(description="The type the file is stored with.")
+    max_bytes: int = Field(description="The largest file the link takes, in bytes.")
+    expires_at: datetime = Field(description="When the link stops working.")
+
+
+class FileUploadResponse(BaseModel):
+    """Returned by ``PUT /uploads/{id}``: what Hail stored."""
+
+    id: UUID = Field(description="The upload's id.")
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description="What the file is for."
+    )
+    filename: str = Field(description="The name given when the link was made.")
+    content_type: str = Field(description="The type given when the link was made.")
+    size_bytes: int = Field(description="Bytes stored. Compare with the local file.")
+    sha256: str = Field(
+        description="sha256 of the bytes stored, hex. Compare with the local file."
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VerificationCheckFile(BaseModel):
+    """One file a verification check read."""
+
+    slot: str = Field(description="The document slot.")
+    upload_id: UUID | None = Field(
+        description="The upload used for the slot, or null for a `file.<slot>` part."
+    )
+    size_bytes: int = Field(description="Size of the file in bytes.")
+    sha256: str = Field(description="sha256 of the file, hex.")
+
+
+class VerificationCheckResponse(BaseModel):
+    """Returned by ``POST /verifications/check`` when every local check passes."""
+
+    ok: Literal[True] = Field(description="Always true: a failed check is a 4xx.")
+    files: list[VerificationCheckFile] = Field(
+        description="The files the check read, one per slot."
+    )
+    note: str = Field(description="What the check does not cover.")
 
 
 class EmailResponse(EmailSummary):

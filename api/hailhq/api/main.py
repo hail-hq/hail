@@ -12,6 +12,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from hailhq.api import access_log
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
 from hailhq.api.number_orders import (
     purge_expired_quotes,
@@ -35,6 +36,7 @@ from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import sms_evidence as sms_evidence_routes
 from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
+from hailhq.api.routes import uploads as uploads_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
@@ -77,6 +79,7 @@ from hailhq.core.webhook_worker import WebhookWorker
 
 _telemetry = configure_telemetry("hail-api")
 logger = logging.getLogger(__name__)
+access_log.install()
 
 
 async def _meter_forward_send(*, organization_id, forward_email_id) -> None:
@@ -482,6 +485,7 @@ _CUSTOMER_ROUTERS = [
     calls_routes.router,
     recordings_routes.router,
     email_attachments_routes.router,
+    uploads_routes.router,
     emails_routes.router,
     events_routes.router,
     email_domains_routes.router,

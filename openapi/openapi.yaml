@@ -658,6 +658,190 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/uploads:
+    post:
+      tags:
+        - uploads
+      summary: Create File Upload
+      description:
+        "Make a one-time link to upload one file with a plain HTTP PUT.
+
+
+        For callers whose shell has no Hail key (an agent using the MCP). Send
+
+        the raw bytes to `upload_url` with `PUT` and no Authorization header,
+
+        once, before `expires_at` (15 minutes):
+
+
+        ```
+
+        curl -sS -X PUT --data-binary @passport.jpg '<upload_url>'
+
+        ```
+
+
+        The PUT answers with `size_bytes` and `sha256` of what was stored. An
+
+        organization may hold at most 50 unused, unexpired links."
+      operationId: create_file_upload
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileUploadCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploadLinkResponse"
+        "429":
+          description:
+            "Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds). Or: the organization
+            already holds 50 unused, unexpired upload links. Use or let some expire."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "503":
+          description: File uploads are not configured on this server.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/uploads/{upload_id}:
+    put:
+      tags:
+        - uploads
+      summary: Put File Upload
+      description:
+        "Send the file's bytes to an upload link. No Authorization header.
+
+
+        Works once. A link already expired when the PUT starts is 410. The body
+
+        must arrive before the link expires (and within 10 minutes), or 408.
+
+        Storing it may end after the expiry, up to 15 minutes later. Unknown id,
+
+        wrong token, a used link, and a file that could not be stored at the end
+
+        are all 404 with one message: make a new link if the file is not
+
+        stored. A second upload of the same file is harmless.
+
+        Empty body: 422. A verification document whose first bytes are not the
+
+        declared JPEG, PNG or PDF: 422."
+      operationId: put_file_upload
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Upload Id
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            description: The token from `upload_url`. The only credential.
+            title: Token
+          description: The token from `upload_url`. The only credential.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploadResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description:
+            "Unknown link, wrong token, or already used. Also when the
+            file could not be stored at the end: another PUT used the link first,
+            the link was removed, or storing ended more than 15 minutes after the
+            expiry. If your file is not stored, make a new link and send it again."
+        "408":
+          description:
+            The body did not arrive before the link expired, or within
+            10 minutes. The link is not used up.
+        "410":
+          description: The link had expired when the PUT started. Make a new link.
+        "413":
+          description: The file is larger than the link's `max_bytes`.
+        "503":
+          description:
+            File uploads are not configured on this server, storage failed,
+            or too many uploads are running, in all or for this organization (`Retry-After`).
+            The link is not used up.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security: []
+      requestBody:
+        required: true
+        description:
+          "The raw file bytes. The `Content-Type` header is ignored: the
+          type given when the link was made is stored."
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
   /v1/emails:
     post:
       tags:
@@ -5097,11 +5281,19 @@ paths:
 
         `fields` (JSON object), `address` (JSON object, when required), `documents`
 
-        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
+        (JSON object: slot name to `{"option": ..., "fields": {...}}`), and for
 
-        part per slot named `file.<slot>`. Get the slot and field names from
+        each slot either a file part named `file.<slot>` or a text part named
 
-        `GET /verifications/requirements`.
+        `upload.<slot>` holding the id of a `verification_document` uploaded
+
+        with `POST /uploads` less than 1 hour ago (not both). Files are JPG, PNG
+
+        or PDF, 10 MB each at most. Get the slot and field names from
+
+        `GET /verifications/requirements`. Used uploads are deleted once the
+
+        verification is saved; after a failed submit they stay for a retry.
 
 
         The name of the person or company comes from the form you send (for
@@ -5248,6 +5440,81 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/check:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification
+      description:
+        "Check a verification form without filing anything (multipart/form-data).
+
+
+        Takes the same parts as `POST /verifications` and runs every check Hail
+
+        can run before filing: the purpose rules, the credit check (402), the
+
+        carrier's form (a read), the duplicate check (409), field lengths, the
+
+        files (`file.<slot>` and `upload.<slot>`: type, size, owner, age), and
+
+        the form's own rules (required fields, documents, address; for `sms`
+
+        the US texting application). Errors are the same codes and shapes
+
+        submit gives.
+
+
+        Nothing is filed at the carrier, saved, held or charged, and uploads
+
+        are not used up. The carrier runs its own checks when you submit."
+      operationId: check_verification
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationCheckResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "402":
+          description: Not enough credit to submit this form. Same rule as `POST /verifications`.
+        "409":
+          description: Submit would be a duplicate. Same rule as submit.
         "422":
           description: Validation Error
           content:
@@ -8261,6 +8528,132 @@ components:
         - label
       title: FieldSpec
       description: One value the customer types in.
+    FileUploadCreate:
+      properties:
+        purpose:
+          type: string
+          enum:
+            - email_attachment
+            - verification_document
+          title: Purpose
+          description:
+            "What the file is for. `email_attachment`: the id works in
+            `POST /v1/emails` `attachment_ids`. `verification_document`: the id works
+            as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`."
+        filename:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Filename
+          description: The file's name, 1 to 255 chars, no control characters.
+        content_type:
+          type: string
+          title: Content Type
+          description:
+            MIME type, `type/subtype` with no parameters. A `verification_document`
+            takes `image/jpeg`, `image/png` or `application/pdf` only. This type is
+            stored; the PUT request's own `Content-Type` header is not used.
+      type: object
+      required:
+        - purpose
+        - filename
+        - content_type
+      title: FileUploadCreate
+      description:
+        "Body of ``POST /uploads``: what the file is for, and its name
+        and type."
+    FileUploadLinkResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: The upload's id.
+        purpose:
+          type: string
+          enum:
+            - email_attachment
+            - verification_document
+          title: Purpose
+          description: What the file is for.
+        upload_url:
+          type: string
+          title: Upload Url
+          description:
+            "Send the raw file bytes here with `PUT`. No Authorization
+            header: the `token` in the URL is the only credential. Works once, until
+            `expires_at`. Treat it like a password."
+        method:
+          type: string
+          const: PUT
+          title: Method
+          description: The HTTP method for `upload_url`.
+        content_type:
+          type: string
+          title: Content Type
+          description: The type the file is stored with.
+        max_bytes:
+          type: integer
+          title: Max Bytes
+          description: The largest file the link takes, in bytes.
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description: When the link stops working.
+      type: object
+      required:
+        - id
+        - purpose
+        - upload_url
+        - method
+        - content_type
+        - max_bytes
+        - expires_at
+      title: FileUploadLinkResponse
+      description:
+        "Returned by ``POST /uploads``: a one-time link to send the bytes
+        to."
+    FileUploadResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: The upload's id.
+        purpose:
+          type: string
+          enum:
+            - email_attachment
+            - verification_document
+          title: Purpose
+          description: What the file is for.
+        filename:
+          type: string
+          title: Filename
+          description: The name given when the link was made.
+        content_type:
+          type: string
+          title: Content Type
+          description: The type given when the link was made.
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: Bytes stored. Compare with the local file.
+        sha256:
+          type: string
+          title: Sha256
+          description: sha256 of the bytes stored, hex. Compare with the local file.
+      type: object
+      required:
+        - id
+        - purpose
+        - filename
+        - content_type
+        - size_bytes
+        - sha256
+      title: FileUploadResponse
+      description: "Returned by ``PUT /uploads/{id}``: what Hail stored."
     ForwardTargetListResponse:
       properties:
         items:
@@ -9880,6 +10273,61 @@ components:
         - msg
         - type
       title: ValidationError
+    VerificationCheckFile:
+      properties:
+        slot:
+          type: string
+          title: Slot
+          description: The document slot.
+        upload_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Upload Id
+          description: The upload used for the slot, or null for a `file.<slot>` part.
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: Size of the file in bytes.
+        sha256:
+          type: string
+          title: Sha256
+          description: sha256 of the file, hex.
+      type: object
+      required:
+        - slot
+        - upload_id
+        - size_bytes
+        - sha256
+      title: VerificationCheckFile
+      description: One file a verification check read.
+    VerificationCheckResponse:
+      properties:
+        ok:
+          type: boolean
+          const: true
+          title: Ok
+          description: "Always true: a failed check is a 4xx."
+        files:
+          items:
+            $ref: "#/components/schemas/VerificationCheckFile"
+          type: array
+          title: Files
+          description: The files the check read, one per slot.
+        note:
+          type: string
+          title: Note
+          description: What the check does not cover.
+      type: object
+      required:
+        - ok
+        - files
+        - note
+      title: VerificationCheckResponse
+      description:
+        Returned by ``POST /verifications/check`` when every local check
+        passes.
     VerificationRequirements:
       properties:
         country_code:

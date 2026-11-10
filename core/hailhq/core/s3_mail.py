@@ -65,8 +65,9 @@ class S3MailClient:
 
         return await asyncio.to_thread(_do)
 
-    async def delete_prefix(self, prefix: str) -> int:
-        """Delete every object under ``prefix``; returns how many."""
+    async def delete_prefix(self, prefix: str, *, keep: str | None = None) -> int:
+        """Delete every object under ``prefix`` except ``keep``; returns how
+        many."""
 
         def _do() -> int:
             deleted = 0
@@ -74,7 +75,11 @@ class S3MailClient:
                 Bucket=self._bucket, Prefix=prefix
             )
             for page in pages:
-                keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+                keys = [
+                    {"Key": o["Key"]}
+                    for o in page.get("Contents", [])
+                    if o["Key"] != keep
+                ]
                 if keys:
                     resp = self._client.delete_objects(
                         Bucket=self._bucket, Delete={"Objects": keys, "Quiet": True}

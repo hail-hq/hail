@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- Upload links: `POST /v1/uploads` returns a one-time URL to `PUT` a file to with no key, for email attachments and verification documents. `POST /v1/verifications/check` checks a verification form without filing it. MCP: `create_file_upload` and `check_verification`.
 - US texting: a registration that waits for credit now says how much it needs in `credit_needed_cents`. The sum over the waiting registrations is one top-up for all.
 - US texting registration: upload a consent screenshot with `POST /v1/verifications/sms/evidence`, use the public link it returns, and delete it with `DELETE` on that link. Verbal consent no longer needs a screenshot link.
 - MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.

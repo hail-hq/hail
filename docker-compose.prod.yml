@@ -60,6 +60,13 @@ services:
     build: !reset null
     restart: unless-stopped
     logging: *bounded-logging
+    environment:
+      # Trust Caddy's X-Forwarded-For, so the rate limit keys each caller with
+      # no key on its own IP, not on Caddy's. Safe only because the port below
+      # is bound to 127.0.0.1: every outside request comes through Caddy, which
+      # sets the header itself and drops one a client sent.
+      # (api/tests/test_prod_compose.py checks both.)
+      FORWARDED_ALLOW_IPS: "*"
     ports: !override
       - "127.0.0.1:8080:8080"
 

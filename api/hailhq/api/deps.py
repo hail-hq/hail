@@ -449,3 +449,11 @@ def get_s3_mail() -> S3MailClient:
     """Shared mail-bucket S3 client, used by every route touching an
     attachment (inbound reads, outbound uploads, outbound sends)."""
     return S3MailClient(bucket=settings.hail_mail_bucket)
+
+
+def get_s3_mail_optional() -> S3MailClient | None:
+    """``get_s3_mail``, or None when no mail bucket is configured. For
+    routes that answer 503 then, or need S3 only for some requests."""
+    if not settings.hail_mail_bucket:
+        return None
+    return get_s3_mail()

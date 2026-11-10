@@ -314,3 +314,32 @@ def test_instrument_raises_a_mistake_in_our_own_call():
 
     with pytest.raises(TypeError):
         instrument("Example", setup, engin=None)
+
+
+def test_upload_link_token_never_reaches_the_export():
+    """PUT /v1/uploads/{id}?token=... : the token is the upload credential."""
+    token = "UPLOADTOKENabc123-_xyz"
+    url = f"https://api.example.org/v1/uploads/0b7c?token={token}"
+    original = ReadableSpan(
+        "PUT /v1/uploads/{upload_id}",
+        context=SpanContext(123, 456, False, TraceFlags(1)),
+        attributes={
+            "url.full": url,
+            "http.url": url,
+            "http.target": f"/v1/uploads/0b7c?token={token}",
+            "url.query": f"token={token}",
+            "http.route": "/v1/uploads/{upload_id}",
+            "logfire.msg": f"PUT /v1/uploads/0b7c?token={token}",
+        },
+        events=[Event("note", {"http.url": url}, 1)],
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert token not in str(exported.attributes)
+    assert token not in str(exported.events[0].attributes)
+    assert token not in exported.name
+    assert exported.attributes["url.full"] == "https://api.example.org/v1/uploads/0b7c"
+    assert exported.attributes["http.route"] == "/v1/uploads/{upload_id}"
