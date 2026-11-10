@@ -65,8 +65,10 @@ async def test_warning_is_deferred_and_spoken_only_once():
     await warning.check(7)
     session.generate_reply.assert_called_once()
     kwargs = session.generate_reply.call_args.kwargs
-    assert "own voice" in kwargs["instructions"]
-    assert "speakerphone" in kwargs["instructions"]
+    assert "echo" in kwargs["instructions"]
+    assert "disrupting the call" in kwargs["instructions"]
+    assert "speakerphone" not in kwargs["instructions"]
+    assert "headphones" not in kwargs["instructions"]
     assert kwargs["allow_interruptions"] is False
     assert kwargs["tool_choice"] == "none"
     await warning.aclose()

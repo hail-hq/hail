@@ -2,9 +2,8 @@
 
 `HAIL_ECHO_WARNING_ENABLED=true` (default) enables a single warning when repeated
 waveform matches show the agent's played voice returning to the caller track.
-The reply says, in the call's language, that its own voice is coming back and
-asks the caller to disable speakerphone or use headphones. It does not claim
-that Hail has fixed the echo. Set the flag false to disable the observer.
+The reply says only, in the call's language: “I'm hearing an echo—it's disrupting
+the call.” It adds no advice or questions and does not claim the echo is fixed. Set the flag false to disable the observer.
 
 [Detector and warning](../../voicebot/hailhq/voicebot/echo_warning.py) use a raw,
 bounded local reader of the already-subscribed caller track, independently of

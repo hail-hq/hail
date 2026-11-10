@@ -40,4 +40,4 @@ files for metrics. Do not normalize each candidate separately. Keep customer
 recordings and transcripts out of Git.
 
 [Echo warning fallback](call-echo-warning.md) detects returning agent audio and
-asks the caller to disable speakerphone or use headphones when filters fail.
+briefly says the echo is disrupting the call when filters fail.

@@ -313,9 +313,9 @@ class EchoWarning:
             return
         self.session.generate_reply(
             instructions=(
-                "In the conversation's language, briefly tell the caller: "
-                "I'm hearing my own voice coming back. Could you turn off speakerphone "
-                "or use headphones? Say this once, naturally, without tools or laughter. "
+                "In the conversation's language, say only this short sentence: "
+                "I'm hearing an echo—it's disrupting the call. "
+                "Do not add advice, questions, explanations, or laughter. "
                 "Do not claim the problem is fixed."
             ),
             tool_choice="none",
