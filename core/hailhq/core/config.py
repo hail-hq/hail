@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     google_amd_model: str = ""
 
     # Voice pipeline
+    hail_echo_warning_enabled: bool = True
     # Supported LiveKit Cloud input filters; keep existing BVC unless selected.
     hail_audio_filter: Literal[
         "bvc", "krisp_viva", "voice_focus_s", "voice_focus_l"

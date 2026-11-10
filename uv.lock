@@ -1255,6 +1255,7 @@ dependencies = [
     { name = "livekit-plugins-speechmatics" },
     { name = "pillow" },
     { name = "pypdfium2" },
+    { name = "numpy" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
@@ -1287,6 +1288,7 @@ requires-dist = [
     { name = "livekit-plugins-speechmatics", specifier = "~=1.8.8" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pillow", specifier = ">=12" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
     { name = "pypdfium2", specifier = ">=5,<6" },
     { name = "pytest", marker = "extra == 'dev'" },

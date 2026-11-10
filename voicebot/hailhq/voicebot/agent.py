@@ -90,6 +90,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
+from hailhq.voicebot.echo_warning import EchoWarning
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
@@ -2655,6 +2656,23 @@ async def _run_call(
         call_id=call_id,
     )
 
+    echo_warning = EchoWarning(
+        session,
+        can_warn=lambda: (
+            not shutting_down
+            and captured["end_reason"] is None
+            and not agent._opening_pending
+            and (agent.phone_menu is None or not agent.phone_menu.active)
+            and not bridge_state.get("picked_up")
+            and not bridge_state.get("connected")
+        ),
+        on_warning=lambda payload: write_call_event(
+            call_id, "audio_echo_warning", payload
+        ),
+    )
+    if settings.hail_echo_warning_enabled:
+        echo_warning.attach()
+
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None
@@ -2665,6 +2683,7 @@ async def _run_call(
         legs_recorded = False
         try:
             await recovery.aclose()
+            await echo_warning.aclose()
             # Never close the classifier under a running check: let the
             # menu finish its check first.
             if agent.phone_menu is not None:
