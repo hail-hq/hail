@@ -438,7 +438,9 @@ async def test_no_sse_routes_in_either_mode(monkeypatch):
 async def test_openai_apps_challenge_is_public(monkeypatch, oauth):
     srv = _boot(monkeypatch, oauth=oauth)
     transport = httpx.ASGITransport(app=srv.app)
-    async with httpx.AsyncClient(transport=transport, base_url="https://mcp.hail.so") as c:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://mcp.hail.so"
+    ) as c:
         resp = await c.get("/.well-known/openai-apps-challenge")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "text/plain; charset=utf-8"
