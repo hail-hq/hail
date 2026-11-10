@@ -434,6 +434,18 @@ async def test_no_sse_routes_in_either_mode(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("oauth", [False, True])
+async def test_openai_apps_challenge_is_public(monkeypatch, oauth):
+    srv = _boot(monkeypatch, oauth=oauth)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://mcp.hail.so") as c:
+        resp = await c.get("/.well-known/openai-apps-challenge")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "text/plain; charset=utf-8"
+    assert resp.text == "POAuiIrWlgcsgNoQiGI4OhKFQLOqtQoDpweSKl4fGkY"
+
+
+@pytest.mark.asyncio
 async def test_healthz_works_in_both_modes(monkeypatch):
     for oauth in (True, False):
         srv = _boot(monkeypatch, oauth=oauth)
