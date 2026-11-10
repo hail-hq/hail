@@ -842,3 +842,23 @@ async def test_the_winner_deletes_earlier_attempts(client, org_and_key, s3) -> N
     s3.delete_prefix.assert_awaited_once_with(
         f"verification-uploads/{org_id}/{link['id']}", keep=key
     )
+
+
+async def test_a_store_step_past_its_timeout_is_503_and_keeps_the_link(
+    client, org_and_key, s3, monkeypatch
+) -> None:
+    from hailhq.api.routes import uploads as uploads_routes
+
+    _, _, plain = org_and_key
+    link = await _link(client, plain)
+    monkeypatch.setattr(uploads_routes, "STORE_TIMEOUT", timedelta(seconds=0.1))
+
+    async def stuck(*_args):
+        await asyncio.sleep(5)
+
+    s3.put_attachment.side_effect = stuck
+    resp = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert resp.status_code == 503, resp.text
+    s3.put_attachment.side_effect = None
+    again = await client.put(_path(link["upload_url"]), content=_JPEG)
+    assert again.status_code == 200, again.text

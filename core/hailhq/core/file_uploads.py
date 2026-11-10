@@ -22,7 +22,6 @@ it, so two PUTs to one link never overwrite each other. (A direct
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 import secrets
 from datetime import timedelta
@@ -32,8 +31,6 @@ from uuid import UUID
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
-
-logger = logging.getLogger(__name__)
 
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
@@ -49,9 +46,11 @@ VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
 # How long an upload link works, and how many unused ones an org may hold.
 LINK_TTL = timedelta(minutes=15)
 MAX_PENDING_LINKS = 50
-# The link sweep waits this long past a link's expiry. A PUT's body read
-# ends by the expiry, so this leaves its S3 write and final update time to
-# finish before the sweep deletes the link's objects.
+# After its body read, which ends by the link's expiry, a PUT has at most
+# this long to write S3 and mark the link used.
+STORE_TIMEOUT = timedelta(minutes=5)
+# The link sweep waits this long past a link's expiry, longer than
+# STORE_TIMEOUT, so no PUT is still running when it deletes the objects.
 LINK_SWEEP_GRACE = timedelta(minutes=15)
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
@@ -111,14 +110,9 @@ def object_prefix(s3_key: str) -> str:
 
 
 async def delete_upload_objects(s3: S3MailClient, s3_key: str) -> None:
-    """Delete every object of one upload. Listing a prefix needs
-    ``s3:ListBucket``; where the bucket policy lacks it, the one key the row
-    points at is deleted instead. Raises only if that fails too."""
-    try:
-        await s3.delete_prefix(object_prefix(s3_key))
-    except Exception:
-        logger.warning("upload prefix delete failed; deleting the one key")
-        await s3.delete(s3_key)
+    """Delete every object of one upload. Listing the prefix needs
+    ``s3:ListBucket`` on the upload folders (``infra/terraform/iam.tf``)."""
+    await s3.delete_prefix(object_prefix(s3_key))
 
 
 def new_token() -> str:
@@ -147,6 +141,7 @@ __all__ = [
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",
+    "STORE_TIMEOUT",
     "VERIFICATION_FILE_TYPES",
     "VERIFICATION_MAX_FILE_BYTES",
     "VERIFICATION_UPLOADS_PREFIX",

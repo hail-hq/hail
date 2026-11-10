@@ -40,6 +40,7 @@ from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
     LINK_TTL,
     MAX_PENDING_LINKS,
+    STORE_TIMEOUT,
     hash_token,
     matches_declared_type,
     max_bytes,
@@ -55,7 +56,7 @@ from hailhq.core.schemas import (
     FileUploadResponse,
 )
 from hailhq.core.urls import join_url
-from sqlalchemy import func, select, update
+from sqlalchemy import Row, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -418,6 +419,45 @@ async def _store(
 
     key = f"{base_key}.{uuid4().hex}"
     try:
+        # Bounded, so the link sweep (LINK_SWEEP_GRACE past the expiry) never
+        # runs while this PUT is still writing.
+        async with asyncio.timeout(STORE_TIMEOUT.total_seconds()):
+            stored = await _write_and_mark(
+                db, s3, upload_id, token_hash, key, payload, content_type
+            )
+    except TimeoutError:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from None
+    if stored is None:
+        # Nothing references this PUT's object: remove it.
+        try:
+            await s3.delete(key)
+        except Exception:
+            logger.warning(
+                "upload %s: could not delete an unused object", upload_id, exc_info=True
+            )
+        # Another PUT finished first, or the link went away.
+        raise _not_found()
+    # Objects of earlier PUTs to this link that were cut off after their S3
+    # write. Usually none. After the response, so no read slot waits on it.
+    background.add_task(_delete_earlier_attempts, s3, upload_id, key)
+    return FileUploadResponse.model_validate(stored)
+
+
+async def _write_and_mark(
+    db: AsyncSession,
+    s3: S3MailClient,
+    upload_id: UUID,
+    token_hash: str,
+    key: str,
+    payload: bytes,
+    content_type: str,
+) -> Row | None:
+    """Write this PUT's object, then mark the link used and point it there.
+    None when the link is already used or gone."""
+    try:
         await s3.put_attachment(key, payload, content_type)
     except Exception as exc:
         raise HTTPException(
@@ -455,20 +495,7 @@ async def _store(
         )
     ).one_or_none()
     await db.commit()
-    if stored is None:
-        # Nothing references this PUT's object: remove it.
-        try:
-            await s3.delete(key)
-        except Exception:
-            logger.warning(
-                "upload %s: could not delete an unused object", upload_id, exc_info=True
-            )
-        # Another PUT finished first, or the link went away.
-        raise _not_found()
-    # Objects of earlier PUTs to this link that were cut off after their S3
-    # write. Usually none. After the response, so no read slot waits on it.
-    background.add_task(_delete_earlier_attempts, s3, upload_id, key)
-    return FileUploadResponse.model_validate(stored)
+    return stored
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

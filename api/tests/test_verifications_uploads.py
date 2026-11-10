@@ -160,9 +160,7 @@ async def test_a_failed_cleanup_does_not_fail_the_submit(
     first = await _upload(async_session, org_id)
     second = await _upload(async_session, org_id)
     first_id, second_id = first.id, second.id
-    # The first upload's prefix delete and its one-key fallback both fail.
     s3.delete_prefix.side_effect = [RuntimeError("s3 down"), None]
-    s3.delete.side_effect = RuntimeError("s3 down")
     resp = await _post(
         client,
         key,
