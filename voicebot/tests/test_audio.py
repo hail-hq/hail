@@ -60,3 +60,58 @@ def test_cloud_web_audio_uses_voice_isolation(monkeypatch):
     )
     assert option is not None
     assert "inb.bvc" not in option.options["modelPath"]
+
+
+@pytest.mark.parametrize(
+    "choice,module,sip_factory,web_factory",
+    [
+        ("bvc", "livekit.plugins.noise_cancellation", "BVCTelephony", "BVC"),
+        (
+            "krisp_viva",
+            "livekit.plugins.krisp",
+            "voice_isolation_telephony",
+            "voice_isolation",
+        ),
+    ],
+)
+def test_configured_cloud_filter_uses_supported_participant_selector(
+    monkeypatch, choice, module, sip_factory, web_factory
+):
+    monkeypatch.setattr(settings, "livekit_url", "wss://test.livekit.cloud")
+    monkeypatch.setattr(settings, "hail_audio_filter", choice)
+    factories = SimpleNamespace(
+        **{sip_factory: Mock(return_value="sip"), web_factory: Mock(return_value="web")}
+    )
+    imported = Mock(return_value=factories)
+    monkeypatch.setattr(audio, "import_module", imported)
+    selector = room_options().audio_input.noise_cancellation
+    for kind, expected in [
+        (rtc.ParticipantKind.PARTICIPANT_KIND_SIP, "sip"),
+        (rtc.ParticipantKind.PARTICIPANT_KIND_STANDARD, "web"),
+    ]:
+        assert (
+            selector(SimpleNamespace(participant=SimpleNamespace(kind=kind)))
+            == expected
+        )
+    imported.assert_called_once_with(module)
+
+
+@pytest.mark.parametrize(
+    "choice,model", [("voice_focus_s", "small"), ("voice_focus_l", "large")]
+)
+def test_voice_focus_uses_documented_model(monkeypatch, choice, model):
+    monkeypatch.setattr(settings, "livekit_url", "wss://test.livekit.cloud")
+    monkeypatch.setattr(settings, "hail_audio_filter", choice)
+    factory = Mock(return_value=object())
+    plugin = SimpleNamespace(
+        audio_enhancement=factory,
+        EnhancerModel=SimpleNamespace(QUAIL_VF_S="small", QUAIL_VF_L="large"),
+    )
+    monkeypatch.setattr(audio, "import_module", Mock(return_value=plugin))
+    selector = room_options().audio_input.noise_cancellation
+    selector(
+        SimpleNamespace(
+            participant=SimpleNamespace(kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP)
+        )
+    )
+    factory.assert_called_once_with(model=model)

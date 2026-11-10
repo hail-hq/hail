@@ -65,3 +65,11 @@ def test_voice_preferences_are_operator_configuration_with_provenance(monkeypatc
     )
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_audio_filter_rejects_unknown_choice(monkeypatch):
+    from hailhq.core.config import Settings
+
+    monkeypatch.setenv("HAIL_AUDIO_FILTER", "unknown")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

@@ -71,8 +71,10 @@ class Settings(BaseSettings):
     google_amd_model: str = ""
 
     # Voice pipeline
-    # Trial duplex AEC on agent input; leaves published/recorded audio untouched.
-    hail_echo_cancellation_enabled: bool = False
+    # Supported LiveKit Cloud input filters; keep existing BVC unless selected.
+    hail_audio_filter: Literal[
+        "bvc", "krisp_viva", "voice_focus_s", "voice_focus_l"
+    ] = "bvc"
     deepgram_api_key: str = ""
     cartesia_api_key: str = ""
     eleven_api_key: str = ""

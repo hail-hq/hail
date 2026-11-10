@@ -22,6 +22,8 @@ dependencies = [
     "livekit-plugins-noise-cancellation~=0.3.2",
     "pypdfium2>=5,<6",
     "pillow>=12",
+    "livekit-plugins-krisp~=0.4.8",
+    "livekit-plugins-ai-coustics==0.2.12",
 ]
 
 [project.optional-dependencies]
