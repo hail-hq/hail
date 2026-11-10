@@ -115,13 +115,6 @@ def _busy() -> HTTPException:
     )
 
 
-def _storage_unavailable() -> HTTPException:
-    return HTTPException(
-        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="storage unavailable; try again",
-    )
-
-
 def _expired() -> HTTPException:
     return HTTPException(
         status_code=http_status.HTTP_410_GONE,
@@ -292,7 +285,8 @@ async def _read_body(request: Request, limit: int) -> bytes:
         410: {
             "description": (
                 "The link had expired when the PUT started. A PUT that starts "
-                "in time is stored, also if it ends after the expiry."
+                "in time is stored, also if it ends after the expiry, as long "
+                "as it finishes within 15 minutes of it."
             )
         },
         413: {"description": "The file is larger than the link's `max_bytes`."},
@@ -334,7 +328,8 @@ async def put_file_upload(
 
     Works once. Unknown id, wrong token or a used link are all 404 with one
     message; a link already expired when the PUT starts is 410. A PUT that
-    starts in time is stored, also if it ends after the expiry. A body that
+    starts in time is stored, also if it ends after the expiry, as long as
+    it finishes within 15 minutes of it. A body that
     does not arrive before the link expires (10 minutes at most) is 408.
     Empty body: 422. A verification document whose first bytes are not the
     declared JPEG, PNG or PDF: 422.
@@ -459,7 +454,10 @@ async def _write_and_mark(
     try:
         await s3.put_attachment(key, payload, content_type)
     except Exception as exc:
-        raise _storage_unavailable() from exc
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from exc
 
     # If this fails, the object stays: the row may point at it if the commit
     # reached the database before the error. Otherwise the next PUT that

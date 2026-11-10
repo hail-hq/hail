@@ -97,7 +97,7 @@ Creates a pending `file_uploads` row (see Storage) and returns 201:
   - A PUT that starts before the expiry is stored, also if it ends after it.
     Expiry is checked once, when the PUT starts. The link sweep waits 15
     minutes past the expiry, deletes the row (only while still unused), then
-    the objects. No timing is assumed: a late PUT keeps its row and object.
+    the objects. A PUT that finishes within those 15 minutes keeps its row and object; a later one gets 404 and deletes its own object.
     A failed S3 delete after the row is gone leaves an object; verification
     documents have the 1-day lifecycle rule as a backstop, email attachment
     leftovers are accepted (rare). Cleanups list the upload's prefix, so the

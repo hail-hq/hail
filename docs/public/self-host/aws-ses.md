@@ -240,8 +240,10 @@ pulls every input from the repo's `.env` — no parallel `tfvars` file.
 The same bucket stores email attachments and verification documents. If you
 write the API's bucket policy by hand instead of with the module, copy the
 statements in [`infra/terraform/iam.tf`](https://github.com/hail-hq/hail/blob/main/infra/terraform/iam.tf).
-Upload cleanups need `s3:ListBucket` on `outbound-attachments/*` and
-`verification-uploads/*`, not only Get, Put and Delete.
+Upload cleanups list objects, not only get, put and delete them. Grant
+`s3:ListBucket` on the bucket ARN itself (not on an object path), with a
+`StringLike` condition on `s3:prefix` for `outbound-attachments/*` and
+`verification-uploads/*`.
 
 ### 10.1 Terragrunt apply
 

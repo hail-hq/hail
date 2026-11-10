@@ -142,12 +142,14 @@ class EmailAttachmentGcWorker:
     async def _sweep_links(self, now: datetime) -> int:
         """Delete upload links never used, ``LINK_SWEEP_GRACE`` past expiry.
 
-        The row goes first, and only while it is still unused, so a PUT
-        that finishes meanwhile, however late, keeps its row and its object;
-        no timing is assumed. Then the objects of PUTs cut off before their
-        update, usually none. A failed S3 delete only logs, so one bad row
-        never blocks the batch. Verification documents also have the
-        bucket's 1-day lifecycle rule as a backstop.
+        The row goes first, and only while it is still unused: a PUT that
+        marks the link used before this delete keeps its row and its object.
+        A PUT that finishes after it (more than ``LINK_SWEEP_GRACE`` past the
+        expiry) finds no row, answers 404 and deletes its own object. Then
+        the objects of PUTs cut off before their update, usually none. A
+        failed S3 delete only logs, so one bad row never blocks the batch;
+        such an object stays. With the Terraform module, verification
+        documents also expire after 1 day by lifecycle rule.
         """
         expired = (
             FileUpload.uploaded_at.is_(None),

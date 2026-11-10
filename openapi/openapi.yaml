@@ -750,7 +750,9 @@ paths:
 
         message; a link already expired when the PUT starts is 410. A PUT that
 
-        starts in time is stored, also if it ends after the expiry. A body that
+        starts in time is stored, also if it ends after the expiry, as long as
+
+        it finishes within 15 minutes of it. A body that
 
         does not arrive before the link expires (10 minutes at most) is 408.
 
@@ -813,7 +815,8 @@ paths:
         "410":
           description:
             The link had expired when the PUT started. A PUT that starts
-            in time is stored, also if it ends after the expiry.
+            in time is stored, also if it ends after the expiry, as long as it finishes
+            within 15 minutes of it.
         "413":
           description: The file is larger than the link's `max_bytes`.
         "503":
