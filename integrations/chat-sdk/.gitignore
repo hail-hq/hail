@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.tgz
+examples/nextjs/.next/
+examples/nextjs/next-env.d.ts
+examples/nextjs/tsconfig.tsbuildinfo

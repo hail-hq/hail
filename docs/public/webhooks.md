@@ -279,3 +279,39 @@ The `event_types` enum and request/response schemas are in
 [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) (`WebhookSubscriptionCreate`).
 The CLI has no `webhooks` command group — for the full endpoint list, refer to
 [the CLI reference](./cli.md#webhooks).
+
+## Chat SDK
+
+Use Hail SMS in a [Vercel Chat SDK](https://chat-sdk.dev) bot:
+
+```bash
+pnpm add @hail-hq/chat-sdk-adapter chat @chat-adapter/state-memory
+```
+
+```typescript
+import { Chat } from "chat";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { createHailAdapter } from "@hail-hq/chat-sdk-adapter";
+
+export const bot = new Chat({
+  userName: "mybot",
+  adapters: { hail: createHailAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onDirectMessage(async (thread, message) => {
+  await thread.post(`You said: ${message.text}`);
+});
+```
+
+Set `HAIL_API_KEY`, `HAIL_FROM_NUMBER` (your Hail-owned E.164 number), and
+`HAIL_WEBHOOK_SECRET`. Subscribe to `sms.received` and route the webhook to
+`bot.webhooks.hail(request)`. Set `HAIL_RECIPIENT_CONSENT=true` only when you
+attest to the required consent for all recipients; otherwise sending fails.
+Clear the number's `sms_agent_id` if a Hail text agent would also answer it.
+Use a persistent state adapter in production.
+
+The adapter verifies signatures, isolates conversations by phone pair, and
+supports SMS replies. It requires Node.js 20+ and `chat ^4.44.0`.
+Refer to the [adapter setup, configuration, and limitations](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk)
+and its [Next.js example](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk/examples/nextjs).

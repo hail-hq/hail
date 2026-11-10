@@ -1,0 +1,63 @@
+{
+  "name": "@hail-hq/chat-sdk-adapter",
+  "version": "0.1.0",
+  "description": "Hail SMS adapter for Vercel Chat SDK",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hail-hq/hail.git",
+    "directory": "integrations/chat-sdk"
+  },
+  "homepage": "https://hail.so/docs/webhooks#chat-sdk",
+  "bugs": {
+    "url": "https://github.com/hail-hq/hail/issues"
+  },
+  "keywords": [
+    "chat-sdk",
+    "chat-adapter",
+    "hail",
+    "sms",
+    "vercel"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepack": "pnpm test && pnpm typecheck && pnpm build",
+    "format": "prettier --write src test examples README.md ANNOUNCEMENT.md RELEASING.md package.json tsconfig.json pnpm-workspace.yaml",
+    "format:check": "prettier --check src test examples README.md ANNOUNCEMENT.md RELEASING.md package.json tsconfig.json pnpm-workspace.yaml"
+  },
+  "peerDependencies": {
+    "chat": "^4.44.0"
+  },
+  "devDependencies": {
+    "@chat-adapter/state-memory": "4.44.0",
+    "@types/node": "22",
+    "chat": "4.44.0",
+    "prettier": "3.3.3",
+    "tsup": "8.5.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

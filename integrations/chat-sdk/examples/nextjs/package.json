@@ -1,0 +1,27 @@
+{
+  "name": "example-hail-chat-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chat-adapter/state-memory": "4.44.0",
+    "@chat-adapter/state-redis": "4.44.0",
+    "@hail-hq/chat-sdk-adapter": "workspace:*",
+    "chat": "4.44.0",
+    "next": "16.2.11",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22",
+    "@types/react": "19",
+    "@types/react-dom": "19",
+    "typescript": "5.9.3"
+  }
+}
