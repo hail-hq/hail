@@ -201,6 +201,81 @@ describe("webhooks", () => {
     expect(history).toContain("Hello");
   });
 });
+describe("background processing", () => {
+  it("acknowledges a signed webhook before a slow handler finishes when waitUntil is supplied", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const bot = new Chat({
+      userName: "test",
+      adapters: { hail: adapter() },
+      state: createMemoryState(),
+    });
+    bots.push(bot);
+    bot.onDirectMessage(async () => {
+      entered();
+      await gate;
+    });
+    const tasks: Promise<unknown>[] = [];
+    const response = bot.webhooks.hail(signed(), {
+      waitUntil: (task) => {
+        tasks.push(task);
+      },
+    });
+    await started;
+    try {
+      const status = await Promise.race([
+        response.then((result) => result.status),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("blocked"), 100),
+        ),
+      ]);
+      expect(status).toBe(200);
+    } finally {
+      release();
+      await response;
+      await Promise.all(tasks);
+    }
+  });
+  it("waits for a handler when no background runtime is supplied", async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const bot = new Chat({
+      userName: "test",
+      adapters: { hail: adapter() },
+      state: createMemoryState(),
+    });
+    bots.push(bot);
+    bot.onDirectMessage(async () => {
+      entered();
+      await gate;
+    });
+    let acknowledged = false;
+    const response = bot.webhooks.hail(signed()).then((result) => {
+      acknowledged = true;
+      return result;
+    });
+    await started;
+    try {
+      expect(acknowledged).toBe(false);
+    } finally {
+      release();
+    }
+    expect((await response).status).toBe(200);
+  });
+});
+
 describe("outbound", () => {
   it("resolves credentials per request and refuses redirects", async () => {
     let token = "first";

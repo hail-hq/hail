@@ -17,7 +17,7 @@ REDIS_URL=redis://localhost:6379 HAIL_FROM_NUMBER=+14155550100 pnpm --filter exa
 npm pack --dry-run
 ```
 
-The dependencies are MIT- or Apache-licensed and compatible with the adapter's AGPL-3.0-only license.
+Chat SDK is MIT-licensed and compatible with the adapter's AGPL-3.0-only license.
 The package contains its ESM build, TypeScript declarations, README, and license.
 Before publication, test an actual signed delivery and reply using an authorized test number and credits.
 The automated tests use the real Chat runtime and a fake Hail HTTP transport; they do not establish carrier delivery.
@@ -51,7 +51,7 @@ Follow [Vercel's vendor-official requirements](https://chat-sdk.dev/docs/contrib
 
 Run the upstream catalog, CLI, and integration checks before opening a listing PR against `vercel/chat`.
 Include the published package, pinned source, product docs, and announcement links.
-Vercel requires verified signed commits and DCO sign-off. No signing keys are registered for the current GitHub account at preparation time; configure signing before submission.
+Vercel requires verified signed commits and DCO sign-off. No SSH signing keys were registered for the current GitHub account when checked; verify commit signing before submission.
 The listing does not grant Vercel Connect registration or Vercel maintenance.
 
 ## Maintenance

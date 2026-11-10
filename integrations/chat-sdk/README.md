@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
 ```
 
 Use a persistent state adapter such as `@chat-adapter/state-redis` in production.
-The [Next.js example](examples/nextjs) uses memory for local development and Redis when `REDIS_URL` is set.
+The [Next.js example](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk/examples/nextjs) uses memory for local development and Redis when `REDIS_URL` is set.
 The adapter uses Node's crypto module and does not support the Edge runtime.
 
 ## Hail setup
@@ -116,7 +116,7 @@ npm pack --dry-run
 ```
 
 This directory is an independent pnpm workspace. It does not alter Hail's service workspace or deploy services.
-Refer to [RELEASING.md](RELEASING.md) for publication and Vercel submission gates.
+Refer to [release checklist](https://github.com/hail-hq/hail/blob/main/integrations/chat-sdk/RELEASING.md) for publication and Vercel submission gates.
 
 ## License and support
 

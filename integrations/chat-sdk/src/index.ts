@@ -198,7 +198,14 @@ export class HailAdapter implements Adapter<HailThreadId, HailSms> {
       requested_at: event.created_at,
       status: "received",
     });
-    await this.chat.processMessage(this, message.threadId, message, options);
+    const task = this.chat.processMessage(
+      this,
+      message.threadId,
+      message,
+      options,
+    );
+    // Chat registers the task with waitUntil; the webhook must not await it too.
+    if (!options?.waitUntil) await task;
     return new Response(null, { status: 200 });
   }
 
