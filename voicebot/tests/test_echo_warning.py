@@ -160,10 +160,15 @@ async def test_raw_sidecar_bypasses_filter_and_closes_with_call(monkeypatch):
     arguments = {}
 
     class RawStream:
+        sent = False
+
         def __aiter__(self):
             return self
 
         async def __anext__(self):
+            if not self.sent:
+                self.sent = True
+                return SimpleNamespace(frame=rtc.AudioFrame(bytes(800), RATE, 1, 400))
             await asyncio.Event().wait()
 
         async def aclose(self):
@@ -176,12 +181,14 @@ async def test_raw_sidecar_bypasses_filter_and_closes_with_call(monkeypatch):
     monkeypatch.setattr(rtc.AudioStream, "from_participant", factory)
     session = Session()
     session.room_io = SimpleNamespace(linked_participant=object())
+    session.input = SimpleNamespace(audio_enabled=False)
     warning = EchoWarning(session, can_warn=lambda: True)
     warning._raw_task = asyncio.create_task(warning._observe_raw())
     await asyncio.sleep(0.01)
     assert arguments["noise_cancellation"] is None
     assert arguments["sample_rate"] == RATE
     assert arguments["capacity"] == 20
+    assert not warning.detector.inputs  # handover mute also covers the observer
     await warning.aclose()
     assert stopped.is_set()
 

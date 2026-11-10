@@ -288,6 +288,8 @@ class EchoWarning:
                             return
                         if self.session.room_io.linked_participant is not participant:
                             break
+                        if not self.session.input.audio_enabled:
+                            continue
                         frame = event.frame
                         self.detector.add_input(
                             np.asarray(frame.data, dtype=float),

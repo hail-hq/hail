@@ -22,6 +22,7 @@ room reverberation, long utterances, network jitter, or very weak echo can delay
 or prevent detection. Playout confirmation may arrive only after an utterance
 ends. This is an echo fallback, not general reverberation detection.
 
+Raw frames are dropped while the agent input is muted for handover.
 The warning waits while the agent speaks/thinks and is blocked during opening,
 IVR navigation, and connected handover. Detections expire after eight seconds
 instead of producing stale warnings after those phases. The line is generated
