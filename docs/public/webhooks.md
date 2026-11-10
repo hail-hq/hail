@@ -313,5 +313,5 @@ Use a persistent state adapter in production.
 
 The adapter verifies signatures, isolates conversations by phone pair, and
 supports SMS replies. It requires Node.js 20+ and `chat ^4.44.0`.
-Refer to the [adapter setup, configuration, and limitations](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk)
-and its [Next.js example](https://github.com/hail-hq/hail/tree/main/integrations/chat-sdk/examples/nextjs).
+Refer to the [adapter setup, configuration, and limitations](https://github.com/hail-hq/chat-sdk-adapter)
+and its [Next.js example](https://github.com/hail-hq/chat-sdk-adapter/tree/main/examples/nextjs).
