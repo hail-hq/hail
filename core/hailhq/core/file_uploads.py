@@ -31,7 +31,6 @@ from uuid import UUID
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
-from sqlalchemy import func
 
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
@@ -93,29 +92,6 @@ def valid_content_type(value: str) -> bool:
     return bool(_CONTENT_TYPE.fullmatch(value))
 
 
-def link_open():
-    """SQL: the link has not expired yet (database clock)."""
-    from hailhq.core.models import FileUpload  # models imports this module
-
-    return FileUpload.link_expires_at > func.now()
-
-
-def link_storable():
-    """SQL: a PUT may still mark this link used (database clock). The exact
-    opposite of ``link_sweepable``, so a PUT and the sweep never both take a
-    row, on any number of hosts."""
-    from hailhq.core.models import FileUpload  # models imports this module
-
-    return FileUpload.link_expires_at >= func.now() - LINK_SWEEP_GRACE
-
-
-def link_sweepable():
-    """SQL: the link sweep may delete this unused link (database clock)."""
-    from hailhq.core.models import FileUpload  # models imports this module
-
-    return FileUpload.link_expires_at < func.now() - LINK_SWEEP_GRACE
-
-
 def object_key(purpose: str, organization_id: UUID, upload_id: UUID) -> str:
     """Where the upload's bytes live in the mail bucket."""
     return f"{_PREFIXES[purpose]}{organization_id}/{upload_id}"
@@ -171,9 +147,6 @@ __all__ = [
     "delete_org_verification_uploads",
     "delete_upload_objects",
     "hash_token",
-    "link_open",
-    "link_storable",
-    "link_sweepable",
     "matches_declared_type",
     "max_bytes",
     "new_token",

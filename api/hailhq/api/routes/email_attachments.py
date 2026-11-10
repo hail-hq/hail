@@ -98,7 +98,7 @@ async def create_email_attachment(
         content_type=content_type,
         size_bytes=len(payload),
         s3_key=key,
-        uploaded_at=func.now(),
+        uploaded_at=func.statement_timestamp(),
         sha256=hashlib.sha256(payload).hexdigest(),
     )
     db.add(row)

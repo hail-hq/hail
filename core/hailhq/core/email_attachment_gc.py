@@ -28,7 +28,6 @@ from datetime import timedelta
 from hailhq.core.file_uploads import (
     VERIFICATION_UPLOAD_TTL,
     delete_upload_objects,
-    link_sweepable,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -83,12 +82,15 @@ class EmailAttachmentGcWorker:
         deleted = await self._sweep_links()
         deleted += await self._sweep_uploaded(
             (FileUpload.purpose == "verification_document")
-            & (FileUpload.uploaded_at < func.now() - VERIFICATION_UPLOAD_TTL)
+            & (
+                FileUpload.uploaded_at
+                < func.statement_timestamp() - VERIFICATION_UPLOAD_TTL
+            )
         )
         deleted += await self._sweep_uploaded(
             (FileUpload.purpose == "email_attachment")
             & FileUpload.first_used_at.is_(None)
-            & (FileUpload.uploaded_at < func.now() - UNUSED_TTL)
+            & (FileUpload.uploaded_at < func.statement_timestamp() - UNUSED_TTL)
         )
         return deleted
 
@@ -155,7 +157,7 @@ class EmailAttachmentGcWorker:
         """
         expired = (
             FileUpload.uploaded_at.is_(None),
-            link_sweepable(),
+            FileUpload.link_sweepable(),
         )
         async with self._session_factory() as session:
             stmt = (

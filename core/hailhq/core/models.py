@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
+from hailhq.core.file_uploads import LINK_SWEEP_GRACE
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
@@ -1733,6 +1734,24 @@ class FileUpload(Base):
     link_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The link rules, on the database clock (``statement_timestamp()``, the
+    # time of each statement), so they hold on any number of API hosts.
+    @classmethod
+    def link_open(cls):
+        """SQL: the link has not expired."""
+        return cls.link_expires_at > func.statement_timestamp()
+
+    @classmethod
+    def link_storable(cls):
+        """SQL: a PUT may still mark this link used. The exact opposite of
+        ``link_sweepable``, so a PUT and the sweep never both take a row."""
+        return cls.link_expires_at >= func.statement_timestamp() - LINK_SWEEP_GRACE
+
+    @classmethod
+    def link_sweepable(cls):
+        """SQL: the link sweep may delete this unused link."""
+        return cls.link_expires_at < func.statement_timestamp() - LINK_SWEEP_GRACE
 
     __table_args__ = (
         CheckConstraint(

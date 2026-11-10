@@ -22,7 +22,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
@@ -42,8 +42,6 @@ from hailhq.core.file_uploads import (
     LINK_TTL,
     MAX_PENDING_LINKS,
     hash_token,
-    link_open,
-    link_storable,
     matches_declared_type,
     max_bytes,
     new_token,
@@ -179,7 +177,7 @@ async def create_file_upload(
             .where(
                 FileUpload.organization_id == org,
                 FileUpload.uploaded_at.is_(None),
-                link_open(),
+                FileUpload.link_open(),
             )
         )
     ).scalar_one()
@@ -202,7 +200,7 @@ async def create_file_upload(
         s3_key=object_key(body.purpose, org, upload_id),
         token_hash=hash_token(token),
         # The database clock, like every other upload time.
-        link_expires_at=func.now() + LINK_TTL,
+        link_expires_at=func.statement_timestamp() + LINK_TTL,
     )
     db.add(row)
     await db.commit()
@@ -221,10 +219,6 @@ async def create_file_upload(
         max_bytes=max_bytes(row.purpose),
         expires_at=row.link_expires_at,
     )
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _server_full() -> bool:
@@ -353,17 +347,19 @@ async def put_file_upload(
     token_hash = hash_token(token)
     found = (
         await db.execute(
-            select(FileUpload, link_open()).where(FileUpload.id == upload_id)
+            select(
+                FileUpload, FileUpload.link_open(), func.statement_timestamp()
+            ).where(FileUpload.id == upload_id)
         )
     ).one_or_none()
-    row, is_open = found if found is not None else (None, False)
+    row, is_open, db_now = found if found is not None else (None, False, None)
     if (
         row is None
         or row.token_hash is None
         or not hmac.compare_digest(row.token_hash, token_hash)
     ):
         raise _not_found()
-    if row.link_expires_at is None or not is_open:
+    if not is_open:
         raise _expired()
     org = row.organization_id
     link = {
@@ -388,6 +384,7 @@ async def put_file_upload(
             background,
             upload_id=upload_id,
             token_hash=token_hash,
+            db_now=db_now,
             **link,
         )
     finally:
@@ -401,6 +398,7 @@ async def _store(
     background: BackgroundTasks,
     *,
     upload_id: UUID,
+    db_now: datetime,
     token_hash: str,
     expires: datetime,
     purpose: str,
@@ -418,7 +416,8 @@ async def _store(
     checked when the PUT starts (410) and again in the update (the store
     window), both on the database clock."""
     try:
-        async with asyncio.timeout(_read_deadline(expires, _now())):
+        # Both times from the database clock.
+        async with asyncio.timeout(_read_deadline(expires, db_now)):
             payload = await _read_body(request, max_bytes(purpose))
     except TimeoutError:
         raise HTTPException(
@@ -489,11 +488,11 @@ async def _write_and_mark(
                 FileUpload.uploaded_at.is_(None),
                 # The link sweep's rule, reversed: a row the sweep may take is
                 # never marked used, so the two never overlap.
-                link_storable(),
+                FileUpload.link_storable(),
             )
             .values(
                 token_hash=None,
-                uploaded_at=func.now(),
+                uploaded_at=func.statement_timestamp(),
                 size_bytes=len(payload),
                 sha256=digest,
                 s3_key=key,

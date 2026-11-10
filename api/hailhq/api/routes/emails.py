@@ -438,7 +438,8 @@ async def deliver_email(
             )
         )
         if row.first_used_at is None:
-            row.first_used_at = now
+            # The database clock, like every other upload time.
+            row.first_used_at = func.statement_timestamp()
     await db.commit()
     await db.refresh(email)
 

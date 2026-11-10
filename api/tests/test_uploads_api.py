@@ -816,10 +816,14 @@ def _expire_during_store(async_session, s3, link: dict, ago: timedelta, then=Non
     update then judges the store window on the database clock."""
 
     async def put(*_args):
-        row = await async_session.get(FileUpload, UUID(link["id"]))
-        if row is not None:
-            row.link_expires_at = datetime.now(timezone.utc) - ago
-            await async_session.commit()
+        from sqlalchemy import func, update
+
+        await async_session.execute(
+            update(FileUpload)
+            .where(FileUpload.id == UUID(link["id"]))
+            .values(link_expires_at=func.statement_timestamp() - ago)
+        )
+        await async_session.commit()
         if then is not None:
             await then()
 
@@ -880,32 +884,30 @@ async def test_a_link_swept_during_its_put_is_404(
 
 async def test_the_store_window_rules_meet_exactly(org_and_key, async_session) -> None:
     """At exactly LINK_SWEEP_GRACE past the expiry a PUT may store and the
-    sweep may not; one microsecond later, the reverse. now() is one value
-    inside a transaction, so the edge is set exactly."""
-    from hailhq.core.file_uploads import link_storable, link_sweepable
-    from sqlalchemy import func, select
+    sweep may not; one microsecond later, the reverse. The row is written
+    and judged in one statement, so both read the same database instant."""
+    from sqlalchemy import func, insert
 
     org_id, _, _ = org_and_key
-    await async_session.commit()  # start a fresh transaction below
-    db_now = (await async_session.execute(select(func.now()))).scalar_one()
     for offset, storable in (
         (timedelta(0), True),
         (timedelta(microseconds=1), False),
     ):
-        row = FileUpload(
-            organization_id=org_id,
-            purpose="email_attachment",
-            filename="f",
-            content_type="text/plain",
-            s3_key=f"outbound-attachments/{org_id}/{uuid4()}",
-            token_hash="h",
-            link_expires_at=db_now - LINK_SWEEP_GRACE - offset,
-        )
-        async_session.add(row)
-        await async_session.flush()
         got = (
             await async_session.execute(
-                select(link_storable(), link_sweepable()).where(FileUpload.id == row.id)
+                insert(FileUpload)
+                .values(
+                    organization_id=org_id,
+                    purpose="email_attachment",
+                    filename="f",
+                    content_type="text/plain",
+                    s3_key=f"outbound-attachments/{org_id}/{uuid4()}",
+                    token_hash="h",
+                    link_expires_at=func.statement_timestamp()
+                    - LINK_SWEEP_GRACE
+                    - offset,
+                )
+                .returning(FileUpload.link_storable(), FileUpload.link_sweepable())
             )
         ).one()
         assert tuple(got) == (storable, not storable)
