@@ -90,6 +90,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
+from hailhq.voicebot.echo import attach_echo_filter
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
@@ -2563,6 +2564,8 @@ async def _run_call(
         # https://docs.livekit.io/reference/python/livekit/agents/
         session_host=False,
     )
+
+    attach_echo_filter(session)
 
     async def record_answered_call() -> None:
         # Do not consume recording allowance during ringing or on unanswered calls.

@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     google_amd_model: str = ""
 
     # Voice pipeline
+    # Trial duplex AEC on agent input; leaves published/recorded audio untouched.
+    hail_echo_cancellation_enabled: bool = False
     deepgram_api_key: str = ""
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
