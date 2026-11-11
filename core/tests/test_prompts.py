@@ -137,15 +137,15 @@ def _sha(text: str) -> str:
 
 # Any change here changes what every agent is told: update on purpose only.
 _VOICE = {
-    (None, None): "9fcbd664e553f4d8c7b077febc6d37b91d35aa4b5c8dbdbe0706052ee73d8b9d",
+    (None, None): "256478185a4fcf57e8e63943fdb0ddd605d46c524dc6c78137ef8f224851fa7d",
     (None, "inbound"): (
-        "83f36704c02ecd83bb4482188525da452a81377a4f58baf2011fae1cd0ce9ddf"
+        "4f0ebc11114eb81cdfbe5c55b59aff7bcc584059c27032c280bd4caf222a51e2"
     ),
     ("Be kind.", None): (
-        "bf646a75f1ff795ea74df3c7de0d7225d444d2bde0e87ccf22a3c3cdcaa63c09"
+        "59709a4fbf2d84a6af0bf1912355f6a9d435700a57cde8d94037ea22c5767b8a"
     ),
     ("Be kind.", "inbound"): (
-        "334c571b41c9e0cebb3cfa4745d7e8072a31bc3483a33ee51064cbccd0a3e6f4"
+        "09b49da91f94f26cf4a20b6cbfa89c1ee62659af254550600230f04876945711"
     ),
 }
 
@@ -159,5 +159,5 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "73718de1be26ec6e01b73d9c5b61a68d8faf0caec751b1f5b4e5c427e9efe8c4"
+        "e3276352e2b4f9e4abca036d5cff6a8c2e72778e93a745fa7269e86352a5c04e"
     )

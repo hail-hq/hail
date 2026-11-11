@@ -44,3 +44,51 @@ Use synthetic conversations; do not commit customer transcripts or recordings.
 
 String tests check prompt composition and required guidance, not model compliance.
 Live behavior needs a separately authorized test call or a synthetic model evaluation.
+
+## Closing calls
+
+Outbound conversational calls (tests, feedback, and welcome calls) finish the
+initial topic with one brief closing question, then wait for the other person
+to reply. For example, after answering a question about the AI introduction,
+ask “Anything else you would like to test?” without saying goodbye or calling
+`end_call` in that turn. Instructions to thank the person and end after
+collecting feedback do not bypass this check. A clear goodbye or request to
+stop can end the call immediately.
+
+Outbound business tasks can still close once the booking or enquiry is done,
+or the other person cannot help. Answer a follow-up question and wait for the
+reply before closing. The `end_call` description and voice framing share
+these rules; this is model guidance, not a new runtime permission check.
+Existing duration limits and interruption handling still apply.
+
+The opt-in synthetic model checks use the configured Bedrock conversation
+model. With AWS credentials, `ANTHROPIC_MODEL`, and
+`ANTHROPIC_BEDROCK_REGION` set in the environment, run from the repo root:
+
+```sh
+uv run --directory core pytest --run-voice-evals tests/test_call_closing_behavior.py tests/test_disclosure_behavior.py -v
+```
+
+These checks incur model usage, place no phone calls, and never execute tools.
+They check hangup decisions and invitations to continue, not exact wording;
+model responses can vary. Ordinary CI skips them unless explicitly enabled.
+
+## AI disclosure help
+
+The automatic AI line is enabled by default and can be disabled where not
+required. Requirements depend on location and call type; the agent must not
+promise universal disclosure or infer a legal exemption from a phone number.
+If asked directly, it still identifies honestly as AI.
+
+`hail_settings_help` documents the current controls, verified against
+`hail-website` on November 11, 2026:
+
+- Agents → open agent → First line → uncheck “Say this first on every call” → Save.
+- Calls → Call settings → AI line → edit “First line on every call” → Save edits inherited wording; it has no workspace-wide off switch.
+- A connected assistant can set `ai_disclosure=false` for a one-off call.
+
+Empty workspace wording restores the default; it does not disable disclosure.
+These are product controls, not a determination of which laws apply. The
+[European Commission's transparency guidance](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)
+is one example of jurisdiction-specific requirements; do not present it as a
+complete global checklist.
