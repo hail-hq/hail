@@ -214,6 +214,25 @@ async def resolve_sender(
             loc=["body", "from"],
         )
 
+    return await resolve_hail_mail_sender(db, organization_id)
+
+
+async def resolve_hail_mail_sender(
+    db: AsyncSession, organization_id: UUID
+) -> EmailDomain:
+    """The generated workspace inbox, independent of custom sending domains."""
+    existing = (
+        await db.execute(
+            select(EmailDomain).where(
+                EmailDomain.organization_id == organization_id,
+                EmailDomain.kind == "hail_mail",
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.verification_status != "verified":
+            raise HTTPException(503, "Your generated workspace inbox is not ready.")
+        return existing
     # Last resort: mint a hail-mail row. The default prefixes are derived
     # per-org from the organization id, so each tenant auto-mints its OWN
     # distinct address instead of colliding on one deployment-wide default. Either
@@ -296,6 +315,8 @@ async def deliver_email(
     email_provider: EmailProvider,
     email: Email,
     attachment_rows: list[FileUpload] | None = None,
+    *,
+    billable: bool = True,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
@@ -442,6 +463,9 @@ async def deliver_email(
             row.first_used_at = func.statement_timestamp()
     await db.commit()
     await db.refresh(email)
+
+    if not billable:
+        return None
 
     # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(

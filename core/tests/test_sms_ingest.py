@@ -366,3 +366,122 @@ async def test_stop_writes_suppression_regardless_of_reply_flag(
         )
     ).scalar_one_or_none()
     assert hit is not None
+
+
+async def test_browser_quota_still_acknowledges_stop_start_help_once(
+    async_session, monkeypatch
+):
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.compliance_gate import is_suppressed
+    from hailhq.core.config import settings
+    from hailhq.core.models import Call
+    from hailhq.core.providers.sms import ProviderSmsResult
+
+    org = uuid.uuid4()
+    call = Call(
+        organization_id=org,
+        transport="browser",
+        provider="browser",
+        status="in_progress",
+        voice_config={},
+        max_duration_seconds=300,
+        answered_at=datetime.now(timezone.utc),
+        metadata_={"browser_trial": True, "browser_contacts": {"sms": "+46705550123"}},
+    )
+    async_session.add(call)
+    await async_session.flush()
+    number = PhoneNumber(
+        organization_id=None,
+        is_pool=True,
+        e164="+14155550111",
+        country_code="US",
+        number_type="local",
+        provider="twilio",
+        provider_resource_id="pool",
+        provisioning_state="active",
+        reserved_call_id=call.id,
+    )
+    async_session.add(number)
+    await async_session.flush()
+    call.metadata_ = {**call.metadata_, "browser_sms_number_id": str(number.id)}
+    for i in range(3):
+        async_session.add(
+            Sms(
+                organization_id=org,
+                direction="inbound",
+                status="received",
+                from_e164="+46705550123",
+                to_e164=number.e164,
+                to_number_id=number.id,
+                body="Test",
+                provider="twilio",
+                provider_message_sid=f"quota-{i}",
+                metadata_={"browser_trial": True, "call_id": str(call.id)},
+            )
+        )
+    await async_session.commit()
+    monkeypatch.setattr(settings, "hail_sms_compliance_replies_enabled", True)
+    provider = AsyncMock()
+    replies = []
+
+    async def send(**kwargs):
+        replies.append(kwargs["body"])
+        return ProviderSmsResult(
+            provider_message_sid=f"ack-{len(replies)}",
+            status="sent",
+            segment_count=1,
+            error_code=None,
+        )
+
+    provider.send_sms.side_effect = send
+
+    async def incoming(keyword, sid, sender_provider=provider):
+        result = await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164="+46705550123",
+            to_e164=number.e164,
+            body=keyword,
+            provider_message_sid=sid,
+            opt_out_type=None,
+            provider=sender_provider,
+        )
+        await async_session.commit()
+        return result
+
+    for keyword, reply in (
+        ("STOP", settings.hail_sms_stop_reply),
+        ("START", settings.hail_sms_start_reply),
+        ("HELP", settings.hail_sms_help_reply),
+    ):
+        await incoming(keyword, keyword)
+        assert replies[-1] == reply
+        count = provider.send_sms.await_count
+        await incoming(keyword, keyword)
+        assert provider.send_sms.await_count == count
+        assert await is_suppressed(async_session, org, "+46705550123", "sms") is (
+            keyword == "STOP"
+        )
+    assert provider.send_sms.await_count == 3
+    assert (
+        await incoming("Ordinary fourth text", "fourth")
+    ).dropped_reason == "browser_inbound_limit"
+    assert (
+        await incoming("STOP", "preview-stop", None)
+    ).dropped_reason == "browser_inbound_limit"
+    assert await is_suppressed(async_session, org, "+46705550123", "sms")
+    assert provider.send_sms.await_count == 3
+
+    await incoming("START", "preview-start", None)
+    await incoming("HELP", "preview-help", None)
+    assert not await is_suppressed(async_session, org, "+46705550123", "sms")
+    assert provider.send_sms.await_count == 3
+    rows = (
+        (await async_session.execute(select(Sms).where(Sms.direction == "inbound")))
+        .scalars()
+        .all()
+    )
+    assert sum(bool(row.metadata_.get("browser_compliance")) for row in rows) == 3
+    assert len(rows) == 6  # three normal texts plus three deduped control messages

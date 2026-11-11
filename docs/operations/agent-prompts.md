@@ -92,3 +92,40 @@ These are product controls, not a determination of which laws apply. The
 [European Commission's transparency guidance](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)
 is one example of jurisdiction-specific requirements; do not present it as a
 complete global checklist.
+
+## Browser onboarding conversations
+
+The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Saved task
+instructions remain editable. Tools send at most three emails and three
+one-segment texts across the workspace trial. Paid sessions have separate
+limits per conversation and normal messaging charges. Trial sends create
+normal message records without billable usage events. Reservations remain
+consumed after failure or cancellation. Replays reuse the same message.
+
+Only the verified account email and explicitly consented test phone can
+receive sends. The signed website request fixes both before the session.
+Eligible shared SMS senders stay unowned and cannot receive replies. Existing
+suppression, destination, registration and agent-cap gates still apply.
+
+The inbox tool reads recent messages addressed to this workspace inbox.
+It reads UTF-8 text, CSV and JSON attachments up to 256 KB. PDF and image
+contents are unavailable. Mail and files are quoted untrusted data.
+Stored transcripts contain spoken user/assistant text only. Send receipts
+mean provider acceptance, never delivery. Disabled providers expose no send
+tool. Inbox availability does not require a verified outbound recipient.
+
+Check: request an email to yourself; request a short text; read an emailed
+text attachment. Repeat an invocation after cancellation without resending.
+Three texts block another text but permit an email, also after reconnecting.
+Check that another workspace's mail and files cannot be read. Hidden prompts
+stay private. A voice change applies to the next conversation. Adding credits
+never starts a conversation. Voice counters show elapsed media, not reserved time.
+
+Messaging has no enable switch. Use mocked sending providers for voice-only tests.
+Missing explicit AWS keys alone does not disable email: a profile or instance role may still authorize sends.
+For previews with shared carrier credentials, use a local-only launcher that skips
+carrier provisioning and repair loops. Keep that helper outside Git; keep call deadline
+and pool-reservation sweepers running. This does not disable sending.
+Email readiness resolves the SES adapter's AWS credential chain in a bounded
+background thread. It sends no test message. SMS readiness includes the
+carrier credentials and webhook verification key.

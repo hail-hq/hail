@@ -41,6 +41,7 @@ from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
 from hailhq.api.routes.internal import agent as internal_agent
+from hailhq.api.routes.internal import browser_sessions
 from hailhq.api.routes.internal import call_settings as internal_call_settings
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import numbers as internal_numbers
@@ -520,3 +521,6 @@ app.include_router(verifications_routes.admin_router)
 def healthz() -> dict[str, str]:
     """Liveness check. Returns {"status": "ok"} with no auth required."""
     return {"status": "ok"}
+
+
+app.include_router(browser_sessions.router)

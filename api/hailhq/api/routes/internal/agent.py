@@ -24,9 +24,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.audit import write_audit_log
+from hailhq.api.browser_messaging import (
+    email_provider_ready,
+    sms_sender,
+    verified_email,
+)
 from hailhq.api.numbers import resolve_sms_number
 from hailhq.api.routes.email_domains import get_email_provider
-from hailhq.api.routes.emails import deliver_email, resolve_sender
+from hailhq.api.routes.emails import (
+    deliver_email,
+    resolve_hail_mail_sender,
+    resolve_sender,
+)
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
@@ -40,6 +49,7 @@ from hailhq.core.agent_tools.send_email import (
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.browser_voice import reserve_browser_preview
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
     check_email_allowed,
@@ -48,7 +58,7 @@ from hailhq.core.compliance_gate import (
     normalize_recipient,
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
-from hailhq.core.db import get_session
+from hailhq.core.db import get_session, org_lock
 from hailhq.core.directory import resolve_member_emails
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.handover import (
@@ -150,8 +160,16 @@ async def _load_call_for_update(db: AsyncSession, call_id: UUID) -> Call | None:
     # in the caller, not a liveness denial that would misreport a send that
     # actually succeeded (or is still in flight). None only means the call
     # row itself doesn't exist.
+    candidate = await db.get(Call, call_id)
+    if candidate is not None and candidate.transport == "browser":
+        await org_lock(db, candidate.organization_id)
     return (
-        await db.execute(select(Call).where(Call.id == call_id).with_for_update())
+        await db.execute(
+            select(Call)
+            .where(Call.id == call_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one_or_none()
 
 
@@ -172,6 +190,8 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
 
 def _other_party(call: Call) -> str | None:
     """The person on the line: the caller on inbound, the callee on outbound."""
+    if call.transport == "browser":
+        return call.metadata_.get("browser_contacts", {}).get("sms")
     return call.from_e164 if call.direction == "inbound" else call.to_e164
 
 
@@ -196,6 +216,25 @@ async def _prior_send(
             )
         )
     ).scalar_one_or_none()
+
+
+async def _record_browser_outcome(db, call_id, invocation_id, message):
+    # Delivery commits before this lock. Preserve any simultaneous finalize
+    # or another tool's metadata when recording the external submission.
+    call = await _load_call_for_update(db, call_id)
+    if call is None or call.transport != "browser":
+        return
+    meta = dict(call.metadata_)
+    meta["browser_actions"] = [
+        (
+            {**action, "status": message.status, "message_id": str(message.id)}
+            if action.get("tool_invocation_id") == str(invocation_id)
+            else action
+        )
+        for action in meta.get("browser_actions", [])
+    ]
+    call.metadata_ = meta
+    await db.commit()
 
 
 async def _deny(
@@ -230,9 +269,10 @@ async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None
     proceed. The audit reason distinguishes which gate fired; the spoken
     text stays vague for the callee.
     """
-    if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
-        db, call.organization_id
-    ):
+    if (
+        call.metadata_.get(CALL_META_BILLED)
+        or (call.transport == "browser" and not call.metadata_.get("browser_trial"))
+    ) and not await has_funds(db, call.organization_id):
         return _SPOKEN_NOT_ALLOWED, "insufficient_funds"
     return None
 
@@ -261,13 +301,29 @@ async def agent_send_sms(
         # worse error on a live call.
         ok = prior.status not in ("failed", "undelivered")
         return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
+            ok=ok,
+            spoken=(
+                "The text is still being submitted. Do not send it again."
+                if prior.status == "queued"
+                else _SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
+            ),
         )
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
+    if call.transport == "browser" and len(body.body.encode("utf-16-le")) // 2 > 70:
+        return AgentSendResponse(
+            ok=False,
+            spoken="Keep test texts to 70 characters. Emoji count twice. Nothing was sent.",
+        )
+
     counterpart = _other_party(call)
+    if call.transport == "browser" and not counterpart:
+        return AgentSendResponse(
+            ok=False,
+            spoken="Enter your mobile number and agree to receive test texts before starting a new conversation.",
+        )
 
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -314,7 +370,11 @@ async def agent_send_sms(
         if call.direction == "inbound" and call.to_number_id is not None
         else None
     )
-    from_number = await resolve_sms_number(db, org, call.agent_id, dialed, counterpart)
+    from_number = (
+        await sms_sender(db, org, counterpart, call=call)
+        if call.transport == "browser"
+        else await resolve_sms_number(db, org, call.agent_id, dialed, counterpart)
+    )
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
@@ -330,6 +390,23 @@ async def agent_send_sms(
 
     auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
 
+    if call.transport == "browser" and not await reserve_browser_preview(
+        db,
+        call.id,
+        {
+            "channel": "sms",
+            "recipient": counterpart,
+            "body": body.body,
+            "preview": False,
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "status": "queued",
+        },
+    ):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your three test texts are used, or the conversation has ended. Nothing was sent.",
+        )
+
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -340,7 +417,14 @@ async def agent_send_sms(
         direction="outbound",
         status="queued",
         body=body.body,
-        metadata_=_meta(body),
+        metadata_={
+            **_meta(body),
+            **(
+                {"browser_trial": True}
+                if call.transport == "browser" and call.metadata_.get("browser_trial")
+                else {}
+            ),
+        },
     )
     db.add(sms)
     await db.commit()
@@ -378,7 +462,16 @@ async def agent_send_sms(
         actor_kind="system",
     )
 
-    err = await deliver_sms(db, sms)
+    err = await deliver_sms(
+        db,
+        sms,
+        **(
+            {"billable": False}
+            if call.transport == "browser" and call.metadata_.get("browser_trial")
+            else {}
+        ),
+    )
+    await _record_browser_outcome(db, call.id, body.tool_invocation_id, sms)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -550,7 +643,12 @@ async def agent_send_email(
         # afterward. Mirrors the SMS path's failed/undelivered exclusion.
         ok = prior.status not in ("failed", "bounced")
         return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+            ok=ok,
+            spoken=(
+                "The email is still being submitted. Do not send it again."
+                if prior.status == "queued"
+                else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+            ),
         )
 
     if call.status != "in_progress":
@@ -567,21 +665,31 @@ async def agent_send_email(
             payload={**_meta(body), "reason": reason},
         )
 
-    matches = await resolve_member_emails(db, org, body.recipient_name)
-    if not matches:
-        return AgentSendResponse(
-            ok=False,
-            spoken=f"I couldn't find {body.recipient_name} in the directory.",
+    if call.transport == "browser":
+        if not await email_provider_ready():
+            return AgentSendResponse(
+                ok=False, spoken="Email sending is not configured for this test."
+            )
+        recipient = await verified_email(
+            db, org, call.metadata_.get("browser_contacts", {}).get("email")
         )
-    if len(matches) > 1:
-        return AgentSendResponse(
-            ok=False,
-            spoken=(
-                f"More than one person is named {body.recipient_name}, so I "
-                "can't pick a recipient."
-            ),
-        )
-    recipient = matches[0]
+        if not recipient:
+            return AgentSendResponse(
+                ok=False, spoken="Verify your account email before testing email."
+            )
+    else:
+        matches = await resolve_member_emails(db, org, body.recipient_name)
+        if not matches:
+            return AgentSendResponse(
+                ok=False,
+                spoken=f"I couldn't find {body.recipient_name} in the directory.",
+            )
+        if len(matches) > 1:
+            return AgentSendResponse(
+                ok=False,
+                spoken=f"More than one person is named {body.recipient_name}, so I can't pick a recipient.",
+            )
+        recipient = matches[0]
 
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
@@ -616,9 +724,39 @@ async def agent_send_email(
         # verified custom domains this path takes the oldest, where POST
         # /emails returns 422 and the caller chooses. A verified custom domain
         # still wins over the hail-mail address, as it does on POST /emails.
-        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+        sd = (
+            await resolve_hail_mail_sender(db, org)
+            if call.transport == "browser"
+            else await resolve_sender(db, org, None, allow_ambiguous=True)
+        )
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
+
+    if call.transport == "browser" and sd.domain != call.metadata_.get(
+        "browser_capabilities", {}
+    ).get("inboxAddress"):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your workspace email changed. Start a new conversation before sending.",
+        )
+
+    if call.transport == "browser" and not await reserve_browser_preview(
+        db,
+        call.id,
+        {
+            "channel": "email",
+            "recipient": recipient,
+            "body": body.body_text,
+            "subject": body.subject,
+            "preview": False,
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "status": "queued",
+        },
+    ):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your three test emails are used, or the conversation has ended. Nothing was sent.",
+        )
 
     email = Email(
         organization_id=org,
@@ -629,7 +767,14 @@ async def agent_send_email(
         body_text=body.body_text,
         status="queued",
         provider="ses",
-        metadata_=_meta(body),
+        metadata_={
+            **_meta(body),
+            **(
+                {"browser_trial": True}
+                if call.transport == "browser" and call.metadata_.get("browser_trial")
+                else {}
+            ),
+        },
     )
     db.add(email)
     await db.commit()
@@ -652,7 +797,17 @@ async def agent_send_email(
         actor_kind="system",
     )
 
-    err = await deliver_email(db, email_provider, email)
+    err = await deliver_email(
+        db,
+        email_provider,
+        email,
+        **(
+            {"billable": False}
+            if call.transport == "browser" and call.metadata_.get("browser_trial")
+            else {}
+        ),
+    )
+    await _record_browser_outcome(db, call.id, body.tool_invocation_id, email)
     if err is not None:
         await write_audit_log(
             organization_id=org,

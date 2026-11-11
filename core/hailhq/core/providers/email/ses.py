@@ -13,6 +13,9 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any
@@ -38,12 +41,85 @@ def _build_default_client() -> Any:
     ``~/.aws/credentials``, IAM role) when explicit keys are empty, so
     operators running on EC2/ECS get IAM-role creds automatically.
     """
-    return boto3.client(
-        "sesv2",
-        region_name=settings.aws_region or None,
-        aws_access_key_id=settings.aws_access_key_id or None,
-        aws_secret_access_key=settings.aws_secret_access_key or None,
-    )
+    return boto3.client("sesv2", **_default_aws_options())
+
+
+def _default_aws_options() -> dict[str, str | None]:
+    return {
+        "region_name": settings.aws_region or None,
+        "aws_access_key_id": settings.aws_access_key_id or None,
+        "aws_secret_access_key": settings.aws_secret_access_key or None,
+    }
+
+
+# Credential providers can run a credential_process or wait on role endpoints.
+# One dedicated worker and one shared future bound both running work and queue
+# size, even after callers time out. Never use the application's executor here.
+_credential_executor = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="hail-aws-readiness"
+)
+_credential_lock = threading.Lock()
+_credential_future: Future[bool] | None = None
+_credential_expires_at = 0.0
+_CREDENTIAL_WAIT_SECONDS = 2.0
+_CREDENTIAL_SUCCESS_TTL = 30.0
+_CREDENTIAL_FAILURE_TTL = 2.0
+
+
+def _resolve_credentials(options: dict[str, str | None]) -> bool:
+    try:
+        session = boto3.Session(**options)
+        if not session.region_name:
+            return False
+        credentials = session.get_credentials()
+        if credentials is None:
+            return False
+        frozen = credentials.get_frozen_credentials()
+        return bool(frozen.access_key and frozen.secret_key)
+    except Exception:
+        return False
+
+
+def _credentials_completed(future: Future[bool]) -> None:
+    global _credential_expires_at
+    ttl = _CREDENTIAL_SUCCESS_TTL if future.result() else _CREDENTIAL_FAILURE_TTL
+    with _credential_lock:
+        if _credential_future is future:
+            _credential_expires_at = time.monotonic() + ttl
+
+
+async def credentials_ready() -> bool:
+    """Share one bounded credential lookup without calling SES.
+
+    A slow SDK call occupies only the dedicated worker. Timeout/cancellation
+    never cancels its future or queues another lookup. Completed outcomes are
+    briefly cached; failures can retry after two seconds.
+    """
+    global _credential_future, _credential_expires_at
+    created = False
+    with _credential_lock:
+        if _credential_future is None or (
+            _credential_future.done() and time.monotonic() >= _credential_expires_at
+        ):
+            _credential_future = _credential_executor.submit(
+                _resolve_credentials, _default_aws_options()
+            )
+            _credential_expires_at = float("inf")
+            created = True
+        future = _credential_future
+    # add_done_callback can run immediately: do this outside the lock.
+    if created:
+        future.add_done_callback(_credentials_completed)
+    # Poll this single shared SDK future rather than attaching a new asyncio
+    # wrapper per request. A hung provider therefore retains no timed-out
+    # callers or callbacks. Each caller owns at most one short-lived timer.
+    deadline = time.monotonic() + _CREDENTIAL_WAIT_SECONDS
+    while not future.done():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+    return future.result()
 
 
 def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:
