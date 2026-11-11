@@ -99,7 +99,12 @@ class JWKSCache:
 
     @staticmethod
     def _default_client() -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_SECONDS)
+        headers = {}
+        if settings.hail_auth_vercel_protection_bypass:
+            headers["x-vercel-protection-bypass"] = (
+                settings.hail_auth_vercel_protection_bypass
+            )
+        return httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_SECONDS, headers=headers)
 
     async def get(self, kid: str) -> PyJWK:
         if kid not in self._keys:
