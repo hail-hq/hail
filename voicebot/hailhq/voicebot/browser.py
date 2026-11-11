@@ -15,6 +15,7 @@ from uuid import UUID
 
 from hailhq.core.browser_voice import (
     SETUP_SECONDS,
+    bind_browser_context,
     finish_browser_call,
 )
 from hailhq.core.db import session_scope
@@ -126,6 +127,14 @@ class BrowserAgent(Agent):
         context = {}
         for (channel, _), result in zip(paths, results):
             if isinstance(result, BaseException):
+                logger.warning(
+                    "Browser message context check failed",
+                    extra={
+                        "call_id": self._browser_call_id,
+                        "channel": channel,
+                        "error_type": type(result).__name__,
+                    },
+                )
                 context[channel] = {
                     "error": "Messages could not be checked. Do not claim no messages arrived. Use the inbox tool to retry."
                 }
@@ -158,6 +167,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
     setup_deadline = None
     finalization = None
     media_started_at = None
+    event_tasks = set()
 
     async def finish(*, failed=False):
         nonlocal finished
@@ -182,6 +192,11 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                         logger.exception(
                             "browser model cleanup failed call_id=%s", call_id
                         )
+                if event_tasks:
+                    _, pending = await asyncio.wait(event_tasks, timeout=2)
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
                 if messaging_api is not None:
                     try:
                         await messaging_api.aclose()
@@ -252,6 +267,16 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             org_id = call.organization_id
             capabilities = call.metadata_.get("browser_capabilities", {})
             seconds = deadline_seconds(call)
+            await bind_browser_context(db, call, actor_kind="agent")
+            logger.info(
+                "Browser conversation starting",
+                extra={
+                    "call_id": str(call_id),
+                    "organization_id": str(org_id),
+                    "agent_id": str(call.agent_id),
+                    "transport": "browser",
+                },
+            )
 
         async def expire_setup():
             await asyncio.sleep(SETUP_SECONDS)
@@ -279,6 +304,10 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             voice_id_override=cfg.get("voice_id"),
             language=language,
         )
+
+        from hailhq.voicebot.agent import attach_event_handlers
+
+        event_tasks = attach_event_handlers(session, call_id)
 
         tools, messaging_api = build_browser_tools(
             call_id, org_id, capabilities, ctx.room.local_participant.publish_data
@@ -326,6 +355,14 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             call.status = "in_progress"
             call.started_at = call.answered_at = media_started_at
             await db.commit()
+        logger.info(
+            "Browser conversation ready",
+            extra={
+                "call_id": str(call_id),
+                "organization_id": str(org_id),
+                "transport": "browser",
+            },
+        )
 
         if finished:
             return

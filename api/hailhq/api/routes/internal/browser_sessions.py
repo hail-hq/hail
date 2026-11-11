@@ -23,6 +23,7 @@ from hailhq.core.browser_voice import (
     SETUP_SECONDS,
     TRIAL_CONCURRENCY,
     TRIAL_MS,
+    bind_browser_context,
     finish_browser_call,
     read_browser_budget,
     session_charge_cents,
@@ -135,6 +136,7 @@ async def scoped(db, body):
         or call.organization_id != body.organization_id
     ):
         raise HTTPException(404, "Browser conversation not found.")
+    await bind_browser_context(db, call)
     return call
 
 
@@ -258,6 +260,7 @@ async def start(
     )
     db.add(call)
     await db.flush()
+    await bind_browser_context(db, call)
     await lease_browser_sms(db, call)
     if not trial:
         db.add(
@@ -361,6 +364,7 @@ async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_sess
     call = await db.get(Call, body.call_id)
     if call is None or call.transport != "browser" or call.status != "in_progress":
         return {"spoken": "This conversation has ended. Inbox access is closed."}
+    await bind_browser_context(db, call)
     caps = call.metadata_.get("browser_capabilities", {})
     address = caps.get("inboxAddress")
     if not address or not caps.get("inboundEmailReady"):
@@ -468,6 +472,7 @@ async def texts(body: TextsRequest, db: Annotated[AsyncSession, Depends(get_sess
     call = await db.get(Call, body.call_id)
     if call is None or call.transport != "browser" or call.status != "in_progress":
         return {"spoken": "This conversation has ended. Text access is closed."}
+    await bind_browser_context(db, call)
     number = await browser_sms_number(db, call)
     if number is None:
         return {"spoken": "This conversation has no active text number."}

@@ -153,6 +153,9 @@ async def _order_reconciler_loop() -> None:
     Runs apart from the backstop sweeper: carrier calls can take 20s each and
     must not delay the stale-call and pool-reservation sweeps.
     """
+    if not settings.hail_background_carrier_jobs_enabled:
+        logger.info("Background carrier order jobs disabled")
+        return
     while True:
         try:
             await reconcile_pending_orders()
@@ -169,6 +172,9 @@ async def _sms_setup_loop() -> None:
     """Finish SMS setup that failed and refresh messaging services. Its own
     loop: a failing step in the order reconciler must never keep it from
     running."""
+    if not settings.hail_background_carrier_jobs_enabled:
+        logger.info("Background carrier SMS setup disabled")
+        return
     while True:
         try:
             await sync_sms_setup()

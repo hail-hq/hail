@@ -17,11 +17,11 @@ from sqlalchemy import func, select
 
 
 async def email_provider_ready():
-    return settings.hail_browser_messaging_enabled and await credentials_ready()
+    return await credentials_ready()
 
 
 def sms_provider_ready(provider):
-    return settings.hail_browser_messaging_enabled and sms_route_configured(provider)
+    return sms_route_configured(provider)
 
 
 async def verified_email(db, org, address):
@@ -133,10 +133,7 @@ async def capabilities(
     )
     if sms_ready:
         sms_ready = (await check_sms_allowed(db, org, sms)).allowed
-    if not settings.hail_browser_messaging_enabled:
-        email_reason = "Test messaging is off in this preview."
     return {
-        "sendingEnabled": settings.hail_browser_messaging_enabled,
         "inboxAddress": from_address_for(sender, None) if sender else None,
         "inboundEmailReady": bool(
             sender
@@ -156,19 +153,15 @@ async def capabilities(
         "smsRecipient": sms,
         "emailReason": email_reason,
         "smsReason": (
-            "Test messaging is off in this preview."
-            if not settings.hail_browser_messaging_enabled
+            None
+            if sms_ready
             else (
-                None
-                if sms_ready
+                "Enter your mobile number and agree to receive test texts."
+                if not sms
                 else (
-                    "Enter your mobile number and agree to receive test texts."
-                    if not sms
-                    else (
-                        "Texting this U.S. mobile needs an approved sender. You can try email instead."
-                        if is_us(sms) and number is None
-                        else "Texts are not available for this number yet. You can try email instead."
-                    )
+                    "Texting this U.S. mobile needs an approved sender. You can try email instead."
+                    if is_us(sms) and number is None
+                    else "Texts are not available for this number yet. You can try email instead."
                 )
             )
         ),

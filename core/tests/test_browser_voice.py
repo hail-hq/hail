@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from hailhq.core.browser_voice import session_charge_cents, trial_remaining_ms
 
 
@@ -77,3 +78,39 @@ async def test_paid_budget_needs_no_workspace_history_query():
 def test_trial_has_five_minutes_and_keeps_time_already_used():
     assert trial_remaining_ms([]) == 300_000
     assert trial_remaining_ms([call(used=60_000)]) == 240_000
+
+
+@pytest.mark.asyncio
+async def test_browser_observability_links_workspace_call_and_agent_without_contacts(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from hailhq.core import telemetry, telemetry_identity
+    from hailhq.core.browser_voice import bind_browser_context
+    from opentelemetry import trace
+
+    bind = AsyncMock()
+    set_identity = Mock()
+    tags = Mock()
+    span = Mock()
+    monkeypatch.setattr(telemetry, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(telemetry, "bind_organization", bind)
+    monkeypatch.setattr(
+        telemetry_identity, "get_identity", lambda: {"organization_id": "workspace"}
+    )
+    monkeypatch.setattr(telemetry_identity, "set_identity", set_identity)
+    monkeypatch.setattr(telemetry_identity, "tag_context", tags)
+    monkeypatch.setattr(trace, "get_current_span", lambda: span)
+    call = SimpleNamespace(organization_id="workspace", id="call", agent_id="agent")
+    db = object()
+    await bind_browser_context(db, call, actor_kind="agent")
+    bind.assert_awaited_once_with(db, "workspace")
+    set_identity.assert_called_once_with(
+        {"organization_id": "workspace", "actor_kind": "agent"}
+    )
+    tags.assert_called_once_with(
+        channel="voice", direction="inbound", call_id="call", agent_id="agent"
+    )
+    span.set_attribute.assert_called_once_with("hail.transport", "browser")

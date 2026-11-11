@@ -250,3 +250,21 @@ async def finish_browser_call(
     call.status = "failed" if failed else "completed"
     call.end_reason = "agent_error" if failed else "normal_hangup"
     call.ended_at = now
+
+
+async def bind_browser_context(db, call, *, actor_kind="system"):
+    """Correlate API, LiveKit, model, and message logs without contact values."""
+    from hailhq.core.telemetry import bind_organization, telemetry_enabled
+    from hailhq.core.telemetry_identity import get_identity, set_identity, tag_context
+    from opentelemetry import trace
+
+    if not telemetry_enabled():
+        return
+    await bind_organization(db, call.organization_id)
+    identity = get_identity()
+    identity["actor_kind"] = actor_kind
+    set_identity(identity)
+    tag_context(
+        channel="voice", direction="inbound", call_id=call.id, agent_id=call.agent_id
+    )
+    trace.get_current_span().set_attribute("hail.transport", "browser")
