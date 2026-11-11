@@ -140,3 +140,52 @@ def parse_mime(raw: bytes) -> ParsedMime:
         body_html=html,
         attachments=atts,
     )
+
+
+def readable_email_body(body_text: str | None, body_html: str | None) -> str:
+    """Show plain text for HTML-only mail without rendering active content."""
+    if body_text:
+        return body_text
+    if not body_html:
+        return "This email has no text message."
+    from html.parser import HTMLParser
+
+    class Reader(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.ignored = 0
+            self.parts = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style", "head"):
+                self.ignored += 1
+            elif not self.ignored and tag in (
+                "p",
+                "div",
+                "br",
+                "li",
+                "tr",
+                "h1",
+                "h2",
+                "h3",
+            ):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style", "head"):
+                self.ignored = max(0, self.ignored - 1)
+            elif not self.ignored and tag in ("p", "div", "li", "tr"):
+                self.parts.append("\n")
+
+        def handle_data(self, data):
+            if not self.ignored:
+                self.parts.append(data)
+
+    reader = Reader()
+    reader.feed(body_html)
+    return (
+        "\n".join(
+            line.strip() for line in "".join(reader.parts).splitlines() if line.strip()
+        )
+        or "This email has no text message."
+    )

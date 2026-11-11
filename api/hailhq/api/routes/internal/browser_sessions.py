@@ -355,6 +355,7 @@ class InboxRequest(BaseModel):
 async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_session)]):
     """Read mail to this session's inbox. No arbitrary org, mailbox or S3 key."""
     from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.core.email_mime import readable_email_body
     from hailhq.core.models import Email, EmailAttachment
 
     call = await db.get(Call, body.call_id)
@@ -430,7 +431,7 @@ async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_sess
                 "id": str(email.id),
                 "from": email.from_address,
                 "subject": email.subject[:200],
-                "body_text": (email.body_text or "No plain-text body available.")[
+                "body_text": readable_email_body(email.body_text, email.body_html)[
                     :6000
                 ],
                 "attachments": [
@@ -506,3 +507,34 @@ async def texts(body: TextsRequest, db: Annotated[AsyncSession, Depends(get_sess
             else "No text has arrived during this conversation yet."
         ),
     }
+
+
+class HistoryRequest(BaseModel):
+    organization_id: UUID
+    agent_id: UUID
+    cursor: str | None = Field(default=None, max_length=120)
+
+
+@router.post("/history")
+async def history(
+    body: HistoryRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    """Website-admin history, available before a call and after it ends."""
+    from hailhq.api.browser_history import browser_history
+
+    before = before_key = None
+    if body.cursor:
+        try:
+            stamp, before_key = body.cursor.split("|", 1)
+            before = datetime.fromisoformat(stamp)
+            if before.tzinfo is None:
+                raise ValueError("Timezone required")
+            channel, record_id = before_key.split(":", 1)
+            if channel not in ("email", "sms", "voice"):
+                raise ValueError("Unknown channel")
+            UUID(record_id)
+        except ValueError:
+            raise HTTPException(422, "Invalid history cursor") from None
+    return await browser_history(
+        db, body.organization_id, body.agent_id, before, before_key
+    )

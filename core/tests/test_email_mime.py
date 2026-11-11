@@ -103,3 +103,15 @@ def test_multiple_inline_text_parts_are_concatenated():
     parsed = parse_mime(raw)
     assert "part one" in parsed.body_text
     assert "part two" in parsed.body_text
+
+
+def test_html_only_email_becomes_readable_without_active_content():
+    from hailhq.core.email_mime import readable_email_body
+
+    value = readable_email_body(
+        None,
+        "<head><style>SECRET STYLE</style></head><p>Order <b>EXAMPLE-4821</b></p><script>SECRET SCRIPT</script><p>Tuesday &amp; Wednesday</p>",
+    )
+    assert value == "Order EXAMPLE-4821\nTuesday & Wednesday"
+    assert readable_email_body("Plain body", "<p>Other body</p>") == "Plain body"
+    assert readable_email_body(None, None) == "This email has no text message."

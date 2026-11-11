@@ -968,3 +968,135 @@ async def test_browser_text_inbox_keeps_original_messages_after_compliance_contr
     )
     assert {str(message.id) for message in stored_controls} == controls
     assert sms_mock.send_sms.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_history_shows_incoming_mail_before_call_and_keeps_private_context_out(
+    client, async_session
+):
+    from hailhq.core.models import Agent
+
+    call, domain = await seed(async_session)
+    agent = Agent(
+        organization_id=call.organization_id, name="Demo", system_prompt="PRIVATE TASK"
+    )
+    async_session.add(agent)
+    await async_session.flush()
+    call.agent_id = agent.id
+    call.status = "completed"
+    call.end_reason = "normal_hangup"
+    call.transcript = {
+        "items": [
+            {"role": "system", "content": ["HIDDEN RUNTIME"]},
+            {"role": "user", "content": ["What is my order?"]},
+            {"role": "assistant", "content": ["Your order is EXAMPLE-42."]},
+            {"role": "tool", "content": ["HIDDEN TOOL"]},
+        ]
+    }
+    incoming = Email(
+        organization_id=call.organization_id,
+        email_domain_id=domain.id,
+        from_address="person@example.test",
+        to_addresses=[domain.domain],
+        subject="Order receipt",
+        body_text="Order: EXAMPLE-42",
+        direction="inbound",
+        status="received",
+    )
+    foreign = Email(
+        organization_id=uuid.uuid4(),
+        email_domain_id=domain.id,
+        from_address="other@example.test",
+        to_addresses=[domain.domain],
+        subject="OTHER WORKSPACE",
+        body_text="SECRET",
+        direction="inbound",
+        status="received",
+    )
+    async_session.add_all([incoming, foreign])
+    await async_session.flush()
+    async_session.add(
+        EmailAttachment(
+            email_id=incoming.id,
+            filename="receipt.txt",
+            content_type="text/plain",
+            size_bytes=12,
+            s3_key="PRIVATE S3 KEY",
+        )
+    )
+    await async_session.commit()
+    body = {"organization_id": str(call.organization_id), "agent_id": str(agent.id)}
+    response = await post(client, "/internal/browser-sessions/history", body)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    serialized = json.dumps(data)
+    assert "Order: EXAMPLE-42" in serialized and "receipt.txt" in serialized
+    assert "What is my order?" in serialized
+    assert all(
+        secret not in serialized
+        for secret in (
+            "HIDDEN RUNTIME",
+            "HIDDEN TOOL",
+            "PRIVATE S3 KEY",
+            "PRIVATE TASK",
+            "OTHER WORKSPACE",
+            "SECRET",
+        )
+    )
+    assert (
+        await post(
+            client,
+            "/internal/browser-sessions/history",
+            {**body, "organization_id": str(uuid.uuid4())},
+        )
+    ).status_code == 404
+    assert (
+        await client.post("/internal/browser-sessions/history", json=body)
+    ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_history_paginates_equal_timestamps_without_skipping_messages(
+    client, async_session
+):
+    from hailhq.core.models import Agent
+
+    call, domain = await seed(async_session)
+    agent = Agent(
+        organization_id=call.organization_id, name="Demo", system_prompt="Help."
+    )
+    async_session.add(agent)
+    await async_session.flush()
+    now = datetime.now(timezone.utc)
+    for i in range(55):
+        async_session.add(
+            Email(
+                organization_id=call.organization_id,
+                email_domain_id=domain.id,
+                from_address="person@example.test",
+                to_addresses=[domain.domain],
+                subject=f"Receipt {i}",
+                body_text="Example",
+                direction="inbound",
+                status="received",
+                created_at=now,
+            )
+        )
+    await async_session.commit()
+    body = {"organization_id": str(call.organization_id), "agent_id": str(agent.id)}
+    first = (await post(client, "/internal/browser-sessions/history", body)).json()
+    assert len(first["items"]) == 50 and first["nextCursor"]
+    second = (
+        await post(
+            client,
+            "/internal/browser-sessions/history",
+            {**body, "cursor": first["nextCursor"]},
+        )
+    ).json()
+    assert len(second["items"]) == 5 and second["nextCursor"] is None
+    assert len({x["id"] for x in first["items"] + second["items"]}) == 55
+    assert (
+        await post(
+            client, "/internal/browser-sessions/history", {**body, "cursor": "bad"}
+        )
+    ).status_code == 422

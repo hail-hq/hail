@@ -233,3 +233,78 @@ async def test_browser_receipts_report_acceptance_and_never_delivery(monkeypatch
     post.return_value = {"ok": False, "spoken": "I could not send it."}
     await api.post("/internal/agent/send-email", {})
     assert json.loads(publish.await_args.args[0])["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_browser_agent_refreshes_mail_before_an_order_question_without_mail_keywords():
+    from unittest.mock import AsyncMock
+
+    from hailhq.voicebot.browser import BrowserAgent
+    from livekit.agents import llm
+
+    api = SimpleNamespace(
+        post=AsyncMock(
+            side_effect=[
+                {
+                    "quoted_untrusted_messages": [
+                        {
+                            "id": "mail-1",
+                            "subject": "Order receipt",
+                            "body_text": "Order number: EXAMPLE-4821",
+                            "attachments": [],
+                        }
+                    ]
+                },
+                {
+                    "quoted_untrusted_messages": [
+                        {
+                            "id": "mail-2",
+                            "subject": "Update",
+                            "body_text": "Order number: EXAMPLE-4822",
+                            "attachments": [],
+                        }
+                    ]
+                },
+            ]
+        )
+    )
+    agent = BrowserAgent(
+        call_id="call-1",
+        messaging_api=api,
+        capabilities={"inboundEmailReady": True},
+        instructions="Help with orders.",
+    )
+    for expected in ("EXAMPLE-4821", "EXAMPLE-4822"):
+        ctx = llm.ChatContext()
+        await agent.on_user_turn_completed(
+            ctx, llm.ChatMessage(role="user", content=["What is my order number?"])
+        )
+        assert expected in ctx.items[-1].text_content
+        assert "untrusted" in ctx.items[-1].text_content
+        assert ctx.items[-1].role == "system"
+        assert __import__(
+            "hailhq.voicebot.browser", fromlist=["public_transcript"]
+        ).public_transcript(ctx.to_dict()) == {"items": []}
+    assert api.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_browser_agent_does_not_confuse_inbox_failure_with_empty_mail():
+    from unittest.mock import AsyncMock
+
+    from hailhq.voicebot.browser import BrowserAgent
+    from livekit.agents import llm
+
+    api = SimpleNamespace(post=AsyncMock(side_effect=RuntimeError("offline")))
+    agent = BrowserAgent(
+        call_id="call-1",
+        messaging_api=api,
+        capabilities={"inboundEmailReady": True},
+        instructions="Help.",
+    )
+    ctx = llm.ChatContext()
+    await agent.on_user_turn_completed(
+        ctx, llm.ChatMessage(role="user", content=["Hello"])
+    )
+    assert "could not be checked" in ctx.items[-1].text_content
+    assert "Do not claim no messages arrived" in ctx.items[-1].text_content
