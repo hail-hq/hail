@@ -662,7 +662,7 @@ async def agent_send_email(
         )
 
     if call.transport == "browser":
-        if not email_provider_ready():
+        if not await email_provider_ready():
             return AgentSendResponse(
                 ok=False, spoken="Email sending is not configured for this test."
             )

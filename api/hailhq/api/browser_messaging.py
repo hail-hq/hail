@@ -4,44 +4,24 @@ The website supplies contacts from its authenticated account and an explicit
 SMS consent control. The model never chooses a destination or sender.
 """
 
-import os
-
 from fastapi import HTTPException
 from hailhq.api.routes.emails import resolve_sender
+from hailhq.core.carrier_routing import sms_route_configured
 from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
 from hailhq.core.config import settings
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import OrganizationMember, PhoneNumber, User
+from hailhq.core.providers.email.ses import credentials_ready
 from hailhq.core.sms_registration_gate import us_registration_block
 from sqlalchemy import func, select
 
 
-def email_provider_ready():
-    # Explicit keys or the deployment's AWS role/profile credential chain.
-    return bool(
-        settings.aws_region
-        and (
-            (settings.aws_access_key_id and settings.aws_secret_access_key)
-            or any(
-                os.environ.get(key)
-                for key in (
-                    "AWS_PROFILE",
-                    "AWS_ROLE_ARN",
-                    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-                    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-                    "AWS_EXECUTION_ENV",
-                )
-            )
-        )
-    )
+async def email_provider_ready():
+    return settings.hail_browser_messaging_enabled and await credentials_ready()
 
 
 def sms_provider_ready(provider):
-    if provider == "twilio":
-        return bool(settings.twilio_account_sid and settings.twilio_auth_token)
-    if provider == "telnyx":
-        return bool(settings.telnyx_api_key)
-    return False
+    return settings.hail_browser_messaging_enabled and sms_route_configured(provider)
 
 
 async def verified_email(db, org, address):
@@ -105,10 +85,11 @@ async def capabilities(
         sender = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         email_reason = "Your workspace email is not ready yet."
+    provider_ready = await email_provider_ready()
     email_ready = bool(
-        sender and email and settings.hail_internal_secret and email_provider_ready()
+        sender and email and settings.hail_internal_secret and provider_ready
     )
-    if sender and not email_provider_ready():
+    if sender and not provider_ready:
         email_reason = "Email sending is not configured for this test."
     if email_ready:
         email_ready = (await check_email_allowed(db, org, [email])).allowed
@@ -124,6 +105,8 @@ async def capabilities(
     )
     if sms_ready:
         sms_ready = (await check_sms_allowed(db, org, sms)).allowed
+    if not settings.hail_browser_messaging_enabled:
+        email_reason = "Test messaging is off in this preview."
     return {
         "inboxAddress": from_address_for(sender, None) if sender else None,
         "inboundEmailReady": bool(
@@ -141,12 +124,16 @@ async def capabilities(
         "smsRecipient": sms,
         "emailReason": email_reason,
         "smsReason": (
-            None
-            if sms_ready
+            "Test messaging is off in this preview."
+            if not settings.hail_browser_messaging_enabled
             else (
-                "Enter your mobile number and agree to receive test texts."
-                if not sms
-                else "No configured, eligible text sender is available for your number yet."
+                None
+                if sms_ready
+                else (
+                    "Enter your mobile number and agree to receive test texts."
+                    if not sms
+                    else "No configured, eligible text sender is available for your number yet."
+                )
             )
         ),
         "attachmentReadTypes": ["text/plain", "text/csv", "application/json"],

@@ -38,12 +38,39 @@ def _build_default_client() -> Any:
     ``~/.aws/credentials``, IAM role) when explicit keys are empty, so
     operators running on EC2/ECS get IAM-role creds automatically.
     """
-    return boto3.client(
-        "sesv2",
-        region_name=settings.aws_region or None,
-        aws_access_key_id=settings.aws_access_key_id or None,
-        aws_secret_access_key=settings.aws_secret_access_key or None,
-    )
+    return boto3.client("sesv2", **_default_aws_options())
+
+
+def _default_aws_options() -> dict[str, str | None]:
+    return {
+        "region_name": settings.aws_region or None,
+        "aws_access_key_id": settings.aws_access_key_id or None,
+        "aws_secret_access_key": settings.aws_secret_access_key or None,
+    }
+
+
+async def credentials_ready() -> bool:
+    """Resolve the same AWS credential chain as sends, without calling SES.
+
+    Session resolution can fetch role credentials. Keep that blocking SDK
+    work off the event loop and bound the caller's wait. Freezing credentials
+    also checks deferred role providers rather than treating a hint as proof.
+    """
+
+    def resolve() -> bool:
+        session = boto3.Session(**_default_aws_options())
+        if not session.region_name:
+            return False
+        credentials = session.get_credentials()
+        if credentials is None:
+            return False
+        frozen = credentials.get_frozen_credentials()
+        return bool(frozen.access_key and frozen.secret_key)
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(resolve), timeout=2)
+    except Exception:
+        return False
 
 
 def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:

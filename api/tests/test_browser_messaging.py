@@ -37,6 +37,11 @@ async def post(client, path, body):
 
 @pytest.fixture(autouse=True)
 def config(monkeypatch):
+    # Preview deliberately empties profile vars; boto3 treats an empty profile
+    # as an explicit (invalid) profile. Tests supply their own fake keys.
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    monkeypatch.setattr(settings, "hail_browser_messaging_enabled", True)
     monkeypatch.setattr(settings, "hail_internal_secret", SECRET)
     monkeypatch.setattr(settings, "hail_mail_name_prefix", "browser-test")
     monkeypatch.setattr(settings, "hail_inbound_enabled", True)
@@ -377,7 +382,7 @@ async def test_disabled_providers_do_not_claim_readiness_and_inbox_survives_unve
     client, async_session, monkeypatch
 ):
     call, domain = await seed(async_session)
-    monkeypatch.setattr(settings, "aws_region", "")
+    monkeypatch.setattr(settings, "hail_browser_messaging_enabled", False)
     monkeypatch.setattr(settings, "twilio_auth_token", "")
     result = (
         await post(
@@ -439,3 +444,109 @@ async def test_failed_or_cancelled_external_send_retry_never_resends(
     assert email_mock.send_email.await_count == 1
     await async_session.refresh(call)
     assert len(call.metadata_["browser_actions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_browser_email_readiness_uses_resolved_default_aws_credentials(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from hailhq.api.browser_messaging import email_provider_ready
+    from hailhq.core.providers.email import ses
+
+    monkeypatch.setattr(settings, "aws_access_key_id", "")
+    monkeypatch.setattr(settings, "aws_secret_access_key", "")
+    for key in (
+        "AWS_PROFILE",
+        "AWS_ROLE_ARN",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_EXECUTION_ENV",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    credentials = SimpleNamespace(
+        get_frozen_credentials=lambda: SimpleNamespace(
+            access_key="role-key", secret_key="role-secret"
+        )
+    )
+    monkeypatch.setattr(
+        ses.boto3,
+        "Session",
+        lambda **kwargs: SimpleNamespace(
+            region_name="us-east-1", get_credentials=lambda: credentials
+        ),
+    )
+    assert await email_provider_ready()
+    monkeypatch.setattr(
+        ses.boto3,
+        "Session",
+        lambda **kwargs: SimpleNamespace(
+            region_name="us-east-1", get_credentials=lambda: None
+        ),
+    )
+    assert not await email_provider_ready()
+
+
+@pytest.mark.asyncio
+async def test_telnyx_missing_webhook_key_falls_back_to_configured_sms_sender(
+    async_session, add_phone_number, monkeypatch
+):
+    from hailhq.api.browser_messaging import sms_sender
+
+    call, _ = await seed(async_session)
+    monkeypatch.setattr(settings, "telnyx_api_key", "test-key")
+    monkeypatch.setattr(settings, "telnyx_public_key", "")
+    first = await add_phone_number(
+        async_session, None, e164="+14155550112", is_pool=True, provider="telnyx"
+    )
+    fallback = await add_phone_number(
+        async_session, None, e164="+14155550113", is_pool=True
+    )
+    assert (
+        await sms_sender(async_session, call.organization_id, "+46705550123")
+    ).id == fallback.id
+    monkeypatch.setattr(settings, "telnyx_public_key", "test-public-key")
+    assert (
+        await sms_sender(async_session, call.organization_id, "+46705550123")
+    ).id == first.id
+
+
+@pytest.mark.asyncio
+async def test_email_readiness_reads_shared_credentials_without_profile_hint(
+    monkeypatch, tmp_path
+):
+    from hailhq.api.browser_messaging import email_provider_ready
+
+    credentials = tmp_path / "credentials"
+    credentials.write_text(
+        "[default]\naws_access_key_id = fixture-key\naws_secret_access_key = fixture-secret\n"
+    )
+    config_file = tmp_path / "config"
+    config_file.write_text("[default]\nregion = us-east-1\n")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(credentials))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    for key in (
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(settings, "aws_region", "")
+    monkeypatch.setattr(settings, "aws_access_key_id", "")
+    monkeypatch.setattr(settings, "aws_secret_access_key", "")
+    assert await email_provider_ready()
+
+
+@pytest.mark.asyncio
+async def test_disabled_browser_messaging_never_resolves_credentials(monkeypatch):
+    from hailhq.api import browser_messaging
+
+    resolve = AsyncMock(side_effect=AssertionError("Credential chain must stay unused"))
+    monkeypatch.setattr(browser_messaging, "credentials_ready", resolve)
+    monkeypatch.setattr(settings, "hail_browser_messaging_enabled", False)
+    assert not await browser_messaging.email_provider_ready()
+    assert not browser_messaging.sms_provider_ready("twilio")
+    resolve.assert_not_called()
