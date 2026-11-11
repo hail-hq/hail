@@ -108,6 +108,7 @@ async def capabilities(
     if not settings.hail_browser_messaging_enabled:
         email_reason = "Test messaging is off in this preview."
     return {
+        "sendingEnabled": settings.hail_browser_messaging_enabled,
         "inboxAddress": from_address_for(sender, None) if sender else None,
         "inboundEmailReady": bool(
             sender

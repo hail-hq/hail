@@ -399,6 +399,7 @@ async def test_disabled_providers_do_not_claim_readiness_and_inbox_survives_unve
             },
         )
     ).json()
+    assert result["sendingEnabled"] is False
     assert result["inboxAddress"] == domain.domain
     assert (
         result["inboundEmailReady"]
