@@ -305,3 +305,39 @@ async def test_stop_is_idempotent_and_releases_unstarted_reservations(
     )
     assert next_call.status_code == 200
     assert next_call.json()["seconds"] == 60
+
+
+@pytest.mark.asyncio
+async def test_worker_crash_releases_paid_hold_without_charging_unknown_duration(
+    client, async_session, monkeypatch
+):
+    from hailhq.core.reconcile import sweep_stale_calls
+
+    body = await setup_agent(async_session)
+    org = uuid.UUID(body["organization_id"])
+    async_session.add(
+        AccountCredit(
+            organization_id=org,
+            kind="credit",
+            channel="credit",
+            amount_cents=10,
+            source="stripe",
+            ref="payment",
+        )
+    )
+    await async_session.commit()
+    result = await post(client, monkeypatch, "", body)
+    call = await async_session.get(Call, uuid.UUID(result.json()["id"]))
+    call.started_at = call.answered_at = datetime.now(timezone.utc) - timedelta(
+        seconds=90
+    )
+    call.status = "in_progress"
+    await async_session.commit()
+    await sweep_stale_calls(async_session, grace_seconds=0)
+    await async_session.commit()
+    refund = (
+        await async_session.execute(
+            select(AccountCredit).where(AccountCredit.source == "browser_voice_refund")
+        )
+    ).scalar_one()
+    assert refund.amount_cents == 10

@@ -80,7 +80,9 @@ async def sweep_stale_calls(
         if datetime.now(timezone.utc) > origin + timedelta(
             seconds=ceiling + grace_seconds
         ):
-            await finish_browser_call(session, call.id, failed=True)
+            await finish_browser_call(
+                session, call.id, failed=True, waive_paid_charge=True
+            )
 
     select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,

@@ -146,3 +146,15 @@ def test_transcript_does_not_expose_system_instructions_or_tool_results():
         }
     )
     assert result == {"items": [{"role": "user", "content": ["Hello"]}]}
+
+
+def test_browser_uses_saved_workspace_language_for_speech_and_llm():
+    from hailhq.voicebot.browser import browser_language
+
+    providers = {"tts": SimpleNamespace(params={"language": "sv"})}
+    assert browser_language({}, providers) == "sv"
+    assert browser_language({"language": "en"}, providers) == "en"
+    assert "Speak in Swedish" in browser_instructions(
+        "Collect a callback request.", "sv"
+    )
+    assert browser_language({"language": "not-a-language"}, {}) is None

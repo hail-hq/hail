@@ -52,6 +52,7 @@ async def finish_browser_call(
     failed: bool = False,
     ended_at: datetime | None = None,
     started_at: datetime | None = None,
+    waive_paid_charge: bool = False,
 ) -> None:
     """Lock and finalize once, including refunds. Caller commits the transaction."""
     call = (
@@ -79,8 +80,12 @@ async def finish_browser_call(
     meta["browser_used_ms"] = duration
     if not meta.get("browser_trial"):
         reserved = Decimal(meta["browser_reserved_cents"])
-        charge = session_charge_cents(
-            duration, meta["browser_rate_cents"], call.max_duration_seconds
+        charge = (
+            Decimal(0)
+            if waive_paid_charge
+            else session_charge_cents(
+                duration, meta["browser_rate_cents"], call.max_duration_seconds
+            )
         )
         refund = reserved - charge
         if refund > 0:
@@ -105,6 +110,8 @@ async def finish_browser_call(
                     priced_at=now,
                 )
             )
+    if waive_paid_charge:
+        meta["browser_charge_waived"] = True
     call.metadata_ = meta
     call.status = "failed" if failed else "completed"
     call.end_reason = "agent_error" if failed else "normal_hangup"

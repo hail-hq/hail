@@ -15,6 +15,7 @@ from uuid import UUID
 
 from hailhq.core.browser_voice import SETUP_SECONDS, finish_browser_call
 from hailhq.core.db import session_scope
+from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -40,8 +41,23 @@ def public_transcript(history: dict) -> dict:
     }
 
 
-def browser_instructions(customer_instructions: str) -> str:
-    return BROWSER_VOICE_PREAMBLE + "\n\n" + customer_instructions
+def browser_instructions(
+    customer_instructions: str, language: str | None = None
+) -> str:
+    instruction = (
+        f"Speak in {SUPPORTED_LANGUAGES[language].name} for this conversation."
+        if language in SUPPORTED_LANGUAGES
+        else ""
+    )
+    return (
+        BROWSER_VOICE_PREAMBLE + "\n\n" + customer_instructions + "\n\n" + instruction
+    )
+
+
+def browser_language(config: dict, providers: dict) -> str | None:
+    tts = providers.get("tts")
+    language = config.get("language") or (tts.params.get("language") if tts else None)
+    return language if language in SUPPORTED_LANGUAGES else None
 
 
 def deadline_seconds(call) -> int:
@@ -162,12 +178,13 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
         configs = await resolve_org_configs(org_id)
         if finished:
             return
+        language = browser_language(cfg, configs)
         session = build_session(
             None,
             ctx.proc.userdata["vad"],
             org_cfgs=configs,
             voice_id_override=cfg.get("voice_id"),
-            language=cfg.get("language"),
+            language=language,
         )
 
         async def preview(channel: str, recipient: str, body: str):
@@ -216,7 +233,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
         await asyncio.wait_for(
             session.start(
                 agent=Agent(
-                    instructions=browser_instructions(prompt),
+                    instructions=browser_instructions(prompt, language),
                     tools=[preview_email, preview_sms],
                 ),
                 room=ctx.room,
@@ -249,7 +266,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             return
         await ctx.room.local_participant.set_attributes({"hail.browser_ready": "true"})
         session.generate_reply(
-            instructions="Briefly say you are an AI assistant, greet the person as this agent, then ask how you can help."
+            instructions="Briefly say you are an AI assistant, greet the person as this agent, then ask how you can help. Use the selected conversation language."
         )
     except Exception:
         logger.exception("browser session failed call_id=%s", call_id)
