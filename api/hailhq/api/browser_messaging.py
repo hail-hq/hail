@@ -12,7 +12,7 @@ from hailhq.core.config import settings
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import OrganizationMember, PhoneNumber, User
 from hailhq.core.providers.email.ses import credentials_ready
-from hailhq.core.sms_registration_gate import us_registration_block
+from hailhq.core.sms_registration_gate import is_us, us_registration_block
 from sqlalchemy import func, select
 
 
@@ -164,7 +164,11 @@ async def capabilities(
                 else (
                     "Enter your mobile number and agree to receive test texts."
                     if not sms
-                    else "No configured, eligible text sender is available for your number yet."
+                    else (
+                        "Texting this U.S. mobile needs an approved sender. You can try email instead."
+                        if is_us(sms) and number is None
+                        else "Texts are not available for this number yet. You can try email instead."
+                    )
                 )
             )
         ),

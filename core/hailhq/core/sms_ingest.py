@@ -225,6 +225,7 @@ async def ingest_inbound_sms(
     )
     if organization_id is None:
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
+    quota_compliance = False
     if browser_call:
         body = body[:2000]
         if not provider_message_sid:
@@ -253,26 +254,38 @@ async def ingest_inbound_sms(
             else incoming.where(Sms.metadata_["call_id"].astext == str(browser_call.id))
         )
         if (await db.execute(incoming)).scalar_one() >= 3:
-            # STOP must still take effect when the inbox quota is full.
             action = _opt_out_action(body, opt_out_type)
-            if action == "STOP":
-                await add_suppression(
-                    db,
-                    organization_id=organization_id,
-                    recipient=from_e164,
-                    channel="sms",
-                    reason="recipient replied STOP",
-                    source="stop_keyword",
-                )
-            elif action == "START":
-                await remove_suppression(
-                    db,
-                    organization_id=organization_id,
-                    recipient=from_e164,
-                    channel="sms",
-                )
-            return IngestResult(sms_id=None, dropped_reason="browser_inbound_limit")
-
+            if action == "START" and not await is_suppressed(
+                db, organization_id, from_e164, "sms"
+            ):
+                action = None
+            if (
+                action is not None
+                and provider is not None
+                and settings.hail_sms_compliance_replies_enabled
+            ):
+                # Store control messages outside the inbox quota so their SID
+                # dedupes webhook retries and each configured acknowledgement
+                # runs once. They never reopen ordinary message capacity.
+                quota_compliance = True
+            else:
+                if action == "STOP":
+                    await add_suppression(
+                        db,
+                        organization_id=organization_id,
+                        recipient=from_e164,
+                        channel="sms",
+                        reason="recipient replied STOP",
+                        source="stop_keyword",
+                    )
+                elif action == "START":
+                    await remove_suppression(
+                        db,
+                        organization_id=organization_id,
+                        recipient=from_e164,
+                        channel="sms",
+                    )
+                return IngestResult(sms_id=None, dropped_reason="browser_inbound_limit")
     # A missing/blank MessageSid must be stored as NULL, not "": the column
     # is UNIQUE-but-nullable, so NULLs coexist while two blank strings would
     # collide and the second genuine message would be swallowed as a "dup".
@@ -305,6 +318,7 @@ async def ingest_inbound_sms(
             {
                 "call_id": str(browser_call.id),
                 "browser_trial": bool(browser_call.metadata_.get("browser_trial")),
+                **({"browser_compliance": True} if quota_compliance else {}),
             }
             if browser_call
             else {}
