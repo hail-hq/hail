@@ -185,6 +185,19 @@ def test_browser_tools_hide_unavailable_channels_and_never_expose_phone_tools(
     }
 
 
+def test_browser_can_read_texts_only_when_assigned_a_number(monkeypatch):
+    import uuid
+
+    from hailhq.core.config import settings
+    from hailhq.voicebot.browser_tools import build_browser_tools
+
+    monkeypatch.setattr(settings, "hail_internal_secret", "test")
+    tools, _api = build_browser_tools(
+        uuid.uuid4(), uuid.uuid4(), {"inboundNumber": "+14155550111"}
+    )
+    assert {tool.info.name for tool in tools} == {"read_browser_texts"}
+
+
 @pytest.mark.asyncio
 async def test_browser_receipts_report_acceptance_and_never_delivery(monkeypatch):
     import json

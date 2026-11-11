@@ -5,7 +5,7 @@ SMS consent control. The model never chooses a destination or sender.
 """
 
 from fastapi import HTTPException
-from hailhq.api.routes.emails import resolve_sender
+from hailhq.api.routes.emails import resolve_hail_mail_sender
 from hailhq.core.carrier_routing import sms_route_configured
 from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
 from hailhq.core.config import settings
@@ -41,15 +41,42 @@ async def verified_email(db, org, address):
     ).scalar_one_or_none()
 
 
-async def sms_sender(db, org, recipient):
-    """Owned numbers first, then eligible pool numbers. Never bind a pool row.
+async def sms_sender(db, org, recipient, *, claim=False, call=None):
+    """Owned numbers first, then eligible available pool numbers.
 
-    Pool ownership stays NULL. Only the outbound Sms belongs to the trial
-    workspace. Inbound routing continues to drop pool messages.
+    claim=True locks a free pool row; lease_browser_sms sets its call FK.
+    Existing calls may send only from their fixed owned or reserved number.
+    Pool ownership always stays NULL.
     """
     if not recipient:
         return None
+    if call is not None and not claim:
+        from hailhq.core.browser_voice import browser_sms_number
+
+        number = await browser_sms_number(db, call)
+        return (
+            number
+            if number is not None and sms_provider_ready(number.provider)
+            else None
+        )
     for pool in (False, True):
+        if pool and claim:
+            from hailhq.core.pool import claim_pool_number
+
+            excluded = []
+            while len(excluded) < 100:
+                number = await claim_pool_number(
+                    db, capability="sms", exclude_ids=tuple(excluded)
+                )
+                if number is None:
+                    return None
+                excluded.append(number.id)
+                if (
+                    sms_provider_ready(number.provider)
+                    and await us_registration_block(db, org, number, recipient) is None
+                ):
+                    return number
+            return None
         candidates = (
             await db.execute(
                 select(PhoneNumber)
@@ -57,6 +84,7 @@ async def sms_sender(db, org, recipient):
                     PhoneNumber.provisioning_state == "active",
                     PhoneNumber.capabilities.any("sms"),
                     PhoneNumber.is_pool.is_(pool),
+                    PhoneNumber.reserved_call_id.is_(None),
                     (
                         PhoneNumber.organization_id.is_(None)
                         if pool
@@ -82,7 +110,7 @@ async def capabilities(
     sender = None
     email_reason = "Verify your account email before testing email."
     try:
-        sender = await resolve_sender(db, org, None, allow_ambiguous=True)
+        sender = await resolve_hail_mail_sender(db, org)
     except HTTPException:
         email_reason = "Your workspace email is not ready yet."
     provider_ready = await email_provider_ready()
@@ -119,8 +147,11 @@ async def capabilities(
         ),
         "emailSendReady": email_ready,
         "smsSendReady": sms_ready,
-        "smsReceiveReady": bool(number and not number.is_pool and number.sms_agent_id),
-        "outboundSender": number.e164 if number and sms_ready else None,
+        "smsReceiveReady": bool(number and not number.is_pool),
+        "inboundNumber": number.e164 if number and not number.is_pool else None,
+        "outboundSender": (
+            number.e164 if number and sms_ready and not number.is_pool else None
+        ),
         "emailRecipient": email,
         "smsRecipient": sms,
         "emailReason": email_reason,
@@ -139,3 +170,57 @@ async def capabilities(
         ),
         "attachmentReadTypes": ["text/plain", "text/csv", "application/json"],
     }
+
+
+async def lease_browser_sms(db, call):
+    """Claim after Call.flush; only this call may use a pooled sender."""
+    from hailhq.core.browser_voice import browser_sms_number
+
+    caps = dict(call.metadata_.get("browser_capabilities", {}))
+    recipient = call.metadata_.get("browser_contacts", {}).get("sms")
+    if not caps.get("smsSendReady"):
+        return None
+    number = await sms_sender(db, call.organization_id, recipient, claim=True)
+    if number is not None:
+        if number.is_pool:
+            number.reserved_call_id = call.id
+        call.metadata_ = {**call.metadata_, "browser_sms_number_id": str(number.id)}
+        caps.update(
+            smsSendReady=True,
+            smsReceiveReady=True,
+            inboundNumber=number.e164,
+            outboundSender=number.e164,
+            smsReason=None,
+        )
+    else:
+        caps.update(
+            smsSendReady=False,
+            smsReceiveReady=False,
+            inboundNumber=None,
+            outboundSender=None,
+        )
+        if recipient:
+            caps["smsReason"] = "No eligible text number is free. Try again shortly."
+    call.metadata_ = {**call.metadata_, "browser_capabilities": caps}
+    await db.flush()
+    return await browser_sms_number(db, call)
+
+
+async def live_browser_capabilities(db, call):
+    from hailhq.core.browser_voice import browser_sms_number
+
+    caps = dict(call.metadata_.get("browser_capabilities", {}))
+    number = await browser_sms_number(db, call)
+    live = call.status == "in_progress" and number is not None
+    caps.update(
+        smsReceiveReady=live,
+        inboundNumber=number.e164 if number else None,
+        outboundSender=number.e164 if number else None,
+        smsSendReady=bool(
+            number
+            and sms_provider_ready(number.provider)
+            and call.status == "in_progress"
+            and caps.get("smsSendReady")
+        ),
+    )
+    return caps

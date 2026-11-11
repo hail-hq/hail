@@ -100,6 +100,7 @@ async def seed(db):
             "browser_trial": True,
             "browser_contacts": {"email": "owner@example.test", "sms": "+46705550123"},
             "browser_capabilities": {
+                "smsSendReady": True,
                 "inboxAddress": domain.domain,
                 "inboundEmailReady": True,
             },
@@ -151,6 +152,10 @@ async def test_sms_eligible_pool_keeps_owner_and_inbound_routing_unchanged(
     pool = await add_phone_number(
         async_session, None, e164="+14155550111", is_pool=True
     )
+    from hailhq.api.browser_messaging import lease_browser_sms
+
+    await lease_browser_sms(async_session, call)
+    await async_session.commit()
     body = {
         "call_id": str(call.id),
         "tool_invocation_id": str(uuid.uuid4()),
@@ -297,6 +302,10 @@ async def test_sms_single_segment_cap_and_independent_lifetime_budget(
 ):
     call, _ = await seed(async_session)
     await add_phone_number(async_session, None, e164="+14155550111", is_pool=True)
+    from hailhq.api.browser_messaging import lease_browser_sms
+
+    await lease_browser_sms(async_session, call)
+    await async_session.commit()
     path = "/internal/agent/send-sms"
 
     def payload(text):
@@ -555,3 +564,345 @@ async def test_disabled_browser_messaging_never_resolves_credentials(monkeypatch
     assert not await browser_messaging.email_provider_ready()
     assert not browser_messaging.sms_provider_ready("twilio")
     resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_browser_sms_lease_is_exclusive_stable_and_released(
+    async_session, session_factory, add_phone_number
+):
+    import asyncio
+
+    from hailhq.api.browser_messaging import lease_browser_sms
+    from hailhq.core.browser_voice import browser_sms_number, finish_browser_call
+    from hailhq.core.models import PhoneNumber
+
+    first, _ = await seed(async_session)
+    # Separate workspace, so the row lock is what prevents a shared claim.
+    second = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        provider="browser",
+        direction="inbound",
+        status="in_progress",
+        voice_config={},
+        max_duration_seconds=300,
+        metadata_={
+            "browser_trial": True,
+            "browser_contacts": {"sms": "+46705550123"},
+            "browser_capabilities": {"smsSendReady": True},
+        },
+    )
+    async_session.add(second)
+    await async_session.commit()
+    pool = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+
+    async def claim(cid):
+        async with session_factory() as db:
+            c = await db.get(Call, cid)
+            number = await lease_browser_sms(db, c)
+            await db.commit()
+            return number.id if number else None
+
+    claims = await asyncio.gather(claim(first.id), claim(second.id))
+    assert claims.count(pool.id) == 1 and claims.count(None) == 1
+    winner = first if claims[0] else second
+    await async_session.refresh(winner)
+    assert (await browser_sms_number(async_session, winner)).id == pool.id
+    await finish_browser_call(async_session, winner.id)
+    await async_session.commit()
+    await async_session.refresh(pool)
+    assert pool.reserved_call_id is None
+    assert (await browser_sms_number(async_session, winner)) is None
+    assert (
+        await async_session.execute(
+            select(PhoneNumber).where(PhoneNumber.organization_id.is_(None))
+        )
+    ).scalar_one().id == pool.id
+
+
+@pytest.mark.asyncio
+async def test_leased_inbound_sms_is_scoped_deduped_capped_and_honors_stop(
+    client, async_session, add_phone_number
+):
+    from hailhq.api.browser_messaging import lease_browser_sms
+    from hailhq.core.compliance_gate import is_suppressed
+    from hailhq.core.sms_ingest import ingest_inbound_sms
+
+    call, _ = await seed(async_session)
+    number = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    await lease_browser_sms(async_session, call)
+    await async_session.commit()
+
+    async def ingest(sid, body="Hello", sender="+46705550123", carrier="twilio"):
+        result = await ingest_inbound_sms(
+            async_session,
+            from_e164=sender,
+            to_e164=number.e164,
+            body=body,
+            provider_message_sid=sid,
+            opt_out_type=None,
+            carrier=carrier,
+        )
+        await async_session.commit()
+        return result
+
+    assert (await ingest("wrong-from", sender="+46705550124")).sms_id is None
+    assert (await ingest("wrong-carrier", carrier="telnyx")).sms_id is None
+    first = await ingest("browser-inbound-1")
+    assert first.sms_id is not None
+    assert (await ingest("browser-inbound-1")).sms_id == first.sms_id
+    await ingest("browser-inbound-2")
+    await ingest("browser-inbound-3")
+    assert (
+        await ingest("browser-inbound-4", body="STOP")
+    ).dropped_reason == "browser_inbound_limit"
+    assert await is_suppressed(
+        async_session, call.organization_id, "+46705550123", "sms"
+    )
+    rows = (await async_session.execute(select(Sms))).scalars().all()
+    assert len(rows) == 3 and all(
+        r.organization_id == call.organization_id and r.agent_reply_state is None
+        for r in rows
+    )
+    result = (
+        await post(
+            client, "/internal/browser-sessions/texts", {"call_id": str(call.id)}
+        )
+    ).json()
+    assert len(result["quoted_untrusted_messages"]) == 3
+    # Another active call has no lease and cannot read this phone's history.
+    other = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        provider="browser",
+        status="in_progress",
+        voice_config={},
+        max_duration_seconds=300,
+        metadata_={},
+    )
+    async_session.add(other)
+    await async_session.commit()
+    denied = (
+        await post(
+            client, "/internal/browser-sessions/texts", {"call_id": str(other.id)}
+        )
+    ).json()
+    assert "quoted_untrusted_messages" not in denied
+    call.status = "completed"
+    call.end_reason = "normal_hangup"
+    await async_session.commit()
+    assert (await ingest("ended-call")).sms_id is None
+
+
+@pytest.mark.asyncio
+async def test_generated_browser_inbox_wins_over_verified_custom_sender(
+    client, async_session, email_mock
+):
+    from hailhq.api.browser_messaging import capabilities
+
+    call, generated = await seed(async_session)
+    async_session.add(
+        EmailDomain(
+            organization_id=call.organization_id,
+            kind="custom",
+            domain="custom.example.test",
+            verification_status="verified",
+            dns_records=[],
+        )
+    )
+    await async_session.commit()
+    caps = await capabilities(
+        async_session, call.organization_id, email_recipient="owner@example.test"
+    )
+    assert caps["inboxAddress"] == generated.domain
+    body = {
+        "call_id": str(call.id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "recipient_name": "you",
+        "subject": "Test",
+        "body_text": "Generated sender.",
+    }
+    assert (await post(client, "/internal/agent/send-email", body)).json()["ok"]
+    email = (await async_session.execute(select(Email))).scalar_one()
+    assert (
+        email.email_domain_id == generated.id and email.from_address == generated.domain
+    )
+
+
+@pytest.mark.asyncio
+async def test_pool_outbound_sender_does_not_change_after_lease(
+    client, async_session, sms_mock, add_phone_number
+):
+    from hailhq.api.browser_messaging import lease_browser_sms
+
+    call, _ = await seed(async_session)
+    held = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    await lease_browser_sms(async_session, call)
+    await async_session.commit()
+    await add_phone_number(async_session, call.organization_id, e164="+14155550112")
+    body = {
+        "call_id": str(call.id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "body": "Fixed sender",
+    }
+    assert (await post(client, "/internal/agent/send-sms", body)).json()["ok"]
+    assert sms_mock.send_sms.await_args.kwargs["from_e164"] == held.e164
+
+
+@pytest.mark.asyncio
+async def test_pool_lease_rejects_unregistered_us_recipient(
+    async_session, add_phone_number
+):
+    from hailhq.api.browser_messaging import lease_browser_sms
+
+    call, _ = await seed(async_session)
+    number = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    call.metadata_ = {**call.metadata_, "browser_contacts": {"sms": "+14155550123"}}
+    assert await lease_browser_sms(async_session, call) is None
+    await async_session.commit()
+    await async_session.refresh(number)
+    assert number.reserved_call_id is None
+
+
+@pytest.mark.asyncio
+async def test_generated_inbox_mints_even_with_existing_custom_domain(
+    async_session, monkeypatch
+):
+    from hailhq.api.browser_messaging import capabilities
+    from hailhq.api.routes.email_domains import compose_hail_mail_address
+
+    org = uuid.uuid4()
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.example.test")
+    monkeypatch.setattr(settings, "hail_mail_from", "")
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "team")
+    async_session.add(
+        EmailDomain(
+            organization_id=org,
+            kind="custom",
+            domain="custom.example.test",
+            verification_status="verified",
+            dns_records=[],
+        )
+    )
+    await async_session.commit()
+    caps = await capabilities(async_session, org)
+    generated = (
+        await async_session.execute(
+            select(EmailDomain).where(
+                EmailDomain.organization_id == org, EmailDomain.kind == "hail_mail"
+            )
+        )
+    ).scalar_one()
+    assert caps["inboxAddress"] == generated.domain
+    assert generated.domain == compose_hail_mail_address(
+        generated.local_prefix_user, generated.local_prefix_org
+    )
+    assert caps["inboundEmailReady"]
+
+
+@pytest.mark.asyncio
+async def test_browser_inbound_rejects_stale_active_lease(
+    async_session, add_phone_number
+):
+    from datetime import timedelta
+
+    from hailhq.api.browser_messaging import lease_browser_sms
+    from hailhq.core.sms_ingest import ingest_inbound_sms
+
+    call, _ = await seed(async_session)
+    number = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    await lease_browser_sms(async_session, call)
+    call.answered_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+    await async_session.commit()
+    result = await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164="+46705550123",
+        to_e164=number.e164,
+        body="Late",
+        provider_message_sid="late-browser-text",
+        opt_out_type=None,
+    )
+    assert result.sms_id is None
+    assert (await async_session.execute(select(Sms))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_start_failure_and_stop_release_browser_text_number(
+    client, async_session, livekit_mock, monkeypatch, add_phone_number
+):
+    from hailhq.core.models import PhoneNumber
+
+    from .test_browser_sessions import post as browser_post
+    from .test_browser_sessions import setup_agent
+
+    body = await setup_agent(async_session)
+    body.update(sms_recipient="+46705550123", recipient_consent=True)
+    pool = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    livekit_mock.dispatch_agent.side_effect = RuntimeError("worker failed")
+    response = await browser_post(client, monkeypatch, "", body)
+    assert response.status_code == 503
+    await async_session.refresh(pool)
+    assert pool.reserved_call_id is None
+    livekit_mock.dispatch_agent.side_effect = None
+    body["request_id"] = str(uuid.uuid4())
+    response = await browser_post(client, monkeypatch, "", body)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["capabilities"]["inboundNumber"] == pool.e164
+    assert not data["capabilities"]["smsReceiveReady"]
+    call = await async_session.get(Call, uuid.UUID(data["id"]))
+    call.status = "in_progress"
+    call.answered_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    read = await browser_post(
+        client,
+        monkeypatch,
+        "/read",
+        {"organization_id": body["organization_id"], "id": data["id"]},
+    )
+    assert read.json()["capabilities"]["smsReceiveReady"]
+    await browser_post(
+        client,
+        monkeypatch,
+        "/stop",
+        {"organization_id": body["organization_id"], "id": data["id"]},
+    )
+    assert (
+        await async_session.get(PhoneNumber, pool.id, populate_existing=True)
+    ).reserved_call_id is None
+
+
+@pytest.mark.asyncio
+async def test_stale_browser_pool_reservation_sweeps_from_media_deadline(
+    async_session, add_phone_number
+):
+    from datetime import timedelta
+
+    from hailhq.api.browser_messaging import lease_browser_sms
+    from hailhq.core.pool import sweep_pool_reservations
+
+    call, _ = await seed(async_session)
+    number = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    await lease_browser_sms(async_session, call)
+    call.requested_at = datetime.now(timezone.utc) - timedelta(minutes=8)
+    call.answered_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    assert await sweep_pool_reservations(async_session, grace_seconds=30) == []
+    call.answered_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+    await async_session.commit()
+    assert await sweep_pool_reservations(async_session, grace_seconds=30) == [number.id]

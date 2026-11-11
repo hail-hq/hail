@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_CEILING, Decimal
 from uuid import UUID
 
-from hailhq.core.models import AccountCredit, Call, UsageEvent
+from hailhq.core.models import AccountCredit, Call, PhoneNumber, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,6 +136,37 @@ async def reserve_browser_preview(db, call_id, action):
     return True
 
 
+async def browser_sms_number(db, call):
+    """The fixed active number owned or exclusively leased by this call."""
+    if (
+        call.answered_at is not None
+        and (datetime.now(timezone.utc) - call.answered_at).total_seconds()
+        >= call.max_duration_seconds
+    ):
+        return None
+    raw_id = call.metadata_.get("browser_sms_number_id")
+    if not raw_id or call.status in TERMINAL_CALL_STATUSES:
+        return None
+    try:
+        number_id = UUID(raw_id)
+    except (ValueError, TypeError):
+        return None
+    number = await db.get(PhoneNumber, number_id, populate_existing=True)
+    if (
+        number is None
+        or number.provisioning_state != "active"
+        or "sms" not in number.capabilities
+    ):
+        return None
+    if number.is_pool:
+        return (
+            number
+            if number.reserved_call_id == call.id and number.organization_id is None
+            else None
+        )
+    return number if number.organization_id == call.organization_id else None
+
+
 def session_charge_cents(duration_ms: int, rate: str, seconds: int) -> Decimal:
     duration = max(0, min(duration_ms, seconds * 1000))
     return (Decimal(duration) * Decimal(rate) / 60_000).quantize(
@@ -161,7 +192,12 @@ async def finish_browser_call(
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
-    if call is None or call.status in TERMINAL_CALL_STATUSES:
+    if call is None:
+        return
+    from hailhq.core.pool import release_pool_reservation
+
+    await release_pool_reservation(db, call_id=call.id)
+    if call.status in TERMINAL_CALL_STATUSES:
         return
     if started_at is not None and call.answered_at is None:
         call.started_at = call.answered_at = started_at

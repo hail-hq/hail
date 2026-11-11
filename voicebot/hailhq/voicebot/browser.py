@@ -56,6 +56,7 @@ def browser_instructions(
     )
     caps = capabilities or {}
     channels = [
+        f"Assigned text number: {caps.get("inboundNumber") or "not available"}.",
         f"Workspace inbox: {caps.get('inboxAddress') if caps.get('inboundEmailReady') else 'not ready'}.",
         f"Email sending: {caps.get('emailRecipient') if caps.get('emailSendReady') else caps.get('emailReason', 'not available')}.",
         f"Text sending: {caps.get('smsRecipient') if caps.get('smsSendReady') else caps.get('smsReason', 'not available')}.",

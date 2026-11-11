@@ -31,7 +31,11 @@ from hailhq.api.browser_messaging import (
 )
 from hailhq.api.numbers import resolve_sms_number
 from hailhq.api.routes.email_domains import get_email_provider
-from hailhq.api.routes.emails import deliver_email, resolve_sender
+from hailhq.api.routes.emails import (
+    deliver_email,
+    resolve_hail_mail_sender,
+    resolve_sender,
+)
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
@@ -367,7 +371,7 @@ async def agent_send_sms(
         else None
     )
     from_number = (
-        await sms_sender(db, org, counterpart)
+        await sms_sender(db, org, counterpart, call=call)
         if call.transport == "browser"
         else await resolve_sms_number(db, org, call.agent_id, dialed, counterpart)
     )
@@ -720,9 +724,21 @@ async def agent_send_email(
         # verified custom domains this path takes the oldest, where POST
         # /emails returns 422 and the caller chooses. A verified custom domain
         # still wins over the hail-mail address, as it does on POST /emails.
-        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+        sd = (
+            await resolve_hail_mail_sender(db, org)
+            if call.transport == "browser"
+            else await resolve_sender(db, org, None, allow_ambiguous=True)
+        )
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
+
+    if call.transport == "browser" and sd.domain != call.metadata_.get(
+        "browser_capabilities", {}
+    ).get("inboxAddress"):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your workspace email changed. Start a new conversation before sending.",
+        )
 
     if call.transport == "browser" and not await reserve_browser_preview(
         db,
