@@ -121,7 +121,8 @@ Check that another workspace's mail and files cannot be read. Hidden prompts
 stay private. A voice change applies to the next conversation. Adding credits
 never starts a conversation. Voice counters show elapsed media, not reserved time.
 
-Set `HAIL_BROWSER_MESSAGING_ENABLED=false` for voice-only local previews.
+Messaging has no enable switch. For voice-only tests, omit real sending credentials or mock the providers.
+Set `HAIL_BACKGROUND_CARRIER_JOBS_ENABLED=false` in local previews before using shared carrier credentials.
 Both browser send tools then stay off, even when the machine has AWS profiles
 or an instance role. Normal messaging and a configured inbox stay unchanged.
 Email readiness resolves the SES adapter's AWS credential chain in a bounded

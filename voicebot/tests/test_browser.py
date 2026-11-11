@@ -316,3 +316,12 @@ def test_browser_codes_are_spoken_as_characters_without_rewriting_message_values
     assert "one, two, two; one, three, three, four" in result
     assert "X as in X-ray; Y as in Yankee" in result
     assert "Never change the original code in written messages" in result
+
+
+def test_browser_module_parses_on_supported_python_311():
+    import ast
+    from pathlib import Path
+
+    from hailhq.voicebot import browser
+
+    ast.parse(Path(browser.__file__).read_text(), feature_version=(3, 11))
