@@ -477,6 +477,7 @@ async def texts(body: TextsRequest, db: Annotated[AsyncSession, Depends(get_sess
                 .where(
                     Sms.organization_id == call.organization_id,
                     Sms.direction == "inbound",
+                    Sms.metadata_["browser_compliance"].as_boolean().is_not(True),
                     Sms.to_number_id == number.id,
                     Sms.from_e164
                     == call.metadata_.get("browser_contacts", {}).get("sms"),

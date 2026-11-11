@@ -906,3 +906,65 @@ async def test_stale_browser_pool_reservation_sweeps_from_media_deadline(
     call.answered_at = datetime.now(timezone.utc) - timedelta(minutes=6)
     await async_session.commit()
     assert await sweep_pool_reservations(async_session, grace_seconds=30) == [number.id]
+
+
+@pytest.mark.asyncio
+async def test_browser_text_inbox_keeps_original_messages_after_compliance_controls(
+    client, async_session, add_phone_number, sms_mock, monkeypatch
+):
+    from hailhq.api.browser_messaging import lease_browser_sms
+    from hailhq.core.sms_ingest import ingest_inbound_sms
+
+    call, _ = await seed(async_session)
+    number = await add_phone_number(
+        async_session, None, e164="+14155550111", is_pool=True
+    )
+    await lease_browser_sms(async_session, call)
+    await async_session.commit()
+    monkeypatch.setattr(settings, "hail_sms_compliance_replies_enabled", True)
+
+    async def incoming(body, sid):
+        result = await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164="+46705550123",
+            to_e164=number.e164,
+            body=body,
+            provider_message_sid=sid,
+            opt_out_type=None,
+            provider=sms_mock,
+        )
+        await async_session.commit()
+        return result.sms_id
+
+    original = set()
+    for index in range(3):
+        original.add(str(await incoming(f"Original {index}", f"inbox-{index}")))
+    controls = set()
+    for keyword in ("STOP", "START", "HELP"):
+        sid = f"control-{keyword}"
+        result = await incoming(keyword, sid)
+        controls.add(str(result))
+        assert await incoming(keyword, sid) == result
+    response = (
+        await post(
+            client, "/internal/browser-sessions/texts", {"call_id": str(call.id)}
+        )
+    ).json()
+    assert {
+        message["id"] for message in response["quoted_untrusted_messages"]
+    } == original
+    assert len(response["quoted_untrusted_messages"]) == 3
+    stored_controls = (
+        (
+            await async_session.execute(
+                select(Sms).where(
+                    Sms.metadata_["browser_compliance"].as_boolean().is_(True)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {str(message.id) for message in stored_controls} == controls
+    assert sms_mock.send_sms.await_count == 3
