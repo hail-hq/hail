@@ -59,7 +59,7 @@ async def test_free_trial_reserves_one_minute_and_token_is_microphone_only(
     response = await post(client, monkeypatch, "", body)
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["trial"] and data["seconds"] == 60
+    assert data["trial"] and data["seconds"] == 300
     grants = jwt.decode(data["token"], options={"verify_signature": False})["video"]
     assert grants["canPublishSources"] == ["microphone"]
     assert grants["canPublishData"] is False
@@ -304,7 +304,7 @@ async def test_stop_is_idempotent_and_releases_unstarted_reservations(
         client, monkeypatch, "", {**body, "request_id": str(uuid.uuid4())}
     )
     assert next_call.status_code == 200
-    assert next_call.json()["seconds"] == 60
+    assert next_call.json()["seconds"] == 300
 
 
 @pytest.mark.asyncio
@@ -376,7 +376,7 @@ async def test_budget_is_org_scoped_and_separates_modality_limits(
     )
     assert response.status_code == 200
     assert response.json() == {
-        "voice": {"used": 15000, "limit": 60000},
+        "voice": {"used": 15000, "limit": 300000},
         "sms": {"used": 1, "limit": 3},
         "email": {"used": 2, "limit": 3},
     }

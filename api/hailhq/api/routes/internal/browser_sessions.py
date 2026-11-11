@@ -17,6 +17,7 @@ from hailhq.core.browser_voice import (
     BROWSER_CONCURRENCY,
     SETUP_SECONDS,
     TRIAL_CONCURRENCY,
+    TRIAL_MS,
     finish_browser_call,
     read_browser_budget,
     session_charge_cents,
@@ -169,12 +170,14 @@ async def start(
             409, "Your balance changed. Refresh before starting a paid conversation."
         )
     seconds = (
-        min(60, trial_remaining_ms(history) // 1000)
+        min(TRIAL_MS // 1000, trial_remaining_ms(history) // 1000)
         if trial
         else min(600, int(balance * 60 / body.rate_cents_per_minute))
     )
     if seconds <= 0:
-        raise HTTPException(402, "Your free minute is used. Add credits to continue.")
+        raise HTTPException(
+            402, "Your preview is complete. Continue setup when you are ready."
+        )
     if len(active) >= BROWSER_CONCURRENCY or (
         trial
         and sum(bool(c.metadata_.get("browser_trial")) for c in active)

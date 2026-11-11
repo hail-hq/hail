@@ -102,7 +102,7 @@ sessions have separate limits per conversation. Tools never send messages. Store
 transcripts contain only user/assistant text, not system messages or tool data.
 Check: a callback task collects the caller's details; a send request produces a
 preview; asking for the runtime prompt does not reveal it. Changing the voice
-in onboarding applies to the next conversation. Free time is shared by the
+in onboarding applies to the next conversation. The five-minute preview is shared by the
 workspace; adding credits never starts a conversation automatically.
 
 The usage rings show server counters. Voice usage shows elapsed media time,

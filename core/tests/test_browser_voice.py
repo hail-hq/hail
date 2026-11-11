@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from hailhq.core.browser_voice import session_charge_cents, trial_remaining_ms
 
 
-def call(*, used=None, seconds=60):
+def call(*, used=None, seconds=300):
     return SimpleNamespace(
         metadata_={
             "browser_trial": True,
@@ -14,11 +14,11 @@ def call(*, used=None, seconds=60):
 
 
 def test_trial_reservation_is_shared_and_does_not_reset_on_reconnect():
-    assert trial_remaining_ms([]) == 60_000
+    assert trial_remaining_ms([]) == 300_000
     assert trial_remaining_ms([call()]) == 0
-    assert trial_remaining_ms([call(used=24_001)]) == 35_999
-    assert trial_remaining_ms([call(used=24_001), call(seconds=35)]) == 999
-    assert trial_remaining_ms([call(used=90_000)]) == 0
+    assert trial_remaining_ms([call(used=24_001)]) == 275_999
+    assert trial_remaining_ms([call(used=24_001), call(seconds=275)]) == 999
+    assert trial_remaining_ms([call(used=900_000)]) == 0
 
 
 def test_paid_price_is_clamped_to_reserved_budget_and_rounded_up_to_tenth_cent():
@@ -42,7 +42,7 @@ def test_browser_budget_tracks_elapsed_voice_and_each_message_channel():
     live.answered_at = now - timedelta(seconds=8)
     live.metadata_["browser_actions"] = [{"channel": "email"}, {"channel": "email"}]
     budget = browser_budget([prior, live], now=now)
-    assert budget["voice"] == {"used": 20_000, "limit": 60_000}
+    assert budget["voice"] == {"used": 20_000, "limit": 300_000}
     assert budget["sms"] == {"used": 1, "limit": 3}
     assert budget["email"] == {"used": 2, "limit": 3}
 
@@ -55,7 +55,7 @@ def test_browser_budget_does_not_count_setup_time_or_other_paid_sessions():
     setup.answered_at = None
     paid = call(used=20_000)
     paid.metadata_["browser_trial"] = False
-    assert browser_budget([setup, paid])["voice"] == {"used": 0, "limit": 60_000}
+    assert browser_budget([setup, paid])["voice"] == {"used": 0, "limit": 300_000}
 
 
 async def test_paid_budget_needs_no_workspace_history_query():
@@ -72,3 +72,8 @@ async def test_paid_budget_needs_no_workspace_history_query():
     budget = await read_browser_budget(NoHistoryQuery(), None, paid)
     assert budget["voice"]["used"] == 5000
     assert budget["email"]["used"] == 1
+
+
+def test_trial_has_five_minutes_and_keeps_time_already_used():
+    assert trial_remaining_ms([]) == 300_000
+    assert trial_remaining_ms([call(used=60_000)]) == 240_000

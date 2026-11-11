@@ -1,6 +1,6 @@
 """Browser voice accounting. Calls own the session; the ledger owns money.
 
-A free minute is reserved in full before provisioning. Only finalization can
+A five-minute trial is reserved in full before provisioning. Only finalization can
 return its unused part. A crashed session therefore never reopens its budget.
 Prices arrive from the authenticated website, never a browser or public API.
 """
@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 MESSAGE_PREVIEW_LIMIT = 3
-TRIAL_MS = 60_000
+TRIAL_MS = 300_000
 TRIAL_CONCURRENCY = 3
 BROWSER_CONCURRENCY = 10
 SETUP_SECONDS = 45
@@ -29,7 +29,8 @@ def trial_remaining_ms(calls) -> int:
             0,
             int(
                 c.metadata_.get(
-                    "browser_used_ms", (c.max_duration_seconds or 60) * 1000
+                    "browser_used_ms",
+                    (c.max_duration_seconds or TRIAL_MS // 1000) * 1000,
                 )
             ),
         )
@@ -55,13 +56,14 @@ def browser_budget(calls, *, current=None, now=None) -> dict:
                 0,
                 int(
                     call.metadata_.get(
-                        "browser_used_ms", (call.max_duration_seconds or 60) * 1000
+                        "browser_used_ms",
+                        (call.max_duration_seconds or TRIAL_MS // 1000) * 1000,
                     )
                 ),
             )
         elif call.answered_at is not None:
             used += min(
-                (call.max_duration_seconds or 60) * 1000,
+                (call.max_duration_seconds or TRIAL_MS // 1000) * 1000,
                 max(0, int((now - call.answered_at).total_seconds() * 1000)),
             )
         for action in call.metadata_.get("browser_actions", []):
