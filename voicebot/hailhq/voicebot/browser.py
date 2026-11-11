@@ -237,6 +237,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                     tools=[preview_email, preview_sms],
                 ),
                 room=ctx.room,
+                record=False,
             ),
             timeout=15,
         )

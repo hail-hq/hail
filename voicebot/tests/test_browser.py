@@ -57,7 +57,7 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
             return lambda callback: callback
 
         async def start(self, **kwargs):
-            pass
+            assert kwargs["record"] is False
 
         async def aclose(self):
             pass
