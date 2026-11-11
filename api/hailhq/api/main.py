@@ -40,8 +40,8 @@ from hailhq.api.routes import uploads as uploads_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
-from hailhq.api.routes.internal import browser_sessions
 from hailhq.api.routes.internal import agent as internal_agent
+from hailhq.api.routes.internal import browser_sessions
 from hailhq.api.routes.internal import call_settings as internal_call_settings
 from hailhq.api.routes.internal import dsar as internal_dsar
 from hailhq.api.routes.internal import numbers as internal_numbers

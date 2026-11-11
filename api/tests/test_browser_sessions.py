@@ -4,10 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
-from sqlalchemy import select
-from hailhq.core.hmac_signing import sign
-from hailhq.core.models import Agent, AccountCredit, Call
 from hailhq.core.browser_voice import finish_browser_call
+from hailhq.core.hmac_signing import sign
+from hailhq.core.models import AccountCredit, Agent, Call
+from sqlalchemy import select
 
 SECRET = "browser-test-secret"
 
@@ -232,6 +232,7 @@ async def test_finalization_refreshes_stale_identity_map_and_uses_media_end_time
     async_session, session_factory
 ):
     from decimal import Decimal
+
     from hailhq.core.browser_voice import session_charge_cents
 
     org = uuid.uuid4()
@@ -274,7 +275,7 @@ async def test_finalization_refreshes_stale_identity_map_and_uses_media_end_time
         .all()
     )
     assert len(refunds) == 1
-    assert refunds[0].amount_cents == Decimal("10") - session_charge_cents(
+    assert refunds[0].amount_cents == Decimal(10) - session_charge_cents(
         10000, "10", 60
     )
 

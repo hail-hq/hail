@@ -1,5 +1,6 @@
-import pytest
 from types import SimpleNamespace
+
+import pytest
 from hailhq.voicebot.browser import browser_instructions, deadline_seconds
 
 
@@ -20,12 +21,18 @@ def test_server_deadline_uses_persisted_budget_not_dispatch_input():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delete_fails", [False, True])
 @pytest.mark.parametrize("shutdown_during_disconnect", [False, True])
+@pytest.mark.parametrize("readiness_delay", [0, 2])
 async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_timer(
-    async_session, monkeypatch, delete_fails, shutdown_during_disconnect
+    async_session,
+    monkeypatch,
+    delete_fails,
+    shutdown_during_disconnect,
+    readiness_delay,
 ):
     import asyncio
     import uuid
     from unittest.mock import AsyncMock
+
     from hailhq.core.models import Call
     from hailhq.voicebot import browser
 
@@ -88,6 +95,25 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
         def shutdown(self, **kwargs):
             closed.set()
 
+    if readiness_delay:
+        from contextlib import asynccontextmanager
+
+        original_scope = browser.session_scope
+
+        @asynccontextmanager
+        async def slow_readiness_scope():
+            async with original_scope() as db:
+                original_get = db.get
+
+                async def get(*args, **kwargs):
+                    if kwargs.get("with_for_update"):
+                        await asyncio.sleep(readiness_delay)
+                    return await original_get(*args, **kwargs)
+
+                db.get = get
+                yield db
+
+        monkeypatch.setattr(browser, "session_scope", slow_readiness_scope)
     monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
     monkeypatch.setattr(browser, "build_session", lambda *a, **kw: Session())
     ctx = Context()

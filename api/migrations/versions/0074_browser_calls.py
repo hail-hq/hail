@@ -6,8 +6,8 @@ the existing voice session owner. Reservations live in its metadata and
 unused paid reservations are returned through the existing ledger.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0074"
 down_revision = "0073"

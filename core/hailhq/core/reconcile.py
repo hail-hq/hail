@@ -57,9 +57,10 @@ async def sweep_stale_calls(
     row). The terminal guard (``status NOT IN terminal``) makes a redundant
     sweep idempotent.
     """
-    from hailhq.core.browser_voice import finish_browser_call, SETUP_SECONDS
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.core.browser_voice import SETUP_SECONDS, finish_browser_call
     from sqlalchemy import select
-    from datetime import datetime, timezone, timedelta
 
     browser_calls = (
         (

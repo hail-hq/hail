@@ -845,7 +845,9 @@ class Call(Base):
             " OR (direction = 'inbound' AND to_number_id IS NOT NULL)))",
             name="calls_number_for_direction",
         ),
-        CheckConstraint("transport IN ('phone', 'browser')", name="calls_transport_check"),
+        CheckConstraint(
+            "transport IN ('phone', 'browser')", name="calls_transport_check"
+        ),
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
     )

@@ -13,13 +13,13 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from livekit.agents import Agent, function_tool
 from hailhq.core.browser_voice import SETUP_SECONDS, finish_browser_call
 from hailhq.core.db import session_scope
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.pipeline import build_session, resolve_org_configs
+from livekit.agents import Agent, function_tool
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
     deadline = None
     setup_deadline = None
     finalization = None
+    media_started_at = None
 
     async def finish(*, failed=False):
         nonlocal finished
@@ -96,7 +97,11 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                     if call is not None and session is not None:
                         call.transcript = public_transcript(session.history.to_dict())
                     await finish_browser_call(
-                        db, call_id, failed=failed, ended_at=media_ended_at
+                        db,
+                        call_id,
+                        failed=failed,
+                        ended_at=media_ended_at,
+                        started_at=media_started_at,
                     )
                     await db.commit()
             finally:
@@ -173,7 +178,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                 "preview": True,
             }
             async with session_scope() as db:
-                call = await db.get(Call, call_id)
+                call = await db.get(Call, call_id, with_for_update=True)
                 if call is None or call.status in TERMINAL_CALL_STATUSES:
                     return "This browser conversation has ended. Nothing was sent."
                 meta = dict(call.metadata_)
@@ -218,10 +223,18 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             ),
             timeout=15,
         )
-        setup_deadline.cancel()
         if finished:
             await session.aclose()
             return
+        media_started_at = datetime.now(timezone.utc)
+
+        async def expire():
+            await asyncio.sleep(seconds)
+            await wait_finish()
+
+        # Arm the live limit before waiting on any readiness DB transaction.
+        deadline = asyncio.create_task(expire())
+        setup_deadline.cancel()
         async with session_scope() as db:
             call = await db.get(Call, call_id, with_for_update=True)
             if call.status in TERMINAL_CALL_STATUSES:
@@ -229,14 +242,11 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                 ctx.shutdown(reason="browser_already_stopped")
                 return
             call.status = "in_progress"
-            call.started_at = call.answered_at = datetime.now(timezone.utc)
+            call.started_at = call.answered_at = media_started_at
             await db.commit()
 
-        async def expire():
-            await asyncio.sleep(seconds)
-            await wait_finish()
-
-        deadline = asyncio.create_task(expire())
+        if finished:
+            return
         await ctx.room.local_participant.set_attributes({"hail.browser_ready": "true"})
         session.generate_reply(
             instructions="Briefly say you are an AI assistant, greet the person as this agent, then ask how you can help."

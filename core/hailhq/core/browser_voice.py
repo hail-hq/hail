@@ -8,14 +8,13 @@ Prices arrive from the authenticated website, never a browser or public API.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import ROUND_CEILING, Decimal
 from uuid import UUID
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from hailhq.core.models import AccountCredit, Call, UsageEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 TRIAL_MS = 60_000
 TRIAL_CONCURRENCY = 3
@@ -52,6 +51,7 @@ async def finish_browser_call(
     *,
     failed: bool = False,
     ended_at: datetime | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     """Lock and finalize once, including refunds. Caller commits the transaction."""
     call = (
@@ -64,6 +64,8 @@ async def finish_browser_call(
     ).scalar_one_or_none()
     if call is None or call.status in TERMINAL_CALL_STATUSES:
         return
+    if started_at is not None and call.answered_at is None:
+        call.started_at = call.answered_at = started_at
     now = ended_at or datetime.now(timezone.utc)
     duration = (
         min(

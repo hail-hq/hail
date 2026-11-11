@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from hailhq.core.browser_voice import trial_remaining_ms, session_charge_cents
+from hailhq.core.browser_voice import session_charge_cents, trial_remaining_ms
 
 
 def call(*, used=None, seconds=60):

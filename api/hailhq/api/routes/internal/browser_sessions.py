@@ -10,27 +10,26 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from livekit import api
-from pydantic import BaseModel, Field
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from hailhq.api.routes.calls import get_livekit
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.billing import get_ledger_cents
 from hailhq.core.browser_voice import (
     BROWSER_CONCURRENCY,
-    TRIAL_CONCURRENCY,
     SETUP_SECONDS,
+    TRIAL_CONCURRENCY,
     finish_browser_call,
     session_charge_cents,
     trial_remaining_ms,
 )
 from hailhq.core.config import settings
-from hailhq.core.db import get_session
+from hailhq.core.db import get_session, org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import AccountCredit, Agent, Call
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from livekit import api
+from pydantic import BaseModel, Field
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/internal/browser-sessions",
@@ -95,10 +94,11 @@ async def start(
 ):
     # Transaction-scoped global admission lock: all API replicas see the same
     # active reservations before any LiveKit side effects are initiated.
-    await db.execute(text("SELECT pg_advisory_xact_lock(737492811)"))
     agent = await db.get(Agent, body.agent_id)
     if agent is None or agent.organization_id != body.organization_id:
         raise HTTPException(404, "Agent not found.")
+    await org_lock(db, body.organization_id)
+    await db.execute(text("SELECT pg_advisory_xact_lock(737492811)"))
     prior = await db.get(Call, body.request_id)
     if prior is not None:
         raise HTTPException(

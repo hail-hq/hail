@@ -2266,6 +2266,7 @@ async def _run_call(
 
     if metadata.get("transport") == "browser":
         from hailhq.voicebot.browser import run_browser_session
+
         await run_browser_session(ctx, metadata["call_id"])
         return
 
