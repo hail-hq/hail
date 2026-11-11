@@ -123,8 +123,9 @@ never starts a conversation. Voice counters show elapsed media, not reserved tim
 
 Messaging has no enable switch. Use mocked sending providers for voice-only tests.
 Missing explicit AWS keys alone does not disable email: a profile or instance role may still authorize sends.
-Set `HAIL_BACKGROUND_CARRIER_JOBS_ENABLED=false` before running a preview with shared carrier credentials.
-That setting stops background provisioning and repair jobs only. It does not disable sending.
+For previews with shared carrier credentials, use a local-only launcher that skips
+carrier provisioning and repair loops. Keep that helper outside Git; keep call deadline
+and pool-reservation sweepers running. This does not disable sending.
 Email readiness resolves the SES adapter's AWS credential chain in a bounded
 background thread. It sends no test message. SMS readiness includes the
 carrier credentials and webhook verification key.

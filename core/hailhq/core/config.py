@@ -126,9 +126,6 @@ class Settings(BaseSettings):
     # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
     didww_voice_in_trunk_id: str = ""
 
-    # Disable carrier provisioning/repair jobs in isolated previews with shared keys.
-    hail_background_carrier_jobs_enabled: bool = True
-
     # AWS, used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
     # are empty, so workloads running on EC2/ECS pick up IAM-role creds

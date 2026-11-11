@@ -122,7 +122,6 @@ async def credentials_ready() -> bool:
     return future.result()
 
 
-
 def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:
     """Map SES ``VerificationStatus`` onto Hail's tri-state.
 
