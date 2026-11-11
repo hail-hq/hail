@@ -622,6 +622,7 @@ async def test_browser_sms_lease_is_exclusive_stable_and_released(
     assert claims.count(pool.id) == 1 and claims.count(None) == 1
     winner = first if claims[0] else second
     await async_session.refresh(winner)
+    assert winner.metadata_["browser_capabilities"]["smsNumberTemporary"] is True
     assert (await browser_sms_number(async_session, winner)).id == pool.id
     await finish_browser_call(async_session, winner.id)
     await async_session.commit()
@@ -901,12 +902,15 @@ async def test_start_failure_and_stop_release_browser_text_number(
         {"organization_id": body["organization_id"], "id": data["id"]},
     )
     assert read.json()["capabilities"]["smsReceiveReady"]
-    await browser_post(
+    assert read.json()["capabilities"]["smsNumberTemporary"] is True
+    stopped = await browser_post(
         client,
         monkeypatch,
         "/stop",
         {"organization_id": body["organization_id"], "id": data["id"]},
     )
+    assert stopped.json()["capabilities"]["smsNumberTemporary"] is False
+    assert stopped.json()["capabilities"]["inboundNumber"] is None
     assert (
         await async_session.get(PhoneNumber, pool.id, populate_existing=True)
     ).reserved_call_id is None

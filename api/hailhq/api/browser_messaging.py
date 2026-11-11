@@ -148,6 +148,7 @@ async def capabilities(
         "emailSendReady": email_ready,
         "smsSendReady": sms_ready,
         "smsReceiveReady": bool(number and not number.is_pool),
+        "smsNumberTemporary": bool(number and number.is_pool),
         "inboundNumber": number.e164 if number and not number.is_pool else None,
         "outboundSender": (
             number.e164 if number and sms_ready and not number.is_pool else None
@@ -188,6 +189,7 @@ async def lease_browser_sms(db, call):
         caps.update(
             smsSendReady=True,
             smsReceiveReady=True,
+            smsNumberTemporary=number.is_pool,
             inboundNumber=number.e164,
             outboundSender=number.e164,
             smsReason=None,
@@ -196,6 +198,7 @@ async def lease_browser_sms(db, call):
         caps.update(
             smsSendReady=False,
             smsReceiveReady=False,
+            smsNumberTemporary=False,
             inboundNumber=None,
             outboundSender=None,
         )
@@ -214,6 +217,7 @@ async def live_browser_capabilities(db, call):
     live = call.status == "in_progress" and number is not None
     caps.update(
         smsReceiveReady=live,
+        smsNumberTemporary=bool(live and number.is_pool),
         inboundNumber=number.e164 if number else None,
         outboundSender=number.e164 if number else None,
         smsSendReady=bool(
