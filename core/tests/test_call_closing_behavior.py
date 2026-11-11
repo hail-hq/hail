@@ -1,4 +1,4 @@
-"""Opt-in model checks: HAIL_RUN_VOICE_EVALS=1 pytest tests/test_call_closing_behavior.py.
+"""Opt-in model checks: pytest --run-voice-evals tests/test_call_closing_behavior.py.
 
 Uses the configured Bedrock conversation model and AWS credentials. No phone
 calls are placed and no tools execute. Unlike prompt snapshots, these checks
@@ -12,10 +12,7 @@ import pytest
 from hailhq.core import prompts
 from hailhq.core.agent_tools.end_call import SPEC
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("HAIL_RUN_VOICE_EVALS") != "1",
-    reason="Opt-in evaluation uses the configured Bedrock model",
-)
+pytestmark = pytest.mark.voice_eval
 
 TEST_CALL = (
     "You are Alex, Sam Taylor's AI assistant, making a short test call to "

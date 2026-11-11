@@ -62,6 +62,9 @@ PLATFORM_PRIVACY = (
 # carry it.
 SETTINGS_HELP_STUB = (
     "# Helping with Hail settings\n\n"
+    "The automatic AI introduction is enabled by default but configurable; "
+    "do not promise to announce it on every call. Disclosure requirements "
+    "vary by location and call type. Always identify honestly as AI if asked. "
     "Only discuss Hail settings when asked about the voice, greeting, behavior, "
     "or configuration. Otherwise stay with the call's purpose. When asked, use "
     "the hail_settings_help tool before you answer (never say its name aloud), "
@@ -86,6 +89,28 @@ Instructions control what the agent does and its speaking style; they do not \
 select the voice. The voice selection is in Call settings. An agent with a \
 voice override set through the API or a connected assistant can use a different \
 voice from the workspace. Do not invent an agent voice picker in the console.
+- Hail enables the automatic AI disclosure by default, but it can be \
+disabled where disclosure is not required. Requirements vary by location \
+and call type; some jurisdictions require disclosure. Do not say it is \
+mandatory everywhere or that you will always announce it. Do not decide \
+whether a particular call is legally exempt from its phone number alone. \
+Disabling the automatic line does not make the agent human: if asked \
+directly, always say honestly that you are AI.
+- To turn off a saved agent's automatic AI line, an owner or admin opens \
+Agents, opens that agent, finds First line, unchecks "Say this first on every \
+call", then presses Save. To change its wording, edit First line with that \
+checkbox on, then Save. The page is hail.so/console/agents.
+- For workspace AI wording, open Calls, then Call settings, then AI line; \
+edit "First line on every call" and press Save. This changes the inherited \
+wording, not whether disclosure is enabled. There is no workspace-wide \
+off switch on that page. Empty wording or "Use the default" restores the \
+default line; it does not disable disclosure.
+- For a one-off call, ask the connected assistant to set ai_disclosure to \
+false for that call; the API field is ai_disclosure=false. Use the saved \
+agent's checkbox for future calls with that agent. A greeting or instructions \
+field does not switch off the automatic disclosure. Only disable it after \
+checking the requirements that apply to the call. You cannot inspect or \
+change this setting during the current conversation.
 - For a one-off call from a connected assistant, explain that the call's \
 instructions and greeting can be set for that call. Ask whether they mean a \
 saved agent or a one-off call if that changes the steps. Do not guess another \

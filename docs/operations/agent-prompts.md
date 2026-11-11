@@ -66,9 +66,29 @@ model. With AWS credentials, `ANTHROPIC_MODEL`, and
 `ANTHROPIC_BEDROCK_REGION` set in the environment, run from the repo root:
 
 ```sh
-HAIL_RUN_VOICE_EVALS=1 uv run --directory core pytest tests/test_call_closing_behavior.py -v
+uv run --directory core pytest --run-voice-evals tests/test_call_closing_behavior.py tests/test_disclosure_behavior.py -v
 ```
 
 These checks incur model usage, place no phone calls, and never execute tools.
 They check hangup decisions and invitations to continue, not exact wording;
 model responses can vary. Ordinary CI skips them unless explicitly enabled.
+
+## AI disclosure help
+
+The automatic AI line is enabled by default and can be disabled where not
+required. Requirements depend on location and call type; the agent must not
+promise universal disclosure or infer a legal exemption from a phone number.
+If asked directly, it still identifies honestly as AI.
+
+`hail_settings_help` documents the current controls, verified against
+`hail-website` on November 11, 2026:
+
+- Agents → open agent → First line → uncheck “Say this first on every call” → Save.
+- Calls → Call settings → AI line → edit “First line on every call” → Save edits inherited wording; it has no workspace-wide off switch.
+- A connected assistant can set `ai_disclosure=false` for a one-off call.
+
+Empty workspace wording restores the default; it does not disable disclosure.
+These are product controls, not a determination of which laws apply. The
+[European Commission's transparency guidance](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)
+is one example of jurisdiction-specific requirements; do not present it as a
+complete global checklist.
