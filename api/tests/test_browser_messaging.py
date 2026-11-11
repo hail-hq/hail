@@ -14,6 +14,7 @@ from hailhq.core.models import (
     EmailAttachment,
     EmailDomain,
     OrganizationMember,
+    PhoneNumber,
     Sms,
     UsageEvent,
     User,
@@ -86,6 +87,18 @@ async def seed(db):
         dns_records=[],
     )
     db.add(domain)
+    # Browser SMS must not consume the last voice-capable pool number.
+    db.add(
+        PhoneNumber(
+            e164="+12125550199",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            is_pool=True,
+            provisioning_state="active",
+            provider="twilio",
+        )
+    )
     await db.flush()
     call = Call(
         organization_id=org,
@@ -617,7 +630,9 @@ async def test_browser_sms_lease_is_exclusive_stable_and_released(
     assert (await browser_sms_number(async_session, winner)) is None
     assert (
         await async_session.execute(
-            select(PhoneNumber).where(PhoneNumber.organization_id.is_(None))
+            select(PhoneNumber).where(
+                PhoneNumber.organization_id.is_(None), PhoneNumber.id == pool.id
+            )
         )
     ).scalar_one().id == pool.id
 
@@ -847,6 +862,18 @@ async def test_start_failure_and_stop_release_browser_text_number(
     from .test_browser_sessions import setup_agent
 
     body = await setup_agent(async_session)
+    async_session.add(
+        PhoneNumber(
+            e164="+12125550199",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            is_pool=True,
+            provisioning_state="active",
+            provider="twilio",
+        )
+    )
+    await async_session.commit()
     body.update(sms_recipient="+46705550123", recipient_consent=True)
     pool = await add_phone_number(
         async_session, None, e164="+14155550111", is_pool=True

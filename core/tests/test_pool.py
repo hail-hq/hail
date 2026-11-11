@@ -413,3 +413,50 @@ async def test_sweeper_releases_answered_handover_after_backstop(async_session):
     assert pn.id in released
     await async_session.refresh(pn)
     assert pn.reserved_call_id is None
+
+
+@pytest.mark.asyncio
+async def test_browser_sms_leaves_last_voice_number_for_phone_calls(async_session):
+    only = await _make_pool_number(async_session)
+    assert (
+        await claim_pool_number(
+            async_session, capability="sms", preserve_voice_capacity=True
+        )
+        is None
+    )
+    assert (await claim_pool_number(async_session)).id == only.id
+
+
+@pytest.mark.asyncio
+async def test_browser_sms_can_lease_without_consuming_remaining_voice_capacity(
+    async_session,
+):
+    first = await _make_pool_number(async_session, e164="+14155550101")
+    second = await _make_pool_number(async_session, e164="+14155550102")
+    claimed = await claim_pool_number(
+        async_session, capability="sms", preserve_voice_capacity=True
+    )
+    assert claimed is not None
+    call = await _make_call(async_session, from_number_id=claimed.id)
+    claimed.reserved_call_id = call.id
+    await async_session.commit()
+    assert (
+        await claim_pool_number(
+            async_session, capability="sms", preserve_voice_capacity=True
+        )
+        is None
+    )
+    voice = await claim_pool_number(async_session)
+    assert voice.id in {first.id, second.id} and voice.id != claimed.id
+
+
+@pytest.mark.asyncio
+async def test_sms_only_pool_number_does_not_require_a_voice_spare(async_session):
+    number = await _make_pool_number(async_session)
+    number.capabilities = ["sms"]
+    await async_session.commit()
+    assert (
+        await claim_pool_number(
+            async_session, capability="sms", preserve_voice_capacity=True
+        )
+    ).id == number.id

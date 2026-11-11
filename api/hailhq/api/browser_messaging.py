@@ -66,7 +66,10 @@ async def sms_sender(db, org, recipient, *, claim=False, call=None):
             excluded = []
             while len(excluded) < 100:
                 number = await claim_pool_number(
-                    db, capability="sms", exclude_ids=tuple(excluded)
+                    db,
+                    capability="sms",
+                    exclude_ids=tuple(excluded),
+                    preserve_voice_capacity=True,
                 )
                 if number is None:
                     return None
