@@ -830,6 +830,10 @@ async def test_credential_readiness_bounds_hung_resolution_and_reuses_result(
         first = await asyncio.gather(*(ses.credentials_ready() for _ in range(40)))
         assert first == [False] * 40
         assert calls == 1
+        assert len(ses._credential_future._done_callbacks) <= 1
+        # Later timed-out callers must not leave wrappers attached forever.
+        await asyncio.gather(*(ses.credentials_ready() for _ in range(40)))
+        assert len(ses._credential_future._done_callbacks) <= 1
         # The ordinary executor remains usable while the credential SDK hangs.
         assert (
             await asyncio.wait_for(asyncio.to_thread(lambda: "available"), 0.2)

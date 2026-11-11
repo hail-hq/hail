@@ -110,13 +110,17 @@ async def credentials_ready() -> bool:
     # add_done_callback can run immediately: do this outside the lock.
     if created:
         future.add_done_callback(_credentials_completed)
-    try:
-        return await asyncio.wait_for(
-            asyncio.shield(asyncio.wrap_future(future)),
-            timeout=_CREDENTIAL_WAIT_SECONDS,
-        )
-    except Exception:
-        return False
+    # Poll this single shared SDK future rather than attaching a new asyncio
+    # wrapper per request. A hung provider therefore retains no timed-out
+    # callers or callbacks. Each caller owns at most one short-lived timer.
+    deadline = time.monotonic() + _CREDENTIAL_WAIT_SECONDS
+    while not future.done():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+    return future.result()
+
 
 
 def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:
