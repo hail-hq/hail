@@ -85,6 +85,24 @@ def browser_budget(calls, *, current=None, now=None) -> dict:
     }
 
 
+async def read_browser_budget(db, organization_id, current=None):
+    if current is not None and not current.metadata_.get("browser_trial"):
+        return browser_budget([], current=current)
+    # Polling needs trial accounting fields, never paid history or transcripts.
+    calls = (
+        await db.execute(
+            select(
+                Call.metadata_, Call.status, Call.answered_at, Call.max_duration_seconds
+            ).where(
+                Call.organization_id == organization_id,
+                Call.transport == "browser",
+                Call.metadata_["browser_trial"].as_boolean().is_(True),
+            )
+        )
+    ).all()
+    return browser_budget(calls, current=current)
+
+
 async def reserve_browser_preview(db, call_id, action):
     """Serialize independent modality limits across the workspace's trial."""
     from hailhq.core.db import org_lock
@@ -103,19 +121,7 @@ async def reserve_browser_preview(db, call_id, action):
     ).scalar_one()
     if call.status in TERMINAL_CALL_STATUSES:
         return False
-    calls = (
-        (
-            await db.execute(
-                select(Call).where(
-                    Call.organization_id == call.organization_id,
-                    Call.transport == "browser",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    budget = browser_budget(calls, current=call)
+    budget = await read_browser_budget(db, call.organization_id, call)
     if (
         action["channel"] not in ("sms", "email")
         or budget[action["channel"]]["used"] >= MESSAGE_PREVIEW_LIMIT

@@ -56,3 +56,19 @@ def test_browser_budget_does_not_count_setup_time_or_other_paid_sessions():
     paid = call(used=20_000)
     paid.metadata_["browser_trial"] = False
     assert browser_budget([setup, paid])["voice"] == {"used": 0, "limit": 60_000}
+
+
+async def test_paid_budget_needs_no_workspace_history_query():
+    from hailhq.core.browser_voice import read_browser_budget
+
+    class NoHistoryQuery:
+        async def execute(self, _statement):
+            raise AssertionError("Paid budget must use its current session only")
+
+    paid = call(used=5000)
+    paid.metadata_["browser_trial"] = False
+    paid.metadata_["browser_actions"] = [{"channel": "email"}]
+    paid.status = "completed"
+    budget = await read_browser_budget(NoHistoryQuery(), None, paid)
+    assert budget["voice"]["used"] == 5000
+    assert budget["email"]["used"] == 1

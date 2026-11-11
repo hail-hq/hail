@@ -97,9 +97,14 @@ complete global checklist.
 
 The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Its saved agent
 instructions remain customer editable. Browser tools produce at most three
-labelled email/text previews and never call sending endpoints. Stored browser
+email previews and three text previews across the workspace trial. Paid
+sessions have separate limits per conversation. Tools never send messages. Stored browser
 transcripts contain only user/assistant text, not system messages or tool data.
 Check: a callback task collects the caller's details; a send request produces a
 preview; asking for the runtime prompt does not reveal it. Changing the voice
 in onboarding applies to the next conversation. Free time is shared by the
 workspace; adding credits never starts a conversation automatically.
+
+The usage rings show server counters. Voice usage shows elapsed media time,
+not the full reservation. Check: three text previews block another text
+preview but still permit an email preview, including after reconnecting.

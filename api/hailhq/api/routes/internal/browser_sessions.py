@@ -17,8 +17,8 @@ from hailhq.core.browser_voice import (
     BROWSER_CONCURRENCY,
     SETUP_SECONDS,
     TRIAL_CONCURRENCY,
-    browser_budget,
     finish_browser_call,
+    read_browser_budget,
     session_charge_cents,
     trial_remaining_ms,
 )
@@ -59,18 +59,7 @@ class BudgetRequest(BaseModel):
 
 
 async def budget_for(db, organization_id, current=None):
-    calls = (
-        (
-            await db.execute(
-                select(Call).where(
-                    Call.organization_id == organization_id, Call.transport == "browser"
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return browser_budget(calls, current=current)
+    return await read_browser_budget(db, organization_id, current)
 
 
 @router.post("/budget")
