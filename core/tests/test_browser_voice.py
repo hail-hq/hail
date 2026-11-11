@@ -26,3 +26,33 @@ def test_paid_price_is_clamped_to_reserved_budget_and_rounded_up_to_tenth_cent()
     assert str(session_charge_cents(30_000, "10", 60)) == "5.0"
     assert str(session_charge_cents(90_000, "10", 60)) == "10.0"
     assert str(session_charge_cents(0, "10", 60)) == "0.0"
+
+
+def test_browser_budget_tracks_elapsed_voice_and_each_message_channel():
+    from datetime import datetime, timedelta, timezone
+
+    from hailhq.core.browser_voice import browser_budget
+
+    now = datetime.now(timezone.utc)
+    prior = call(used=12_000)
+    prior.status = "completed"
+    prior.metadata_["browser_actions"] = [{"channel": "sms"}]
+    live = call(seconds=48)
+    live.status = "in_progress"
+    live.answered_at = now - timedelta(seconds=8)
+    live.metadata_["browser_actions"] = [{"channel": "email"}, {"channel": "email"}]
+    budget = browser_budget([prior, live], now=now)
+    assert budget["voice"] == {"used": 20_000, "limit": 60_000}
+    assert budget["sms"] == {"used": 1, "limit": 3}
+    assert budget["email"] == {"used": 2, "limit": 3}
+
+
+def test_browser_budget_does_not_count_setup_time_or_other_paid_sessions():
+    from hailhq.core.browser_voice import browser_budget
+
+    setup = call()
+    setup.status = "requested"
+    setup.answered_at = None
+    paid = call(used=20_000)
+    paid.metadata_["browser_trial"] = False
+    assert browser_budget([setup, paid])["voice"] == {"used": 0, "limit": 60_000}

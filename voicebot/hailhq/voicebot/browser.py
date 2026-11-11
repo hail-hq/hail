@@ -13,7 +13,11 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from hailhq.core.browser_voice import SETUP_SECONDS, finish_browser_call
+from hailhq.core.browser_voice import (
+    SETUP_SECONDS,
+    finish_browser_call,
+    reserve_browser_preview,
+)
 from hailhq.core.db import session_scope
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
@@ -195,16 +199,8 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                 "preview": True,
             }
             async with session_scope() as db:
-                call = await db.get(Call, call_id, with_for_update=True)
-                if call is None or call.status in TERMINAL_CALL_STATUSES:
-                    return "This browser conversation has ended. Nothing was sent."
-                meta = dict(call.metadata_)
-                actions = list(meta.get("browser_actions", []))
-                if len(actions) >= 3:
-                    return "This test allows three message previews. Nothing was sent."
-                actions.append(action)
-                meta["browser_actions"] = actions
-                call.metadata_ = meta
+                if not await reserve_browser_preview(db, call_id, action):
+                    return "This preview limit is reached or the conversation has ended. Nothing was sent."
                 await db.commit()
             await ctx.room.local_participant.publish_data(
                 json.dumps(action), reliable=True, topic="hail.preview"

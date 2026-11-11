@@ -17,6 +17,7 @@ from hailhq.core.browser_voice import (
     BROWSER_CONCURRENCY,
     SETUP_SECONDS,
     TRIAL_CONCURRENCY,
+    browser_budget,
     finish_browser_call,
     session_charge_cents,
     trial_remaining_ms,
@@ -51,6 +52,32 @@ class Start(BaseModel):
 class Control(BaseModel):
     organization_id: UUID
     id: UUID
+
+
+class BudgetRequest(BaseModel):
+    organization_id: UUID
+
+
+async def budget_for(db, organization_id, current=None):
+    calls = (
+        (
+            await db.execute(
+                select(Call).where(
+                    Call.organization_id == organization_id, Call.transport == "browser"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return browser_budget(calls, current=current)
+
+
+@router.post("/budget")
+async def budget(
+    body: BudgetRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    return await budget_for(db, body.organization_id)
 
 
 def view(call: Call) -> dict:
@@ -230,7 +257,12 @@ async def start(
             )
             .to_jwt()
         )
-        return {**view(call), "token": token, "url": settings.livekit_url}
+        return {
+            **view(call),
+            "token": token,
+            "url": settings.livekit_url,
+            "budget": await budget_for(db, call.organization_id, call),
+        }
     except Exception:
         try:
             await delete_browser_room(lk, call.livekit_room)
@@ -244,7 +276,8 @@ async def start(
 
 @router.post("/read")
 async def read(body: Control, db: Annotated[AsyncSession, Depends(get_session)]):
-    return view(await scoped(db, body))
+    call = await scoped(db, body)
+    return {**view(call), "budget": await budget_for(db, call.organization_id, call)}
 
 
 @router.post("/stop")
@@ -261,4 +294,4 @@ async def stop(
         await delete_browser_room(lk, call.livekit_room)
         await finish_browser_call(db, call.id, ended_at=media_ended_at)
         await db.commit()
-    return view(call)
+    return {**view(call), "budget": await budget_for(db, call.organization_id, call)}

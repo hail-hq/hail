@@ -341,3 +341,104 @@ async def test_worker_crash_releases_paid_hold_without_charging_unknown_duration
         )
     ).scalar_one()
     assert refund.amount_cents == 10
+
+
+@pytest.mark.asyncio
+async def test_budget_is_org_scoped_and_separates_modality_limits(
+    client, async_session, monkeypatch
+):
+    body = await setup_agent(async_session)
+    async_session.add(
+        Call(
+            id=uuid.uuid4(),
+            organization_id=body["organization_id"],
+            transport="browser",
+            voice_config={},
+            livekit_room="budget-history",
+            direction="outbound",
+            status="completed",
+            end_reason="normal_hangup",
+            max_duration_seconds=60,
+            metadata_={
+                "browser_trial": True,
+                "browser_used_ms": 15000,
+                "browser_actions": [
+                    {"channel": "sms"},
+                    {"channel": "email"},
+                    {"channel": "email"},
+                ],
+            },
+        )
+    )
+    await async_session.commit()
+    response = await post(
+        client, monkeypatch, "/budget", {"organization_id": body["organization_id"]}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "voice": {"used": 15000, "limit": 60000},
+        "sms": {"used": 1, "limit": 3},
+        "email": {"used": 2, "limit": 3},
+    }
+    other = await post(
+        client, monkeypatch, "/budget", {"organization_id": str(uuid.uuid4())}
+    )
+    assert other.json()["voice"]["used"] == 0
+    assert other.json()["sms"]["used"] == 0
+
+
+@pytest.mark.asyncio
+async def test_message_preview_limits_persist_across_trial_sessions(async_session):
+    from hailhq.core.browser_voice import reserve_browser_preview
+
+    body = await setup_agent(async_session)
+    prior = Call(
+        id=uuid.uuid4(),
+        organization_id=body["organization_id"],
+        transport="browser",
+        voice_config={},
+        livekit_room="prior-previews",
+        direction="outbound",
+        status="completed",
+        end_reason="normal_hangup",
+        max_duration_seconds=60,
+        metadata_={
+            "browser_trial": True,
+            "browser_used_ms": 10000,
+            "browser_actions": [{"channel": "sms"}] * 3,
+        },
+    )
+    current = Call(
+        id=uuid.uuid4(),
+        organization_id=body["organization_id"],
+        transport="browser",
+        voice_config={},
+        livekit_room="current-previews",
+        direction="outbound",
+        status="in_progress",
+        max_duration_seconds=50,
+        metadata_={"browser_trial": True},
+    )
+    async_session.add_all([prior, current])
+    await async_session.commit()
+    assert not await reserve_browser_preview(
+        async_session, current.id, {"channel": "sms", "body": "blocked"}
+    )
+    assert await reserve_browser_preview(
+        async_session, current.id, {"channel": "email", "body": "allowed"}
+    )
+    await async_session.commit()
+    assert current.metadata_["browser_actions"] == [
+        {"channel": "email", "body": "allowed"}
+    ]
+
+    assert await reserve_browser_preview(
+        async_session, current.id, {"channel": "email", "body": "second"}
+    )
+    assert await reserve_browser_preview(
+        async_session, current.id, {"channel": "email", "body": "third"}
+    )
+    assert not await reserve_browser_preview(
+        async_session, current.id, {"channel": "email", "body": "over limit"}
+    )
+    await async_session.commit()
