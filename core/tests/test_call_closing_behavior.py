@@ -112,6 +112,7 @@ async def test_call_closing_decision(
             max_tokens=350,
             system=prompts.build_voice_instructions(instructions, direction),
             messages=[
+                {"role": "user", "content": "Hello?"},
                 {"role": "assistant", "content": opening},
                 {"role": "user", "content": reply},
             ],
