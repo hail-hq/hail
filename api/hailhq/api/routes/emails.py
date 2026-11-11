@@ -296,6 +296,8 @@ async def deliver_email(
     email_provider: EmailProvider,
     email: Email,
     attachment_rows: list[FileUpload] | None = None,
+    *,
+    billable: bool = True,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
@@ -442,6 +444,9 @@ async def deliver_email(
             row.first_used_at = func.statement_timestamp()
     await db.commit()
     await db.refresh(email)
+
+    if not billable:
+        return None
 
     # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(

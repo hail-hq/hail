@@ -4,11 +4,13 @@ import pytest
 from hailhq.voicebot.browser import browser_instructions, deadline_seconds
 
 
-def test_browser_runtime_is_private_and_does_not_promise_real_sends():
+def test_browser_runtime_scopes_real_sends_and_warns_about_unreadable_files():
     result = browser_instructions("Collect a callback request.")
     assert "Collect a callback request." in result
     assert "browser" in result
-    assert "never sends" in result
+    assert "verified account email" in result
+    assert "three emails and three texts" in result
+    assert "cannot read PDFs or images" in result
     assert "telephone call" not in result
 
 
@@ -158,3 +160,63 @@ def test_browser_uses_saved_workspace_language_for_speech_and_llm():
         "Collect a callback request.", "sv"
     )
     assert browser_language({"language": "not-a-language"}, {}) is None
+
+
+def test_browser_tools_hide_unavailable_channels_and_never_expose_phone_tools(
+    monkeypatch,
+):
+    import uuid
+
+    from hailhq.core.config import settings
+    from hailhq.voicebot.browser_tools import build_browser_tools
+
+    monkeypatch.setattr(settings, "hail_internal_secret", "test")
+    tools, _api = build_browser_tools(uuid.uuid4(), uuid.uuid4(), {})
+    assert tools == []
+    tools, _api = build_browser_tools(
+        uuid.uuid4(),
+        uuid.uuid4(),
+        {"emailSendReady": True, "smsSendReady": True, "inboundEmailReady": True},
+    )
+    assert {tool.info.name for tool in tools} == {
+        "send_email",
+        "send_sms",
+        "read_browser_inbox",
+    }
+
+
+@pytest.mark.asyncio
+async def test_browser_receipts_report_acceptance_and_never_delivery(monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+
+    from hailhq.core.agent_tools.client import AgentApiClient
+    from hailhq.voicebot.browser_tools import BrowserApiClient
+
+    post = AsyncMock(return_value={"ok": True, "spoken": "Email sent."})
+    monkeypatch.setattr(AgentApiClient, "post", post)
+    publish = AsyncMock()
+    api = BrowserApiClient({"emailRecipient": "owner@example.test"}, publish)
+    await api.post(
+        "/internal/agent/send-email",
+        {"subject": "Test", "body_text": "Hello", "tool_invocation_id": "request-id"},
+    )
+    event = json.loads(publish.await_args.args[0])
+    assert event == {
+        "channel": "email",
+        "recipient": "owner@example.test",
+        "subject": "Test",
+        "body": "Hello",
+        "status": "accepted",
+        "id": "request-id",
+    }
+    assert publish.await_args.kwargs["topic"] == "hail.message"
+    post.return_value = {
+        "ok": True,
+        "spoken": "The email is still being submitted. Do not send it again.",
+    }
+    await api.post("/internal/agent/send-email", {})
+    assert publish.await_count == 1
+    post.return_value = {"ok": False, "spoken": "I could not send it."}
+    await api.post("/internal/agent/send-email", {})
+    assert json.loads(publish.await_args.args[0])["status"] == "failed"

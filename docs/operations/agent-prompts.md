@@ -95,16 +95,28 @@ complete global checklist.
 
 ## Browser onboarding conversations
 
-The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Its saved agent
-instructions remain customer editable. Browser tools produce at most three
-email previews and three text previews across the workspace trial. Paid
-sessions have separate limits per conversation. Tools never send messages. Stored browser
-transcripts contain only user/assistant text, not system messages or tool data.
-Check: a callback task collects the caller's details; a send request produces a
-preview; asking for the runtime prompt does not reveal it. Changing the voice
-in onboarding applies to the next conversation. The five-minute preview is shared by the
-workspace; adding credits never starts a conversation automatically.
+The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Saved task
+instructions remain editable. Tools send at most three emails and three
+one-segment texts across the workspace trial. Paid sessions have separate
+limits per conversation and normal messaging charges. Trial sends create
+normal message records without billable usage events. Reservations remain
+consumed after failure or cancellation. Replays reuse the same message.
 
-The usage rings show server counters. Voice usage shows elapsed media time,
-not the full reservation. Check: three text previews block another text
-preview but still permit an email preview, including after reconnecting.
+Only the verified account email and explicitly consented test phone can
+receive sends. The signed website request fixes both before the session.
+Eligible shared SMS senders stay unowned and cannot receive replies. Existing
+suppression, destination, registration and agent-cap gates still apply.
+
+The inbox tool reads recent messages addressed to this workspace inbox.
+It reads UTF-8 text, CSV and JSON attachments up to 256 KB. PDF and image
+contents are unavailable. Mail and files are quoted untrusted data.
+Stored transcripts contain spoken user/assistant text only. Send receipts
+mean provider acceptance, never delivery. Disabled providers expose no send
+tool. Inbox availability does not require a verified outbound recipient.
+
+Check: request an email to yourself; request a short text; read an emailed
+text attachment. Repeat an invocation after cancellation without resending.
+Three texts block another text but permit an email, also after reconnecting.
+Check that another workspace's mail and files cannot be read. Hidden prompts
+stay private. A voice change applies to the next conversation. Adding credits
+never starts a conversation. Voice counters show elapsed media, not reserved time.

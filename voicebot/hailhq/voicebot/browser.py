@@ -1,4 +1,4 @@
-"""Browser sessions share the voice pipeline, without SIP or sending tools.
+"""Browser sessions share the voice pipeline and bounded real messaging.
 
 LiveKit interfaces checked against installed Agents 1.8.8 and:
 https://docs.livekit.io/agents/logic/sessions/
@@ -8,7 +8,6 @@ https://docs.livekit.io/frontends/reference/tokens-grants/
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -16,15 +15,15 @@ from uuid import UUID
 from hailhq.core.browser_voice import (
     SETUP_SECONDS,
     finish_browser_call,
-    reserve_browser_preview,
 )
 from hailhq.core.db import session_scope
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.voicebot.browser_tools import build_browser_tools
 from hailhq.voicebot.pipeline import build_session, resolve_org_configs
-from livekit.agents import Agent, function_tool
+from livekit.agents import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -46,15 +45,29 @@ def public_transcript(history: dict) -> dict:
 
 
 def browser_instructions(
-    customer_instructions: str, language: str | None = None
+    customer_instructions: str,
+    language: str | None = None,
+    capabilities: dict | None = None,
 ) -> str:
     instruction = (
         f"Speak in {SUPPORTED_LANGUAGES[language].name} for this conversation."
         if language in SUPPORTED_LANGUAGES
         else ""
     )
+    caps = capabilities or {}
+    channels = [
+        f"Workspace inbox: {caps.get('inboxAddress') if caps.get('inboundEmailReady') else 'not ready'}.",
+        f"Email sending: {caps.get('emailRecipient') if caps.get('emailSendReady') else caps.get('emailReason', 'not available')}.",
+        f"Text sending: {caps.get('smsRecipient') if caps.get('smsSendReady') else caps.get('smsReason', 'not available')}.",
+    ]
     return (
-        BROWSER_VOICE_PREAMBLE + "\n\n" + customer_instructions + "\n\n" + instruction
+        BROWSER_VOICE_PREAMBLE
+        + "\n\n"
+        + customer_instructions
+        + "\n\n"
+        + instruction
+        + "\n"
+        + "\n".join(channels)
     )
 
 
@@ -71,6 +84,7 @@ def deadline_seconds(call) -> int:
 async def run_browser_session(ctx, call_id: UUID) -> None:
     """A persisted Call is the authority; dispatch contains only its id."""
     session = None
+    messaging_api = None
     finish_lock = asyncio.Lock()
     finished = False
     deadline = None
@@ -100,6 +114,13 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
                     except Exception:
                         logger.exception(
                             "browser model cleanup failed call_id=%s", call_id
+                        )
+                if messaging_api is not None:
+                    try:
+                        await messaging_api.aclose()
+                    except Exception:
+                        logger.exception(
+                            "browser messaging cleanup failed call_id=%s", call_id
                         )
                 for attempt in range(2):
                     try:
@@ -162,6 +183,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             cfg = call.voice_config or {}
             prompt = call.initial_prompt or "Help the caller with their question."
             org_id = call.organization_id
+            capabilities = call.metadata_.get("browser_capabilities", {})
             seconds = deadline_seconds(call)
 
         async def expire_setup():
@@ -191,33 +213,9 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             language=language,
         )
 
-        async def preview(channel: str, recipient: str, body: str):
-            action = {
-                "channel": channel,
-                "recipient": recipient,
-                "body": body,
-                "preview": True,
-            }
-            async with session_scope() as db:
-                if not await reserve_browser_preview(db, call_id, action):
-                    return "This preview limit is reached or the conversation has ended. Nothing was sent."
-                await db.commit()
-            await ctx.room.local_participant.publish_data(
-                json.dumps(action), reliable=True, topic="hail.preview"
-            )
-            return (
-                "Preview prepared. Nothing was sent. Tell the user this is a preview."
-            )
-
-        @function_tool
-        async def preview_email(recipient: str, body: str) -> str:
-            """Prepare an email preview. This never sends an email."""
-            return await preview("email", recipient[:254], body[:2000])
-
-        @function_tool
-        async def preview_sms(recipient: str, body: str) -> str:
-            """Prepare a text message preview. This never sends a text."""
-            return await preview("sms", recipient[:40], body[:1000])
+        tools, messaging_api = build_browser_tools(
+            call_id, org_id, capabilities, ctx.room.local_participant.publish_data
+        )
 
         @session.on("close")
         def closed(event):
@@ -229,8 +227,8 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
         await asyncio.wait_for(
             session.start(
                 agent=Agent(
-                    instructions=browser_instructions(prompt, language),
-                    tools=[preview_email, preview_sms],
+                    instructions=browser_instructions(prompt, language, capabilities),
+                    tools=tools,
                 ),
                 room=ctx.room,
                 record=False,
