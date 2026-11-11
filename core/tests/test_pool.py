@@ -460,3 +460,22 @@ async def test_sms_only_pool_number_does_not_require_a_voice_spare(async_session
             async_session, capability="sms", preserve_voice_capacity=True
         )
     ).id == number.id
+
+
+@pytest.mark.asyncio
+async def test_browser_sms_checks_other_candidates_when_first_has_no_voice_spare(
+    async_session, monkeypatch
+):
+    from hailhq.core import pool
+
+    voice = await _make_pool_number(async_session, e164="+14155550101")
+    sms = await _make_pool_number(async_session, e164="+14155550102")
+    sms.capabilities = ["sms"]
+    await async_session.commit()
+    # Force the dual-capability number first instead of relying on random order.
+    monkeypatch.setattr(pool.func, "random", lambda: PhoneNumber.e164)
+    claimed = await claim_pool_number(
+        async_session, capability="sms", preserve_voice_capacity=True
+    )
+    assert claimed.id == sms.id
+    assert (await claim_pool_number(async_session, capability="voice")).id == voice.id

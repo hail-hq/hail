@@ -89,32 +89,36 @@ async def claim_pool_number(
         stmt = stmt.where(PhoneNumber.capabilities.any(capability))
     if exclude_ids:
         stmt = stmt.where(PhoneNumber.id.not_in(exclude_ids))
-    number = (await session.execute(stmt)).scalar_one_or_none()
-    if (
-        number is not None
-        and preserve_voice_capacity
-        and "voice" in number.capabilities
-    ):
-        # Keep a claimable voice number on this carrier. Locking the spare
-        # makes concurrent browser claims conservative instead of oversubscribing it.
-        spare = (
-            await session.execute(
-                select(PhoneNumber.id)
-                .where(
-                    PhoneNumber.is_pool.is_(True),
-                    PhoneNumber.provisioning_state == "active",
-                    PhoneNumber.reserved_call_id.is_(None),
-                    PhoneNumber.provider == number.provider,
-                    PhoneNumber.capabilities.any("voice"),
-                    PhoneNumber.id != number.id,
-                )
-                .limit(1)
-                .with_for_update(skip_locked=True)
-            )
-        ).scalar_one_or_none()
-        if spare is None:
+    while True:
+        number = (await session.execute(stmt)).scalar_one_or_none()
+        if number is None:
             return None
-    return number
+        if (
+            number is not None
+            and preserve_voice_capacity
+            and "voice" in number.capabilities
+        ):
+            # Keep a claimable voice number on this carrier. Locking the spare
+            # makes concurrent browser claims conservative instead of oversubscribing it.
+            spare = (
+                await session.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.is_pool.is_(True),
+                        PhoneNumber.provisioning_state == "active",
+                        PhoneNumber.reserved_call_id.is_(None),
+                        PhoneNumber.provider == number.provider,
+                        PhoneNumber.capabilities.any("voice"),
+                        PhoneNumber.id != number.id,
+                    )
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if spare is None:
+                stmt = stmt.where(PhoneNumber.id != number.id)
+                continue
+        return number
 
 
 async def release_pool_reservation(
