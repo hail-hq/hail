@@ -308,3 +308,11 @@ async def test_browser_agent_does_not_confuse_inbox_failure_with_empty_mail():
     )
     assert "could not be checked" in ctx.items[-1].text_content
     assert "Do not claim no messages arrived" in ctx.items[-1].text_content
+
+
+def test_browser_codes_are_spoken_as_characters_without_rewriting_message_values():
+    result = browser_instructions("Help with orders.")
+    assert "character by character" in result
+    assert "one, two, two; one, three, three, four" in result
+    assert "X as in X-ray; Y as in Yankee" in result
+    assert "Never change the original code in written messages" in result
