@@ -137,12 +137,12 @@ def _sha(text: str) -> str:
 
 # Any change here changes what every agent is told: update on purpose only.
 _VOICE = {
-    (None, None): "9fcbd664e553f4d8c7b077febc6d37b91d35aa4b5c8dbdbe0706052ee73d8b9d",
+    (None, None): "b00c9a5ad26e6990929f5d18254b53225775ffecd36299fad5dacbe45b49f121",
     (None, "inbound"): (
         "83f36704c02ecd83bb4482188525da452a81377a4f58baf2011fae1cd0ce9ddf"
     ),
     ("Be kind.", None): (
-        "bf646a75f1ff795ea74df3c7de0d7225d444d2bde0e87ccf22a3c3cdcaa63c09"
+        "c8e8d0b8009d64d7d06de8fc454da582adec852ad64299e24b06fcec8425d02b"
     ),
     ("Be kind.", "inbound"): (
         "334c571b41c9e0cebb3cfa4745d7e8072a31bc3483a33ee51064cbccd0a3e6f4"

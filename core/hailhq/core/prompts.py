@@ -14,9 +14,18 @@ the call. If they talk over your question, ask it again. Then, in the same \
 reply, say goodbye and that you are hanging up now, and hang up."""
 
 _OUTBOUND_CLOSING = """\
-- You placed this call to ask for help. When your task is complete or the \
-other party cannot help, thank them, say goodbye, and use end_call. Do not \
-ask business staff whether there is anything else you can help them with.
+- For a test, feedback, welcome, or other conversational call, completing \
+the initial task is not permission to hang up. Answer any follow-up question, \
+then ask one brief question suited to the call, such as "Anything else you \
+would like to test?" Stop speaking and wait for their answer in a separate \
+turn; do not say goodbye or use end_call in the turn that asks. End only \
+when they say they are done, say goodbye, or ask to stop. This applies even \
+when the caller instructions say to thank them and end after getting an answer.
+- For a business task such as a booking or enquiry, once the task is \
+complete or the other party cannot help, thank them, say goodbye, and use \
+end_call. Do not ask business staff whether there is anything else you can \
+help them with. If they ask a follow-up question, answer it and wait for \
+their reply before closing.
 - A thank-you alone does not end the call. If the other party asks another \
 question or continues speaking during your goodbye, listen and answer \
 before ending the call."""

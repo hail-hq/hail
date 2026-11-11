@@ -44,3 +44,31 @@ Use synthetic conversations; do not commit customer transcripts or recordings.
 
 String tests check prompt composition and required guidance, not model compliance.
 Live behavior needs a separately authorized test call or a synthetic model evaluation.
+
+## Closing calls
+
+Outbound conversational calls (tests, feedback, and welcome calls) finish the
+initial topic with one brief closing question, then wait for the other person
+to reply. For example, after answering a question about the AI introduction,
+ask “Anything else you would like to test?” without saying goodbye or calling
+`end_call` in that turn. Instructions to thank the person and end after
+collecting feedback do not bypass this check. A clear goodbye or request to
+stop can end the call immediately.
+
+Outbound business tasks can still close once the booking or enquiry is done,
+or the other person cannot help. Answer a follow-up question and wait for the
+reply before closing. The `end_call` description and voice framing share
+these rules; this is model guidance, not a new runtime permission check.
+Existing duration limits and interruption handling still apply.
+
+The opt-in synthetic model checks use the configured Bedrock conversation
+model. With AWS credentials, `ANTHROPIC_MODEL`, and
+`ANTHROPIC_BEDROCK_REGION` set in the environment, run from the repo root:
+
+```sh
+HAIL_RUN_VOICE_EVALS=1 uv run --directory core pytest tests/test_call_closing_behavior.py -v
+```
+
+These checks incur model usage, place no phone calls, and never execute tools.
+They check hangup decisions and invitations to continue, not exact wording;
+model responses can vary. Ordinary CI skips them unless explicitly enabled.
