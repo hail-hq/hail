@@ -13,6 +13,9 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any
@@ -49,16 +52,23 @@ def _default_aws_options() -> dict[str, str | None]:
     }
 
 
-async def credentials_ready() -> bool:
-    """Resolve the same AWS credential chain as sends, without calling SES.
+# Credential providers can run a credential_process or wait on role endpoints.
+# One dedicated worker and one shared future bound both running work and queue
+# size, even after callers time out. Never use the application's executor here.
+_credential_executor = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="hail-aws-readiness"
+)
+_credential_lock = threading.Lock()
+_credential_future: Future[bool] | None = None
+_credential_expires_at = 0.0
+_CREDENTIAL_WAIT_SECONDS = 2.0
+_CREDENTIAL_SUCCESS_TTL = 30.0
+_CREDENTIAL_FAILURE_TTL = 2.0
 
-    Session resolution can fetch role credentials. Keep that blocking SDK
-    work off the event loop and bound the caller's wait. Freezing credentials
-    also checks deferred role providers rather than treating a hint as proof.
-    """
 
-    def resolve() -> bool:
-        session = boto3.Session(**_default_aws_options())
+def _resolve_credentials(options: dict[str, str | None]) -> bool:
+    try:
+        session = boto3.Session(**options)
         if not session.region_name:
             return False
         credentials = session.get_credentials()
@@ -66,9 +76,45 @@ async def credentials_ready() -> bool:
             return False
         frozen = credentials.get_frozen_credentials()
         return bool(frozen.access_key and frozen.secret_key)
+    except Exception:
+        return False
 
+
+def _credentials_completed(future: Future[bool]) -> None:
+    global _credential_expires_at
+    ttl = _CREDENTIAL_SUCCESS_TTL if future.result() else _CREDENTIAL_FAILURE_TTL
+    with _credential_lock:
+        if _credential_future is future:
+            _credential_expires_at = time.monotonic() + ttl
+
+
+async def credentials_ready() -> bool:
+    """Share one bounded credential lookup without calling SES.
+
+    A slow SDK call occupies only the dedicated worker. Timeout/cancellation
+    never cancels its future or queues another lookup. Completed outcomes are
+    briefly cached; failures can retry after two seconds.
+    """
+    global _credential_future, _credential_expires_at
+    created = False
+    with _credential_lock:
+        if _credential_future is None or (
+            _credential_future.done() and time.monotonic() >= _credential_expires_at
+        ):
+            _credential_future = _credential_executor.submit(
+                _resolve_credentials, _default_aws_options()
+            )
+            _credential_expires_at = float("inf")
+            created = True
+        future = _credential_future
+    # add_done_callback can run immediately: do this outside the lock.
+    if created:
+        future.add_done_callback(_credentials_completed)
     try:
-        return await asyncio.wait_for(asyncio.to_thread(resolve), timeout=2)
+        return await asyncio.wait_for(
+            asyncio.shield(asyncio.wrap_future(future)),
+            timeout=_CREDENTIAL_WAIT_SECONDS,
+        )
     except Exception:
         return False
 

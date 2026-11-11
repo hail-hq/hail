@@ -37,6 +37,9 @@ async def post(client, path, body):
 
 @pytest.fixture(autouse=True)
 def config(monkeypatch):
+    from hailhq.core.providers.email import ses
+
+    monkeypatch.setattr(ses, "_credential_future", None)
     # Preview deliberately empties profile vars; boto3 treats an empty profile
     # as an explicit (invalid) profile. Tests supply their own fake keys.
     monkeypatch.delenv("AWS_PROFILE", raising=False)
@@ -477,6 +480,7 @@ async def test_browser_email_readiness_uses_resolved_default_aws_credentials(
         ),
     )
     assert await email_provider_ready()
+    monkeypatch.setattr(ses, "_credential_future", None)
     monkeypatch.setattr(
         ses.boto3,
         "Session",

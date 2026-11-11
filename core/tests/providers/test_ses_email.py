@@ -800,3 +800,49 @@ async def test_send_email_raw_path_sends_the_feedback_id_tag() -> None:
     assert fake.kwargs["EmailTags"] == [
         {"Name": "ses:feedback-id-a", "Value": str(org_id)}
     ]
+
+
+async def test_credential_readiness_bounds_hung_resolution_and_reuses_result(
+    monkeypatch,
+):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from hailhq.core.providers.email import ses
+
+    release = threading.Event()
+    calls = 0
+    lock = threading.Lock()
+
+    def session(**kwargs):
+        nonlocal calls
+        with lock:
+            calls += 1
+        release.wait(timeout=5)
+        return SimpleNamespace(region_name="us-east-1", get_credentials=lambda: None)
+
+    monkeypatch.setattr(ses.boto3, "Session", session)
+    monkeypatch.setattr(ses, "_credential_future", None, raising=False)
+    monkeypatch.setattr(ses, "_CREDENTIAL_WAIT_SECONDS", 0.02, raising=False)
+    monkeypatch.setattr(ses, "_CREDENTIAL_FAILURE_TTL", 0.03, raising=False)
+    try:
+        first = await asyncio.gather(*(ses.credentials_ready() for _ in range(40)))
+        assert first == [False] * 40
+        assert calls == 1
+        # The ordinary executor remains usable while the credential SDK hangs.
+        assert (
+            await asyncio.wait_for(asyncio.to_thread(lambda: "available"), 0.2)
+            == "available"
+        )
+        assert not await ses.credentials_ready()
+        assert calls == 1
+        release.set()
+        await asyncio.sleep(0.01)
+        assert not await ses.credentials_ready()
+        assert calls == 1  # completed failure is cached for its short TTL
+        await asyncio.sleep(0.04)
+        assert not await ses.credentials_ready()
+        assert calls == 2  # a completed lookup can be refreshed
+    finally:
+        release.set()
