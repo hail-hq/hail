@@ -937,7 +937,7 @@ async def _routed_email(
     """The inbound row's address and the agent that answers it now, or None.
     Routing can change while the model writes."""
     routed = await routed_agent(db, inbound)
-    if routed is None:
+    if routed is None or inbound.agent_id != routed[1].id:
         return None
     await bind_organization(db, inbound.organization_id)
     tag_context(

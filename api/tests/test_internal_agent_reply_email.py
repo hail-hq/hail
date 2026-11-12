@@ -1207,6 +1207,7 @@ async def test_a_custom_domain_reply_ignores_the_to_header(
     _org, _agent, domain, inbound = await _seed(async_session)
     domain.kind = "custom"
     domain.domain = "acme.com"
+    domain.inbound_enabled = True
     domain.local_prefix_user = None
     domain.local_prefix_org = None
     inbound.to_addresses = ["ceo@acme.com"]
@@ -1299,3 +1300,35 @@ async def test_sends_count_across_channels(async_session) -> None:
     )
     await async_session.commit()
     assert await email_agent.tool_sends_for_reply(async_session, inbound) == 1
+
+
+async def test_a_replaced_agent_cannot_send_the_previous_agents_run(
+    client, async_session, email_mock
+):
+    org, _, domain, inbound = await _seed(async_session)
+    replacement = Agent(
+        organization_id=org, name="Replacement", system_prompt="Different task."
+    )
+    async_session.add(replacement)
+    await async_session.flush()
+    domain.email_agent_id = replacement.id
+    await async_session.commit()
+    assert (await _reply(client, inbound.id))["state"] == "skipped"
+    email_mock.send_email.assert_not_awaited()
+
+
+@pytest.mark.parametrize("change", ["inbound", "verification"])
+async def test_a_disabled_custom_inbox_cannot_send_a_queued_reply(
+    client, async_session, email_mock, change
+):
+    _, _, domain, inbound = await _seed(async_session)
+    domain.kind = "custom"
+    domain.domain = "mail.example.test"
+    domain.local_prefix_user = None
+    domain.local_prefix_org = None
+    domain.inbound_enabled = change != "inbound"
+    if change == "verification":
+        domain.verification_status = "pending"
+    await async_session.commit()
+    assert (await _reply(client, inbound.id))["state"] == "skipped"
+    email_mock.send_email.assert_not_awaited()

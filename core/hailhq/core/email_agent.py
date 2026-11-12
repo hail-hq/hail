@@ -154,6 +154,10 @@ async def routed_agent(
     domain = await db.get(EmailDomain, email.email_domain_id)
     if domain is None or domain.email_agent_id is None:
         return None
+    if domain.kind == "custom" and (
+        domain.verification_status != "verified" or not domain.inbound_enabled
+    ):
+        return None
     agent = await db.get(Agent, domain.email_agent_id)
     if not answers_emails(agent):
         return None
@@ -756,13 +760,13 @@ def build_chat_messages(
         if row.direction == "inbound":
             text = (
                 f"Email from {row.from_address}\n"
-                f"Subject: {row.subject}\n\n{_plain_body(row)}"
+                f"Subject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{_plain_body(row)}"
             )
             messages.append({"role": "user", "content": text})
         elif _agent_wrote(row):
             messages.append({"role": "assistant", "content": _plain_body(row)})
         else:
-            text = f"{TEAM_EMAIL_LABEL}\nSubject: {row.subject}\n\n{_plain_body(row)}"
+            text = f"{TEAM_EMAIL_LABEL}\nSubject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{_plain_body(row)}"
             messages.append({"role": "user", "content": text})
     return messages
 

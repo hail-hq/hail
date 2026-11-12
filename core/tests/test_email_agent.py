@@ -1463,3 +1463,15 @@ async def test_member_lookup_fails_closed_without_the_tables(async_session):
     assert await directory.is_verified_member(async_session, org, MEMBER) is False
     assert (await async_session.execute(select(Agent.id))).first() is not None
     await async_session.rollback()
+
+
+def test_chat_subjects_cannot_exceed_the_subject_budget():
+    agent = Agent(organization_id=uuid.uuid4(), name="Inbox", system_prompt="Help.")
+    row = Email(
+        direction="inbound",
+        from_address=MEMBER,
+        subject="x" * 100_000,
+        body_text="Hello.",
+    )
+    messages = email_agent.build_chat_messages(agent, [row], trust="member")
+    assert "x" * (email_agent.MAX_SUBJECT_CHARS + 1) not in messages[1]["content"]
