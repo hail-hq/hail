@@ -175,9 +175,9 @@ address's explicit Anyone setting and sender authentication.
 
 `thread_history(query=...)` searches stored texts and spoken call turns without
 the recent-history time window. The existing caller, agent, and organization
-filters still apply. An incoming-email run can use it only when the verified
-member record has one unambiguous saved phone number. Email-written numbers
-never establish a link. Outside senders have no cross-channel history tool.
+filters still apply. Incoming email does not gain access to phone history from a saved member
+phone number. That field is editable without ownership verification. A verified
+phone-to-email link is required before this cross-channel capability can ship.
 
 Email runs allow six model rounds within the existing 90-second total budget.
 Tool sends remain capped at three; extra rounds permit search, opening a result,

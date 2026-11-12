@@ -42,8 +42,11 @@ from hailhq.core.text_agent import (
 )
 from sqlalchemy import (
     ColumnElement,
+    Text,
     and_,
     any_,
+    cast,
+    false,
     func,
     literal_column,
     or_,
@@ -52,6 +55,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 logger = logging.getLogger("hailhq.core.email_agent")
 
@@ -587,18 +591,18 @@ def _local_part(message_id: str) -> str:
     return message_id.strip("<> ").partition("@")[0]
 
 
-def _trusted_inbound():
+def _trusted_inbound(model=Email):
     """Inbound rows the chat may quote. ``from_verified`` is the allowlist: a
     forged row with the same ``From`` stays out, and so does any row ingest did
     not prove. The other checks only take rows away."""
     return and_(
-        Email.direction == "inbound",
-        Email.from_verified.is_(True),
-        or_(Email.spam_verdict.is_(None), Email.spam_verdict != "FAIL"),
-        or_(Email.virus_verdict.is_(None), Email.virus_verdict != "FAIL"),
+        model.direction == "inbound",
+        model.from_verified.is_(True),
+        or_(model.spam_verdict.is_(None), model.spam_verdict != "FAIL"),
+        or_(model.virus_verdict.is_(None), model.virus_verdict != "FAIL"),
         or_(
-            Email.metadata_["agent_skip_reason"].astext.is_(None),
-            Email.metadata_["agent_skip_reason"].astext.not_in(_UNTRUSTED_SKIPS),
+            model.metadata_["agent_skip_reason"].astext.is_(None),
+            model.metadata_["agent_skip_reason"].astext.not_in(_UNTRUSTED_SKIPS),
         ),
     )
 
@@ -654,6 +658,48 @@ async def _thread_rows(
         if r.direction != "outbound"
         or (answered[r.id] in trusted if r.id in answered else _team_send(r))
     ]
+
+
+def email_history_filter(sender: str):
+    """The same sender-proof and provenance rules as thread history, in SQL.
+
+    Search applies this before LIMIT so excluded mail cannot hide valid matches.
+    Caller queries still own organization, inbox and peer boundaries.
+    """
+
+    def has_key(key):
+        return func.coalesce(Email.metadata_.has_key(key), false())
+
+    agent_wrote = or_(
+        Email.agent_id.is_not(None), *(has_key(k) for k in _AGENT_SEND_KEYS)
+    )
+    parent = aliased(Email)
+    parent_id = func.coalesce(
+        Email.metadata_["reply_to_email_id"].astext,
+        Email.metadata_["inbound_email_id"].astext,
+    )
+    trusted_parent = (
+        select(parent.id)
+        .where(
+            cast(parent.id, Text) == parent_id,
+            parent.organization_id == Email.organization_id,
+            parent.email_domain_id == Email.email_domain_id,
+            _trusted_inbound(parent),
+            func.lower(parent.from_address) == sender,
+        )
+        .correlate(Email)
+        .exists()
+    )
+    return or_(
+        _trusted_inbound(),
+        and_(
+            Email.direction == "outbound",
+            or_(
+                and_(agent_wrote, trusted_parent),
+                and_(~agent_wrote, *(~has_key(k) for k in _NOT_TEAM_SEND_KEYS)),
+            ),
+        ),
+    )
 
 
 async def email_thread(db: AsyncSession, email: Email) -> list[Email]:

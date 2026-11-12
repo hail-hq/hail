@@ -146,7 +146,7 @@ async def test_email_history_uses_the_member_record_not_a_number_in_the_message(
         inbound_email_id=inbound.id,
     )
     result = await HISTORY.execute(ctx, {"query": "Tracking", "phone": "+12125550124"})
-    assert "Tracking legitimate" in result and "Tracking private" not in result
+    assert "Tracking legitimate" not in result and "Tracking private" not in result
     if blocked == "unverified":
         inbound.from_verified = False
     elif blocked == "outside":
@@ -175,3 +175,82 @@ async def test_email_history_uses_the_member_record_not_a_number_in_the_message(
         ctx.organization_id = uuid.uuid4()
     await async_session.commit()
     assert "legitimate" not in await HISTORY.execute(ctx, {"query": "Tracking"})
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_sender_skip_and_outbound_provenance_rules(
+    async_session, client
+):
+    org, agent, domain, inbound = await _seed(async_session)
+    refused = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        direction="inbound",
+        from_address=inbound.from_address,
+        from_verified=True,
+        to_addresses=inbound.to_addresses,
+        status="received",
+        subject="needle",
+        body_text="needle",
+        metadata_={"agent_skip_reason": "auto_generated"},
+    )
+    async_session.add(refused)
+    await async_session.flush()
+    for metadata in [
+        {"call_id": str(uuid.uuid4())},
+        {"reply_to_email_id": str(refused.id)},
+        {"tool_invocation_id": str(uuid.uuid4())},
+    ]:
+        async_session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                agent_id=agent.id,
+                direction="outbound",
+                from_address=domain.domain,
+                to_addresses=[inbound.from_address],
+                status="sent",
+                subject="needle",
+                body_text="needle",
+                metadata_=metadata,
+            )
+        )
+    await async_session.commit()
+    result = await post(
+        client,
+        "/internal/agent/email-run/inbox",
+        {"inbound_email_id": str(inbound.id), "query": "needle"},
+    )
+    assert result.json()["quoted_untrusted_messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_proven_replies_and_plain_team_mail(async_session, client):
+    org, agent, domain, inbound = await _seed(async_session)
+    ids = []
+    for agent_id, metadata in [
+        (agent.id, {"reply_to_email_id": str(inbound.id)}),
+        (None, {}),
+    ]:
+        row = Email(
+            organization_id=org,
+            email_domain_id=domain.id,
+            agent_id=agent_id,
+            direction="outbound",
+            from_address=domain.domain,
+            to_addresses=[inbound.from_address],
+            status="sent",
+            subject="needle",
+            body_text="needle",
+            metadata_=metadata,
+        )
+        async_session.add(row)
+        await async_session.flush()
+        ids.append(str(row.id))
+    await async_session.commit()
+    result = await post(
+        client,
+        "/internal/agent/email-run/inbox",
+        {"inbound_email_id": str(inbound.id), "query": "needle"},
+    )
+    assert {m["id"] for m in result.json()["quoted_untrusted_messages"]} == set(ids)

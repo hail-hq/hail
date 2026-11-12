@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from hailhq.core.email_agent import MAX_HEADER_CHARS
+from hailhq.core.email_agent import MAX_HEADER_CHARS, email_history_filter
 from hailhq.core.models import Email
 from sqlalchemy import and_, func, or_, select
 
@@ -27,7 +27,10 @@ class EmailScope:
         if self.email_ids is not None:
             return query.where(Email.id.in_(self.email_ids))
         if self.email_domain_id is not None:
-            query = query.where(Email.email_domain_id == self.email_domain_id)
+            query = query.where(
+                Email.email_domain_id == self.email_domain_id,
+                email_history_filter(self.peer.lower()),
+            )
         incoming = [
             Email.direction == "inbound",
             Email.from_verified.is_(True),

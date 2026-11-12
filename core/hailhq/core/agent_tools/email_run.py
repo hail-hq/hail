@@ -2,7 +2,8 @@
 
 Every tool the agent allows that works outside a call. Each send names a member
 from the directory, and the email-run routes in the API resolve the address.
-The thread is already in the chat, so ``thread_history`` is not here.
+Email history is retrieved with ``read_email``. A saved phone number does not
+prove phone ownership, so email runs do not get ``thread_history``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from hailhq.core.agent_tools import (
     read_email,
     send_email,
     send_sms,
-    thread_history,
 )
 from hailhq.core.agent_tools.spec import ToolSpec
 from hailhq.core.models import Agent
@@ -36,17 +36,13 @@ async def email_run_tools(
     specs: list[ToolSpec] = []
     for spec in (
         read_email.SPEC,
-        thread_history.SPEC,
         list_contacts.EMAIL_RUN_SPEC,
         send_email.EMAIL_RUN_SPEC,
         send_sms.EMAIL_RUN_SPEC,
     ):
         if agent.tools is not None and spec.name not in agent.tools:
             continue
-        if (
-            spec in (list_contacts.EMAIL_RUN_SPEC, thread_history.SPEC)
-            and trust != "member"
-        ):
+        if spec is list_contacts.EMAIL_RUN_SPEC and trust != "member":
             continue
         try:
             if await spec.is_available(agent.organization_id, session):

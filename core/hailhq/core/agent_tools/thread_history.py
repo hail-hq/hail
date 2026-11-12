@@ -14,9 +14,6 @@ from typing import Any, get_args
 from hailhq.core import threads
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.db import session_scope
-from hailhq.core.email_agent import routed_agent, run_refusal
-from hailhq.core.models import Email, OrganizationMember, User
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _NOT_FOUND = "I can't find that message."
@@ -32,54 +29,6 @@ async def _always(_org: uuid.UUID, _session: AsyncSession) -> bool:
 async def _scope(db: AsyncSession, ctx: ToolContext) -> threads.ThreadScope | None:
     """The thread this run may read, or None. Always inside the run's org."""
     scope = ctx.thread
-    if scope is None and ctx.inbound_email_id is not None:
-        email = await db.get(Email, ctx.inbound_email_id)
-        if (
-            email is None
-            or email.organization_id != ctx.organization_id
-            or email.agent_reply_state != "processing"
-            or not email.from_verified
-        ):
-            return None
-        routed = await routed_agent(db, email)
-        if routed is None or email.agent_id != routed[1].id:
-            return None
-        if await run_refusal(db, routed[0], email, check_cap=False) is not None:
-            return None
-        # Email-to-phone linkage comes only from the verified member record.
-        # A number written in an email never establishes this relationship.
-        user = (
-            await db.execute(
-                select(User)
-                .join(OrganizationMember, OrganizationMember.user_id == User.id)
-                .where(
-                    OrganizationMember.organization_id == ctx.organization_id,
-                    func.lower(User.email) == email.from_address.strip().lower(),
-                    User.email_verified.is_(True),
-                )
-            )
-        ).scalar_one_or_none()
-        if user is None or not threads.is_e164(user.phone_number):
-            return None
-        peers = (
-            (
-                await db.execute(
-                    select(User.id)
-                    .join(OrganizationMember, OrganizationMember.user_id == User.id)
-                    .where(
-                        OrganizationMember.organization_id == ctx.organization_id,
-                        User.phone_number == user.phone_number,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if len(set(peers)) != 1:
-            return None
-        scope = threads.ThreadScope(
-            ctx.organization_id, email.agent_id, user.phone_number
-        )
     if scope is None and ctx.call_id is not None:
         call = await threads.call_thread_context(db, ctx.call_id)
         if call is not None:
