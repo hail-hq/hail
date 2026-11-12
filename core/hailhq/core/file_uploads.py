@@ -32,10 +32,10 @@ from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import func
-from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from hailhq.core.models import FileUpload
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
