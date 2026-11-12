@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core.config import settings
-from hailhq.voicebot import browser_tools
+from hailhq.voicebot import agent, browser_tools
 from hailhq.voicebot.browser import browser_instructions, deadline_seconds
 
 
@@ -130,7 +130,9 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
             asyncio.create_task(ctx.callback())
 
         ctx.room.disconnect.side_effect = disconnected
-    await browser.run_browser_session(ctx, call.id)
+    await browser.run_browser_session(
+        ctx, call.id, attach_handlers=agent.attach_event_handlers
+    )
     await asyncio.wait_for(closed.wait(), timeout=3)
     await asyncio.sleep(0.1)
     await async_session.refresh(call)
