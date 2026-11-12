@@ -5,10 +5,12 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from fastapi import HTTPException
+from hailhq.api.deps import Principal
 from hailhq.api.number_orders import (
     CONSUMED_QUOTE_RETENTION,
     QUOTE_RETENTION,
     acquire_offer,
+    purchase_number,
     purge_expired_quotes,
     reconcile_order,
 )
@@ -23,6 +25,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.number_offers import CarrierOffer
 from hailhq.core.providers.voice import CarrierRequestError
+from hailhq.core.schemas import NumberAcquireRequest, PhoneNumberResponse
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -185,6 +188,109 @@ async def test_failed_order_refunds_once(async_session, org_and_key, monkeypatch
     await buy(async_session, org, row)
     assert await get_balance_cents(async_session, org) == 100000
     assert wire.await_count == 2
+
+
+async def test_account_rejection_is_diagnosable_refunded_and_safe_for_customer(
+    async_session, org_and_key, monkeypatch, caplog
+):
+    org, key, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    attempts = []
+    request_id = "83cfaf11-a778-432a-872b-c6cf42ba2372"
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(
+            400,
+            headers={"x-request-id": request_id},
+            json={
+                "errors": [
+                    {
+                        "code": "20003",
+                        "title": "API Key forbidden",
+                        "detail": "private applicant information",
+                    }
+                ]
+            },
+        )
+
+    principal = Principal(
+        auth_kind="apikey",
+        api_key_id=key.id,
+        user_id=None,
+        organization_id=org,
+        scopes=[],
+    )
+    body = NumberAcquireRequest(quote_id=row.id, country_code="PT", number_type="local")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        monkeypatch.setattr(
+            "hailhq.core.providers.telnyx.get_http_client", lambda: client
+        )
+        for _ in range(2):
+            with pytest.raises(HTTPException) as caught:
+                await purchase_number(async_session, principal, body)
+            assert caught.value.status_code == 409
+            assert "hi@hail.so" in caught.value.detail
+            assert "credits" in caught.value.detail.lower()
+            assert "restricted" not in caught.value.detail.lower()
+            assert "private applicant information" not in caught.value.detail
+        await async_session.refresh(row)
+        number = await async_session.get(PhoneNumber, row.number_id)
+        await async_session.refresh(number)
+    assert number.provisioning_state == "failed"
+    assert number.provisioning_metadata["failure_code"] == "carrier_account_restricted"
+    assert number.provisioning_metadata["carrier_error"] == {
+        "status": 400,
+        "codes": ["20003"],
+        "request_id": request_id,
+    }
+    assert len(attempts) == 1
+    assert await get_balance_cents(async_session, org) == 100000
+    assert "20003" in caplog.text and request_id in caplog.text
+    assert "private applicant information" not in caplog.text
+    assert (
+        "carrier_error" not in PhoneNumberResponse.model_validate(number).model_dump()
+    )
+
+
+@pytest.mark.parametrize("status", [408, 409, 500])
+async def test_ambiguous_rejection_keeps_hold_and_safe_diagnostics(
+    async_session, org_and_key, monkeypatch, status
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    request_id = "83cfaf11-a778-432a-872b-c6cf42ba2372"
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                status,
+                headers={"x-request-id": request_id},
+                json={"errors": [{"code": "50001"}]},
+            )
+        )
+    ) as client:
+        monkeypatch.setattr(
+            "hailhq.core.providers.telnyx.get_http_client", lambda: client
+        )
+        number = await buy(async_session, org, row)
+    assert number.provisioning_state == "pending"
+    assert await get_balance_cents(async_session, org) == 99850
+    assert number.provisioning_metadata["carrier_error"] == {
+        "status": status,
+        "codes": ["50001"],
+        "request_id": request_id,
+    }
+    assert "failure_code" not in number.provisioning_metadata
 
 
 async def test_quote_is_org_bound_and_expiring(async_session, org_and_key, monkeypatch):
