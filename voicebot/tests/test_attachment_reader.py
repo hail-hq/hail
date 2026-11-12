@@ -528,7 +528,7 @@ def test_pdf_preserves_prior_pages_when_budget_cannot_fit_next_character(
     full = decode_file({**data, "page": 2})
     assert ord(full["text"][0]) > 127
     monkeypatch.setattr(
-        attachment_decoder, "TEXT_BYTES", len("Receipt page 1".encode()) + 1 + remaining
+        attachment_decoder, "TEXT_BYTES", len(b"Receipt page 1") + 1 + remaining
     )
     first = decode_file(data)
     assert first["text"] == "Receipt page 1"
