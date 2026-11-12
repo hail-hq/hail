@@ -52,4 +52,7 @@ COPY --from=builder --chown=hail:hail /app/.cache /app/.cache
 
 USER hail
 
+# Check the final runtime too, after copying dependencies out of the builder.
+RUN --network=none python -c "import hailhq.voicebot.main"
+
 CMD ["python", "-m", "hailhq.voicebot.main", "start"]

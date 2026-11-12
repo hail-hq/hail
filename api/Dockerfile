@@ -54,5 +54,8 @@ WORKDIR /app/api
 
 USER hail
 
+# Import the application with production dependencies before publishing the image.
+RUN --network=none python -c "from hailhq.api.main import app"
+
 EXPOSE 8080
 CMD ["uvicorn", "hailhq.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

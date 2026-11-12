@@ -38,8 +38,14 @@ permissions:
   packages: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build & push ${{ matrix.service }}
+    needs: checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -78,7 +84,7 @@ jobs:
 
   deploy:
     name: Deploy to VM
-    needs: build
+    needs: [build, checks]
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -151,7 +157,7 @@ jobs:
             # Assigned first: set -e does not see a failure inside an argument,
             # and an empty list would make `up -d` scale the voicebot back to 1.
             services="$($COMPOSE config --services | grep -vx voicebot)"
-            $COMPOSE up -d --remove-orphans $services
+            $COMPOSE up -d --wait --wait-timeout 120 --remove-orphans $services
             new_voicebot="$(scripts/deploy/roll-voicebot.sh $COMPOSE)"
 
             # Stale-image gate. `pull` + `up -d` can silently keep an old
