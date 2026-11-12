@@ -10,12 +10,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core import telemetry
 from hailhq.core.agent_tools import read_email
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
-from hailhq.voicebot import emailbot
+from hailhq.voicebot import attachment_decoder, emailbot
 from hailhq.voicebot.attachment_decoder import decode_file
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.tools import _make_handler
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from PIL import Image
 
 
@@ -127,19 +131,19 @@ def pdf_bytes(pages=1):
     )
 
 
-def test_pdf_reading_includes_rendered_scans_and_a_bounded_page_range():
+def test_small_pdf_reads_all_pages_without_a_fixed_page_count():
     result = decode_file(
         {
             "base64": base64.b64encode(pdf_bytes(5)).decode(),
             "content_type": "application/pdf",
-            "page": 2,
+            "page": 1,
         }
     )
-    assert "Receipt page 2" in result["text"]
+    assert "Receipt page 5" in result["text"]
     assert (
-        len(result["images"]) == 3
-        and result["pages"] == "2-4 of 5"
-        and result["partial"]
+        len(result["images"]) == 5
+        and result["pages"] == "1-5 of 5"
+        and not result["partial"]
     )
 
 
@@ -268,3 +272,171 @@ async def test_email_read_tool_cannot_replace_its_authenticated_source():
     assert path == "/internal/agent/email-run/inbox"
     assert body["inbound_email_id"] == str(inbound)
     assert "organization_id" not in body and "call_id" not in body
+
+
+def test_pdf_byte_budget_returns_a_cursor_to_the_first_unread_page(monkeypatch):
+    monkeypatch.setattr(attachment_decoder, "MAX_DECODED_BYTES", 15000, raising=False)
+    data = {
+        "base64": base64.b64encode(pdf_bytes(8)).decode(),
+        "content_type": "application/pdf",
+    }
+    result = decode_file(data)
+    assert len(json.dumps(result).encode()) <= 15000
+    assert result["partial"] is True
+    assert 1 < result["continuation"]["page"] < 8
+    later = decode_file({**data, **result["continuation"]})
+    assert f'Receipt page {result["continuation"]["page"]}' in later["text"]
+
+
+def test_decoder_rejects_files_larger_than_ten_mib():
+    with pytest.raises(ValueError, match="reading limit"):
+        decode_file(
+            {
+                "base64": base64.b64encode(b"x" * (10 * 1024 * 1024 + 1)).decode(),
+                "content_type": "image/png",
+            }
+        )
+
+
+def test_word_text_has_byte_bounded_continuation_without_lost_characters():
+    text = "é" * 25000 + "THE END"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "word/document.xml", f"<document><p><t>{text}</t></p></document>"
+        )
+    data = {
+        "base64": base64.b64encode(buffer.getvalue()).decode(),
+        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    collected = ""
+    for _ in range(5):
+        result = decode_file(data)
+        assert len(result["text"].encode()) <= 24000
+        collected += result["text"]
+        if not result.get("continuation"):
+            break
+        assert result["partial"] is True
+        data.update(result["continuation"])
+    assert collected == text
+
+
+@pytest.mark.asyncio
+async def test_reader_preserves_continuation_when_model_analysis_fails(monkeypatch):
+    monkeypatch.setattr(attachment_decoder, "MAX_DECODED_BYTES", 15000)
+    data = {
+        "base64": base64.b64encode(pdf_bytes(8)).decode(),
+        "content_type": "application/pdf",
+    }
+
+    async def local_decode(data):
+        return decode_file(data)
+
+    monkeypatch.setattr("hailhq.voicebot.attachment_reader.decoded_pages", local_decode)
+    result = json.loads(
+        await inspect_tool_file(json.dumps({"attachment_data": data}), None)
+    )
+    assert result["partial"] is True
+    assert result["continuation"] == {"page": 2, "text_offset": 0}
+    assert result["visual_read"] is False
+
+
+def test_pdf_long_page_text_can_continue_on_the_same_page(monkeypatch):
+    monkeypatch.setattr(attachment_decoder, "TEXT_BYTES", 10)
+    # The default function budget is fixed; PDFs pass the current remaining budget.
+    data = {
+        "base64": base64.b64encode(pdf_bytes()).decode(),
+        "content_type": "application/pdf",
+    }
+    first = decode_file(data)
+    assert first["partial"] is True
+    assert first["continuation"] == {"page": 1, "text_offset": 10}
+    second = decode_file({**data, **first["continuation"]})
+    assert first["text"] + second["text"] == "Receipt page 1"
+    assert "continuation" not in second
+
+
+def test_compressed_office_expansion_is_rejected():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", b"x" * (5 * 1024 * 1024 + 1))
+    assert len(buffer.getvalue()) < 10000
+    with pytest.raises(ValueError, match="Expanded document"):
+        decode_file(
+            {
+                "base64": base64.b64encode(buffer.getvalue()).decode(),
+                "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_long_model_answer_reports_partial_and_can_be_requested_again():
+    class Stream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        def __aiter__(self):
+            async def items():
+                yield SimpleNamespace(delta=SimpleNamespace(content="é" * 15000))
+
+            return items()
+
+    result = json.loads(
+        await inspect_tool_file(
+            json.dumps(
+                {
+                    "attachment_data": {
+                        "base64": base64.b64encode(png()).decode(),
+                        "content_type": "image/png",
+                    }
+                }
+            ),
+            SimpleNamespace(chat=lambda **kwargs: Stream()),
+        )
+    )
+    assert len(result["quoted_untrusted_content"].encode()) <= 24000
+    assert result["partial"] is True
+    assert result["analysis_incomplete"] is True
+    assert result["retry"] == {"page": 1, "text_offset": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timed_out", [False, True])
+async def test_attachment_inspection_traces_outcomes_without_file_content(
+    monkeypatch, timed_out
+):
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(telemetry, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(telemetry.trace, "get_tracer", provider.get_tracer)
+    if timed_out:
+
+        async def timeout(data):
+            raise TimeoutError()
+
+        monkeypatch.setattr("hailhq.voicebot.attachment_reader.decoded_pages", timeout)
+    await inspect_tool_file(
+        json.dumps(
+            {
+                "attachment_data": {
+                    "base64": base64.b64encode(png()).decode(),
+                    "content_type": "image/png",
+                    "question": "PRIVATE QUESTION",
+                }
+            }
+        ),
+        None,
+    )
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes["outcome"] == ("timeout" if timed_out else "unsupported")
+    assert spans[0].attributes["duration_seconds"] >= 0
+    assert spans[0].attributes["attachment_mime_type"] == "image/png"
+    assert "PRIVATE QUESTION" not in str(spans[0].attributes)
+    assert "base64" not in str(spans[0].attributes)
+    provider.shutdown()

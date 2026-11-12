@@ -112,9 +112,9 @@ It lists both directions, with a cursor for older mail. It never accepts a mailb
 organization, storage key, or recipient identity from the model.
 
 Agents inspect JPEG, PNG, WebP, GIF, PDF, UTF-8 text, CSV, JSON, Word (DOCX),
-and Excel (XLSX) attachments up to 10 MiB. PDFs return at most three pages per
-read; the tool accepts a page number for later pages. Each call allows eight
-file reads. Corrupt, encrypted, or unsupported files return an honest failure.
+and Excel (XLSX) attachments up to 10 MiB each. There is no fixed PDF page
+count. Decoded payloads use byte budgets and return explicit `page` and
+`text_offset` continuation cursors. Each run allows eight file reads. Corrupt, encrypted, or unsupported files return an honest failure.
 Native parsers run in a short-lived process without application credentials.
 The existing session model describes rendered images; no new model key is needed.
 New workers opt in with `attachment_format=inspection_v1`. During a rolling
@@ -159,9 +159,12 @@ carrier credentials and webhook verification key.
 ## Attachments in incoming-email runs
 
 The email worker uses `read_email` with the claimed inbound email ID. It never
-uses a call ID. The existing authenticated `email_thread` query owns access,
-including sender proof, organization, current agent route, and allowed history.
-A bounded file index gives the model file IDs without another discovery round.
+uses a call ID. The server fixes the authenticated sender, organization, inbox, and active
+agent route. Only the current email and its file index enter the initial context.
+`read_email(query=...)` searches older emails and separate threads with the
+same verified person. Results include short snippets, message IDs, and a cursor.
+`email_id` and `offset` retrieve full messages in chunks without losing the tail.
+`attachment_id` and `email_id` select a file from that message thread.
 Filenames are quoted untrusted data. File bytes never enter tool history.
 
 An original-file send back to `sender` is the final reply. Its recorded reply
@@ -169,6 +172,17 @@ prevents a second body-only email. A safe provider retry rebuilds the same
 attachment intent; it cannot drop the files and send only text. Reads stop when
 the claim ends or its eight-read budget is used. Outsider replies require the
 address's explicit Anyone setting and sender authentication.
+
+`thread_history(query=...)` searches stored texts and spoken call turns without
+the recent-history time window. The existing caller, agent, and organization
+filters still apply. An incoming-email run can use it only when the verified
+member record has one unambiguous saved phone number. Email-written numbers
+never establish a link. Outside senders have no cross-channel history tool.
+
+Email runs allow six model rounds within the existing 90-second total budget.
+Tool sends remain capped at three; extra rounds permit search, opening a result,
+reading a file, and then replying. Retries after a previous send still have no
+tools, so a reworded retry cannot send another message.
 
 Phone file sends use the same verified workspace-member scope as phone reads.
 The API and email workers must ship before the companion frontend updates.

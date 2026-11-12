@@ -10,7 +10,11 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from hailhq.api.agent_email_context import InboxSelection, email_scope, read_file
+from hailhq.api.agent_email_context import (
+    InboxSelection,
+    email_scope,
+    read_file,
+)
 from hailhq.api.browser_history import browser_history
 from hailhq.api.browser_messaging import (
     capabilities,
@@ -34,14 +38,16 @@ from hailhq.core.browser_voice import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
+from hailhq.core.email_agent import email_thread
 from hailhq.core.email_mime import readable_email_body
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import AccountCredit, Agent, Call, Email, EmailAttachment, Sms
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.telemetry import operation
 from hailhq.core.threads import is_e164
 from livekit import api
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, text, tuple_
+from sqlalchemy import or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -383,6 +389,17 @@ async def conversation_inbox(body: InboxRequest, db, call):
     if body.email_id:
         query = query.where(Email.id == body.email_id)
     if body.attachment_id:
+        # A file read selects a thread explicitly, or stays in the current run's
+        # thread. Search can discover other threads without granting arbitrary files.
+        if isinstance(call, Email):
+            anchor = call
+            if body.email_id:
+                anchor = (await db.execute(query)).scalar_one_or_none()
+                if anchor is None:
+                    return {"spoken": "That email is not in this conversation."}
+            query = query.where(
+                Email.id.in_([row.id for row in await email_thread(db, anchor)])
+            )
         attachment = (
             await db.execute(
                 select(EmailAttachment)
@@ -400,17 +417,47 @@ async def conversation_inbox(body: InboxRequest, db, call):
             call,
             attachment,
             page=body.page,
+            text_offset=body.text_offset,
             allow_binary=body.attachment_format == "inspection_v1",
         )
-    messages = (
-        (
-            await db.execute(
-                query.order_by(Email.created_at.desc(), Email.id.desc()).limit(5)
+    if body.query:
+        term = body.query.strip()
+        attachment_match = (
+            select(EmailAttachment.id)
+            .where(
+                EmailAttachment.email_id == Email.id,
+                EmailAttachment.filename.icontains(term, autoescape=True),
+            )
+            .exists()
+        )
+        query = query.where(
+            or_(
+                Email.subject.icontains(term, autoescape=True),
+                Email.body_text.icontains(term, autoescape=True),
+                Email.body_html.icontains(term, autoescape=True),
+                attachment_match,
             )
         )
-        .scalars()
-        .all()
-    )
+    with operation(
+        "agent.email.search",
+        query_present=bool(body.query),
+        explicit_email=bool(body.email_id),
+    ) as span:
+        messages = (
+            (
+                await db.execute(
+                    query.order_by(Email.created_at.desc(), Email.id.desc()).limit(
+                        body.limit + 1
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if span is not None:
+            span.set_attribute("result_count", min(len(messages), body.limit))
+    has_more = len(messages) > body.limit
+    messages = messages[: body.limit]
     result = []
     for email in messages:
         attachments = (
@@ -420,6 +467,14 @@ async def conversation_inbox(body: InboxRequest, db, call):
                 .limit(20)
             )
         ).scalars()
+        content = readable_email_body(email.body_text, email.body_html)
+        offset = body.offset if body.email_id else 0
+        if body.query and not body.email_id:
+            match_at = content.lower().find(body.query.strip().lower())
+            offset = max(0, match_at - 100)
+        chunk_size = 6000 if body.email_id else 500
+        excerpt = content[offset : offset + chunk_size]
+        next_offset = offset + len(excerpt)
         result.append(
             {
                 "id": str(email.id),
@@ -428,9 +483,10 @@ async def conversation_inbox(body: InboxRequest, db, call):
                 "message_id": email.message_id,
                 "in_reply_to": email.in_reply_to,
                 "subject": email.subject[:200],
-                "body_text": readable_email_body(email.body_text, email.body_html)[
-                    :6000
-                ],
+                "body_text": excerpt,
+                "offset": offset,
+                "truncated": next_offset < len(content),
+                "next_offset": next_offset if next_offset < len(content) else None,
                 "attachments": [
                     {
                         "id": str(a.id),
@@ -444,6 +500,7 @@ async def conversation_inbox(body: InboxRequest, db, call):
         )
     return {
         "quoted_untrusted_messages": result,
+        "next_before_email_id": str(messages[-1].id) if has_more and messages else None,
         "spoken": (
             "No email has arrived in this inbox yet."
             if not result

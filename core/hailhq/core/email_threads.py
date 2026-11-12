@@ -14,6 +14,7 @@ class EmailScope:
     peer: str
     inbox: str
     email_ids: tuple[UUID, ...] | None = None
+    email_domain_id: UUID | None = None
 
     def query(self):
         query = select(Email).where(
@@ -25,19 +26,27 @@ class EmailScope:
         )
         if self.email_ids is not None:
             return query.where(Email.id.in_(self.email_ids))
+        if self.email_domain_id is not None:
+            query = query.where(Email.email_domain_id == self.email_domain_id)
+        incoming = [
+            Email.direction == "inbound",
+            Email.from_verified.is_(True),
+            func.lower(Email.from_address) == self.peer.lower(),
+            or_(Email.spam_verdict.is_(None), Email.spam_verdict != "FAIL"),
+        ]
+        outgoing = [
+            Email.direction == "outbound",
+            Email.to_addresses.any(self.peer),
+            Email.metadata_["forwarded_from"].astext.is_(None),
+            Email.metadata_["system_kind"].astext.is_(None),
+        ]
+        if self.email_domain_id is None:
+            incoming.append(Email.to_addresses.any(self.inbox))
+            outgoing.append(func.lower(Email.from_address) == self.inbox.lower())
         return query.where(
             or_(
-                and_(
-                    Email.direction == "inbound",
-                    Email.from_verified.is_(True),
-                    func.lower(Email.from_address) == self.peer.lower(),
-                    Email.to_addresses.any(self.inbox),
-                ),
-                and_(
-                    Email.direction == "outbound",
-                    func.lower(Email.from_address) == self.inbox.lower(),
-                    Email.to_addresses.any(self.peer),
-                ),
+                and_(*incoming),
+                and_(*outgoing),
             )
         )
 

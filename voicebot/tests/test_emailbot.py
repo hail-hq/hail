@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -545,7 +546,9 @@ async def test_the_same_message_keeps_its_id_across_a_retried_run() -> None:
         assert ids[0] == ids[1] != ids[2]
 
 
-async def test_a_proven_member_reads_the_history(async_session, monkeypatch) -> None:
+async def test_history_is_available_on_demand_without_automatic_context_dump(
+    async_session, monkeypatch
+) -> None:
     await _seed(async_session, earlier=True)
     llm = ScriptedLLM([("text", "Hi")])
     _use(monkeypatch, llm)
@@ -553,7 +556,9 @@ async def test_a_proven_member_reads_the_history(async_session, monkeypatch) -> 
         SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
     )
     text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
-    assert "Earlier private note" in text
+    assert "Earlier private note" not in text
+    assert "Can you help?" in text
+    assert "current_email_id" in text
 
 
 async def test_the_cap_is_read_before_the_model_is_paid(
@@ -721,3 +726,45 @@ async def test_file_index_contains_only_thread_files_with_bounded_names(
     assert str(att.id) in text and str(email_id) in text
     assert "x" * 201 not in text
     assert att.s3_key not in text and "base64" not in text
+
+
+async def test_search_open_inspect_and_send_fit_in_one_email_run(
+    async_session, monkeypatch
+):
+    await _seed(async_session)
+    message_id, attachment_id = str(uuid.uuid4()), str(uuid.uuid4())
+    llm = ScriptedLLM(
+        [
+            ("tool", "read_email", json.dumps({"query": "receipt"})),
+            ("tool", "read_email", json.dumps({"email_id": message_id})),
+            (
+                "tool",
+                "read_email",
+                json.dumps({"email_id": message_id, "attachment_id": attachment_id}),
+            ),
+            (
+                "tool",
+                "send_email",
+                json.dumps(
+                    {
+                        "recipient_name": "sender",
+                        "subject": "Receipt",
+                        "body_text": "Original attached.",
+                        "reply_to_email_id": message_id,
+                        "attachment_ids": [attachment_id],
+                    }
+                ),
+            ),
+            ("text", "Original attached."),
+        ]
+    )
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(
+        post=AsyncMock(return_value={"ok": True, "state": "done", "spoken": "Done."})
+    )
+    assert await emailbot.reply_once(api)
+    paths = [call.args[0] for call in api.post.await_args_list]
+    assert paths == ["/internal/agent/email-run/inbox"] * 3 + [
+        "/internal/agent/email-run/send-email",
+        "/internal/agent/reply-email",
+    ]

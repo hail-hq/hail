@@ -26,8 +26,9 @@ except ImportError:
 MAX_BYTES = AGENT_ATTACHMENT_READ_BYTES
 MAX_PIXELS = 40_000_000
 MAX_EDGE = 1600
-PAGES = 3
-TEXT_CHARS = 24000
+MAX_DECODED_BYTES = 4 * 1024 * 1024
+TEXT_BYTES = 24000
+MAX_EXPANDED_TEXT_BYTES = 32 * 1024 * 1024
 
 
 def _image(image):
@@ -45,6 +46,26 @@ def _image(image):
     )
 
 
+def _text_chunk(text, offset=0, budget=TEXT_BYTES):
+    encoded = text.encode("utf-8")
+    if offset < 0 or offset > len(encoded):
+        raise ValueError("That text offset is not in the file")
+    # Decode strictly at the start, so a caller cannot skip half a character.
+    remaining = encoded[offset:].decode("utf-8")
+    chunk = remaining.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+    next_offset = offset + len(chunk.encode("utf-8"))
+    return chunk, next_offset if next_offset < len(encoded) else None
+
+
+def _fits(images, text):
+    # Reserve space for range/cursor metadata and JSON framing as well as bytes
+    # sent to the model. Counting JSON also accounts for escaped text characters.
+    return (
+        len(json.dumps({"images": images, "text": text}).encode()) + 1024
+        <= MAX_DECODED_BYTES
+    )
+
+
 def decode_file(data):
     raw = base64.b64decode(data["base64"], validate=True)
     if len(raw) > MAX_BYTES:
@@ -57,31 +78,57 @@ def decode_file(data):
                 raise ValueError("That page is not in the PDF")
             images = []
             texts = []
-            end = min(len(pdf), start + PAGES)
-            for index in range(start, end):
+            continuation = None
+            end = start
+            offset = int(data.get("text_offset", 0))
+            for index in range(start, len(pdf)):
                 page = pdf[index]
                 try:
                     width, height = page.get_size()
                     if width <= 0 or height <= 0:
                         raise ValueError("Invalid page dimensions")
-                    text = page.get_textpage()
+                    textpage = page.get_textpage()
                     try:
-                        texts.append(text.get_text_range()[:TEXT_CHARS])
+                        remaining = (
+                            TEXT_BYTES
+                            - len("\n".join(texts).encode("utf-8"))
+                            - bool(texts)
+                        )
+                        text, next_offset = _text_chunk(
+                            textpage.get_text_range(), offset, max(0, remaining)
+                        )
                     finally:
-                        text.close()
+                        textpage.close()
                     bitmap = page.render(scale=min(2, MAX_EDGE / max(width, height)))
                     try:
-                        images.append(_image(bitmap.to_pil()))
+                        image = _image(bitmap.to_pil())
                     finally:
                         bitmap.close()
+                    if not _fits([*images, image], "\n".join([*texts, text])):
+                        if not images:
+                            raise ValueError("Decoded page exceeds the reading limit")
+                        continuation = {"page": index + 1, "text_offset": offset}
+                        break
+                    images.append(image)
+                    texts.append(text)
+                    end = index + 1
+                    if next_offset is not None:
+                        continuation = {"page": index + 1, "text_offset": next_offset}
+                        break
+                    offset = 0
                 finally:
                     page.close()
-            return {
+            result = {
                 "images": images,
-                "text": "\n".join(texts)[:TEXT_CHARS],
+                "text": "\n".join(texts),
                 "pages": f"{start+1}-{end} of {len(pdf)}",
-                "partial": start > 0 or end < len(pdf),
+                "partial": start > 0
+                or int(data.get("text_offset", 0)) > 0
+                or continuation is not None,
             }
+            if continuation:
+                result["continuation"] = continuation
+            return result
     if kind in (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -148,19 +195,35 @@ def decode_file(data):
                                 raise ValueError("Invalid shared string reference")
                             value = strings[index]
                         pieces.append(f"{cell.get('r', 'cell')}: {value}")
-        text = "\n".join(pieces)
-        return {
+        if (
+            sum(len(piece.encode("utf-8")) + 1 for piece in pieces)
+            > MAX_EXPANDED_TEXT_BYTES
+        ):
+            raise ValueError("Expanded document text exceeds the reading limit")
+        offset = int(data.get("text_offset", 0))
+        text, next_offset = _text_chunk("\n".join(pieces), offset)
+        result = {
             "images": [],
-            "text": text[:TEXT_CHARS],
-            "partial": len(text) > TEXT_CHARS,
+            "text": text,
+            "partial": offset > 0 or next_offset is not None,
         }
+        if next_offset is not None:
+            result["continuation"] = {"text_offset": next_offset}
+        return result
     if kind in ("image/jpeg", "image/png", "image/webp", "image/gif"):
         with Image.open(io.BytesIO(raw)) as image:
-            return {
-                "images": [_image(image)],
-                "text": "",
-                "partial": getattr(image, "n_frames", 1) > 1,
-            }
+            frame = int(data.get("page", 1))
+            frames = getattr(image, "n_frames", 1)
+            if frame < 1 or frame > frames:
+                raise ValueError("That frame is not in the image")
+            image.seek(frame - 1)
+            images = [_image(image)]
+            if not _fits(images, ""):
+                raise ValueError("Decoded image exceeds the reading limit")
+            result = {"images": images, "text": "", "partial": frames > 1}
+            if frame < frames:
+                result["continuation"] = {"page": frame + 1}
+            return result
     raise ValueError(
         "This file type cannot be read. The original can still be reattached"
     )

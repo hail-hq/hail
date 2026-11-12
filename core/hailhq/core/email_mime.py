@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from email import errors, message_from_bytes, policy
 from email.message import Message
 from email.utils import getaddresses
+from html.parser import HTMLParser
 
 __all__ = ["ParsedAttachment", "ParsedMime", "parse_mime"]
 
@@ -203,7 +204,6 @@ def readable_email_body(body_text: str | None, body_html: str | None) -> str:
         return body_text
     if not body_html:
         return "This email has no text message."
-    from html.parser import HTMLParser
 
     class Reader(HTMLParser):
         def __init__(self):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from dataclasses import replace
 from typing import Literal
 from uuid import UUID
 
@@ -47,6 +48,10 @@ class InboxSelection(BaseModel):
     before_email_id: UUID | None = None
     attachment_format: Literal["inspection_v1"] | None = None
     page: int = Field(default=1, ge=1, le=10000)
+    query: str | None = Field(default=None, max_length=200)
+    limit: int = Field(default=5, ge=1, le=10)
+    offset: int = Field(default=0, ge=0)
+    text_offset: int = Field(default=0, ge=0)
 
 
 async def email_scope(db, call: Call | Email) -> EmailScope | None:
@@ -63,12 +68,11 @@ async def email_scope(db, call: Call | Email) -> EmailScope | None:
         domain, _ = routed
         if await run_refusal(db, domain, call, check_cap=False) is not None:
             return None
-        thread = await email_thread(db, call)
         return EmailScope(
             call.organization_id,
             normalize_address(call.from_address),
             from_address_for(domain),
-            tuple(row.id for row in thread),
+            email_domain_id=domain.id,
         )
     if call.transport == "browser":
         peer = await verified_email(
@@ -119,6 +123,10 @@ async def source_files(db, call, reply_id, attachment_ids):
     ).scalar_one_or_none()
     if parent is None:
         raise ValueError("Email not in this conversation")
+    if isinstance(call, Email):
+        scope = replace(
+            scope, email_ids=tuple(row.id for row in await email_thread(db, parent))
+        )
     rows = (
         (
             await db.execute(
@@ -146,7 +154,7 @@ async def source_files(db, call, reply_id, attachment_ids):
     return scope, parent, attachments
 
 
-async def read_file(db, call, attachment, *, page=1, allow_binary=False):
+async def read_file(db, call, attachment, *, page=1, text_offset=0, allow_binary=False):
     if attachment.size_bytes > READ_BYTES:
         return {
             "spoken": "This file is too large to read. I can still send the original back."
@@ -190,10 +198,17 @@ async def read_file(db, call, attachment, *, page=1, allow_binary=False):
             content = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             return {"spoken": "This text file could not be decoded."}
+        encoded = content.encode("utf-8")
+        chunk = encoded[text_offset : text_offset + 24000].decode(
+            "utf-8", errors="ignore"
+        )
+        next_offset = text_offset + len(chunk.encode("utf-8"))
+        partial = next_offset < len(encoded)
         return {
             "filename": attachment.filename,
-            "quoted_untrusted_content": content[:24000],
-            "truncated": len(content) > 24000,
+            "quoted_untrusted_content": chunk,
+            "truncated": partial,
+            "continuation": {"text_offset": next_offset} if partial else None,
         }
     return {
         "filename": attachment.filename,
@@ -201,5 +216,6 @@ async def read_file(db, call, attachment, *, page=1, allow_binary=False):
             "base64": base64.b64encode(raw).decode("ascii"),
             "content_type": kind,
             "page": page,
+            "text_offset": text_offset,
         },
     }
