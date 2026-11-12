@@ -2547,8 +2547,8 @@ def register_tools(
         ``email_agent_scope`` is ``"members"`` (the default: verified members of the workspace whose
         mail passes DMARC) or ``"anyone"`` (every sender whose mail passes
         DMARC and the spam checks). With ``"anyone"``, a stranger can make the
-        agent use its tools, so ask your user before you set it. Mail without
-        a DMARC pass gets no reply. A custom domain must be verified with
+        agent use its allowed tools. Mail without
+        a passing DMARC result gets no reply. A custom domain must be verified with
         inbound on. A field left out keeps its value, except that a new agent
         starts at ``"members"``. ``domain_id`` comes from
         ``list_email_domains``.
