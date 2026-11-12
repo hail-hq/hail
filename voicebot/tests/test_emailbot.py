@@ -1,0 +1,981 @@
+"""Email worker: builds the chat from the thread, posts the reply, retries."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from hailhq.core.agent_tools import send_email, send_sms
+from hailhq.core.agent_tools.email_run import email_run_tools
+from hailhq.core.agent_tools.spec import NO_CALL, ToolContext
+from hailhq.core.config import settings
+from hailhq.core.email_agent import MAX_ATTEMPTS, MAX_REPLIES_PER_THREAD
+from hailhq.core.models import (
+    AccountCredit,
+    Agent,
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    OrganizationMember,
+    User,
+)
+from hailhq.core.prompts import EMAIL_SENDS_TRIED_LINE
+from hailhq.voicebot import emailbot
+from hailhq.voicebot.pipeline import ProviderKeyError
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from ._fakes import FakeLLM, ScriptedLLM
+
+NOW = datetime(2026, 10, 31, tzinfo=timezone.utc)
+ADDRESS = "amber-heron-42+acme@mail.hail.so"
+MEMBER = "ada@example.com"
+
+
+@pytest.fixture(autouse=True)
+def _internal_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "hail_internal_secret", "test-secret")
+
+
+async def _seed(
+    session,
+    *,
+    scope="members",
+    tools=None,
+    sender=MEMBER,
+    dmarc="PASS",
+    earlier=False,
+    credits=10_000,
+):
+    org = uuid.uuid4()
+    if credits:
+        session.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=credits,
+                source="test",
+                ref="test",
+            )
+        )
+    agent = Agent(
+        organization_id=org, name="Inbox", system_prompt="Help the team.", tools=tools
+    )
+    session.add(agent)
+    await session.flush()
+    domain = EmailDomain(
+        organization_id=org,
+        kind="hail_mail",
+        domain=ADDRESS,
+        local_prefix_user="amber-heron-42",
+        local_prefix_org="acme",
+        verification_status="verified",
+        provider="ses",
+        verified_at=NOW,
+        email_agent_id=agent.id,
+        email_agent_scope=scope,
+    )
+    session.add(domain)
+    await session.flush()
+    uid = uuid.uuid4()
+    session.add(
+        User(id=uid, name="Ada", email=MEMBER, email_verified=True, created_at=NOW)
+    )
+    session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=uid,
+            organization_id=org,
+            role="member",
+            created_at=NOW,
+        )
+    )
+    row = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        email_domain_kind="hail_mail",
+        direction="inbound",
+        from_address=sender,
+        to_addresses=[ADDRESS],
+        subject="Question",
+        body_text="Can you help?",
+        status="received",
+        message_id="<one@example.com>",
+        references_ids=["<zero@example.com>"] if earlier else None,
+        dmarc_verdict=dmarc,
+        from_verified=dmarc == "PASS",
+        agent_id=agent.id,
+        agent_reply_state="pending",
+    )
+    session.add(row)
+    if earlier:
+        session.add(
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                email_domain_kind="hail_mail",
+                direction="inbound",
+                from_address=sender,
+                to_addresses=[ADDRESS],
+                subject="Question",
+                body_text="Earlier private note",
+                status="received",
+                message_id="<zero@example.com>",
+                dmarc_verdict="PASS",
+                from_verified=True,
+            )
+        )
+    await session.commit()
+    return row.id
+
+
+def _use(monkeypatch: pytest.MonkeyPatch, llm) -> None:
+    async def fake_resolve(_org, *, skip_llm=False):
+        return {}
+
+    monkeypatch.setattr(emailbot, "resolve_org_configs", fake_resolve)
+    monkeypatch.setattr(emailbot, "build_llm", lambda cfg, org=None: llm)
+
+
+async def _state(session, email_id) -> str | None:
+    session.expire_all()
+    return (await session.get(Email, email_id)).agent_reply_state
+
+
+async def test_reply_once_posts_the_model_text(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Happy to help."))
+    api = SimpleNamespace(post=AsyncMock(return_value={"ok": True, "state": "done"}))
+
+    assert await emailbot.reply_once(api) is True
+
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email",
+        {"email_id": str(email_id), "body": "Happy to help."},
+    )
+    assert await _state(async_session, email_id) == "done"
+    assert await emailbot.reply_once(api) is False
+
+
+async def test_nothing_waiting_returns_false(async_session) -> None:
+    assert await emailbot.reply_once(SimpleNamespace(post=AsyncMock())) is False
+
+
+async def test_skipped_state_is_recorded(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": False, "state": "skipped", "reason": "thread_cap"}
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "skipped"
+
+
+async def test_a_provider_error_fails_without_posting(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+
+    async def boom(_org, *, skip_llm=False):
+        raise ProviderKeyError("bad key")
+
+    monkeypatch.setattr(emailbot, "resolve_org_configs", boom)
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "failed"
+
+
+async def test_a_model_error_goes_back_for_a_retry(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+
+    async def boom(_org, *, skip_llm=False):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(emailbot, "resolve_org_configs", boom)
+    await emailbot.reply_once(SimpleNamespace(post=AsyncMock()))
+    async_session.expire_all()
+    row = await async_session.get(Email, email_id)
+    assert row.agent_reply_state == "pending"
+    assert row.agent_reply_attempts == 1
+    assert row.agent_reply_available_at is not None
+
+
+async def test_a_lost_post_goes_back_for_a_retry(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(post=AsyncMock(side_effect=TimeoutError()))
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+
+
+async def test_an_empty_reply_is_skipped(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="   "))
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+
+
+async def test_the_model_reads_the_mail_as_a_labeled_message(
+    async_session, monkeypatch
+) -> None:
+    await _seed(async_session)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    text = [str(i.text_content) for i in llm.calls[0]["items"]]
+    assert "verified member" in text[0]
+    assert text[1].startswith(f"Email from {MEMBER}")
+
+
+async def test_a_proven_outside_sender_is_framed_and_keeps_tools(
+    async_session, monkeypatch
+) -> None:
+    await _seed(async_session, scope="anyone", sender="stranger@example.net")
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    assert "outside the organization" in str(llm.calls[0]["items"][0].text_content)
+    assert llm.calls[0]["tools"]
+
+
+async def _fill_cap(session, email_id, *, meta) -> None:
+    row = await session.get(Email, email_id)
+    for _ in range(MAX_REPLIES_PER_THREAD):
+        session.add(
+            Email(
+                organization_id=row.organization_id,
+                email_domain_id=row.email_domain_id,
+                agent_id=row.agent_id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_={"thread_sender": MEMBER, **meta},
+            )
+        )
+    await session.commit()
+
+
+async def _written_reply(session, email_id, *, status="failed") -> None:
+    row = await session.get(Email, email_id)
+    session.add(
+        Email(
+            organization_id=row.organization_id,
+            email_domain_id=row.email_domain_id,
+            agent_id=row.agent_id,
+            from_address=ADDRESS,
+            to_addresses=[MEMBER],
+            subject="Re: Question",
+            body_text="Written earlier.",
+            status=status,
+            metadata_={"reply_to_email_id": str(email_id)},
+        )
+    )
+    await session.commit()
+
+
+async def test_a_retry_with_its_reply_written_passes_a_full_cap(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    await _fill_cap(async_session, email_id, meta={})
+    await _written_reply(async_session, email_id)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert api.post.await_args.args[0] == "/internal/agent/reply-email"
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_retry_with_its_reply_written_skips_the_model(
+    async_session, monkeypatch
+) -> None:
+    """No second tool sends, and an empty model answer cannot skip the row."""
+    email_id = await _seed(async_session)
+    await _written_reply(async_session, email_id)
+    llm = ScriptedLLM([("tool", "send_email", "{}"), ("text", "")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id)}
+    )
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_retry_leaves_the_rules_to_the_route(
+    async_session, monkeypatch
+) -> None:
+    """The route reads scope and funds, and owns the queued reply."""
+    email_id = await _seed(async_session, credits=0)
+    await _written_reply(async_session, email_id, status="queued")
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "insufficient_funds",
+            }
+        )
+    )
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id)}
+    )
+    assert await _state(async_session, email_id) == "skipped"
+
+
+async def test_a_wait_at_the_last_attempt_does_not_fail_the_row(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    row = await async_session.get(Email, email_id)
+    row.agent_reply_attempts = MAX_ATTEMPTS - 1
+    await async_session.commit()
+    await _written_reply(async_session, email_id, status="queued")
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "retry",
+                "reason": "in_flight",
+                "retry_after_seconds": 120,
+            }
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+
+
+async def test_a_retry_after_a_tool_send_has_no_tools(
+    async_session, monkeypatch
+) -> None:
+    """The model could reword the message, and it would go out twice."""
+    email_id = await _seed(async_session, earlier=True)
+    row = await async_session.get(Email, email_id)
+    async_session.add(
+        Email(
+            organization_id=row.organization_id,
+            email_domain_id=row.email_domain_id,
+            agent_id=row.agent_id,
+            from_address=ADDRESS,
+            to_addresses=["other@example.com"],
+            subject="Note",
+            body_text="Sent on the first attempt.",
+            status="sent",
+            metadata_={
+                "inbound_email_id": str(email_id),
+                "thread_sender": MEMBER,
+            },
+        )
+    )
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "Done.")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert len(llm.calls) == 1
+    assert not llm.calls[0]["tools"]
+    assert EMAIL_SENDS_TRIED_LINE in llm.calls[0]["items"][0].text_content
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" in text
+    assert "Search older mail with read_email" not in text
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email", {"email_id": str(email_id), "body": "Done."}
+    )
+
+
+async def test_a_retried_runs_own_sends_do_not_stop_it(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    await _fill_cap(async_session, email_id, meta={"inbound_email_id": str(email_id)})
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_an_unproven_row_never_reaches_the_model(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(
+        async_session, scope="anyone", sender="stranger@example.net", dmarc="GRAY"
+    )
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "sender_not_verified"
+
+
+async def test_no_funds_is_read_before_the_model_is_paid(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session, credits=0)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock())
+    await emailbot.reply_once(api)
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "insufficient_funds"
+    assert row.metadata_["suppressed_reasons"] == ["insufficient_funds"]
+
+
+async def test_a_retry_answer_puts_the_row_back(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": False, "state": "retry", "reason": "in_flight"}
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+
+
+async def test_retry_after_replaces_the_backoff(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "retry",
+                "reason": "in_flight",
+                "retry_after_seconds": 170,
+            }
+        )
+    )
+    before = datetime.now(timezone.utc)
+    await emailbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Email, email_id)
+    assert row.agent_reply_available_at >= before + timedelta(seconds=165)
+
+
+async def test_one_ses_error_then_a_delivered_reply(async_session, monkeypatch) -> None:
+    """The second pass posts no body, and the route sends the stored text."""
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            side_effect=[
+                {"ok": False, "state": "retry", "reason": "TimeoutError"},
+                {"ok": True, "state": "done"},
+            ]
+        )
+    )
+    await emailbot.reply_once(api)
+    assert await _state(async_session, email_id) == "pending"
+    row = await async_session.get(Email, email_id)
+    row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await async_session.commit()
+    await _written_reply(async_session, email_id)
+
+    await emailbot.reply_once(api)
+    assert api.post.await_args.args[1] == {"email_id": str(email_id)}
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_a_lasting_send_failure_ends_failed(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="Hi"))
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": False, "state": "retry", "reason": "TimeoutError"}
+        )
+    )
+    for _ in range(MAX_ATTEMPTS):
+        row = await async_session.get(Email, email_id)
+        row.agent_reply_available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await async_session.commit()
+        await emailbot.reply_once(api)
+        async_session.expire_all()
+    assert await _state(async_session, email_id) == "failed"
+
+
+async def test_an_empty_reply_says_why(async_session, monkeypatch) -> None:
+    email_id = await _seed(async_session)
+    _use(monkeypatch, FakeLLM(reply="   "))
+    await emailbot.reply_once(SimpleNamespace(post=AsyncMock()))
+    await _state(async_session, email_id)
+    row = await async_session.get(Email, email_id)
+    assert row.metadata_["agent_skip_reason"] == "empty_reply"
+
+
+async def test_the_same_message_keeps_its_id_across_a_retried_run() -> None:
+    api = SimpleNamespace(post=AsyncMock(return_value={"spoken": "ok"}))
+    email_id = uuid.uuid4()
+    ctx = ToolContext(
+        call_id=None,
+        organization_id=uuid.uuid4(),
+        api=api,  # type: ignore[arg-type]
+        hangup=None,
+        send_dtmf=None,
+        inbound_email_id=email_id,
+    )
+    args = {"recipient_name": "Ada", "subject": "s", "body_text": "b", "body": "b"}
+    for spec in (send_email.EMAIL_RUN_SPEC, send_sms.EMAIL_RUN_SPEC):
+        api.post.reset_mock()
+        await spec.execute(ctx, args)
+        await spec.execute(ctx, args)
+        await spec.execute(ctx, {**args, "body_text": "other", "body": "other"})
+        ids = [c.args[1]["tool_invocation_id"] for c in api.post.await_args_list]
+        assert ids[0] == ids[1] != ids[2]
+
+
+async def test_history_is_available_on_demand_without_automatic_context_dump(
+    async_session, monkeypatch
+) -> None:
+    await _seed(async_session, earlier=True)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" not in text
+    assert "Can you help?" in text
+    assert "current_email_id" in text
+
+
+@pytest.mark.parametrize("tools", [[], ["send_email"], ["list_contacts"]])
+async def test_history_is_loaded_when_the_agent_cannot_retrieve_it(
+    async_session, monkeypatch, tools
+) -> None:
+    await _seed(async_session, earlier=True, tools=tools)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" in text
+    assert "Search older mail with read_email" not in text
+
+
+async def test_the_cap_is_read_before_the_model_is_paid(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    row = await async_session.get(Email, email_id)
+    for _ in range(MAX_REPLIES_PER_THREAD):
+        async_session.add(
+            Email(
+                organization_id=row.organization_id,
+                email_domain_id=row.email_domain_id,
+                agent_id=row.agent_id,
+                from_address=ADDRESS,
+                to_addresses=["other@example.com"],
+                subject="Note",
+                body_text="Hello",
+                status="sent",
+                metadata_={"thread_sender": MEMBER},
+            )
+        )
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock())
+    assert await emailbot.reply_once(api) is True
+    assert llm.calls == []
+    api.post.assert_not_awaited()
+    assert await _state(async_session, email_id) == "skipped"
+
+
+async def test_a_tool_call_reaches_the_email_run_route(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    llm = ScriptedLLM(
+        [
+            (
+                "tool",
+                "send_email",
+                '{"recipient_name": "Ada", "subject": "Hi", "body_text": "Hello"}',
+            ),
+            ("text", "Done."),
+        ]
+    )
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={"ok": True, "spoken": "Email sent.", "state": "done"}
+        )
+    )
+    await emailbot.reply_once(api)
+    path, payload = api.post.await_args_list[0].args
+    assert path == "/internal/agent/email-run/send-email"
+    assert payload["inbound_email_id"] == str(email_id)
+    assert payload["recipient_name"] == "Ada"
+    assert "call_id" not in payload
+    assert api.post.await_args_list[1].args[0] == "/internal/agent/reply-email"
+    assert llm.calls[1]["items"][-1].output == "Email sent."
+
+
+async def test_an_unknown_tool_tells_the_model(async_session, monkeypatch) -> None:
+    await _seed(async_session)
+    llm = ScriptedLLM([("tool", "end_call", "{}"), ("text", "Sorry.")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    assert llm.calls[1]["items"][-1].output == emailbot.TOOL_FAILED
+
+
+async def test_a_failing_tool_does_not_stop_the_reply(
+    async_session, monkeypatch
+) -> None:
+    email_id = await _seed(async_session)
+    llm = ScriptedLLM(
+        [
+            (
+                "tool",
+                "send_email",
+                '{"recipient_name": "Ada", "subject": "Hi", "body_text": "Hello"}',
+            ),
+            ("text", "I could not send that."),
+        ]
+    )
+    _use(monkeypatch, llm)
+
+    async def post(path, payload):
+        if "email-run" in path:
+            raise RuntimeError("down")
+        return {"state": "done"}
+
+    await emailbot.reply_once(SimpleNamespace(post=post))
+    assert llm.calls[1]["items"][-1].output == emailbot.TOOL_FAILED
+    assert await _state(async_session, email_id) == "done"
+
+
+async def test_tools_follow_the_agent_list(async_session) -> None:
+    agent = Agent(
+        organization_id=uuid.uuid4(),
+        name="A",
+        system_prompt="x",
+        tools=["list_contacts"],
+    )
+    assert [s.name for s in await email_run_tools(agent, async_session)] == [
+        "list_contacts"
+    ]
+    agent.tools = []
+    assert await email_run_tools(agent, async_session) == []
+
+
+async def test_outside_sender_gets_no_contact_list(async_session) -> None:
+    agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="x", tools=None)
+    names = {
+        s.name for s in await email_run_tools(agent, async_session, trust="outside")
+    }
+    assert "list_contacts" not in names
+
+
+async def test_call_only_tools_are_not_offered(async_session) -> None:
+    agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="x", tools=None)
+    names = {s.name for s in await email_run_tools(agent, async_session)}
+    assert not names & {"end_call", "send_dtmf", "transfer_call", "cancel_transfer"}
+
+
+async def test_send_tools_refuse_without_a_call_or_an_email() -> None:
+    api = SimpleNamespace(post=AsyncMock())
+    ctx = ToolContext(
+        call_id=None,
+        organization_id=uuid.uuid4(),
+        api=api,  # type: ignore[arg-type]
+        hangup=None,
+        send_dtmf=None,
+    )
+    args = {"recipient_name": "Ada", "subject": "s", "body_text": "b", "body": "b"}
+    assert await send_email.SPEC.execute(ctx, args) == NO_CALL
+    assert await send_sms.SPEC.execute(ctx, args) == NO_CALL
+    assert await send_sms.EMAIL_RUN_SPEC.execute(ctx, args) != "ok"
+    api.post.assert_not_awaited()
+
+
+async def test_file_index_contains_only_thread_files_with_bounded_names(
+    async_session, monkeypatch
+):
+    email_id = await _seed(async_session)
+    att = EmailAttachment(
+        email_id=email_id,
+        filename="receipt-" + "x" * 1000,
+        content_type="image/png",
+        size_bytes=7,
+        s3_key="attachments/private-storage-key",
+    )
+    async_session.add(att)
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "I can check that file.")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"ok": True, "state": "done"}))
+    assert await emailbot.reply_once(api)
+    text = "\n".join(
+        part
+        for item in llm.calls[0]["items"]
+        for part in getattr(item, "content", [])
+        if isinstance(part, str)
+    )
+    assert str(att.id) in text and str(email_id) in text
+    assert "x" * 201 not in text
+    assert att.s3_key not in text and "base64" not in text
+
+
+async def test_search_open_inspect_and_send_fit_in_one_email_run(
+    async_session, monkeypatch
+):
+    await _seed(async_session)
+    message_id, attachment_id = str(uuid.uuid4()), str(uuid.uuid4())
+    llm = ScriptedLLM(
+        [
+            ("tool", "read_email", json.dumps({"query": "receipt"})),
+            ("tool", "read_email", json.dumps({"email_id": message_id})),
+            (
+                "tool",
+                "read_email",
+                json.dumps({"email_id": message_id, "attachment_id": attachment_id}),
+            ),
+            (
+                "tool",
+                "send_email",
+                json.dumps(
+                    {
+                        "recipient_name": "sender",
+                        "subject": "Receipt",
+                        "body_text": "Original attached.",
+                        "reply_to_email_id": message_id,
+                        "attachment_ids": [attachment_id],
+                    }
+                ),
+            ),
+            ("text", "Original attached."),
+        ]
+    )
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(
+        post=AsyncMock(return_value={"ok": True, "state": "done", "spoken": "Done."})
+    )
+    assert await emailbot.reply_once(api)
+    paths = [call.args[0] for call in api.post.await_args_list]
+    assert paths == ["/internal/agent/email-run/inbox"] * 3 + [
+        "/internal/agent/email-run/send-email",
+        "/internal/agent/reply-email",
+    ]
+
+
+@pytest.fixture
+def telemetry(monkeypatch):
+    exporter = InMemorySpanExporter()
+    traces = TracerProvider()
+    traces.add_span_processor(SimpleSpanProcessor(exporter))
+    reader = InMemoryMetricReader()
+    meters = MeterProvider(metric_readers=[reader])
+    monkeypatch.setattr(metrics, "get_meter", meters.get_meter)
+    monkeypatch.setattr(
+        emailbot,
+        "operation",
+        lambda name, **attrs: traces.get_tracer("test").start_as_current_span(
+            name, attributes=attrs
+        ),
+    )
+    yield exporter, reader
+    traces.shutdown()
+    meters.shutdown()
+
+
+def points(reader):
+    return {
+        metric.name: metric.data.data_points
+        for resource in reader.get_metrics_data().resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+
+
+@pytest.mark.parametrize(
+    "case,want",
+    [
+        ("done", "done"),
+        ("skipped", "skipped"),
+        ("empty", "skipped"),
+        ("refused", "skipped"),
+        ("failed", "failed"),
+        ("retry", "retry"),
+        ("exhausted", "failed"),
+        ("model_error", "retry"),
+        ("send_error", "retry"),
+        ("bad_key", "failed"),
+    ],
+)
+async def test_reply_reports_actual_outcome_with_bounded_metrics(
+    monkeypatch, telemetry, case, want
+):
+    exporter, reader = telemetry
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(
+            id="private-email-id",
+            requested_at=datetime.now(timezone.utc) - timedelta(seconds=60),
+        ),
+        attempt=3,
+    )
+    prepared = "sender_unverified" if case == "refused" else ([], [])
+    monkeypatch.setattr(emailbot, "_prepare", AsyncMock(return_value=prepared))
+    generation = AsyncMock(return_value="" if case == "empty" else "private reply")
+    if case == "model_error":
+        generation.side_effect = RuntimeError("private message")
+    if case == "bad_key":
+        generation.side_effect = emailbot.ProviderKeyError("bad key")
+    monkeypatch.setattr(emailbot, "generate_reply", generation)
+    state = "retry" if case == "exhausted" else case
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": state}))
+    if case == "send_error":
+        api.post.side_effect = RuntimeError("private body")
+    # Database settlement is external here; exercise the runner's reporting of its result.
+    monkeypatch.setattr(emailbot, "_settle", AsyncMock(return_value=want))
+    with emailbot.operation("reply") as span:
+        await emailbot._reply_claimed(api, claimed, span)
+    recorded = exporter.get_finished_spans()[-1]
+    assert recorded.attributes["reply.state"] == want
+    if case in {"model_error", "send_error", "bad_key", "failed", "exhausted"}:
+        assert recorded.status.status_code.name == "ERROR"
+    emitted = points(reader)
+    outcomes = emitted["hail.email.reply.attempts"][0]
+    assert outcomes.value == 1
+    assert dict(outcomes.attributes) == {"outcome": want}
+    duration = emitted["hail.email.reply.duration"][0]
+    assert duration.count == 1 and duration.sum >= 0
+    assert dict(duration.attributes) == {"outcome": want}
+    age = emitted["hail.email.reply.queue_age"][0]
+    assert age.count == 1 and age.sum >= 60
+    assert not age.attributes
+
+
+@pytest.mark.parametrize(
+    "persisted,want", [("pending", "retry"), ("failed", "failed"), (None, "superseded")]
+)
+async def test_settle_returns_actual_retry_state(monkeypatch, persisted, want):
+    @asynccontextmanager
+    async def session():
+        yield object()
+
+    monkeypatch.setattr(emailbot, "session_scope", session)
+    monkeypatch.setattr(emailbot, "retry_reply", AsyncMock(return_value=persisted))
+    assert await emailbot._settle(object(), None, retry=True) == want
+
+
+async def test_manual_tool_span_has_no_arguments_or_result(monkeypatch, telemetry):
+    exporter, _ = telemetry
+    call = SimpleNamespace(name="search_emails", arguments='{"query":"private query"}')
+    spec = SimpleNamespace(
+        name="search_emails", execute=AsyncMock(return_value="private result")
+    )
+    output, error = await emailbot._run_tool(call, {call.name: spec}, object())
+    assert output == "private result" and not error
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert dict(spans[0].attributes) == {
+        "gen_ai.tool.name": "search_emails",
+        "tool.outcome": "done",
+    }
+    assert spans[0].end_time >= spans[0].start_time
+
+
+@pytest.mark.parametrize("known", [False, True])
+async def test_tool_errors_are_visible_without_untrusted_tool_names(
+    monkeypatch, telemetry, known
+):
+    exporter, _ = telemetry
+    call = SimpleNamespace(
+        name="read_email" if known else "private arbitrary model text", arguments="{}"
+    )
+    specs = (
+        {
+            "read_email": SimpleNamespace(
+                name="read_email",
+                execute=AsyncMock(side_effect=ValueError("private content")),
+            )
+        }
+        if known
+        else {}
+    )
+    output, error = await emailbot._run_tool(call, specs, object())
+    assert error and output == emailbot.TOOL_FAILED
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code.name == "ERROR"
+    assert span.attributes["gen_ai.tool.name"] == ("read_email" if known else "unknown")
+    assert span.attributes["tool.outcome"] == ("failed" if known else "unavailable")
+
+
+async def test_cancelled_attempt_is_recorded_and_cancellation_propagates(
+    monkeypatch, telemetry
+):
+    exporter, reader = telemetry
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(id="private-id", requested_at=datetime.now(timezone.utc))
+    )
+    monkeypatch.setattr(
+        emailbot, "_prepare", AsyncMock(side_effect=asyncio.CancelledError())
+    )
+    with pytest.raises(asyncio.CancelledError), emailbot.operation("reply") as span:
+        await emailbot._reply_claimed(object(), claimed, span)
+    assert exporter.get_finished_spans()[0].attributes["reply.state"] == "cancelled"
+    assert points(reader)["hail.email.reply.attempts"][0].attributes == {
+        "outcome": "cancelled"
+    }
+
+
+async def test_expanded_tool_workflow_can_finish_after_old_three_round_budget(
+    monkeypatch,
+):
+    monkeypatch.setattr(emailbot, "LLM_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(emailbot, "_prepare", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(emailbot, "_settle", AsyncMock(return_value="done"))
+
+    async def generation(*args):
+        await asyncio.sleep(0.2)
+        return "The searched file is attached."
+
+    monkeypatch.setattr(emailbot, "generate_reply", generation)
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(id=uuid.uuid4(), requested_at=datetime.now(timezone.utc)),
+        attempt=1,
+    )
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot._reply_claimed(api, claimed)
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email",
+        {"email_id": str(claimed.email.id), "body": "The searched file is attached."},
+    )

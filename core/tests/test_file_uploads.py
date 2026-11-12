@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from hailhq.core import file_uploads
+from hailhq.core.db import session_scope
 from hailhq.core.file_uploads import (
     hash_token,
     matches_declared_type,
@@ -15,6 +16,7 @@ from hailhq.core.file_uploads import (
     object_key,
     valid_content_type,
 )
+from hailhq.core.models import FileUpload
 
 
 @pytest.mark.parametrize(
@@ -94,3 +96,43 @@ def test_object_prefix_of_a_key_with_no_folder() -> None:
     from hailhq.core.file_uploads import object_prefix
 
     assert object_prefix("id.3f9a0c") == "id"
+
+
+async def test_store_upload_tracks_bytes_before_storage_write(async_session):
+    payload = b"the original bytes"
+    row = FileUpload(
+        organization_id=uuid4(),
+        purpose="email_attachment",
+        filename="original.txt",
+        content_type="text/plain",
+    )
+    s3 = AsyncMock()
+
+    async def put(key, content, content_type):
+        async with session_scope() as other:
+            tracked = await other.get(FileUpload, row.id)
+            assert tracked is not None and tracked.first_used_at is None
+            assert tracked.sha256 == hashlib.sha256(payload).hexdigest()
+        assert content == payload
+
+    s3.put_attachment.side_effect = put
+    assert await file_uploads.store_upload(async_session, s3, row, payload) is row
+    assert row.s3_key == object_key("email_attachment", row.organization_id, row.id)
+    assert row.uploaded_at is not None and row.size_bytes == len(payload)
+
+
+async def test_failed_storage_write_leaves_a_tracked_unused_upload(async_session):
+    row = FileUpload(
+        organization_id=uuid4(),
+        purpose="email_attachment",
+        filename="original.txt",
+        content_type="text/plain",
+    )
+    s3 = AsyncMock()
+    s3.put_attachment.side_effect = OSError("storage unavailable")
+    with pytest.raises(OSError):
+        await file_uploads.store_upload(async_session, s3, row, b"original")
+    async with session_scope() as other:
+        tracked = await other.get(FileUpload, row.id)
+        assert tracked is not None and tracked.first_used_at is None
+        assert tracked.uploaded_at is not None

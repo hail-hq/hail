@@ -15,6 +15,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio for now), refreshed weekly.
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
+- Email agents: route an address to an agent, and it answers inbound mail in the thread.
 
 ### Fixed
 

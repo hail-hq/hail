@@ -109,8 +109,12 @@ class EmailProvider(ABC):
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
         organization_id: UUID,
+        at_most_once: bool = False,
     ) -> ProviderSendResult:
         """Send one message. Implementations must raise on provider error.
+
+        ``at_most_once`` forbids repeating a send that may already have gone
+        out (agent replies). Other sends may be retried.
 
         ``headers`` carries extra top-level headers (loop-prevention,
         Auto-Submitted, References). ``attachments`` force the raw-MIME

@@ -159,5 +159,13 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "4b4f4c9391d6ddb4c82b15aad4bac249651203748eab65c17f2b7929ebf374b3"
+        "a82cdbe2869575b0d92b5894334b6cfd984e680ae6f3761b01b6031cc898949f"
     )
+
+
+def test_email_instructions_keep_the_current_private_boundary():
+    for trust in ("member", "outside"):
+        text = prompts.build_email_instructions("Handle orders.", trust=trust)
+        assert prompts.PLATFORM_PRIVACY in text
+        assert text.endswith(prompts.PRIVACY_REMINDER)
+        assert "Handle orders." in text

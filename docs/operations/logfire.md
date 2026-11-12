@@ -23,12 +23,12 @@ Filter by `service_name`: `hail-api`, `hail-voicebot`, or `hail-mcp`.
 
 Coverage: existing Hail INFO+ logs and dependency WARNING+ logs, exceptions,
 FastAPI/Starlette requests, HTTPX/Requests/aiohttp clients,
-MCP requests, native LiveKit voice/model/tool spans, SMS agent invocations,
+MCP requests, native LiveKit voice/model/tool spans, SMS and email agent invocations,
 webhook deliveries, and email forwards. Request spans carry a generated
 `request_id`; authenticated API requests carry `organization_name`, `organization_id`, `user_email`, `user_id`, and `auth_kind`. Other API workers share the API's log,
 HTTP, and database instrumentation. The API injects W3C trace context into
-outbound LiveKit dispatch metadata. SMS work is correlated by SMS, agent and
-organization IDs; it starts a new trace when claimed from the database.
+outbound LiveKit dispatch metadata. SMS and email work is correlated by message, agent and
+organization IDs; each claimed message starts a new trace.
 
 ## Trace tags
 
@@ -66,16 +66,42 @@ The export always sends these keys in full, not masked:
 `gen_ai.system_instructions`, `gen_ai.input.messages`,
 `gen_ai.output.messages`, `gen_ai.tool.call.arguments`,
 `gen_ai.tool.call.result` and `lk.pii.user_transcript`. Logfire shows the
-`llm_request` spans of a voice call or SMS reply in its LLM view: the system
+`llm_request` spans of voice calls, SMS replies, and email replies in its LLM view: the system
 prompt, the conversation and the reply. Tool definitions stay dropped.
 This content can hold the other party's full number, address or name:
-masking applies only to the `hail.from` and `hail.to` tags.
+masking applies only to the `hail.from` and `hail.to` tags. Email model inputs
+include thread content and file indexes. Attachment inspection can send extracted
+text and normalized page images to the model. Native model spans can therefore
+export that content too. The worker removes the storage `attachment_data`
+envelope from tool results; this does not promise that model image inputs are
+absent from telemetry. Manual email tool spans add only a known tool name and
+outcome, without copying arguments, results, file bytes, or search queries.
 
 There is no attribute length limit: the OpenTelemetry SDK default is
 unlimited and Hail does not set `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`, so
 long prompts are not cut. LiveKit sends the content unless the LiveKit Cloud
 project turns on redaction (LiveKit Cloud dashboard), which strips it for
 every exporter.
+
+## Email worker metrics
+
+Each claimed email attempt records these metrics through the existing OTLP reader:
+
+- `hail.email.reply.attempts`: one count with a bounded `outcome` label.
+- `hail.email.reply.duration`: elapsed attempt time in seconds, with the same label.
+- `hail.email.reply.queue_age`: seconds since the original email arrived, without labels.
+
+Outcomes are `done`, `skipped`, `retry`, `failed`, `superseded`, or `cancelled`.
+A retry that exhausts its attempts reports `failed`. A retry that loses its
+claim reports `superseded`. Waiting on an existing send reports `retry`.
+Queue age includes earlier attempts and backoff; it is not just this attempt's wait.
+No metric label contains an email address, message ID, organization ID, or body.
+The invocation span carries `reply.state`. Failed attempts and caught exceptions
+mark the span as an error. Email tool child spans show safe outcomes and duration.
+Empty polls do not create attempt metrics or traces.
+
+These metrics and spans do not create alerts. Configure alerts separately through
+an authorized infrastructure change, then verify delivery with a real email flow.
 
 ## Export filter
 
@@ -121,8 +147,8 @@ Data protection: Pydantic Logfire (EU region) is a listed sub-processor of the
 hosted service. The legal records ([RoPA](../legal/ropa.md),
 [DPIA summary](../legal/dpia-summary.md)) also cover voice and SMS agent
 prompts, transcripts, replies and tool call arguments and results, sent as
-is (they can hold a counterparty's full number, address or name). They also
-cover call, SMS and email tags: the counterparty's number is masked to its
+is (they can hold a counterparty's full number, address or name). They also cover email agent threads, replies, file indexes, and attachment
+content sent to the model. They cover call, SMS and email tags: the counterparty's number is masked to its
 country code and last 4 digits and an email to its domain; the
 organization's own number and address are sent in full.
 Update them if what is exported changes. Retention follows the Logfire project

@@ -25,12 +25,17 @@ import hashlib
 import re
 import secrets
 from datetime import timedelta
-from typing import Literal
-from uuid import UUID
+from typing import TYPE_CHECKING, Literal
+from uuid import UUID, uuid4
 
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
+from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from hailhq.core.models import FileUpload
 
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
@@ -56,6 +61,7 @@ _PREFIXES = {
     "email_attachment": "outbound-attachments/",
     "verification_document": "verification-uploads/",
 }
+EMAIL_ATTACHMENTS_PREFIX = _PREFIXES["email_attachment"]
 VERIFICATION_UPLOADS_PREFIX = _PREFIXES["verification_document"]
 
 # ``type/subtype`` only, no parameters: the value is put into a shell
@@ -97,6 +103,29 @@ def object_key(purpose: str, organization_id: UUID, upload_id: UUID) -> str:
     return f"{_PREFIXES[purpose]}{organization_id}/{upload_id}"
 
 
+async def store_upload(
+    db: AsyncSession, s3: S3MailClient, row: FileUpload, payload: bytes
+) -> FileUpload:
+    """Store a direct upload with its cleanup record committed before S3.
+
+    Callers supply the file's owner, purpose, name and MIME type. This owner
+    computes its identity, key, size and digest. A failed write stays tracked
+    and unused so the existing upload sweep can clean it up.
+    """
+    if row.purpose not in PURPOSES or len(payload) > max_bytes(row.purpose):
+        raise ValueError("File exceeds its upload limit or has an invalid purpose")
+    row.id = row.id or uuid4()
+    row.s3_key = object_key(row.purpose, row.organization_id, row.id)
+    row.size_bytes = len(payload)
+    row.sha256 = hashlib.sha256(payload).hexdigest()
+    row.uploaded_at = func.statement_timestamp()
+    db.add(row)
+    await db.commit()
+    await s3.put_attachment(row.s3_key, payload, row.content_type)
+    await db.refresh(row)
+    return row
+
+
 def object_prefix(s3_key: str) -> str:
     """The prefix holding every object of one upload: its key without the
     ``.<attempt>`` suffix. A PUT cut off between its S3 write and its update
@@ -135,6 +164,7 @@ async def delete_org_verification_uploads(
 
 
 __all__ = [
+    "EMAIL_ATTACHMENTS_PREFIX",
     "LINK_SWEEP_GRACE",
     "LINK_TTL",
     "MAX_PENDING_LINKS",
@@ -152,5 +182,6 @@ __all__ = [
     "new_token",
     "object_key",
     "object_prefix",
+    "store_upload",
     "valid_content_type",
 ]

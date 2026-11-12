@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core.config import settings
+from hailhq.core.email_attachment_limits import AGENT_ATTACHMENT_READ_BYTES
 from hailhq.core.hmac_signing import sign
 from hailhq.core.models import (
     Call,
@@ -254,6 +255,7 @@ async def test_inbox_and_attachment_contents_are_scoped_and_untrusted(
         email_domain_id=domain.id,
         direction="inbound",
         from_address="owner@example.test",
+        from_verified=True,
         to_addresses=[domain.domain],
         subject="Notes",
         body_text="Read my notes",
@@ -305,7 +307,9 @@ async def test_inbox_and_attachment_contents_are_scoped_and_untrusted(
         )
     ).json()
     assert "cannot find" in denied["spoken"]
-    s3.fetch_raw.assert_awaited_once_with("private-key")
+    s3.fetch_raw.assert_awaited_once_with(
+        "private-key", max_bytes=AGENT_ATTACHMENT_READ_BYTES
+    )
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,8 @@
 from pathlib import Path
+from uuid import uuid4
 
-from hailhq.core.email_mime import parse_mime
+from hailhq.core.email_mime import parse_mime, reference_ids
+from hailhq.core.models import Email
 
 FIX = Path(__file__).parent / "fixtures" / "inbound"
 
@@ -115,3 +117,39 @@ def test_html_only_email_becomes_readable_without_active_content():
     assert value == "Order EXAMPLE-4821\nTuesday & Wednesday"
     assert readable_email_body("Plain body", "<p>Other body</p>") == "Plain body"
     assert readable_email_body(None, None) == "This email has no text message."
+
+
+def test_reply_headers_do_not_accept_injected_header_lines():
+    email = Email(
+        id=uuid4(),
+        message_id="<safe@example.test>",
+        references_ids=["<bad>\r\nBcc: stranger@example.test"],
+    )
+    assert reference_ids(email) == ["<safe@example.test>"]
+
+
+def test_long_message_ids_keep_root_and_recent_parent_within_service_budget():
+    ids = [f"<{n:03d}-{'x' * 150}@example.test>" for n in range(30)]
+    email = Email(id=uuid4(), references_ids=ids[:-1], in_reply_to=ids[-1])
+    result = reference_ids(email)
+    assert len(" ".join(result)) <= 995
+    assert result[0] == ids[0] and result[-1] == ids[-1]
+    assert len(reference_ids(email, limit=None)) == 30
+
+
+def test_parent_wins_when_root_and_parent_cannot_fit_together():
+    root = f"<{'x' * 500}@example.test>"
+    parent = f"<{'y' * 500}@example.test>"
+    email = Email(id=uuid4(), references_ids=[root], in_reply_to=parent)
+    assert reference_ids(email) == [parent]
+
+
+def test_reference_ids_reject_non_message_ids_and_control_characters():
+    email = Email(
+        references_ids=[
+            "<not-an-address>",
+            "<safe@example.test>",
+            "<bad\x00@example.test>",
+        ],
+    )
+    assert reference_ids(email) == ["<safe@example.test>"]

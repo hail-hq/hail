@@ -973,6 +973,10 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer texts on numbers that route texts to this agent.",
     )
+    email_enabled: bool = Field(
+        default=True,
+        description="Answer email on addresses that route email to this agent.",
+    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1046,6 +1050,9 @@ class AgentUpdate(BaseModel):
     sms_enabled: bool | None = Field(
         default=None, description="Whether the agent answers texts."
     )
+    email_enabled: bool | None = Field(
+        default=None, description="Whether the agent answers email."
+    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1090,6 +1097,9 @@ class AgentResponse(BaseModel):
     )
     voice_enabled: bool = Field(description="Whether the agent answers calls.")
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
+    email_enabled: bool = Field(
+        default=True, description="Whether the agent answers email."
+    )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
         default_factory=list, description="People the agent may hand a live call to."
@@ -1232,6 +1242,7 @@ def _normalize_domain(addr: str) -> str:
 
 
 EmailDomainKind = Literal["hail_mail", "custom"]
+EmailAgentScope = Literal["members", "anyone"]
 EmailDomainVerificationStatus = Literal["pending", "verified", "failed"]
 
 
@@ -1375,7 +1386,15 @@ MAX_FORWARD_TARGETS = 10
 
 # Email.metadata keys the queue uses internally; POST /emails rejects them.
 RESERVED_EMAIL_METADATA_KEYS = frozenset(
-    {"forwarded_from", "forward_headers", "system_kind"}
+    {
+        "forwarded_from",
+        "forward_headers",
+        "system_kind",
+        # An agent's reply bookkeeping: a forged key could pose as a prior reply.
+        "reply_to_email_id",
+        "inbound_email_id",
+        "thread_sender",
+    }
 )
 
 
@@ -1429,6 +1448,25 @@ class EmailDomainPatch(BaseModel):
         default=None,
         description="Cap on forwarded messages per hour. Omit to leave unchanged.",
     )
+    email_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The agent that answers mail to this address. The agent must be "
+            "live and answer email. A custom domain must be verified with "
+            "inbound on. Null stops agent replies. Omit to leave unchanged."
+        ),
+    )
+    email_agent_scope: EmailAgentScope | None = Field(
+        default=None,
+        description=(
+            "Who the agent answers. 'members': verified members of the "
+            "organization whose mail passes DMARC. 'anyone': every sender whose "
+            "mail passes DMARC and the spam and header rules; such a sender can "
+            "make the agent use its tools. Mail without a DMARC pass gets no "
+            "reply. Omit to leave unchanged, except that a new agent starts at "
+            "'members'."
+        ),
+    )
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -1469,11 +1507,13 @@ class EmailDomainPatch(BaseModel):
             and self.inbound_enabled is None
             and self.forward_to is None
             and self.forward_rate_per_hour is None
+            and "email_agent_id" not in self.model_fields_set
+            and self.email_agent_scope is None
         ):
             raise ValueError(
                 "at least one of local_prefix_user, local_prefix_org, "
-                "inbound_enabled, forward_to, "
-                "or forward_rate_per_hour must be set"
+                "inbound_enabled, forward_to, forward_rate_per_hour, "
+                "email_agent_id, or email_agent_scope must be set"
             )
         return self
 
@@ -1530,6 +1570,14 @@ class EmailDomainResponse(BaseModel):
     forward_rate_per_hour: int | None = Field(
         default=None,
         description="Configured cap on forwarded messages per hour, if set.",
+    )
+    email_agent_id: UUID | None = Field(
+        default=None,
+        description="The agent that answers mail to this address. Null when none does.",
+    )
+    email_agent_scope: EmailAgentScope = Field(
+        default="members",
+        description="Who the agent answers: 'members' or 'anyone'.",
     )
     created_at: datetime = Field(
         description="When this domain was added, ISO 8601 timestamp."
@@ -1772,8 +1820,9 @@ class EmailCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the email and echoed back on "
             "reads. Not interpreted by Hail. The keys 'forwarded_from', "
-            "'forward_headers' and 'system_kind' are reserved for Hail's own "
-            "queue bookkeeping and are rejected."
+            "'forward_headers', 'system_kind', 'reply_to_email_id', "
+            "'inbound_email_id' and 'thread_sender' are reserved for Hail's own "
+            "bookkeeping and are rejected."
         ),
     )
     attachment_ids: list[UUID] | None = Field(
@@ -2262,11 +2311,23 @@ class EmailResponse(EmailSummary):
     )
     in_reply_to: str | None = Field(
         default=None,
-        description="RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 In-Reply-To header. Set on inbound emails and agent replies; null on other outbound rows.",
     )
     references_ids: list[str] | None = Field(
         default=None,
-        description="RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 References header, split into ids. Set on inbound emails and agent replies; null on other outbound rows.",
+    )
+    agent_id: UUID | None = Field(
+        default=None,
+        description="The agent this email belongs to: the address's agent on inbound rows, the writer on outbound rows.",
+    )
+    agent_reply_state: str | None = Field(
+        default=None,
+        description=(
+            "Inbound rows routed to an agent: 'pending', 'processing', 'done', "
+            "'skipped', or 'failed'. A skipped row names why in "
+            "metadata.agent_skip_reason."
+        ),
     )
     spam_verdict: str | None = Field(
         default=None,

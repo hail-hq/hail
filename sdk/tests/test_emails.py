@@ -421,6 +421,7 @@ def test_email_response_inbound_fields_parse() -> None:
             "message_id": "<abc@example.com>",
             "in_reply_to": None,
             "references_ids": ["<prev@example.com>"],
+            "agent_reply_state": "pending",
             "spam_verdict": "pass",
             "virus_verdict": "pass",
             "dkim_verdict": "pass",
@@ -443,6 +444,7 @@ def test_email_response_inbound_fields_parse() -> None:
     assert email.status == "received"
     assert email.direction == "inbound"
     assert email.message_id == "<abc@example.com>"
+    assert email.agent_reply_state == "pending"
     assert email.spam_verdict == "pass"
     assert email.raw_url == "https://api.hail.so/emails/abc/raw"
     assert len(email.attachments) == 1

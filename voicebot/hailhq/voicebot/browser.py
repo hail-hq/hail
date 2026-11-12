@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -25,7 +26,7 @@ from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.browser_tools import build_browser_tools
 from hailhq.voicebot.pipeline import build_session, resolve_org_configs
-from livekit.agents import Agent
+from livekit.agents import Agent, AgentSession
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class BrowserAgent(Agent):
             for message in messages:
                 entry = {
                     key: message[key]
-                    for key in ("id", "from", "subject", "attachments")
+                    for key in ("id", "from", "direction", "subject", "attachments")
                     if key in message
                 }
                 entry["text"] = (message.get("body_text") or message.get("body") or "")[
@@ -157,7 +158,12 @@ def deadline_seconds(call) -> int:
     return max(1, min(600, call.max_duration_seconds))
 
 
-async def run_browser_session(ctx, call_id: UUID) -> None:
+async def run_browser_session(
+    ctx,
+    call_id: UUID,
+    *,
+    attach_handlers: Callable[[AgentSession, UUID], set[asyncio.Task[None]]],
+) -> None:
     """A persisted Call is the authority; dispatch contains only its id."""
     session = None
     messaging_api = None
@@ -305,9 +311,7 @@ async def run_browser_session(ctx, call_id: UUID) -> None:
             language=language,
         )
 
-        from hailhq.voicebot.agent import attach_event_handlers
-
-        event_tasks = attach_event_handlers(session, call_id)
+        event_tasks = attach_handlers(session, call_id)
 
         tools, messaging_api = build_browser_tools(
             call_id, org_id, capabilities, ctx.room.local_participant.publish_data
