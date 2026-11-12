@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from dataclasses import replace
 from typing import Literal
 from uuid import UUID
 
 from hailhq.api import deps
 from hailhq.api.browser_messaging import verified_email
-from hailhq.api.routes.emails import verified_senders
 from hailhq.core.email_agent import (
     EmailScope,
     email_thread,
@@ -35,15 +35,15 @@ from hailhq.core.models import (
     Call,
     Email,
     EmailAttachment,
-    OrganizationMember,
-    User,
 )
 from hailhq.core.telemetry import operation
+from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select, tuple_
 
 READ_BYTES = AGENT_ATTACHMENT_READ_BYTES
 READS_PER_CALL = 8
+logger = logging.getLogger(__name__)
 
 
 class InboxSelection(BaseModel):
@@ -87,34 +87,9 @@ async def email_scope(db, call: Call | Email) -> EmailScope | None:
         caps = call.metadata_.get("browser_capabilities", {})
         inbox = caps.get("inboxAddress") if caps.get("inboundEmailReady") else None
     else:
-        # An inbound caller ID is not proof of an email identity. Only an
-        # outbound call to a verified workspace member can use this path.
-        if call.direction != "outbound":
-            return None
-        peers = (
-            (
-                await db.execute(
-                    select(User.email)
-                    .join(OrganizationMember, OrganizationMember.user_id == User.id)
-                    .where(
-                        OrganizationMember.organization_id == call.organization_id,
-                        User.email_verified.is_(True),
-                        User.phone_number == call.to_e164,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if len(set(peers)) != 1:
-            return None
-        peer = peers[0]
-
-        # Match resolve_sender(..., allow_ambiguous=True) without minting an
-        # inbox as a side effect of a read. Custom domains keep their normal
-        # precedence over the generated address.
-        senders = await verified_senders(db, call.organization_id)
-        inbox = from_address_for(senders[0]) if senders else None
+        # Caller ID and an editable profile phone do not prove ownership of
+        # an email account, even when Hail placed the call.
+        return None
     return EmailScope(call.organization_id, peer, inbox) if peer and inbox else None
 
 
@@ -129,7 +104,10 @@ async def source_files(db, call, reply_id, attachment_ids):
         raise ValueError("Email not in this conversation")
     if isinstance(call, Email):
         scope = replace(
-            scope, email_ids=tuple(row.id for row in await email_thread(db, parent))
+            scope,
+            email_ids=tuple(
+                row.id for row in await email_thread(db, parent, scope=scope)
+            ),
         )
     rows = (
         (
@@ -188,16 +166,29 @@ async def read_file(db, call, attachment, *, page=1, text_offset=0, allow_binary
         return {"spoken": "No more files can be read in this conversation."}
     locked.metadata_ = {**locked.metadata_, "attachment_reads": used + 1}
     await db.commit()
-    s3 = deps.get_s3_mail_optional()
-    if s3 is None:
-        return {"spoken": "File storage is not available right now."}
-    try:
-        raw = await asyncio.wait_for(
-            s3.fetch_raw(attachment.s3_key, max_bytes=READ_BYTES), 10
-        )
-        if len(raw) > READ_BYTES:
-            raise ValueError("File too large")
-    except Exception:
+    outcome = "done"
+    with operation("agent.email.attachment.fetch") as span:
+        s3 = deps.get_s3_mail_optional()
+        if s3 is None:
+            outcome = "storage_unavailable"
+        else:
+            try:
+                raw = await asyncio.wait_for(
+                    s3.fetch_raw(attachment.s3_key, max_bytes=READ_BYTES), 10
+                )
+                if len(raw) > READ_BYTES:
+                    outcome = "too_large"
+            except TimeoutError:
+                outcome = "timeout"
+            except Exception:
+                outcome = "storage_error"
+        if span is not None:
+            span.set_attribute("outcome", outcome)
+            if outcome != "done":
+                span.set_status(StatusCode.ERROR)
+    if outcome != "done":
+        # Storage errors can contain object paths or private request details.
+        logger.warning("Attachment storage read failed: %s", outcome)
         return {"spoken": "The file could not be read. Try again."}
     if kind in ("text/plain", "text/csv", "application/json"):
         try:
@@ -249,14 +240,16 @@ async def conversation_inbox(body: InboxSelection, db, call):
     if body.attachment_id:
         # A file read selects a thread explicitly, or stays in the current run's
         # thread. Search can discover other threads without granting arbitrary files.
-        if isinstance(call, Email):
+        if isinstance(call, Email) or body.email_id:
             anchor = call
             if body.email_id:
                 anchor = (await db.execute(query)).scalar_one_or_none()
                 if anchor is None:
                     return {"spoken": "That email is not in this conversation."}
-            query = query.where(
-                Email.id.in_([row.id for row in await email_thread(db, anchor)])
+            query = scope.query().where(
+                Email.id.in_(
+                    [row.id for row in await email_thread(db, anchor, scope=scope)]
+                )
             )
         attachment = (
             await db.execute(
