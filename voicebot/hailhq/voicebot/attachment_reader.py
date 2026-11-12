@@ -13,12 +13,12 @@ import os
 import sys
 import time
 
-from hailhq.core.telemetry import operation
-from hailhq.voicebot.attachment_decoder import (
-    MAX_DECODED_BYTES,
-    TEXT_BYTES,
-    _text_chunk,
+from hailhq.core.email_attachment_limits import (
+    AGENT_ATTACHMENT_DECODED_BYTES,
+    AGENT_ATTACHMENT_TEXT_BYTES,
+    text_chunk,
 )
+from hailhq.core.telemetry import operation
 from livekit.agents.llm import ChatContext, ImageContent
 from opentelemetry.trace import StatusCode
 
@@ -40,7 +40,7 @@ async def decoded_pages(data):
         stdout, _ = await asyncio.wait_for(
             process.communicate(json.dumps(data).encode()), 12
         )
-        if process.returncode or len(stdout) > MAX_DECODED_BYTES:
+        if process.returncode or len(stdout) > AGENT_ATTACHMENT_DECODED_BYTES:
             raise ValueError("The file could not be decoded")
         return json.loads(stdout)
     finally:
@@ -102,12 +102,19 @@ async def _inspect_attachment(response, data, model, span):
                     async for chunk in stream:
                         delta = getattr(chunk, "delta", None)
                         if delta and delta.content:
-                            part, next_offset = _text_chunk(
-                                delta.content, budget=TEXT_BYTES - answer_bytes
+                            if AGENT_ATTACHMENT_TEXT_BYTES - answer_bytes < 4:
+                                analysis_incomplete = True
+                                break
+                            part, next_offset = text_chunk(
+                                delta.content,
+                                budget=AGENT_ATTACHMENT_TEXT_BYTES - answer_bytes,
                             )
                             parts.append(part)
                             answer_bytes += len(part.encode("utf-8"))
-                            if next_offset is not None or answer_bytes >= TEXT_BYTES:
+                            if (
+                                next_offset is not None
+                                or answer_bytes >= AGENT_ATTACHMENT_TEXT_BYTES
+                            ):
                                 analysis_incomplete = True
                                 break
             text = "".join(parts).strip()

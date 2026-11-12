@@ -10,6 +10,7 @@ from dataclasses import replace
 
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.read_email import SPEC as READ_EMAIL
+from hailhq.core.agent_tools.read_email import read_inbox as request_inbox
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.config import settings
@@ -82,21 +83,12 @@ def build_browser_tools(call_id, org_id, capabilities, publish=None):
             tools.append(wrap_tool(spec, context))
 
     async def read_inbox(ctx, args):
-        result = await api.post(
+        return await request_inbox(
+            api,
             "/internal/browser-sessions/inbox",
-            {
-                "call_id": str(call_id),
-                "attachment_format": "inspection_v1",
-                **{
-                    key: args[key]
-                    for key in READ_EMAIL.parameters["properties"]
-                    if key != "question" and key in args and args[key] is not None
-                },
-            },
+            {"call_id": str(call_id)},
+            args,
         )
-        if args.get("question") and "attachment_data" in result:
-            result["attachment_data"]["question"] = str(args["question"])[:500]
-        return json.dumps(result)
 
     async def available(org, db):
         return True

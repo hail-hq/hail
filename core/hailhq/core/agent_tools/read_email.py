@@ -15,8 +15,18 @@ async def _execute(ctx, args):
         if email_run
         else {"call_id": str(ctx.call_id)}
     )
-    result = await ctx.api.post(
+    return await read_inbox(
+        ctx.api,
         "/internal/agent/email-run/inbox" if email_run else "/internal/agent/inbox",
+        source,
+        args,
+    )
+
+
+async def read_inbox(api, path, source, args):
+    """Build one inbox request with a route and identity chosen by the caller."""
+    result = await api.post(
+        path,
         {
             **source,
             "attachment_format": "inspection_v1",
@@ -50,7 +60,7 @@ SPEC = ToolSpec(
             "email_id": {"type": "string", "format": "uuid"},
             "attachment_id": {"type": "string", "format": "uuid"},
             "before_email_id": {"type": "string", "format": "uuid"},
-            "page": {"type": "integer", "minimum": 1, "maximum": 10000},
+            "page": {"type": "integer", "minimum": 1},
             "question": {"type": "string", "maxLength": 500},
             "query": {"type": "string", "maxLength": 200},
             "limit": {"type": "integer", "minimum": 1, "maximum": 10},

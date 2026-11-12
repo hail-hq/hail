@@ -1,9 +1,7 @@
-"""Stdlib-`email` MIME parser tailored to inbound ingestion.
+"""Email MIME parsing, readable bodies and safe reply headers.
 
-The parser keeps the API tight: a single ``parse_mime`` entry point
-returns a ``ParsedMime`` dataclass with the fields the inbound pipeline
-needs (envelope-like header derivatives, body parts, attachments as raw
-bytes). Storing attachments to S3 is the caller's job.
+Inbound ingestion uses parse_mime. Delivery and agent history share the
+same message-ID validation and bounded reply-header construction here.
 """
 
 from __future__ import annotations
@@ -15,7 +13,24 @@ from email.message import Message
 from email.utils import getaddresses
 from html.parser import HTMLParser
 
-__all__ = ["ParsedAttachment", "ParsedMime", "parse_mime"]
+__all__ = [
+    "MAX_HEADER_CHARS",
+    "MAX_SUBJECT_CHARS",
+    "ParsedAttachment",
+    "ParsedMime",
+    "parse_mime",
+    "readable_email_body",
+    "reference_ids",
+    "reply_references",
+    "reply_subject",
+    "usable_message_id",
+]
+
+# Leave room beneath the provider's 995-character header value cap.
+MAX_HEADER_CHARS = 900
+# Same cap as POST /emails; incoming subjects have no stored length cap.
+MAX_SUBJECT_CHARS = 998
+_MESSAGE_ID = re.compile(r"<[!-;=?-~]+@[!-;=?-~]+>")
 
 
 @dataclass
@@ -244,3 +259,61 @@ def readable_email_body(body_text: str | None, body_html: str | None) -> str:
         )
         or "This email has no text message."
     )
+
+
+def reply_subject(subject: str | None) -> str:
+    clean = " ".join((subject or "").split())
+    if clean.lower().startswith("re:"):
+        return clean[:MAX_SUBJECT_CHARS]
+    return f"Re: {clean}"[:MAX_SUBJECT_CHARS] if clean else "Re: your email"
+
+
+def usable_message_id(value: str, *, max_chars: int = 998) -> bool:
+    """A single printable RFC message ID, safe to compare or emit in headers."""
+    return (
+        isinstance(value, str)
+        and len(value) <= max_chars
+        and bool(_MESSAGE_ID.fullmatch(value))
+    )
+
+
+def reference_ids(email, *, limit=30):
+    """Only safe Message-ID header values; never copy arbitrary headers."""
+    ids = list(
+        dict.fromkeys(
+            x
+            for x in [
+                *(email.references_ids or []),
+                email.in_reply_to,
+                (email.message_id or "").strip(),
+            ]
+            if isinstance(x, str) and usable_message_id(x)
+        )
+    )
+    if limit is None:
+        return ids
+    # Preserve the root and newest parents within both service header limits.
+    # Unbounded IDs above remain available for comparing stored threads.
+    ids = [value for value in ids if len(value) <= MAX_HEADER_CHARS]
+    if not ids:
+        return []
+    root = ids[0]
+    if len(ids) > 1 and len(root) + 1 + len(ids[-1]) > MAX_HEADER_CHARS:
+        return ids[-1:]
+    recent = []
+    length = len(root)
+    for value in reversed(ids[1:]):
+        if len(recent) >= limit - 1 or length + 1 + len(value) > MAX_HEADER_CHARS:
+            break
+        recent.append(value)
+        length += 1 + len(value)
+    return [root, *reversed(recent)]
+
+
+def reply_references(email) -> tuple[str | None, list[str] | None]:
+    """Safe reply headers, retaining the root and most recent parents."""
+    message_id = (email.message_id or "").strip()
+    if not usable_message_id(message_id, max_chars=MAX_HEADER_CHARS):
+        return None, None
+    chain = reference_ids(email)
+    return message_id, chain or None

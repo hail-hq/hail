@@ -37,9 +37,8 @@ from hailhq.core.email_agent import (
     sender_trust,
     tool_sends_for_reply,
 )
-from hailhq.core.email_telemetry import observe_reply
 from hailhq.core.models import EmailAttachment
-from hailhq.core.telemetry import operation, telemetry_enabled
+from hailhq.core.telemetry import observe_email_reply, operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
     resolve_identity,
@@ -266,7 +265,7 @@ async def _reply_claimed(
     api: AgentApiClient, claimed: ClaimedEmailReply, span=None
 ) -> bool:
     email = claimed.email
-    with observe_reply(email.requested_at, span) as report:
+    with observe_email_reply(email.requested_at, span) as report:
 
         async def settle(*args, **kwargs):
             report.finish(await _settle(*args, **kwargs))

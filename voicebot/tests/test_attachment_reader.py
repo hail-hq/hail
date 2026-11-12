@@ -3,6 +3,8 @@
 import base64
 import io
 import json
+import subprocess
+import sys
 import uuid
 import zipfile
 from dataclasses import replace
@@ -13,6 +15,7 @@ import pytest
 from hailhq.core import telemetry
 from hailhq.core.agent_tools import read_email
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.core.email_attachment_limits import text_chunk
 from hailhq.voicebot import attachment_decoder, emailbot
 from hailhq.voicebot.attachment_decoder import decode_file
 from hailhq.voicebot.attachment_reader import inspect_tool_file
@@ -371,7 +374,8 @@ def test_compressed_office_expansion_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_long_model_answer_reports_partial_and_can_be_requested_again():
+@pytest.mark.parametrize("parts", [["é" * 15000], ["x" * 23999, "é"]])
+async def test_long_model_answer_reports_partial_and_can_be_requested_again(parts):
     class Stream:
         async def __aenter__(self):
             return self
@@ -381,7 +385,8 @@ async def test_long_model_answer_reports_partial_and_can_be_requested_again():
 
         def __aiter__(self):
             async def items():
-                yield SimpleNamespace(delta=SimpleNamespace(content="é" * 15000))
+                for part in parts:
+                    yield SimpleNamespace(delta=SimpleNamespace(content=part))
 
             return items()
 
@@ -440,3 +445,96 @@ async def test_attachment_inspection_traces_outcomes_without_file_content(
     assert "PRIVATE QUESTION" not in str(spans[0].attributes)
     assert "base64" not in str(spans[0].attributes)
     provider.shutdown()
+
+
+@pytest.mark.parametrize("offset", [-1, 1, 4])
+def test_text_byte_cursor_rejects_invalid_utf8_offsets(offset):
+    with pytest.raises(ValueError, match="offset"):
+        text_chunk("éx", offset=offset)
+
+
+@pytest.mark.parametrize("budget", [0, -1])
+def test_text_byte_cursor_requires_a_positive_budget(budget):
+    with pytest.raises(ValueError, match="positive"):
+        text_chunk("text", budget=budget)
+
+
+def test_text_byte_cursor_preserves_characters_across_chunks():
+    first, cursor = text_chunk("é€final", budget=4)
+    second, end = text_chunk("é€final", offset=cursor)
+    assert first == "é"
+    assert first + second == "é€final"
+    assert end is None
+    assert text_chunk("é€final", offset=len("é€final".encode())) == ("", None)
+
+
+def test_attachment_reader_does_not_load_the_native_decoder():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import hailhq.voicebot.attachment_reader; "
+                "assert 'hailhq.voicebot.attachment_decoder' not in sys.modules; "
+                "assert 'pypdfium2' not in sys.modules"
+            ),
+        ],
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+
+
+def test_pdf_soft_deadline_preserves_pages_and_a_continuation(monkeypatch):
+    clock = iter([0, 5])
+    monkeypatch.setattr(
+        attachment_decoder, "time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
+    data = {
+        "base64": base64.b64encode(pdf_bytes(3)).decode(),
+        "content_type": "application/pdf",
+    }
+    first = decode_file(data)
+    assert first["pages"] == "1-1 of 3"
+    assert first["partial"] is True
+    assert first["continuation"] == {"page": 2, "text_offset": 0}
+    monkeypatch.setattr(
+        attachment_decoder, "time", SimpleNamespace(monotonic=lambda: 0)
+    )
+    rest = decode_file({**data, **first["continuation"]})
+    assert "Receipt page 2" in rest["text"]
+    assert "Receipt page 3" in rest["text"]
+    assert "continuation" not in rest
+
+
+def test_email_file_schema_does_not_cap_the_page_number():
+    assert read_email.SPEC.parameters["properties"]["page"] == {
+        "type": "integer",
+        "minimum": 1,
+    }
+
+
+@pytest.mark.parametrize("remaining", [1, 2])
+def test_pdf_preserves_prior_pages_when_budget_cannot_fit_next_character(
+    monkeypatch, remaining
+):
+    # Keep the real PDF's stream lengths and byte offsets unchanged.
+    raw = pdf_bytes(2).replace(b"Receipt page 2", b"\xe9" + b"x" * 13)
+    data = {
+        "base64": base64.b64encode(raw).decode(),
+        "content_type": "application/pdf",
+    }
+    full = decode_file({**data, "page": 2})
+    assert ord(full["text"][0]) > 127
+    monkeypatch.setattr(
+        attachment_decoder, "TEXT_BYTES", len("Receipt page 1".encode()) + 1 + remaining
+    )
+    first = decode_file(data)
+    assert first["text"] == "Receipt page 1"
+    assert len(first["images"]) == 1
+    assert first["partial"] is True
+    assert first["continuation"] == {"page": 2, "text_offset": 0}
+    rest = decode_file({**data, **first["continuation"]})
+    assert rest["text"] == full["text"]
+    assert "continuation" not in rest

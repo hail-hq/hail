@@ -1,7 +1,7 @@
 """Optional EU Logfire telemetry shared by every backend process.
 
-A filtering OTLP exporter keeps conversation/tool content out of native LiveKit
-spans too. Agents 1.8 has set_tracer_provider(..., allow_pii=); Hail does not
+A filtering OTLP exporter applies the same metadata and explicit GenAI content
+policy to application and native LiveKit spans. Agents 1.8 has set_tracer_provider(..., allow_pii=); Hail does not
 use it and relies on this exporter for every span instead. No exporter is
 created unless explicitly enabled. Existing console logging is preserved.
 """
@@ -15,7 +15,9 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
@@ -31,7 +33,7 @@ from hailhq.core.telemetry_identity import (
     set_identity,
 )
 from hailhq.core.urls import join_url
-from opentelemetry import trace
+from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.dependencies import DependencyConflictError
@@ -43,7 +45,7 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
     SpanExportResult,
 )
-from opentelemetry.trace import Link, SpanKind, Status
+from opentelemetry.trace import Link, SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -436,3 +438,51 @@ def request_span_attributes(span, scope) -> None:
         span.set_attribute(
             "request_id", format(span.get_span_context().span_id, "016x")
         )
+
+
+class _ReplyObservation:
+    def __init__(self, span):
+        self.span = span
+        self.outcome = "failed"
+
+    def finish(self, outcome: str) -> None:
+        self.outcome = (
+            outcome
+            if outcome
+            in {"done", "skipped", "failed", "retry", "superseded", "cancelled"}
+            else "failed"
+        )
+        if self.span is not None:
+            self.span.set_attribute("reply.state", self.outcome)
+            if self.outcome == "failed":
+                self.span.set_status(StatusCode.ERROR)
+
+    def error(self, exc: BaseException) -> None:
+        if self.span is not None:
+            self.span.record_exception(exc)
+            self.span.set_status(StatusCode.ERROR)
+
+
+@contextmanager
+def observe_email_reply(requested_at: datetime, span=None):
+    """Count one claimed attempt, its duration, and its age since receipt."""
+    meter = metrics.get_meter("hailhq.email")
+    attempts = meter.create_counter("hail.email.reply.attempts", unit="{attempt}")
+    duration = meter.create_histogram("hail.email.reply.duration", unit="s")
+    age = meter.create_histogram("hail.email.reply.queue_age", unit="s")
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=timezone.utc)
+    age.record(max(0.0, (datetime.now(timezone.utc) - requested_at).total_seconds()))
+    started = monotonic()
+    report = _ReplyObservation(span)
+    try:
+        yield report
+    except BaseException as exc:
+        report.error(exc)
+        report.finish("cancelled" if not isinstance(exc, Exception) else "failed")
+        raise
+    finally:
+        report.finish(report.outcome)
+        labels = {"outcome": report.outcome}
+        attempts.add(1, labels)
+        duration.record(max(0.0, monotonic() - started), labels)

@@ -497,3 +497,67 @@ async def test_forged_sender_cannot_plant_history_or_files(
     )
     assert "attachment_data" not in response.json()
     s3.fetch_raw.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_browser_history_applies_common_trust_and_keeps_its_own_sends(
+    client, async_session
+):
+    call, domain = await seed(async_session)
+    trusted, _ = await mail(async_session, call, domain)
+    refused, _ = await mail(
+        async_session, call, domain, message_id="<auto@example.test>"
+    )
+    refused.metadata_ = {"agent_skip_reason": "auto_generated"}
+    sent = Email(
+        organization_id=call.organization_id,
+        email_domain_id=domain.id,
+        direction="outbound",
+        from_address=domain.domain,
+        to_addresses=[trusted.from_address],
+        subject="Your receipt",
+        body_text="This call sent your receipt.",
+        status="sent",
+        metadata_={"call_id": str(call.id), "tool_invocation_id": str(uuid.uuid4())},
+    )
+    forged_reply = Email(
+        organization_id=call.organization_id,
+        email_domain_id=domain.id,
+        direction="outbound",
+        from_address=domain.domain,
+        to_addresses=[trusted.from_address],
+        subject="Untrusted reply",
+        body_text="This reply quotes refused mail.",
+        status="sent",
+        metadata_={"reply_to_email_id": str(refused.id)},
+    )
+    async_session.add_all([sent, forged_reply])
+    await async_session.commit()
+    response = await post(
+        client, "/internal/browser-sessions/inbox", {"call_id": str(call.id)}
+    )
+    ids = {item["id"] for item in response.json()["quoted_untrusted_messages"]}
+    assert ids == {str(trusted.id), str(sent.id)}
+
+
+@pytest.mark.asyncio
+async def test_text_attachment_rejects_a_cursor_inside_a_utf8_character(
+    client, async_session, monkeypatch
+):
+    call, domain = await seed(async_session)
+    _, att = await mail(async_session, call, domain)
+    att.content_type = "text/plain"
+    raw = "éfinal".encode()
+    att.size_bytes = len(raw)
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = raw
+    monkeypatch.setattr(deps, "get_s3_mail_optional", lambda: s3)
+    result = await post(
+        client,
+        "/internal/browser-sessions/inbox",
+        {"call_id": str(call.id), "attachment_id": str(att.id), "text_offset": 1},
+    )
+    assert result.status_code == 200, result.text
+    assert "text position" in result.json()["spoken"]
+    assert "continuation" not in result.json()

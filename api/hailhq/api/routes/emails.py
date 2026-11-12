@@ -23,11 +23,10 @@ from a tenant who hasn't registered a domain still goes out.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
@@ -74,9 +73,9 @@ from hailhq.core.email_attachment_limits import (
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_delivery_events import record_sent_event
+from hailhq.core.email_mime import reference_ids
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.email_threads import reference_ids
-from hailhq.core.file_uploads import object_key
+from hailhq.core.file_uploads import EMAIL_ATTACHMENTS_PREFIX, store_upload
 from hailhq.core.models import (
     Email,
     EmailAttachment,
@@ -394,7 +393,10 @@ async def deliver_email(
             # Independent objects — fetch concurrently so caller latency
             # is max(fetch) instead of sum(fetch) across attachments.
             payloads = await asyncio.gather(
-                *(s3.fetch_raw(row.s3_key) for row in attachment_rows)
+                *(
+                    s3.fetch_raw(row.s3_key, max_bytes=MAX_EMAIL_ATTACHMENT_BYTES)
+                    for row in attachment_rows
+                )
             )
             if (
                 sum(len(raw) for raw in payloads)
@@ -411,25 +413,15 @@ async def deliver_email(
             retained = []
             for row, payload in zip(attachment_rows, payloads):
                 if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
-                    "outbound-attachments/"
+                    EMAIL_ATTACHMENTS_PREFIX
                 ):
-                    upload_id = uuid4()
                     upload = FileUpload(
-                        id=upload_id,
                         organization_id=email.organization_id,
                         purpose="email_attachment",
                         filename=row.filename,
                         content_type=row.content_type,
-                        size_bytes=len(payload),
-                        s3_key=object_key(
-                            "email_attachment", email.organization_id, upload_id
-                        ),
-                        sha256=hashlib.sha256(payload).hexdigest(),
-                        uploaded_at=func.statement_timestamp(),
                     )
-                    db.add(upload)
-                    await db.commit()
-                    await s3.put_attachment(upload.s3_key, payload, upload.content_type)
+                    await store_upload(db, s3, upload, payload)
                     retained.append(upload)
                 else:
                     retained.append(row)

@@ -25,7 +25,11 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from hailhq.api.agent_email_context import InboxSelection, source_files
+from hailhq.api.agent_email_context import (
+    InboxSelection,
+    conversation_inbox,
+    source_files,
+)
 from hailhq.api.audit import write_audit_log
 from hailhq.api.browser_messaging import (
     email_provider_ready,
@@ -40,10 +44,6 @@ from hailhq.api.routes.emails import (
     resolve_sender,
 )
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.api.routes.internal.browser_sessions import (
-    InboxRequest as AgentInboxRequest,
-)
-from hailhq.api.routes.internal.browser_sessions import conversation_inbox
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.agent_tools.send_email import (
@@ -87,7 +87,6 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.email_sender import from_address_for
-from hailhq.core.email_threads import reference_ids
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
@@ -1567,13 +1566,8 @@ async def agent_send_email(
         },
     )
     if parent is not None:
-        subject = " ".join((parent.subject or body.subject).splitlines())
-        email.subject = (
-            subject if subject.lower().startswith("re:") else "Re: " + subject
-        )[:MAX_SUBJECT_CHARS]
-        refs = reference_ids(parent, limit=None)
-        email.in_reply_to = parent.message_id if parent.message_id in refs else None
-        email.references_ids = refs or None
+        email.subject = reply_subject(parent.subject or body.subject)
+        email.in_reply_to, email.references_ids = reply_references(parent)
     email.metadata_ = {
         **email.metadata_,
         "source_attachment_ids": [str(a.id) for a in source_attachments],
@@ -2153,6 +2147,10 @@ async def agent_handover_result(
         )
     await db.commit()
     return {"ok": True}
+
+
+class AgentInboxRequest(InboxSelection):
+    call_id: UUID
 
 
 @router.post("/inbox")

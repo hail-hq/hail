@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -24,7 +23,14 @@ from typing import Any, Literal
 from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.directory import is_verified_member
-from hailhq.core.email_mime import ParsedMime
+from hailhq.core.email_mime import (
+    MAX_HEADER_CHARS,
+    MAX_SUBJECT_CHARS,
+    ParsedMime,
+    reference_ids,
+    reply_references,
+    reply_subject,
+)
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.models import Agent, Email, EmailDomain, Sms
 from hailhq.core.prompts import (
@@ -60,13 +66,16 @@ from sqlalchemy.orm import aliased
 logger = logging.getLogger("hailhq.core.email_agent")
 
 __all__ = [
+    "MAX_HEADER_CHARS",
     "MAX_REPLY_CHARS",
     "MAX_TOOL_SENDS",
     "ClaimedEmailReply",
+    "EmailScope",
     "ReplyDecision",
     "answers_emails",
     "build_chat_messages",
     "claim_pending_reply",
+    "email_history_filter",
     "email_thread",
     "finish_reply",
     "is_authenticated",
@@ -79,6 +88,7 @@ __all__ = [
     "retry_reply",
     "routed_agent",
     "run_refusal",
+    "same_thread",
     "sender_refusal",
     "sender_trust",
     "stamp_skip",
@@ -98,13 +108,9 @@ MAX_EMAIL_CHARS = 6000
 MAX_HTML_CHARS = 200_000
 # Texts and emails one reply run may send, so one email cannot spend without limit.
 MAX_TOOL_SENDS = 3
-# SES caps a header value at 995 characters.
-MAX_HEADER_CHARS = 900
 # Newest ids read from one email's headers when finding its thread. The sender
 # writes them, and asyncpg takes at most 32767 query arguments.
 MAX_REFERENCED_IDS = 100
-# Same cap as POST /emails. An inbound subject has no cap of its own.
-MAX_SUBJECT_CHARS = 998
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -112,7 +118,6 @@ _NO_REPLY_LOCAL = re.compile(
     r"^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|postmaster|bounces?)"
     r"([+.\-_].*)?$"
 )
-_MESSAGE_ID = re.compile(r"^<[!-;=?-~]+@[!-;=?-~]+>$")
 # Why a stored row stays out of the chat: nothing proved who wrote it, or it was
 # never meant for the agent.
 _AGENT_SEND_KEYS = ("reply_to_email_id", "inbound_email_id", "thread_sender")
@@ -591,6 +596,13 @@ def _local_part(message_id: str) -> str:
     return message_id.strip("<> ").partition("@")[0]
 
 
+def _virus_safe(model=Email):
+    return or_(
+        model.virus_verdict.is_(None),
+        func.upper(model.virus_verdict).not_in(("FAIL", "FAILED")),
+    )
+
+
 def _trusted_inbound(model=Email):
     """Inbound rows the chat may quote. ``from_verified`` is the allowlist: a
     forged row with the same ``From`` stays out, and so does any row ingest did
@@ -599,22 +611,12 @@ def _trusted_inbound(model=Email):
         model.direction == "inbound",
         model.from_verified.is_(True),
         or_(model.spam_verdict.is_(None), model.spam_verdict != "FAIL"),
-        or_(model.virus_verdict.is_(None), model.virus_verdict != "FAIL"),
+        _virus_safe(model),
         or_(
             model.metadata_["agent_skip_reason"].astext.is_(None),
             model.metadata_["agent_skip_reason"].astext.not_in(_UNTRUSTED_SKIPS),
         ),
     )
-
-
-def _answered_id(row: Email) -> uuid.UUID | None:
-    """The inbound row an agent's outbound row answers, from its metadata."""
-    meta = row.metadata_ or {}
-    raw = meta.get("reply_to_email_id") or meta.get("inbound_email_id")
-    try:
-        return uuid.UUID(str(raw)) if raw else None
-    except ValueError:
-        return None
 
 
 def _agent_wrote(row: Email) -> bool:
@@ -624,43 +626,7 @@ def _agent_wrote(row: Email) -> bool:
     return row.agent_id is not None or any(key in meta for key in _AGENT_SEND_KEYS)
 
 
-def _team_send(row: Email) -> bool:
-    """Mail a person at the org sent. A forward holds a stranger's words, and
-    the other marked rows are Hail's own mail or a call's."""
-    meta = row.metadata_ or {}
-    return not any(key in meta for key in _NOT_TEAM_SEND_KEYS)
-
-
-async def _thread_rows(
-    db: AsyncSession, email: Email, sender: str, rows: Sequence[Email]
-) -> list[Email]:
-    """The ``rows`` a chat may read. An agent row must answer something proven:
-    a reply to forged mail says what the forger asked for. Any other outbound
-    row must be a team send."""
-    answered = {
-        r.id: _answered_id(r)
-        for r in rows
-        if r.direction == "outbound" and _agent_wrote(r)
-    }
-    ids = {i for i in answered.values() if i is not None}
-    trusted: set[uuid.UUID] = set()
-    if ids:
-        stmt = select(Email.id).where(
-            Email.id.in_(ids),
-            Email.organization_id == email.organization_id,
-            _trusted_inbound(),
-            func.lower(Email.from_address) == sender,
-        )
-        trusted = set((await db.execute(stmt)).scalars().all())
-    return [
-        r
-        for r in rows
-        if r.direction != "outbound"
-        or (answered[r.id] in trusted if r.id in answered else _team_send(r))
-    ]
-
-
-def email_history_filter(sender: str):
+def email_history_filter(sender: str, *, allow_call_mail: bool = False):
     """The same sender-proof and provenance rules as thread history, in SQL.
 
     Search applies this before LIMIT so excluded mail cannot hide valid matches.
@@ -690,13 +656,26 @@ def email_history_filter(sender: str):
         .correlate(Email)
         .exists()
     )
-    return or_(
-        _trusted_inbound(),
-        and_(
-            Email.direction == "outbound",
-            or_(
-                and_(agent_wrote, trusted_parent),
-                and_(~agent_wrote, *(~has_key(k) for k in _NOT_TEAM_SEND_KEYS)),
+    team_send = and_(~agent_wrote, *(~has_key(k) for k in _NOT_TEAM_SEND_KEYS))
+    if allow_call_mail:
+        # Browser and outbound voice scopes already fix both mailbox and peer.
+        # Their own call sends have no inbound email parent to prove.
+        team_send = or_(
+            team_send,
+            and_(
+                ~agent_wrote,
+                Email.metadata_["call_id"].astext.is_not(None),
+                ~has_key("forwarded_from"),
+                ~has_key("system_kind"),
+            ),
+        )
+    return and_(
+        _virus_safe(),
+        or_(
+            _trusted_inbound(),
+            and_(
+                Email.direction == "outbound",
+                or_(and_(agent_wrote, trusted_parent), team_send),
             ),
         ),
     )
@@ -726,15 +705,18 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
                 Email.message_id.in_(ids),
                 Email.provider_message_id.in_({_local_part(i) for i in ids}),
             ),
+            email_history_filter(sender),
             or_(
-                and_(_trusted_inbound(), func.lower(Email.from_address) == sender),
+                and_(
+                    Email.direction == "inbound",
+                    func.lower(Email.from_address) == sender,
+                ),
                 and_(Email.direction == "outbound", sender == any_(Email.to_addresses)),
             ),
         )
         # Newest first, so a long thread keeps its recent mail.
         newest = stmt.order_by(Email.requested_at.desc()).limit(CHAT_LIMIT)
         rows = (await db.execute(newest)).scalars().all()
-        rows = await _thread_rows(db, email, sender, rows)
         frontier = [r for r in rows if r.id not in seen]
         seen.update({r.id: r for r in frontier})
     earlier = [row for row in seen.values() if row.id != email.id]
@@ -817,38 +799,6 @@ def build_chat_messages(
     return messages
 
 
-def reply_subject(subject: str | None) -> str:
-    clean = " ".join((subject or "").split())
-    if clean.lower().startswith("re:"):
-        return clean[:MAX_SUBJECT_CHARS]
-    return f"Re: {clean}"[:MAX_SUBJECT_CHARS] if clean else "Re: your email"
-
-
-def _usable_id(value: str) -> bool:
-    return len(value) <= MAX_HEADER_CHARS and bool(_MESSAGE_ID.match(value))
-
-
-def reply_references(email: Email) -> tuple[str | None, list[str] | None]:
-    """``(In-Reply-To, References)`` for a reply. An id that is malformed, or too
-    long for a header, is left out, and the reply still sends: ids come from the
-    sender and go into headers. The first id and the newest ones stay when the
-    list is too long for one header."""
-    message_id = (email.message_id or "").strip()
-    if not _usable_id(message_id):
-        return None, None
-    chain = [r for r in (email.references_ids or []) if _usable_id(r)]
-    chain.append(message_id)
-    # One pass: the sender sets how many ids there are.
-    length = len(" ".join(chain))
-    cut = 1
-    while length > MAX_HEADER_CHARS and cut < len(chain) - 1:
-        length -= len(chain[cut]) + 1
-        cut += 1
-    if length > MAX_HEADER_CHARS:
-        return message_id, chain[-1:]
-    return message_id, chain[:1] + chain[cut:]
-
-
 async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
     """Emails and texts this reply run sent with its tools. An email that SES
     proved it never took stays out: it reached nobody."""
@@ -864,3 +814,56 @@ async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
             stmt = stmt.where(_may_have_reached_someone())
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total
+
+
+@dataclass(frozen=True)
+class EmailScope:
+    """Server-selected peer and mailbox, with shared history trust rules."""
+
+    organization_id: uuid.UUID
+    peer: str
+    inbox: str
+    email_ids: tuple[uuid.UUID, ...] | None = None
+    email_domain_id: uuid.UUID | None = None
+
+    def query(self):
+        query = select(Email).where(
+            Email.organization_id == self.organization_id,
+        )
+        if self.email_domain_id is not None:
+            query = query.where(Email.email_domain_id == self.email_domain_id)
+        query = query.where(
+            email_history_filter(
+                self.peer.lower(), allow_call_mail=self.email_domain_id is None
+            )
+        )
+        if self.email_ids is not None:
+            query = query.where(Email.id.in_(self.email_ids))
+        incoming = [
+            Email.direction == "inbound",
+            func.lower(Email.from_address) == self.peer.lower(),
+        ]
+        outgoing = [
+            Email.direction == "outbound",
+            Email.to_addresses.any(self.peer),
+        ]
+        if self.email_domain_id is None:
+            incoming.append(Email.to_addresses.any(self.inbox))
+            outgoing.append(func.lower(Email.from_address) == self.inbox.lower())
+        return query.where(
+            or_(
+                and_(*incoming),
+                and_(*outgoing),
+            )
+        )
+
+
+def same_thread(first: Email, second: Email) -> bool:
+    """Compare stored chains after the caller has enforced peer and inbox scope.
+
+    Keep every valid reference for old-file reuse; outgoing header limits do not
+    constrain which older message a stored chain may refer to.
+    """
+    return first.id == second.id or bool(
+        set(reference_ids(first, limit=None)) & set(reference_ids(second, limit=None))
+    )

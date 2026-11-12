@@ -11,11 +11,17 @@ import base64
 import io
 import json
 import sys
+import time
 import zipfile
 from xml.etree import ElementTree
 
 import pypdfium2 as pdfium
-from hailhq.core.email_attachment_limits import AGENT_ATTACHMENT_READ_BYTES
+from hailhq.core.email_attachment_limits import (
+    AGENT_ATTACHMENT_DECODED_BYTES,
+    AGENT_ATTACHMENT_READ_BYTES,
+    AGENT_ATTACHMENT_TEXT_BYTES,
+    text_chunk,
+)
 from PIL import Image, ImageOps
 
 try:
@@ -26,8 +32,9 @@ except ImportError:
 MAX_BYTES = AGENT_ATTACHMENT_READ_BYTES
 MAX_PIXELS = 40_000_000
 MAX_EDGE = 1600
-MAX_DECODED_BYTES = 4 * 1024 * 1024
-TEXT_BYTES = 24000
+MAX_DECODED_BYTES = AGENT_ATTACHMENT_DECODED_BYTES
+TEXT_BYTES = AGENT_ATTACHMENT_TEXT_BYTES
+PDF_DECODE_SECONDS = 4.0
 MAX_EXPANDED_TEXT_BYTES = 32 * 1024 * 1024
 
 
@@ -44,17 +51,6 @@ def _image(image):
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode(
         "ascii"
     )
-
-
-def _text_chunk(text, offset=0, budget=TEXT_BYTES):
-    encoded = text.encode("utf-8")
-    if offset < 0 or offset > len(encoded):
-        raise ValueError("That text offset is not in the file")
-    # Decode strictly at the start, so a caller cannot skip half a character.
-    remaining = encoded[offset:].decode("utf-8")
-    chunk = remaining.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
-    next_offset = offset + len(chunk.encode("utf-8"))
-    return chunk, next_offset if next_offset < len(encoded) else None
 
 
 def _fits(images, text):
@@ -81,7 +77,11 @@ def decode_file(data):
             continuation = None
             end = start
             offset = int(data.get("text_offset", 0))
+            deadline = time.monotonic() + PDF_DECODE_SECONDS
             for index in range(start, len(pdf)):
+                if images and time.monotonic() >= deadline:
+                    continuation = {"page": index + 1, "text_offset": offset}
+                    break
                 page = pdf[index]
                 try:
                     width, height = page.get_size()
@@ -94,8 +94,11 @@ def decode_file(data):
                             - len("\n".join(texts).encode("utf-8"))
                             - bool(texts)
                         )
-                        text, next_offset = _text_chunk(
-                            textpage.get_text_range(), offset, max(0, remaining)
+                        if remaining <= 0 or (texts and remaining < 4):
+                            continuation = {"page": index + 1, "text_offset": offset}
+                            break
+                        text, next_offset = text_chunk(
+                            textpage.get_text_range(), offset, remaining
                         )
                     finally:
                         textpage.close()
@@ -201,7 +204,7 @@ def decode_file(data):
         ):
             raise ValueError("Expanded document text exceeds the reading limit")
         offset = int(data.get("text_offset", 0))
-        text, next_offset = _text_chunk("\n".join(pieces), offset)
+        text, next_offset = text_chunk("\n".join(pieces), offset)
         result = {
             "images": [],
             "text": text,
