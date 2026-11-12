@@ -105,6 +105,7 @@ async def test_search_percent_is_literal_and_does_not_expand_to_all_mail(
         },
     )
     assert result.json()["quoted_untrusted_messages"] == []
+    assert "matching" in result.json()["spoken"].lower()
 
 
 @pytest.mark.asyncio
