@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core import directory, email_agent
 from hailhq.core.email_ingest import ingest_inbound
-from hailhq.core.email_mime import parse_mime
+from hailhq.core.email_mime import parse_mime, reference_ids, usable_message_id
 from hailhq.core.models import (
     Agent,
     Email,
@@ -1098,7 +1098,7 @@ def test_reply_references_chain_and_drop_bad_ids():
 
 def test_a_message_id_too_long_for_a_header_is_left_out():
     long_id = f"<{'x' * email_agent.MAX_HEADER_CHARS}@example.com>"
-    assert email_agent._MESSAGE_ID.match(long_id)
+    assert usable_message_id(long_id)
     assert email_agent.reply_references(
         Email(message_id=long_id, references_ids=["<one@x.co>"])
     ) == (None, None)
@@ -1475,3 +1475,64 @@ def test_chat_subjects_cannot_exceed_the_subject_budget():
     )
     messages = email_agent.build_chat_messages(agent, [row], trust="member")
     assert "x" * (email_agent.MAX_SUBJECT_CHARS + 1) not in messages[1]["content"]
+
+
+def test_long_thread_keeps_access_to_original_files_but_bounds_reply_headers():
+    original = Email(id=uuid.uuid4(), message_id="<original@example.test>")
+    newest = Email(
+        id=uuid.uuid4(),
+        message_id="<latest@example.test>",
+        references_ids=[
+            original.message_id,
+            *[f"<reply{n}@example.test>" for n in range(50)],
+        ],
+    )
+    assert email_agent.same_thread(original, newest)
+    assert len(reference_ids(newest)) == 30
+
+
+def test_bounded_headers_keep_the_root_for_the_next_inbound_reply():
+    original = Email(id=uuid.uuid4(), message_id="<original@example.test>")
+    outgoing = Email(
+        id=uuid.uuid4(),
+        message_id="<outgoing@example.test>",
+        references_ids=[
+            original.message_id,
+            *[f"<reply{n}@example.test>" for n in range(50)],
+        ],
+    )
+    inbound = Email(
+        id=uuid.uuid4(),
+        message_id="<inbound@example.test>",
+        references_ids=reference_ids(outgoing),
+        in_reply_to=outgoing.message_id,
+    )
+    assert len(inbound.references_ids) == 30
+    assert email_agent.same_thread(original, inbound)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("header", ["in_reply_to", "references_ids"])
+def test_thread_matches_an_outbound_ses_id(reverse, header):
+    original = Email(
+        id=uuid.uuid4(), direction="outbound", provider_message_id="ses-original"
+    )
+    reference = "<ses-original@email.amazonses.com>"
+    reply = Email(
+        id=uuid.uuid4(),
+        message_id="<reply@example.com>",
+        **{header: [reference] if header == "references_ids" else reference},
+    )
+    pair = (reply, original) if reverse else (original, reply)
+    assert email_agent.same_thread(*pair)
+
+
+@pytest.mark.parametrize(
+    "reference", ["<other@email.amazonses.com>", "ses-original", "<ses-original>"]
+)
+def test_thread_does_not_match_unrelated_or_malformed_ses_references(reference):
+    original = Email(
+        id=uuid.uuid4(), direction="outbound", provider_message_id="ses-original"
+    )
+    reply = Email(id=uuid.uuid4(), in_reply_to=reference)
+    assert not email_agent.same_thread(original, reply)

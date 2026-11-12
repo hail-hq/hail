@@ -6,11 +6,14 @@ SMS consent control. The model never chooses a destination or sender.
 
 from fastapi import HTTPException
 from hailhq.api.routes.emails import resolve_hail_mail_sender
+from hailhq.core.browser_voice import browser_sms_number
 from hailhq.core.carrier_routing import sms_route_configured
 from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
 from hailhq.core.config import settings
+from hailhq.core.email_attachment_limits import AGENT_ATTACHMENT_READ_TYPES
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import OrganizationMember, PhoneNumber, User
+from hailhq.core.pool import claim_pool_number
 from hailhq.core.providers.email.ses import credentials_ready
 from hailhq.core.sms_registration_gate import is_us, us_registration_block
 from sqlalchemy import func, select
@@ -51,8 +54,6 @@ async def sms_sender(db, org, recipient, *, claim=False, call=None):
     if not recipient:
         return None
     if call is not None and not claim:
-        from hailhq.core.browser_voice import browser_sms_number
-
         number = await browser_sms_number(db, call)
         return (
             number
@@ -61,8 +62,6 @@ async def sms_sender(db, org, recipient, *, claim=False, call=None):
         )
     for pool in (False, True):
         if pool and claim:
-            from hailhq.core.pool import claim_pool_number
-
             excluded = []
             while len(excluded) < 100:
                 number = await claim_pool_number(
@@ -169,13 +168,12 @@ async def capabilities(
                 )
             )
         ),
-        "attachmentReadTypes": ["text/plain", "text/csv", "application/json"],
+        "attachmentReadTypes": list(AGENT_ATTACHMENT_READ_TYPES),
     }
 
 
 async def lease_browser_sms(db, call):
     """Claim after Call.flush; only this call may use a pooled sender."""
-    from hailhq.core.browser_voice import browser_sms_number
 
     caps = dict(call.metadata_.get("browser_capabilities", {}))
     recipient = call.metadata_.get("browser_contacts", {}).get("sms")
@@ -210,8 +208,6 @@ async def lease_browser_sms(db, call):
 
 
 async def live_browser_capabilities(db, call):
-    from hailhq.core.browser_voice import browser_sms_number
-
     caps = dict(call.metadata_.get("browser_capabilities", {}))
     number = await browser_sms_number(db, call)
     live = call.status == "in_progress" and number is not None

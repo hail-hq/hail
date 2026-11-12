@@ -1768,9 +1768,10 @@ class FileUpload(Base):
     ``purpose`` says what it is for:
 
     * ``email_attachment``: an outbound email attachment, reusable across
-      many sends. Distinct from ``EmailAttachment`` (always 1:1 with an
-      already-received inbound email). Rows still unused 24h after upload
-      are deleted; used rows are kept.
+      many sends. Distinct from ``EmailAttachment`` (one file on one email).
+      A forwarded received file uses an outbound upload to preserve its bytes
+      beyond inbound retention. Rows still unused 24h after upload are
+      deleted; used rows are kept.
     * ``verification_document``: a document for one carrier verification.
       ``POST /verifications`` reads it and deletes it; rows left over are
       deleted 1 hour after upload.

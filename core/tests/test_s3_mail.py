@@ -1,4 +1,5 @@
 import asyncio
+import io
 from unittest.mock import MagicMock
 
 import pytest
@@ -114,3 +115,24 @@ def test_count_prefix_reads_key_count():
     stub.list_objects_v2.assert_called_once_with(
         Bucket="hail-inbound", Prefix="sms-evidence/o/", MaxKeys=100
     )
+
+
+def test_fetch_raw_bounds_buffering_and_closes_body():
+    stub = MagicMock()
+    body = io.BytesIO(b"abcdef")
+    stub.get_object.return_value = {"Body": body}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(ValueError, match="limit"):
+        asyncio.run(client.fetch_raw("file", max_bytes=3))
+    assert body.closed
+
+
+def test_fetch_raw_rejects_large_content_length_without_reading():
+    stub = MagicMock()
+    body = MagicMock()
+    stub.get_object.return_value = {"Body": body, "ContentLength": 4}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(ValueError, match="limit"):
+        asyncio.run(client.fetch_raw("file", max_bytes=3))
+    body.read.assert_not_called()
+    body.close.assert_called_once()

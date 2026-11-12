@@ -37,8 +37,10 @@ this as required rather than optional.
   conversation is only ever sent to one provider at a time.
 - **Monitoring and tracing**: Hail sends application traces to
   Pydantic Logfire, in its EU region, to run and debug the service.
-  Traces include voice and SMS agent prompts, transcripts, replies, and
-  tool call arguments and results, sent as is. This content can hold a
+  Traces include voice, SMS, and email agent prompts, conversation content,
+  replies, and tool call arguments and results, sent as is. Email model inputs
+  can include file indexes, extracted attachment text, and normalized page images.
+  Native model instrumentation can export those inputs too. This content can hold a
   Recipient's full phone number, email address or name. In trace tags,
   a Recipient's phone number is masked to its country code and last 4
   digits, and an email address to its domain. The Developer's own number

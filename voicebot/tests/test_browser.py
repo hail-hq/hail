@@ -1,6 +1,10 @@
+import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core.config import settings
+from hailhq.voicebot import agent, browser_tools
 from hailhq.voicebot.browser import browser_instructions, deadline_seconds
 
 
@@ -10,7 +14,8 @@ def test_browser_runtime_scopes_real_sends_and_warns_about_unreadable_files():
     assert "browser" in result
     assert "verified account email" in result
     assert "three emails and three texts" in result
-    assert "cannot read PDFs or images" in result
+    assert "inspect images, PDFs" in result
+    assert "stored original" in result
     assert "telephone call" not in result
 
 
@@ -125,7 +130,9 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
             asyncio.create_task(ctx.callback())
 
         ctx.room.disconnect.side_effect = disconnected
-    await browser.run_browser_session(ctx, call.id)
+    await browser.run_browser_session(
+        ctx, call.id, attach_handlers=agent.attach_event_handlers
+    )
     await asyncio.wait_for(closed.wait(), timeout=3)
     await asyncio.sleep(0.1)
     await async_session.refresh(call)
@@ -325,3 +332,36 @@ def test_browser_module_parses_on_supported_python_311():
     from hailhq.voicebot import browser
 
     ast.parse(Path(browser.__file__).read_text(), feature_version=(3, 11))
+
+
+@pytest.mark.asyncio
+async def test_browser_forwards_search_and_both_continuation_offsets(monkeypatch):
+    monkeypatch.setattr(settings, "hail_internal_secret", "test")
+    monkeypatch.setattr(browser_tools, "wrap_tool", lambda spec, ctx: spec)
+    post = AsyncMock(return_value={"quoted_untrusted_content": "remaining content"})
+    monkeypatch.setattr(browser_tools.BrowserApiClient, "post", post)
+    call_id = uuid.uuid4()
+    tools, _ = browser_tools.build_browser_tools(
+        call_id, uuid.uuid4(), {"inboundEmailReady": True}
+    )
+    spec = next(s for s in tools if s.name == "read_browser_inbox")
+    args = {
+        "email_id": str(uuid.uuid4()),
+        "query": "receipt",
+        "offset": 6000,
+        "text_offset": 24000,
+        "page": 4,
+        "limit": 2,
+    }
+    await spec.execute(
+        None,
+        {**args, "call_id": "forged", "organization_id": "forged"},
+    )
+    assert post.await_args.args[0] == "/internal/browser-sessions/inbox"
+    payload = post.await_args.args[1]
+    assert payload["call_id"] == str(call_id)
+    assert "organization_id" not in payload
+    assert payload["attachment_format"] == "inspection_v1"
+    for key, value in args.items():
+        assert payload.get(key) == value
+        assert key in spec.parameters["properties"]

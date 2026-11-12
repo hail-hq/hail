@@ -43,6 +43,7 @@ def test_registry_names_and_tiers():
         "list_contacts",
         "send_sms",
         "send_email",
+        "read_email",
         "thread_history",
         "transfer_call",
     }
@@ -51,6 +52,7 @@ def test_registry_names_and_tiers():
     assert tools["list_contacts"].risk_tier == "read_only"
     assert tools["send_sms"].risk_tier == "outbound_send"
     assert tools["send_email"].risk_tier == "outbound_send"
+    assert tools["read_email"].risk_tier == "read_only"
     assert tools["thread_history"].risk_tier == "read_only"
     assert tools["transfer_call"].risk_tier == "session_control"
 

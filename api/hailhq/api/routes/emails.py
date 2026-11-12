@@ -7,7 +7,6 @@ GET /emails/suppressions - the org's suppressed addresses.
 DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
-
   explicit ``from`` → the org's one verified custom domain → its hail-mail
   address → freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
 
@@ -74,7 +73,9 @@ from hailhq.core.email_attachment_limits import (
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_delivery_events import record_sent_event
+from hailhq.core.email_mime import reference_ids
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.file_uploads import EMAIL_ATTACHMENTS_PREFIX, store_upload
 from hailhq.core.models import (
     Email,
     EmailAttachment,
@@ -314,10 +315,11 @@ def _send_headers(email: Email, extra: dict[str, str] | None) -> dict[str, str] 
     """Headers for the wire. An agent's mail threads in the sender's client and
     marks itself automatic, so another agent does not answer it."""
     headers = dict(extra or {})
-    if email.in_reply_to:
+    references = reference_ids(email)
+    if email.in_reply_to in references:
         headers["In-Reply-To"] = email.in_reply_to
-    if email.references_ids:
-        headers["References"] = " ".join(email.references_ids)
+    if references:
+        headers["References"] = " ".join(references)
     meta = email.metadata_ or {}
     if meta.get("reply_to_email_id"):
         headers["Auto-Submitted"] = "auto-replied"
@@ -330,7 +332,7 @@ async def deliver_email(
     db: AsyncSession,
     email_provider: EmailProvider,
     email: Email,
-    attachment_rows: list[FileUpload] | None = None,
+    attachment_rows: list[FileUpload | EmailAttachment] | None = None,
     *,
     billable: bool = True,
     claimed_at: datetime | None = None,
@@ -377,6 +379,7 @@ async def deliver_email(
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+
     provider_attachments: list[ProviderAttachment] = []
     try:
         if attachment_rows:
@@ -390,8 +393,39 @@ async def deliver_email(
             # Independent objects — fetch concurrently so caller latency
             # is max(fetch) instead of sum(fetch) across attachments.
             payloads = await asyncio.gather(
-                *(s3.fetch_raw(row.s3_key) for row in attachment_rows)
+                *(
+                    s3.fetch_raw(row.s3_key, max_bytes=MAX_EMAIL_ATTACHMENT_BYTES)
+                    for row in attachment_rows
+                )
             )
+            if (
+                sum(len(raw) for raw in payloads)
+                + len((email.body_text or "").encode())
+                + len((email.body_html or "").encode())
+                > MAX_EMAIL_ATTACHMENT_BYTES
+            ):
+                raise ValueError("Email attachments exceed the message size limit")
+            # Received objects expire under the inbound lifecycle. Track a
+            # retained outbound copy using the existing upload/GC contract,
+            # before sending. Failed or interrupted sends leave unused uploads
+            # for the normal sweeper; successful sends mark them used below.
+
+            retained = []
+            for row, payload in zip(attachment_rows, payloads):
+                if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
+                    EMAIL_ATTACHMENTS_PREFIX
+                ):
+                    upload = FileUpload(
+                        organization_id=email.organization_id,
+                        purpose="email_attachment",
+                        filename=row.filename,
+                        content_type=row.content_type,
+                    )
+                    await store_upload(db, s3, upload, payload)
+                    retained.append(upload)
+                else:
+                    retained.append(row)
+            attachment_rows = retained
             provider_attachments = [
                 ProviderAttachment(
                     filename=row.filename,
@@ -491,7 +525,7 @@ async def deliver_email(
                 s3_key=row.s3_key,
             )
         )
-        if row.first_used_at is None:
+        if isinstance(row, FileUpload) and row.first_used_at is None:
             # The database clock, like every other upload time.
             row.first_used_at = func.statement_timestamp()
     await db.commit()

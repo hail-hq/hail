@@ -25,6 +25,11 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from hailhq.api.agent_email_context import (
+    InboxSelection,
+    conversation_inbox,
+    source_files,
+)
 from hailhq.api.audit import write_audit_log
 from hailhq.api.browser_messaging import (
     email_provider_ready,
@@ -80,6 +85,7 @@ from hailhq.core.email_agent import (
 from hailhq.core.email_agent import (
     thread_lock_key as email_thread_lock_key,
 )
+from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.handover import (
@@ -98,6 +104,7 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     Email,
+    EmailAttachment,
     EmailDomain,
     PhoneNumber,
     Sms,
@@ -159,6 +166,8 @@ class AgentSendEmailRequest(AgentSendBase):
     recipient_name: str = Field(min_length=1, max_length=MAX_RECIPIENT_NAME_CHARS)
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
+    reply_to_email_id: UUID | None = None
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
 
 class AgentSendResponse(BaseModel):
@@ -440,9 +449,12 @@ async def _send_email_to(
     recipient: str,
     subject: str,
     body_text: str,
-    meta: dict[str, str],
+    meta: dict[str, Any],
     agent_id: UUID | None,
     consent_source: str,
+    reply_parent: Email | None = None,
+    reply_domain: EmailDomain | None = None,
+    attachment_rows: list[EmailAttachment] | None = None,
 ) -> AgentSendResponse:
     """Gate, cap, pick the sender, write the row, audit, and deliver one
     email to a member the caller resolved from the directory."""
@@ -475,7 +487,7 @@ async def _send_email_to(
         # domains this path takes the oldest, where POST /emails returns 422
         # and the caller chooses. A verified custom domain still wins over the
         # hail-mail address, as it does on POST /emails.
-        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+        sd = reply_domain or await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
 
@@ -491,6 +503,9 @@ async def _send_email_to(
         provider="ses",
         metadata_=meta,
     )
+    if reply_parent is not None:
+        email.subject = reply_subject(reply_parent.subject)
+        email.in_reply_to, email.references_ids = reply_references(reply_parent)
     db.add(email)
     await db.commit()
     await db.refresh(email)
@@ -498,7 +513,9 @@ async def _send_email_to(
     await write_audit_log(
         organization_id=org,
         api_key_id=None,
-        action="agent.email.send",
+        action=(
+            "agent.email.reply" if meta.get("reply_to_email_id") else "agent.email.send"
+        ),
         resource_type="email",
         resource_id=email.id,
         payload={
@@ -512,7 +529,13 @@ async def _send_email_to(
         actor_kind="system",
     )
 
-    err = await deliver_email(db, email_provider, email, at_most_once=True)
+    err = await deliver_email(
+        db,
+        email_provider,
+        email,
+        at_most_once=True,
+        **({"attachment_rows": attachment_rows} if attachment_rows else {}),
+    )
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -1038,8 +1061,29 @@ async def agent_reply_email(
             await db.refresh(prior)
             return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
         await db.refresh(prior)
+        files = []
+        if prior.metadata_.get("source_attachment_ids"):
+            try:
+                ids = [
+                    UUID(value) for value in prior.metadata_["source_attachment_ids"]
+                ]
+                source_id = UUID(
+                    prior.metadata_.get("attachment_reply_to_email_id", str(inbound.id))
+                )
+                _, _, files = await source_files(db, inbound, source_id, ids)
+            except (ValueError, TypeError):
+                prior.status = "failed"
+                prior.end_reason = "AttachmentsUnavailable"
+                prior.failed_at = datetime.now(timezone.utc)
+                await db.commit()
+                return _send_failure("AttachmentsUnavailable", prior)
         err = await deliver_email(
-            db, email_provider, prior, claimed_at=claimed_at, at_most_once=True
+            db,
+            email_provider,
+            prior,
+            claimed_at=claimed_at,
+            at_most_once=True,
+            **({"attachment_rows": files} if files else {}),
         )
         if err is not None:
             return _send_failure(err, prior)
@@ -1102,6 +1146,8 @@ class AgentEmailRunBase(BaseModel):
 
 
 class AgentEmailRunEmailRequest(AgentEmailRunBase):
+    reply_to_email_id: UUID | None = None
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
 
@@ -1197,9 +1243,46 @@ async def agent_email_run_send_email(
     inbound, agent = run
     org = inbound.organization_id
 
-    recipient = await _member_email(db, org, body.recipient_name)
-    if isinstance(recipient, AgentSendResponse):
-        return recipient
+    parent = None
+    files = []
+    meta = _email_run_meta(body, agent, inbound)
+    if body.attachment_ids or body.reply_to_email_id:
+        existing = await prior_email_reply(db, inbound)
+        if existing is not None:
+            return _replayed_send(existing)
+        try:
+            scope, source, files = await source_files(
+                db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
+            )
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files are not available in this email thread. Nothing was sent.",
+            )
+        if body.recipient_name.casefold() in ("sender", "you"):
+            recipient = scope.peer
+        else:
+            recipient = await _member_email(db, org, body.recipient_name)
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
+        if recipient.casefold() != scope.peer.casefold():
+            return AgentSendResponse(
+                ok=False,
+                spoken="Original files can only return to this email's sender.",
+            )
+        # This file-bearing send is the automatic reply itself. The normal
+        # reply endpoint observes this row and does not send a second email.
+        parent = inbound
+        meta = {
+            **meta,
+            "reply_to_email_id": str(inbound.id),
+            "attachment_reply_to_email_id": str(source.id),
+            "source_attachment_ids": [str(row.id) for row in files],
+        }
+    else:
+        recipient = await _member_email(db, org, body.recipient_name)
+        if isinstance(recipient, AgentSendResponse):
+            return recipient
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
@@ -1210,9 +1293,16 @@ async def agent_email_run_send_email(
         recipient=recipient,
         subject=body.subject,
         body_text=body.body_text,
-        meta=_email_run_meta(body, agent, inbound),
+        meta=meta,
         agent_id=agent.id,
         consent_source="inbound_email",
+        reply_parent=parent,
+        reply_domain=(
+            await db.get(EmailDomain, inbound.email_domain_id)
+            if parent is not None
+            else None
+        ),
+        attachment_rows=files,
     )
 
 
@@ -1311,9 +1401,40 @@ async def agent_send_email(
         )
 
     if call.transport != "browser":
-        recipient = await _member_email(db, org, body.recipient_name)
-        if isinstance(recipient, AgentSendResponse):
-            return recipient
+        parent = None
+        files = []
+        meta = _meta(body)
+        if body.reply_to_email_id or body.attachment_ids:
+            try:
+                scope, parent, files = await source_files(
+                    db, call, body.reply_to_email_id, body.attachment_ids
+                )
+            except ValueError:
+                return AgentSendResponse(
+                    ok=False,
+                    spoken="Those files are not available in this conversation.",
+                )
+            recipient = (
+                scope.peer
+                if body.recipient_name.casefold() in ("you", "sender")
+                else await _member_email(db, org, body.recipient_name)
+            )
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
+            if recipient.casefold() != scope.peer.casefold():
+                return AgentSendResponse(
+                    ok=False,
+                    spoken="Original files can only return to the person in this conversation.",
+                )
+            meta = {
+                **meta,
+                "source_attachment_ids": [str(row.id) for row in files],
+                "attachment_reply_to_email_id": str(parent.id),
+            }
+        else:
+            recipient = await _member_email(db, org, body.recipient_name)
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
         return await _send_email_to(
             db,
             email_provider,
@@ -1321,9 +1442,11 @@ async def agent_send_email(
             recipient=recipient,
             subject=body.subject,
             body_text=body.body_text,
-            meta=_meta(body),
+            meta=meta,
             agent_id=None,
             consent_source="voice_call",
+            reply_parent=parent,
+            attachment_rows=files,
         )
 
     if call.transport == "browser":
@@ -1388,6 +1511,28 @@ async def agent_send_email(
             spoken="Your workspace email changed. Start a new conversation before sending.",
         )
 
+    parent = None
+    source_attachments = []
+    if body.reply_to_email_id or body.attachment_ids:
+        try:
+            scope, parent, source_attachments = await source_files(
+                db, call, body.reply_to_email_id, body.attachment_ids
+            )
+            if recipient.lower() != scope.peer.lower():
+                raise ValueError("Files can only return to this conversation's person")
+
+            if (
+                sum(a.size_bytes for a in source_attachments)
+                + len(body.body_text.encode())
+                > MAX_EMAIL_ATTACHMENT_BYTES
+            ):
+                raise ValueError("Files too large")
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files or that email are not available in this conversation. Nothing was sent.",
+            )
+
     if call.transport == "browser" and not await reserve_browser_preview(
         db,
         call.id,
@@ -1424,6 +1569,14 @@ async def agent_send_email(
             ),
         },
     )
+    if parent is not None:
+        email.subject = reply_subject(parent.subject or body.subject)
+        email.in_reply_to, email.references_ids = reply_references(parent)
+    email.metadata_ = {
+        **email.metadata_,
+        "source_attachment_ids": [str(a.id) for a in source_attachments],
+        "attachment_reply_to_email_id": str(parent.id) if parent else None,
+    }
     db.add(email)
     await db.commit()
     await db.refresh(email)
@@ -1450,6 +1603,7 @@ async def agent_send_email(
         email_provider,
         email,
         at_most_once=True,
+        **({"attachment_rows": source_attachments} if source_attachments else {}),
         **(
             {"billable": False}
             if call.transport == "browser" and call.metadata_.get("browser_trial")
@@ -1997,6 +2151,44 @@ async def agent_handover_result(
         )
     await db.commit()
     return {"ok": True}
+
+
+class AgentInboxRequest(InboxSelection):
+    call_id: UUID
+
+
+@router.post("/inbox")
+async def agent_inbox(
+    body: AgentInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    call = await db.get(Call, body.call_id)
+    if call is None or call.status != "in_progress":
+        return {"spoken": "This conversation has ended. Inbox access is closed."}
+    await _tag_call(db, call)
+    return await conversation_inbox(body, db, call)
+
+
+class EmailRunInboxRequest(InboxSelection):
+    inbound_email_id: UUID
+
+
+@router.post("/email-run/inbox")
+async def email_run_inbox(
+    body: EmailRunInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    inbound = await db.get(Email, body.inbound_email_id)
+    if inbound is None or inbound.direction != "inbound":
+        return {"spoken": "This email conversation is not available."}
+    await key_lock(db, email_thread_lock_key(inbound))
+    await db.refresh(inbound)
+    routed = await _routed_email(db, inbound)
+    if (
+        routed is None
+        or inbound.agent_reply_state != "processing"
+        or await run_refusal(db, routed[0], inbound, count_own_sends=True) is not None
+    ):
+        return {"spoken": "This email conversation is no longer available."}
+    return await conversation_inbox(body, db, inbound)
 
 
 __all__ = ["router"]
