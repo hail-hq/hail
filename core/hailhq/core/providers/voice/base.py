@@ -51,11 +51,15 @@ OrderState = Literal["active", "failed", "pending", "missing", "rejected_registr
 
 
 class CarrierRequestError(Exception):
-    """A carrier rejected or failed a request. ``status`` is its HTTP status."""
+    """A carrier rejected a request; diagnostics must exclude raw provider text."""
 
-    def __init__(self, status: int) -> None:
+    def __init__(
+        self, status: int, *, codes: tuple[str, ...] = (), request_id: str | None = None
+    ) -> None:
         super().__init__(f"Carrier request failed with HTTP {status}")
         self.status = status
+        self.codes = codes
+        self.request_id = request_id
 
 
 class CarrierPreOrderError(CarrierRequestError):

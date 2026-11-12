@@ -706,19 +706,56 @@ async def acquire_offer(
             if isinstance(exc, httpx.HTTPStatusError)
             else exc.status
         )
+        codes = list(exc.codes) if isinstance(exc, CarrierRequestError) else []
+        request_id = exc.request_id if isinstance(exc, CarrierRequestError) else None
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "carrier_error": {
+                "status": status,
+                "codes": codes,
+                "request_id": request_id,
+            },
+        }
         if 400 <= status < 500 and status not in (408, 409):
+            restricted = number.provider == "telnyx" and "20003" in codes
+            number.provisioning_metadata = {
+                **number.provisioning_metadata,
+                "failure_code": (
+                    "carrier_account_restricted"
+                    if restricted
+                    else "carrier_order_rejected"
+                ),
+            }
+            logger.warning(
+                "Carrier rejected number order: provider=%s organization=%s number=%s "
+                "status=%s codes=%s request_id=%s",
+                number.provider,
+                org,
+                number.id,
+                status,
+                codes,
+                request_id,
+            )
             await finish_order(
                 db,
                 number,
                 resource_id=None,
                 failed=True,
-                reason=f"the carrier rejected the order (HTTP {status})",
+                reason=(
+                    "number purchases are restricted on our side; contact support for help"
+                    if restricted
+                    else f"the carrier rejected the order (HTTP {status})"
+                ),
             )
         else:
             # Unknown outcome: keep the reservation for reconciliation.
             await db.commit()
             logger.warning(
-                "Carrier order outcome unknown: number=%s status=%s", number.id, status
+                "Carrier order outcome unknown: number=%s status=%s codes=%s request_id=%s",
+                number.id,
+                status,
+                codes,
+                request_id,
             )
     except Exception:
         # Do not expose provider payloads or retry this order on another carrier.
