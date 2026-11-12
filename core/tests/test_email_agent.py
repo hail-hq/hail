@@ -1509,3 +1509,30 @@ def test_bounded_headers_keep_the_root_for_the_next_inbound_reply():
     )
     assert len(inbound.references_ids) == 30
     assert email_agent.same_thread(original, inbound)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("header", ["in_reply_to", "references_ids"])
+def test_thread_matches_an_outbound_ses_id(reverse, header):
+    original = Email(
+        id=uuid.uuid4(), direction="outbound", provider_message_id="ses-original"
+    )
+    reference = "<ses-original@email.amazonses.com>"
+    reply = Email(
+        id=uuid.uuid4(),
+        message_id="<reply@example.com>",
+        **{header: [reference] if header == "references_ids" else reference},
+    )
+    pair = (reply, original) if reverse else (original, reply)
+    assert email_agent.same_thread(*pair)
+
+
+@pytest.mark.parametrize(
+    "reference", ["<other@email.amazonses.com>", "ses-original", "<ses-original>"]
+)
+def test_thread_does_not_match_unrelated_or_malformed_ses_references(reference):
+    original = Email(
+        id=uuid.uuid4(), direction="outbound", provider_message_id="ses-original"
+    )
+    reply = Email(id=uuid.uuid4(), in_reply_to=reference)
+    assert not email_agent.same_thread(original, reply)

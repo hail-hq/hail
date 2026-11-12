@@ -590,10 +590,10 @@ def _referenced_ids(email: Email) -> list[str]:
     return ids
 
 
-def _local_part(message_id: str) -> str:
+def _provider_message_ids(message_ids: set[str]) -> set[str]:
     """SES overrides ``Message-ID`` on outbound mail with its own id at an SES
     host, so a referenced reply is found through ``provider_message_id``."""
-    return message_id.strip("<> ").partition("@")[0]
+    return {message_id.strip("<> ").partition("@")[0] for message_id in message_ids}
 
 
 def _virus_safe(model=Email):
@@ -703,7 +703,7 @@ async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
             Email.email_domain_id == email.email_domain_id,
             or_(
                 Email.message_id.in_(ids),
-                Email.provider_message_id.in_({_local_part(i) for i in ids}),
+                Email.provider_message_id.in_(_provider_message_ids(ids)),
             ),
             email_history_filter(sender),
             or_(
@@ -864,6 +864,14 @@ def same_thread(first: Email, second: Email) -> bool:
     Keep every valid reference for old-file reuse; outgoing header limits do not
     constrain which older message a stored chain may refer to.
     """
-    return first.id == second.id or bool(
-        set(reference_ids(first, limit=None)) & set(reference_ids(second, limit=None))
+    first_ids = set(reference_ids(first, limit=None))
+    second_ids = set(reference_ids(second, limit=None))
+    return (
+        first.id == second.id
+        or bool(first_ids & second_ids)
+        or any(
+            source.direction == "outbound"
+            and source.provider_message_id in _provider_message_ids(references)
+            for source, references in ((first, second_ids), (second, first_ids))
+        )
     )

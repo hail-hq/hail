@@ -233,6 +233,45 @@ async def test_reuses_a_file_from_an_earlier_email_in_the_same_thread(
 
 
 @pytest.mark.asyncio
+async def test_returns_an_original_outbound_file_after_a_reply_to_its_ses_id(
+    client, async_session, monkeypatch, email_mock
+):
+    call, domain = await seed(async_session)
+    original, att = await mail(async_session, call, domain)
+    original.direction = "outbound"
+    original.from_address = domain.domain
+    original.to_addresses = ["owner@example.test"]
+    original.message_id = None
+    original.provider_message_id = "ses-original"
+    reply, _ = await mail(
+        async_session, call, domain, message_id="<reply@example.test>"
+    )
+    reply.in_reply_to = "<ses-original@email.amazonses.com>"
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = b"pngdata"
+    monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
+    result = await post(
+        client,
+        "/internal/agent/send-email",
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": "you",
+            "subject": "Original",
+            "body_text": "Your original file.",
+            "reply_to_email_id": str(reply.id),
+            "attachment_ids": [str(att.id)],
+        },
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["ok"] is True, result.text
+    sent = email_mock.send_email.call_args.kwargs
+    assert sent["attachments"][0].payload == b"pngdata"
+    assert sent["headers"]["In-Reply-To"] == reply.message_id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["quota", "ended", "virus", "size"])
 async def test_file_reads_stop_before_storage_when_not_allowed(
     client, async_session, monkeypatch, reason
