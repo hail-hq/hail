@@ -246,7 +246,7 @@ async def test_a_young_queued_reply_is_left_to_finish(
     email_mock.send_email.assert_not_awaited()
 
 
-async def test_a_stale_queued_reply_is_delivered(
+async def test_an_ambiguous_queued_reply_is_never_resent(
     client, async_session, email_mock
 ) -> None:
     org, agent, domain, inbound = await _seed(async_session)
@@ -260,9 +260,12 @@ async def test_a_stale_queued_reply_is_delivered(
         age=timedelta(minutes=5),
     )
     data = await _reply(client, inbound.id, "Different text.")
-    assert data["state"] == "done" and data["reply_id"] == str(row.id)
-    kwargs = email_mock.send_email.await_args.kwargs
-    assert kwargs["body_text"] == "Written earlier."
+    assert data["state"] == "failed" and data["reason"] == "DeliveryUnknown"
+    assert data["reply_id"] == str(row.id)
+    assert (await _reply(client, inbound.id))["reason"] == "DeliveryUnknown"
+    email_mock.send_email.assert_not_awaited()
+    await async_session.refresh(row)
+    assert row.status == "failed" and row.end_reason == "DeliveryUnknown"
 
 
 async def test_a_retry_without_a_body_delivers_the_stored_text(
@@ -304,7 +307,7 @@ async def test_a_slow_resend_cannot_be_sent_twice(
         agent,
         domain,
         inbound,
-        status="queued",
+        status="failed",
         age=timedelta(minutes=5),
     )
     await async_session.refresh(row)

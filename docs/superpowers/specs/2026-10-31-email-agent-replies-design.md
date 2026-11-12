@@ -72,12 +72,16 @@ because a forward holds a stranger's words. A team send reaches the model as quo
 text, never as an `assistant` turn. The newest rows win when a thread is long.
 
 `POST /internal/agent/reply-email` sends one reply per inbound row. A retry reads
-the earlier row: a sent one is done, a failed one is delivered again if SES took
-nothing, and so is a
-queued one past a 240-second grace. A resend first claims the row by resetting
-`requested_at`, guarded on the old status and time, so a retry during a slow resend
-waits. The send writes its result only while that claim holds. SES calls have a
-total budget of 213 seconds, under the grace. A failure that proves SES took
+the earlier row: a sent one is done, and a failed one is delivered again only if
+its saved failure proves SES took nothing. A queued row waits for up to 240
+seconds, then becomes a final `DeliveryUnknown` failure: SES may have accepted
+it before the API stopped, so it is never resent. Settling that row revokes the
+old send claim. A safe resend first claims the failed row by resetting
+`requested_at`, guarded on the old status and time, so another retry waits.
+Attachment preparation and provider delivery share a total budget of 213 seconds
+from the claim, under the grace. Before calling SES, the request checks that its
+claim still owns a queued row. The send writes its result only while that claim
+still holds and the row remains queued. A failure that proves SES took
 nothing (throttling, limits, connect timeouts, endpoint connection errors) comes
 back as `retry`, and the worker marks the row failed only after its last attempt.
 A wait for a send still running is not an attempt. A skip marks a reply left queued

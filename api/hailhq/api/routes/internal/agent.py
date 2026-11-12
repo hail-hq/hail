@@ -146,8 +146,8 @@ _SPOKEN_EMAIL_UNCONFIGURED = "Email isn't set up for this account."
 _SPOKEN_SMS_SENT_MEMBER = "Text message sent."
 _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
-# How long a queued reply counts as in flight. Past this the send is presumed
-# lost, and a retry delivers the same row. Must stay above SES_SEND_BUDGET_SECONDS.
+# How long a queued reply counts as in flight. After this its delivery is
+# unknown: SES may have accepted it before the API stopped. Never resend it.
 _QUEUED_GRACE = timedelta(seconds=240)
 
 
@@ -1035,7 +1035,33 @@ async def agent_reply_email(
     if cap_denial is not None:
         return await skip("agent_caps")
 
+    if prior is not None and prior.status == "queued":
+        # Age cannot prove that SES rejected a send. Settle the uncertainty
+        # without another provider call, and revoke the old request's claim.
+        settled_at = datetime.now(timezone.utc)
+        settled = await db.execute(
+            update(Email)
+            .where(
+                Email.id == prior.id,
+                Email.status == "queued",
+                Email.requested_at == prior.requested_at,
+            )
+            .values(
+                status="failed",
+                end_reason="DeliveryUnknown",
+                failed_at=settled_at,
+                requested_at=settled_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        await db.refresh(prior)
+        if not settled.rowcount:
+            return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
+        return _send_failure("DeliveryUnknown", prior)
+
     if prior is not None:
+        # Only a persisted failure proving SES took nothing reaches this path.
         # The row exists, so the audit row does too: only the send is missing.
         # requested_at restarts the grace above, so a retry during a slow resend
         # waits. The guard means one claim wins even without the thread lock.

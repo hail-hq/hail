@@ -36,9 +36,9 @@ from hailhq.core.providers.email.base import (
 )
 
 # Every SES call shares these timeouts. botocore's default of 5 attempts lets one
-# send run for minutes. An agent's reply is resent once its queued row is older
-# than _QUEUED_GRACE in routes/internal/agent.py, so a send must end first. The
-# read timeout stays at 60 seconds for large attachment sends.
+# send run for minutes. Agent delivery also bounds attachment preparation plus
+# the provider call within SES_SEND_BUDGET_SECONDS. A queued send with an unknown
+# outcome is never resent. The read timeout stays at 60 seconds for attachments.
 SES_CONNECT_TIMEOUT_SECONDS = 10
 SES_READ_TIMEOUT_SECONDS = 60
 SES_MAX_ATTEMPTS = 3

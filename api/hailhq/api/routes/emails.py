@@ -85,6 +85,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import ProviderAttachment
+from hailhq.core.providers.email.ses import SES_SEND_BUDGET_SECONDS
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
@@ -351,12 +352,26 @@ async def deliver_email(
     raises for provider errors.
 
     ``claimed_at`` is the row's ``requested_at`` when this send claimed it. The
-    outcome is written only while that claim holds: a newer resend owns the row
-    otherwise, and it records the result and the charge.
+    outcome is written only while that claim holds and the row is queued. Agent
+    sends default to the stored claim time and recheck it before calling SES.
     """
-    owned = (Email.id == email.id,) + (
-        (Email.requested_at == claimed_at,) if claimed_at is not None else ()
+    if at_most_once and claimed_at is None:
+        claimed_at = email.requested_at
+    owned = (
+        (Email.id == email.id,)
+        + ((Email.requested_at == claimed_at,) if claimed_at is not None else ())
+        + ((Email.status == "queued",) if at_most_once else ())
     )
+    # Include storage preparation in the provider's budget. The claim's age
+    # counts too, so a delayed request cannot start a fresh full-length send.
+    budget = None
+    if at_most_once:
+        age = (
+            (datetime.now(timezone.utc) - claimed_at).total_seconds()
+            if claimed_at is not None
+            else 0
+        )
+        budget = max(0, SES_SEND_BUDGET_SECONDS - age)
     attachment_rows = attachment_rows or []
     # One-click unsubscribe (RFC 8058) only when the send has exactly one
     # recipient (to + cc + bcc, deduped). The headers are the same for every
@@ -382,74 +397,92 @@ async def deliver_email(
 
     provider_attachments: list[ProviderAttachment] = []
     try:
-        if attachment_rows:
-            # Fetching payloads inside this try: a concurrently-deleted S3
-            # object (e.g. a GC-worker race) fails the send cleanly via the
-            # except block below rather than raising unhandled — which would
-            # otherwise leave the Email row stuck at 'queued' and, with an
-            # explicit Idempotency-Key, that key stuck at the in-flight
-            # sentinel for its full TTL.
-            s3 = get_s3_mail()
-            # Independent objects — fetch concurrently so caller latency
-            # is max(fetch) instead of sum(fetch) across attachments.
-            payloads = await asyncio.gather(
-                *(
-                    s3.fetch_raw(row.s3_key, max_bytes=MAX_EMAIL_ATTACHMENT_BYTES)
-                    for row in attachment_rows
+        async with asyncio.timeout(budget):
+            if attachment_rows:
+                # Fetching payloads inside this try: a concurrently-deleted S3
+                # object (e.g. a GC-worker race) fails the send cleanly via the
+                # except block below rather than raising unhandled — which would
+                # otherwise leave the Email row stuck at 'queued' and, with an
+                # explicit Idempotency-Key, that key stuck at the in-flight
+                # sentinel for its full TTL.
+                s3 = get_s3_mail()
+                # Independent objects — fetch concurrently so caller latency
+                # is max(fetch) instead of sum(fetch) across attachments.
+                payloads = await asyncio.gather(
+                    *(
+                        s3.fetch_raw(row.s3_key, max_bytes=MAX_EMAIL_ATTACHMENT_BYTES)
+                        for row in attachment_rows
+                    )
                 )
-            )
-            if (
-                sum(len(raw) for raw in payloads)
-                + len((email.body_text or "").encode())
-                + len((email.body_html or "").encode())
-                > MAX_EMAIL_ATTACHMENT_BYTES
-            ):
-                raise ValueError("Email attachments exceed the message size limit")
-            # Received objects expire under the inbound lifecycle. Track a
-            # retained outbound copy using the existing upload/GC contract,
-            # before sending. Failed or interrupted sends leave unused uploads
-            # for the normal sweeper; successful sends mark them used below.
-
-            retained = []
-            for row, payload in zip(attachment_rows, payloads):
-                if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
-                    EMAIL_ATTACHMENTS_PREFIX
+                if (
+                    sum(len(raw) for raw in payloads)
+                    + len((email.body_text or "").encode())
+                    + len((email.body_html or "").encode())
+                    > MAX_EMAIL_ATTACHMENT_BYTES
                 ):
-                    upload = FileUpload(
-                        organization_id=email.organization_id,
-                        purpose="email_attachment",
+                    raise ValueError("Email attachments exceed the message size limit")
+                # Received objects expire under the inbound lifecycle. Track a
+                # retained outbound copy using the existing upload/GC contract,
+                # before sending. Failed or interrupted sends leave unused uploads
+                # for the normal sweeper; successful sends mark them used below.
+
+                retained = []
+                for row, payload in zip(attachment_rows, payloads):
+                    if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
+                        EMAIL_ATTACHMENTS_PREFIX
+                    ):
+                        upload = FileUpload(
+                            organization_id=email.organization_id,
+                            purpose="email_attachment",
+                            filename=row.filename,
+                            content_type=row.content_type,
+                        )
+                        await store_upload(db, s3, upload, payload)
+                        retained.append(upload)
+                    else:
+                        retained.append(row)
+                attachment_rows = retained
+                provider_attachments = [
+                    ProviderAttachment(
                         filename=row.filename,
                         content_type=row.content_type,
+                        payload=payload,
                     )
-                    await store_upload(db, s3, upload, payload)
-                    retained.append(upload)
-                else:
-                    retained.append(row)
-            attachment_rows = retained
-            provider_attachments = [
-                ProviderAttachment(
-                    filename=row.filename,
-                    content_type=row.content_type,
-                    payload=payload,
+                    for row, payload in zip(attachment_rows, payloads)
+                ]
+            if at_most_once and claimed_at is not None:
+                # Preparation can outlive a claim. Check before the irreversible
+                # provider call, not just when saving its result afterward.
+                claim = await db.execute(
+                    update(Email)
+                    .where(*owned)
+                    .values(status="queued")
+                    .execution_options(synchronize_session=False)
                 )
-                for row, payload in zip(attachment_rows, payloads)
-            ]
-        result = await email_provider.send_email(
-            from_address=email.from_address,
-            from_name=email.from_name,
-            to_addresses=email.to_addresses,
-            subject=email.subject,
-            body_text=email.body_text,
-            body_html=email.body_html,
-            cc=email.cc_addresses,
-            bcc=email.bcc_addresses,
-            reply_to=email.reply_to,
-            headers=_send_headers(email, unsubscribe_headers),
-            attachments=provider_attachments or None,
-            organization_id=email.organization_id,
-            at_most_once=at_most_once,
-        )
+                await db.commit()
+                if not claim.rowcount:
+                    return "SendClaimLost"
+            result = await email_provider.send_email(
+                from_address=email.from_address,
+                from_name=email.from_name,
+                to_addresses=email.to_addresses,
+                subject=email.subject,
+                body_text=email.body_text,
+                body_html=email.body_html,
+                cc=email.cc_addresses,
+                bcc=email.bcc_addresses,
+                reply_to=email.reply_to,
+                headers=_send_headers(email, unsubscribe_headers),
+                attachments=provider_attachments or None,
+                organization_id=email.organization_id,
+                at_most_once=at_most_once,
+            )
     except Exception as exc:
+        if isinstance(exc, TimeoutError):
+            # Cancellation may have interrupted a database operation during
+            # preparation. Recover the session before recording the failure.
+            await db.rollback()
+            await db.refresh(email)
         logger.warning(
             "ses send_email failed for email_id=%s",
             email.id,

@@ -1,8 +1,10 @@
 """Email-run files use the claimed, authenticated sender's thread."""
 
+import asyncio
 import base64
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,7 +12,7 @@ from botocore.exceptions import ConnectTimeoutError
 from hailhq.api import deps
 from hailhq.api.routes import emails
 from hailhq.core.models import Email, EmailAttachment
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from tests.test_internal_agent_reply_email import (
     _internal_secret,  # noqa: F401 - provider fixture
@@ -247,3 +249,105 @@ async def test_email_file_access_closes_with_claim_and_budget(
     )
     assert "attachment_data" not in result.json()
     s3.fetch_raw.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_claim", [True, False])
+@pytest.mark.parametrize(
+    "change", ["expired_fetch", "expired_upload", "superseded", "settled"]
+)
+async def test_attachment_preparation_cannot_send_after_its_claim_ends(
+    async_session, monkeypatch, email_mock, change, explicit_claim
+):
+    _, agent, domain, inbound = await _seed(async_session)
+    att = await file(async_session, inbound)
+    reply = Email(
+        organization_id=inbound.organization_id,
+        email_domain_id=domain.id,
+        agent_id=agent.id,
+        direction="outbound",
+        from_address=domain.domain,
+        to_addresses=[inbound.from_address],
+        subject="Your receipt",
+        body_text="Here is your file.",
+        status="queued",
+        requested_at=datetime.now(timezone.utc),
+    )
+    async_session.add(reply)
+    await async_session.commit()
+    claimed_at = reply.requested_at
+    s3 = AsyncMock()
+
+    async def fetch(*args, **kwargs):
+        if change == "expired_fetch":
+            # A short budget lets real cancellation stop a stalled S3 read.
+            await asyncio.sleep(0.3)
+        elif change in {"superseded", "settled"}:
+            values = (
+                {"requested_at": claimed_at + timedelta(seconds=1)}
+                if change == "superseded"
+                else {"status": "failed", "end_reason": "DeliveryUnknown"}
+            )
+            await async_session.execute(
+                update(Email)
+                .where(Email.id == reply.id)
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            await async_session.commit()
+        return b"pngdata"
+
+    s3.fetch_raw.side_effect = fetch
+    monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
+    if change.startswith("expired"):
+        monkeypatch.setattr(emails, "SES_SEND_BUDGET_SECONDS", 0.1)
+
+    async def stalled_upload(*args, **kwargs):
+        await asyncio.sleep(0.3)
+
+    if change == "expired_upload":
+        s3.put_attachment.side_effect = stalled_upload
+    error = await emails.deliver_email(
+        async_session,
+        email_mock,
+        reply,
+        [att],
+        claimed_at=claimed_at if explicit_claim else None,
+        at_most_once=True,
+    )
+    assert error == (
+        "TimeoutError" if change.startswith("expired") else "SendClaimLost"
+    )
+    email_mock.send_email.assert_not_awaited()
+    await async_session.refresh(reply)
+    if change == "superseded":
+        assert reply.status == "queued" and reply.requested_at != claimed_at
+    else:
+        assert reply.status == "failed"
+        assert reply.end_reason == (
+            "TimeoutError" if change.startswith("expired") else "DeliveryUnknown"
+        )
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_after_acceptance_is_never_resent(
+    client, async_session, monkeypatch, email_mock
+):
+    _, _, _, inbound = await _seed(async_session)
+    accepted = []
+
+    async def accepted_then_stalled(**kwargs):
+        accepted.append(kwargs["body_text"])
+        await asyncio.sleep(0.3)
+
+    email_mock.send_email.side_effect = accepted_then_stalled
+    monkeypatch.setattr(emails, "SES_SEND_BUDGET_SECONDS", 0.1)
+    first = await _reply(client, inbound.id)
+    assert first["state"] == "failed" and first["reason"] == "TimeoutError"
+    again = await _reply(client, inbound.id)
+    assert again["state"] == "failed" and again["reason"] == "TimeoutError"
+    assert accepted == ["Happy to help."]
+    outbound = (
+        await async_session.execute(select(Email).where(Email.direction == "outbound"))
+    ).scalar_one()
+    assert outbound.status == "failed" and outbound.end_reason == "TimeoutError"
