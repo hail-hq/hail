@@ -63,6 +63,91 @@ async def test_claimed_email_reads_original_attachment(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+@pytest.mark.parametrize("action", ["read", "send"])
+async def test_selected_thread_can_read_and_return_an_earlier_original(
+    client, async_session, monkeypatch, email_mock, direction, action
+):
+    org, agent, domain, inbound = await _seed(async_session)
+    original = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        direction="inbound",
+        from_address=inbound.from_address,
+        to_addresses=inbound.to_addresses,
+        from_verified=True,
+        subject="Original receipt",
+        body_text="Please keep this file.",
+        status="received",
+        message_id="<original@example.test>",
+    )
+    async_session.add(original)
+    await async_session.flush()
+    anchor = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        direction=direction,
+        from_address=(
+            inbound.from_address if direction == "inbound" else inbound.to_addresses[0]
+        ),
+        to_addresses=(
+            inbound.to_addresses if direction == "inbound" else [inbound.from_address]
+        ),
+        from_verified=direction == "inbound",
+        agent_id=agent.id if direction == "outbound" else None,
+        metadata_=(
+            {"inbound_email_id": str(original.id)} if direction == "outbound" else {}
+        ),
+        subject="Re: Original receipt",
+        body_text="We have the receipt.",
+        status="received" if direction == "inbound" else "sent",
+        message_id="<anchor@example.test>",
+        references_ids=[original.message_id],
+    )
+    async_session.add(anchor)
+    attachment = await file(async_session, original)
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = b"pngdata"
+    monkeypatch.setattr(deps, "get_s3_mail_optional", lambda: s3)
+    monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
+    if action == "read":
+        result = await post(
+            client,
+            "/internal/agent/email-run/inbox",
+            {
+                "inbound_email_id": str(inbound.id),
+                "email_id": str(anchor.id),
+                "attachment_id": str(attachment.id),
+                "attachment_format": "inspection_v1",
+            },
+        )
+        assert result.status_code == 200, result.text
+        assert "attachment_data" in result.json(), result.text
+        assert (
+            base64.b64decode(result.json()["attachment_data"]["base64"]) == b"pngdata"
+        )
+    else:
+        result = await post(
+            client,
+            "/internal/agent/email-run/send-email",
+            {
+                "inbound_email_id": str(inbound.id),
+                "tool_invocation_id": str(uuid.uuid4()),
+                "recipient_name": "sender",
+                "subject": "Your original receipt",
+                "body_text": "Here is the original file.",
+                "reply_to_email_id": str(anchor.id),
+                "attachment_ids": [str(attachment.id)],
+            },
+        )
+        assert result.status_code == 200 and result.json()["ok"], result.text
+        assert (
+            email_mock.send_email.call_args.kwargs["attachments"][0].payload
+            == b"pngdata"
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("foreign", ["organization", "sender", "thread"])
 @pytest.mark.parametrize("action", ["read", "reply"])
 async def test_email_file_reads_do_not_follow_forged_references(

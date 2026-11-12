@@ -2,10 +2,10 @@
 
 import base64
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from hailhq.api import deps
+from hailhq.api import agent_email_context, deps
 from hailhq.api.routes import emails
 from hailhq.core.models import (
     AccountCredit,
@@ -106,6 +106,48 @@ async def test_image_read_returns_private_bytes_only_after_user_and_org_checks(
     result = response.json()
     assert base64.b64decode(result["attachment_data"]["base64"]) == b"pngdata"
     assert "s3_key" not in response.text and att.s3_key not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["storage_unavailable", "timeout", "storage_error"])
+async def test_file_storage_failures_record_safe_error_outcomes(
+    client, async_session, monkeypatch, caplog, outcome
+):
+    call, domain = await seed(async_session)
+    _, att = await mail(async_session, call, domain)
+    private_marker = "private-file-path-and-content"
+    s3 = AsyncMock()
+    s3.fetch_raw.side_effect = (
+        TimeoutError(private_marker)
+        if outcome == "timeout"
+        else OSError(private_marker)
+    )
+    monkeypatch.setattr(
+        deps,
+        "get_s3_mail_optional",
+        lambda: None if outcome == "storage_unavailable" else s3,
+    )
+    span = MagicMock()
+    operation = MagicMock()
+    operation.return_value.__enter__.return_value = span
+    monkeypatch.setattr(agent_email_context, "operation", operation)
+    response = await post(
+        client,
+        "/internal/browser-sessions/inbox",
+        {
+            "call_id": str(call.id),
+            "attachment_id": str(att.id),
+            "attachment_format": "inspection_v1",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert "could not be read" in response.json()["spoken"]
+    operation.assert_called_once_with("agent.email.attachment.fetch")
+    span.set_attribute.assert_called_once_with("outcome", outcome)
+    assert span.set_status.call_args.args[0].name == "ERROR"
+    span.record_exception.assert_not_called()
+    assert private_marker not in caplog.text and private_marker not in response.text
+    assert att.s3_key not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -417,7 +459,7 @@ async def test_older_worker_never_receives_binary_tool_data(
 
 
 @pytest.mark.asyncio
-async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_sending(
+async def test_outbound_profile_phone_does_not_prove_email_identity(
     client, async_session
 ):
     call, _ = await seed(async_session)
@@ -452,11 +494,12 @@ async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_s
     async_session.add(message)
     await async_session.commit()
     result = await post(client, "/internal/agent/inbox", {"call_id": str(call.id)})
-    assert result.json()["quoted_untrusted_messages"][0]["id"] == str(message.id)
+    assert "quoted_untrusted_messages" not in result.json(), result.text
+    assert "My order details" not in result.text
 
 
 @pytest.mark.asyncio
-async def test_verified_outbound_phone_run_can_return_its_original_file(
+async def test_outbound_profile_phone_cannot_return_email_originals(
     client, async_session, monkeypatch, email_mock
 ):
     call, domain = await seed(async_session)
@@ -495,10 +538,9 @@ async def test_verified_outbound_phone_run_can_return_its_original_file(
             "attachment_ids": [str(att.id)],
         },
     )
-    assert result.json()["ok"] is True, result.text
-    assert (
-        email_mock.send_email.call_args.kwargs["attachments"][0].payload == b"pngdata"
-    )
+    assert result.json()["ok"] is False, result.text
+    s3.fetch_raw.assert_not_awaited()
+    email_mock.send_email.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -524,7 +566,7 @@ async def test_forged_sender_cannot_plant_history_or_files(
     s3 = AsyncMock()
     monkeypatch.setattr(deps, "get_s3_mail_optional", lambda: s3)
     response = await post(client, path, {"call_id": str(call.id)})
-    assert response.json()["quoted_untrusted_messages"] == []
+    assert response.json().get("quoted_untrusted_messages", []) == []
     response = await post(
         client,
         path,

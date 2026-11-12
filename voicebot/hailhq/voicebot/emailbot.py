@@ -38,6 +38,7 @@ from hailhq.core.email_agent import (
     sender_trust,
     tool_sends_for_reply,
 )
+from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import EmailAttachment
 from hailhq.core.telemetry import observe_email_reply, operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
@@ -220,10 +221,10 @@ async def _settle(
             persisted = await retry_reply(db, claimed, delay=delay)
             return {"pending": "retry", "failed": "failed"}.get(persisted, "superseded")
         if state is not None:
-            await finish_reply(
+            settled = await finish_reply(
                 db, claimed.email, state, attempt=claimed.attempt, reason=reason
             )
-            return state
+            return state if settled else "superseded"
     return "superseded"
 
 
@@ -267,6 +268,7 @@ async def reply_once(api: AgentApiClient) -> bool:
             agent_id=claimed.agent.id,
             email_id=claimed.email.id,
             from_=claimed.email.from_address,
+            to=from_address_for(claimed.domain),
         )
         return await _reply_claimed(api, claimed, span)
 

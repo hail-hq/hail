@@ -969,6 +969,7 @@ async def _routed_email(
         agent_id=routed[1].id,
         email_id=inbound.id,
         from_=inbound.from_address,
+        to=from_address_for(routed[0]),
     )
     return routed
 

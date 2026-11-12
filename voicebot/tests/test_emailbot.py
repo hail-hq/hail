@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.prompts import EMAIL_SENDS_TRIED_LINE
 from hailhq.voicebot import emailbot
+from hailhq.voicebot.chat_loop import run_chat
 from hailhq.voicebot.pipeline import ProviderKeyError
 from opentelemetry import metrics
 from opentelemetry.sdk.metrics import MeterProvider
@@ -894,6 +896,86 @@ async def test_settle_returns_actual_retry_state(monkeypatch, persisted, want):
     monkeypatch.setattr(emailbot, "session_scope", session)
     monkeypatch.setattr(emailbot, "retry_reply", AsyncMock(return_value=persisted))
     assert await emailbot._settle(object(), None, retry=True) == want
+
+
+@pytest.mark.parametrize("state", ["done", "skipped", "failed", "retry"])
+async def test_lost_claim_reports_superseded(monkeypatch, telemetry, state):
+    exporter, reader = telemetry
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(id=uuid.uuid4(), requested_at=datetime.now(timezone.utc)),
+        attempt=MAX_ATTEMPTS,
+    )
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(rowcount=0)
+
+    @asynccontextmanager
+    async def session():
+        yield db
+
+    monkeypatch.setattr(emailbot, "session_scope", session)
+    monkeypatch.setattr(emailbot, "_prepare", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(emailbot, "generate_reply", AsyncMock(return_value="A reply"))
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": state}))
+    with emailbot.operation("reply") as span:
+        await emailbot._reply_claimed(api, claimed, span)
+    assert exporter.get_finished_spans()[-1].attributes["reply.state"] == "superseded"
+    assert points(reader)["hail.email.reply.attempts"][0].attributes == {
+        "outcome": "superseded"
+    }
+
+
+async def test_chat_logs_do_not_copy_model_tool_names(caplog):
+    private_name = "private medical note from the model"
+    llm = ScriptedLLM([("tool", private_name, "{}"), ("text", "A reply")])
+    with caplog.at_level(logging.INFO, logger="hailhq.voicebot.chat_loop"):
+        result = await run_chat(
+            llm,
+            [{"role": "user", "content": "Help"}],
+            [],
+            AsyncMock(return_value=(emailbot.TOOL_FAILED, True)),
+            max_rounds=2,
+            log_label="email_id=test",
+        )
+    assert result == "A reply"
+    records = [r for r in caplog.records if r.name == "hailhq.voicebot.chat_loop"]
+    assert records
+    assert all(private_name not in record.getMessage() for record in records)
+    assert llm.aclosed
+
+
+@pytest.mark.parametrize(
+    "kind,domain,address",
+    [
+        ("hail_mail", ADDRESS, ADDRESS),
+        ("custom", "example.com", "noreply@example.com"),
+    ],
+)
+async def test_claim_span_tags_the_workspace_mailbox(
+    monkeypatch, telemetry, kind, domain, address
+):
+    exporter, _ = telemetry
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(id=uuid.uuid4(), from_address=MEMBER),
+        agent=SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4()),
+        domain=SimpleNamespace(kind=kind, domain=domain),
+        attempt=1,
+    )
+
+    @asynccontextmanager
+    async def session():
+        yield object()
+
+    monkeypatch.setattr(emailbot, "session_scope", session)
+    monkeypatch.setattr(
+        emailbot, "claim_pending_reply", AsyncMock(return_value=claimed)
+    )
+    monkeypatch.setattr(emailbot, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(emailbot, "resolve_identity", AsyncMock(return_value={}))
+    monkeypatch.setattr(emailbot, "_reply_claimed", AsyncMock(return_value=True))
+    assert await emailbot.reply_once(object())
+    attrs = exporter.get_finished_spans()[-1].attributes
+    assert attrs["hail.to"] == address
+    assert attrs["hail.from"] == "***@example.com"
 
 
 async def test_manual_tool_span_has_no_arguments_or_result(monkeypatch, telemetry):

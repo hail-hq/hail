@@ -86,9 +86,8 @@ async def run_chat(
             for call in calls:
                 output, is_error = await run_tool(call)
                 logger.info(
-                    "%s agent tool=%s round=%d error=%s",
+                    "%s agent tool round=%d error=%s",
                     log_label,
-                    call.name,
                     round_no,
                     is_error,
                 )

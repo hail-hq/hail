@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from hailhq.api.routes.internal import agent as internal_agent
@@ -30,6 +32,32 @@ HMAC_SECRET = "test-internal-secret"
 NOW = datetime(2026, 10, 31, tzinfo=timezone.utc)
 MEMBER = "ada@example.com"
 ADDRESS = "amber-heron-42+acme@mail.hail.so"
+
+
+@pytest.mark.parametrize(
+    "kind,domain,address",
+    [
+        ("hail_mail", ADDRESS, ADDRESS),
+        ("custom", "example.com", "noreply@example.com"),
+    ],
+)
+async def test_routed_email_tags_the_workspace_mailbox(
+    monkeypatch, kind, domain, address
+):
+    agent = SimpleNamespace(id=uuid.uuid4())
+    route = (SimpleNamespace(kind=kind, domain=domain), agent)
+    inbound = SimpleNamespace(
+        id=uuid.uuid4(),
+        agent_id=agent.id,
+        organization_id=uuid.uuid4(),
+        from_address=MEMBER,
+    )
+    monkeypatch.setattr(internal_agent, "routed_agent", AsyncMock(return_value=route))
+    monkeypatch.setattr(internal_agent, "bind_organization", AsyncMock())
+    tags = Mock()
+    monkeypatch.setattr(internal_agent, "tag_context", tags)
+    assert await internal_agent._routed_email(object(), inbound) == route
+    assert tags.call_args.kwargs["to"] == address
 
 
 def _signed(body: bytes) -> dict[str, str]:

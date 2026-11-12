@@ -1412,9 +1412,10 @@ async def test_a_stale_claim_stamps_nothing(async_session):
     await _seed(async_session)
     row = await _ingest(async_session, _raw())
     claimed = await email_agent.claim_pending_reply(async_session)
-    await email_agent.finish_reply(
+    settled = await email_agent.finish_reply(
         async_session, row, "skipped", attempt=claimed.attempt + 1, reason="no_agent"
     )
+    assert settled is False
     await async_session.refresh(row)
     assert "agent_skip_reason" not in row.metadata_
 
@@ -1424,11 +1425,26 @@ async def test_stale_claim_cannot_overwrite(async_session):
     await _seed(async_session)
     row = await _ingest(async_session, _raw())
     claimed = await email_agent.claim_pending_reply(async_session)
-    await email_agent.finish_reply(
+    settled = await email_agent.finish_reply(
         async_session, row, "done", attempt=claimed.attempt + 1
     )
+    assert settled is False
     await async_session.refresh(row)
     assert row.agent_reply_state == "processing"
+
+
+@pytest.mark.asyncio
+async def test_final_retry_reports_a_lost_claim(async_session):
+    await _seed(async_session)
+    row = await _ingest(async_session, _raw())
+    row.agent_reply_attempts = email_agent.MAX_ATTEMPTS - 1
+    await async_session.commit()
+    claimed = await email_agent.claim_pending_reply(async_session)
+    row.agent_reply_state = "done"
+    await async_session.commit()
+    assert await email_agent.retry_reply(async_session, claimed) is None
+    await async_session.refresh(row)
+    assert row.agent_reply_state == "done"
 
 
 @pytest.mark.asyncio

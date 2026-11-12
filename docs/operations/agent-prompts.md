@@ -132,9 +132,9 @@ reference never broadens the person or organization scope. Existing send size,
 consent, quota, and billing checks still apply. Unsupported file types can still
 be forwarded. This feature adds no upload control.
 
-The normal `read_email` tool uses the same checks. Phone calls can use email
-history only when an outbound call reaches a uniquely matched, verified workspace
-member. An inbound caller ID alone does not prove email ownership.
+The normal `read_email` tool uses the same checks. Ordinary phone calls cannot
+read email history. Neither caller ID nor an editable profile phone proves
+email ownership. Browser sessions use the signed-in account's verified email.
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
 tool. Inbox access requires the verified person associated with the call.

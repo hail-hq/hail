@@ -530,9 +530,10 @@ async def finish_reply(
     *,
     attempt: int | None = None,
     reason: str | None = None,
-) -> None:
+) -> bool:
     """Record the final state, and with ``reason`` why it was skipped. With
-    ``attempt`` it applies only while that claim still owns the row."""
+    ``attempt`` it applies only while that claim still owns the row. Return
+    whether the row was updated, so stale attempts report lost ownership."""
     stmt = update(Email).where(Email.id == email.id)
     if attempt is not None:
         stmt = stmt.where(
@@ -543,6 +544,7 @@ async def finish_reply(
     await db.commit()
     if reason is not None and result.rowcount:  # type: ignore[attr-defined]
         await stamp_skip(db, email.id, reason)
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 async def retry_reply(
@@ -556,8 +558,10 @@ async def retry_reply(
     """
     waiting = delay is not None
     if not waiting and claimed.attempt >= MAX_ATTEMPTS:
-        await finish_reply(db, claimed.email, "failed", attempt=claimed.attempt)
-        return "failed"
+        settled = await finish_reply(
+            db, claimed.email, "failed", attempt=claimed.attempt
+        )
+        return "failed" if settled else None
     wait = delay or RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
     result = await db.execute(
         update(Email)
@@ -681,37 +685,54 @@ def email_history_filter(sender: str, *, allow_call_mail: bool = False):
     )
 
 
-async def email_thread(db: AsyncSession, email: Email) -> list[Email]:
+async def email_thread(
+    db: AsyncSession, email: Email, *, scope: EmailScope | None = None
+) -> list[Email]:
     """The thread up to and including ``email``, oldest first, at most
     ``CHAT_LIMIT`` rows.
 
-    No reply goes to an unproven sender, and this stays closed for one anyway. A
-    proven sender gets rows with this sender only, because ``References`` is
-    written by the sender and could name someone else's message.
+    A claimed inbound message proves its sender. An explicitly selected message
+    may be inbound or outbound, but must belong to the server-selected scope.
+    References never expand that person's organization or inbox access.
     """
-    if not is_authenticated(email):
+    if scope is not None:
+        authorized = (
+            await db.execute(scope.query().where(Email.id == email.id))
+        ).scalar_one_or_none()
+        if authorized is None:
+            return []
+    elif not is_authenticated(email):
         return [email]
-    sender = normalize_address(email.from_address)
+    sender = scope.peer if scope is not None else normalize_address(email.from_address)
     seen: dict[uuid.UUID, Email] = {email.id: email}
     frontier = [email]
     while frontier and len(seen) < CHAT_LIMIT:
         ids = {i for row in frontier for i in _referenced_ids(row)}
         if not ids:
             break
-        stmt = select(Email).where(
-            Email.organization_id == email.organization_id,
-            Email.email_domain_id == email.email_domain_id,
+        stmt = (
+            scope.query()
+            if scope is not None
+            else select(Email).where(
+                Email.organization_id == email.organization_id,
+                Email.email_domain_id == email.email_domain_id,
+                email_history_filter(sender),
+                or_(
+                    and_(
+                        Email.direction == "inbound",
+                        func.lower(Email.from_address) == sender,
+                    ),
+                    and_(
+                        Email.direction == "outbound",
+                        sender == any_(Email.to_addresses),
+                    ),
+                ),
+            )
+        )
+        stmt = stmt.where(
             or_(
                 Email.message_id.in_(ids),
                 Email.provider_message_id.in_(_provider_message_ids(ids)),
-            ),
-            email_history_filter(sender),
-            or_(
-                and_(
-                    Email.direction == "inbound",
-                    func.lower(Email.from_address) == sender,
-                ),
-                and_(Email.direction == "outbound", sender == any_(Email.to_addresses)),
             ),
         )
         # Newest first, so a long thread keeps its recent mail.
