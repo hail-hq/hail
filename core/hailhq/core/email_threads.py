@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from hailhq.core.email_agent import MAX_HEADER_CHARS
 from hailhq.core.models import Email
 from sqlalchemy import and_, func, or_, select
 
@@ -28,6 +29,7 @@ class EmailScope:
             or_(
                 and_(
                     Email.direction == "inbound",
+                    Email.from_verified.is_(True),
                     func.lower(Email.from_address) == self.peer.lower(),
                     Email.to_addresses.any(self.inbox),
                 ),
@@ -57,11 +59,24 @@ def reference_ids(email, *, limit=30):
             and not any(c in x for c in "\r\n \t")
         )
     )
-    if limit is None or len(ids) <= limit:
+    if limit is None:
         return ids
-    # Keep the root so the next incoming reply still links old files, while
-    # retaining recent parents and bounding the outbound References header.
-    return [ids[0], *ids[-(limit - 1) :]]
+    # Preserve the root and newest parents within both service header limits.
+    # Unbounded IDs above remain available for comparing stored threads.
+    ids = [value for value in ids if len(value) <= MAX_HEADER_CHARS]
+    if not ids:
+        return []
+    root = ids[0]
+    if len(ids) > 1 and len(root) + 1 + len(ids[-1]) > MAX_HEADER_CHARS:
+        return ids[-1:]
+    recent = []
+    length = len(root)
+    for value in reversed(ids[1:]):
+        if len(recent) >= limit - 1 or length + 1 + len(value) > MAX_HEADER_CHARS:
+            break
+        recent.append(value)
+        length += 1 + len(value)
+    return [root, *reversed(recent)]
 
 
 def same_thread(first, second):

@@ -45,3 +45,19 @@ def test_bounded_headers_keep_the_root_for_the_next_inbound_reply():
     )
     assert len(inbound.references_ids) == 30
     assert same_thread(original, inbound)
+
+
+def test_long_message_ids_keep_root_and_recent_parent_within_service_budget():
+    ids = [f"<{n:03d}-{'x' * 150}@example.test>" for n in range(30)]
+    email = Email(id=uuid4(), references_ids=ids[:-1], in_reply_to=ids[-1])
+    result = reference_ids(email)
+    assert len(" ".join(result)) <= 995
+    assert result[0] == ids[0] and result[-1] == ids[-1]
+    assert len(reference_ids(email, limit=None)) == 30
+
+
+def test_parent_wins_when_root_and_parent_cannot_fit_together():
+    root = f"<{'x' * 500}@example.test>"
+    parent = f"<{'y' * 500}@example.test>"
+    email = Email(id=uuid4(), references_ids=[root], in_reply_to=parent)
+    assert reference_ids(email) == [parent]

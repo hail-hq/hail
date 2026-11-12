@@ -39,6 +39,7 @@ async def mail(
         email_domain_id=domain.id if org is None else None,
         direction="inbound",
         from_address=sender,
+        from_verified=True,
         to_addresses=[domain.domain],
         subject="Receipt",
         body_text="Here is my receipt",
@@ -403,6 +404,7 @@ async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_s
         email_domain_id=custom.id,
         direction="inbound",
         from_address=user.email,
+        from_verified=True,
         to_addresses=["noreply@team.example.test"],
         subject="Custom inbox",
         body_text="My order details",
@@ -458,3 +460,40 @@ async def test_verified_outbound_phone_run_can_return_its_original_file(
     assert (
         email_mock.send_email.call_args.kwargs["attachments"][0].payload == b"pngdata"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["browser", "phone"])
+async def test_forged_sender_cannot_plant_history_or_files(
+    client, async_session, monkeypatch, transport
+):
+    call, domain = await seed(async_session)
+    source, att = await mail(async_session, call, domain)
+    path = "/internal/browser-sessions/inbox"
+    if transport == "phone":
+        number = (await async_session.execute(select(PhoneNumber))).scalar_one()
+        user = (await async_session.execute(select(User))).scalar_one()
+        user.phone_number = "+12125550123"
+        call.transport = "phone"
+        call.direction = "outbound"
+        call.from_number_id = number.id
+        call.from_e164 = number.e164
+        call.to_e164 = user.phone_number
+        path = "/internal/agent/inbox"
+    source.from_verified = False
+    await async_session.commit()
+    s3 = AsyncMock()
+    monkeypatch.setattr(deps, "get_s3_mail_optional", lambda: s3)
+    response = await post(client, path, {"call_id": str(call.id)})
+    assert response.json()["quoted_untrusted_messages"] == []
+    response = await post(
+        client,
+        path,
+        {
+            "call_id": str(call.id),
+            "attachment_id": str(att.id),
+            "attachment_format": "inspection_v1",
+        },
+    )
+    assert "attachment_data" not in response.json()
+    s3.fetch_raw.assert_not_awaited()

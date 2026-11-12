@@ -254,6 +254,7 @@ async def test_inbox_and_attachment_contents_are_scoped_and_untrusted(
         email_domain_id=domain.id,
         direction="inbound",
         from_address="owner@example.test",
+        from_verified=True,
         to_addresses=[domain.domain],
         subject="Notes",
         body_text="Read my notes",
