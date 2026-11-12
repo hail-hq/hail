@@ -13,6 +13,7 @@ async def _execute(ctx, args):
         "/internal/agent/inbox",
         {
             "call_id": str(ctx.call_id),
+            "attachment_format": "inspection_v1",
             **{
                 key: args[key]
                 for key in ("email_id", "attachment_id", "before_email_id", "page")

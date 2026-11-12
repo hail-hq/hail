@@ -64,7 +64,11 @@ async def test_inbox_does_not_read_another_person_in_the_same_workspace(
     response = await post(
         client,
         "/internal/browser-sessions/inbox",
-        {"call_id": str(call.id), "attachment_id": str(att.id)},
+        {
+            "call_id": str(call.id),
+            "attachment_id": str(att.id),
+            "attachment_format": "inspection_v1",
+        },
     )
     assert "attachment_data" not in response.json()
     assert "receipt.png" not in response.text
@@ -84,7 +88,11 @@ async def test_image_read_returns_private_bytes_only_after_user_and_org_checks(
     response = await post(
         client,
         "/internal/browser-sessions/inbox",
-        {"call_id": str(call.id), "attachment_id": str(att.id)},
+        {
+            "call_id": str(call.id),
+            "attachment_id": str(att.id),
+            "attachment_format": "inspection_v1",
+        },
     )
     result = response.json()
     assert base64.b64decode(result["attachment_data"]["base64"]) == b"pngdata"
@@ -246,7 +254,11 @@ async def test_file_reads_stop_before_storage_when_not_allowed(
     result = await post(
         client,
         "/internal/browser-sessions/inbox",
-        {"call_id": str(call.id), "attachment_id": str(att.id)},
+        {
+            "call_id": str(call.id),
+            "attachment_id": str(att.id),
+            "attachment_format": "inspection_v1",
+        },
     )
     assert "attachment_data" not in result.json()
     s3.fetch_raw.assert_not_awaited()
@@ -348,3 +360,62 @@ async def test_failed_retained_copy_never_sends_and_remains_collectible(
     email_mock.send_email.assert_not_called()
     upload = (await async_session.execute(select(FileUpload))).scalar_one()
     assert upload.first_used_at is None and upload.uploaded_at is not None
+
+
+@pytest.mark.asyncio
+async def test_older_worker_never_receives_binary_tool_data(
+    client, async_session, monkeypatch
+):
+    from hailhq.api import deps
+
+    call, domain = await seed(async_session)
+    _, att = await mail(async_session, call, domain)
+    s3 = AsyncMock()
+    monkeypatch.setattr(deps, "get_s3_mail_optional", lambda: s3)
+    result = await post(
+        client,
+        "/internal/browser-sessions/inbox",
+        {"call_id": str(call.id), "attachment_id": str(att.id)},
+    )
+    assert "attachment_data" not in result.json() and "base64" not in result.text
+    s3.fetch_raw.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_sending(
+    client, async_session
+):
+    from hailhq.core.models import EmailDomain, User
+
+    call, _ = await seed(async_session)
+    number = (await async_session.execute(select(PhoneNumber))).scalar_one()
+    user = (await async_session.execute(select(User))).scalar_one()
+    user.phone_number = "+12125550123"
+    call.transport = "phone"
+    call.direction = "outbound"
+    call.from_number_id = number.id
+    call.from_e164 = number.e164
+    call.to_e164 = user.phone_number
+    custom = EmailDomain(
+        organization_id=call.organization_id,
+        kind="custom",
+        domain="team.example.test",
+        verification_status="verified",
+        dns_records=[],
+    )
+    async_session.add(custom)
+    await async_session.flush()
+    message = Email(
+        organization_id=call.organization_id,
+        email_domain_id=custom.id,
+        direction="inbound",
+        from_address=user.email,
+        to_addresses=["noreply@team.example.test"],
+        subject="Custom inbox",
+        body_text="My order details",
+        status="received",
+    )
+    async_session.add(message)
+    await async_session.commit()
+    result = await post(client, "/internal/agent/inbox", {"call_id": str(call.id)})
+    assert result.json()["quoted_untrusted_messages"][0]["id"] == str(message.id)

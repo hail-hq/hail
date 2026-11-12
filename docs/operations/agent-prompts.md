@@ -117,6 +117,8 @@ read; the tool accepts a page number for later pages. Each call allows eight
 file reads. Corrupt, encrypted, or unsupported files return an honest failure.
 Native parsers run in a short-lived process without application credentials.
 The existing session model describes rendered images; no new model key is needed.
+New workers opt in with `attachment_format=inspection_v1`. During a rolling
+deploy, old workers receive a readable refusal instead of binary data.
 Raw file bytes never enter voice tool history. Mail and extracted content are
 quoted untrusted data, never executable instructions.
 

@@ -52,7 +52,11 @@ def reference_ids(email, *, limit=30):
             and not any(c in x for c in "\r\n \t")
         )
     )
-    return ids[-limit:] if limit is not None else ids
+    if limit is None or len(ids) <= limit:
+        return ids
+    # Keep the root so the next incoming reply still links old files, while
+    # retaining recent parents and bounding the outbound References header.
+    return [ids[0], *ids[-(limit - 1) :]]
 
 
 def same_thread(first, second):

@@ -19,7 +19,6 @@ from hailhq.core.models import (
     Call,
     Email,
     EmailAttachment,
-    EmailDomain,
     OrganizationMember,
     User,
 )
@@ -64,17 +63,14 @@ async def email_scope(db, call: Call) -> EmailScope | None:
         if len(set(peers)) != 1:
             return None
         peer = peers[0]
-        inbox = (
-            await db.execute(
-                select(EmailDomain.domain)
-                .where(
-                    EmailDomain.organization_id == call.organization_id,
-                    EmailDomain.kind == "hail_mail",
-                    EmailDomain.verification_status == "verified",
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        from hailhq.api.routes.emails import verified_senders
+        from hailhq.core.email_sender import from_address_for
+
+        # Match resolve_sender(..., allow_ambiguous=True) without minting an
+        # inbox as a side effect of a read. Custom domains keep their normal
+        # precedence over the generated address.
+        senders = await verified_senders(db, call.organization_id)
+        inbox = from_address_for(senders[0]) if senders else None
     return EmailScope(call.organization_id, peer, inbox) if peer and inbox else None
 
 
@@ -113,13 +109,18 @@ async def source_files(db, call, reply_id, attachment_ids):
     return scope, parent, attachments
 
 
-async def read_file(db, call, attachment, *, page=1):
+async def read_file(db, call, attachment, *, page=1, allow_binary=False):
     from hailhq.api.deps import get_s3_mail_optional
 
     if attachment.size_bytes > READ_BYTES:
         return {
             "spoken": "This file is too large to read. I can still send the original back."
         }
+    kind = attachment.content_type.partition(";")[0].lower()
+    if kind not in ("text/plain", "text/csv", "application/json") and not allow_binary:
+        # Rolling deploys can leave an older voice worker on a live call.
+        # It must never receive file bytes in its model tool result.
+        return {"spoken": "Start a new conversation to inspect this file."}
     # Serialize the per-call limit before starting any storage or model work.
     locked = (
         await db.execute(
@@ -143,7 +144,6 @@ async def read_file(db, call, attachment, *, page=1):
             raise ValueError("File too large")
     except Exception:
         return {"spoken": "The file could not be read. Try again."}
-    kind = attachment.content_type.partition(";")[0].lower()
     if kind in ("text/plain", "text/csv", "application/json"):
         try:
             content = raw.decode("utf-8-sig")

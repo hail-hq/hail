@@ -85,6 +85,7 @@ def build_browser_tools(call_id, org_id, capabilities, publish=None):
             "/internal/browser-sessions/inbox",
             {
                 "call_id": str(call_id),
+                "attachment_format": "inspection_v1",
                 **{
                     key: args[key]
                     for key in ("email_id", "attachment_id", "before_email_id", "page")

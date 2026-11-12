@@ -6,7 +6,7 @@ an organization, price, billing mode, tool set, or duration via this route.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -353,6 +353,7 @@ class InboxRequest(BaseModel):
     email_id: UUID | None = None
     attachment_id: UUID | None = None
     before_email_id: UUID | None = None
+    attachment_format: Literal["inspection_v1"] | None = None
     page: int = Field(default=1, ge=1, le=10000)
 
 
@@ -401,7 +402,13 @@ async def conversation_inbox(body: InboxRequest, db, call):
         ).scalar_one_or_none()
         if attachment is None:
             return {"spoken": "I cannot find that file in this inbox."}
-        return await read_file(db, call, attachment, page=body.page)
+        return await read_file(
+            db,
+            call,
+            attachment,
+            page=body.page,
+            allow_binary=body.attachment_format == "inspection_v1",
+        )
     messages = (
         (
             await db.execute(
