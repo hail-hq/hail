@@ -160,7 +160,9 @@ carrier credentials and webhook verification key.
 
 The email worker uses `read_email` with the claimed inbound email ID. It never
 uses a call ID. The server fixes the authenticated sender, organization, inbox, and active
-agent route. Only the current email and its file index enter the initial context.
+agent route. When `read_email` is available, only the current email and its file
+index enter the initial context. Otherwise, the worker loads the bounded,
+authorized thread, including on retries that disable tools after a send.
 `read_email(query=...)` searches older emails and separate threads with the
 same verified person. Results include short snippets, message IDs, and a cursor.
 `email_id` and `offset` retrieve full messages in chunks without losing the tail.

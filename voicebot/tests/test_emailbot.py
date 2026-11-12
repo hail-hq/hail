@@ -376,7 +376,7 @@ async def test_a_retry_after_a_tool_send_has_no_tools(
     async_session, monkeypatch
 ) -> None:
     """The model could reword the message, and it would go out twice."""
-    email_id = await _seed(async_session)
+    email_id = await _seed(async_session, earlier=True)
     row = await async_session.get(Email, email_id)
     async_session.add(
         Email(
@@ -402,6 +402,9 @@ async def test_a_retry_after_a_tool_send_has_no_tools(
     assert len(llm.calls) == 1
     assert not llm.calls[0]["tools"]
     assert EMAIL_SENDS_TRIED_LINE in llm.calls[0]["items"][0].text_content
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" in text
+    assert "Search older mail with read_email" not in text
     api.post.assert_awaited_once_with(
         "/internal/agent/reply-email", {"email_id": str(email_id), "body": "Done."}
     )
@@ -567,6 +570,21 @@ async def test_history_is_available_on_demand_without_automatic_context_dump(
     assert "Earlier private note" not in text
     assert "Can you help?" in text
     assert "current_email_id" in text
+
+
+@pytest.mark.parametrize("tools", [[], ["send_email"], ["list_contacts"]])
+async def test_history_is_loaded_when_the_agent_cannot_retrieve_it(
+    async_session, monkeypatch, tools
+) -> None:
+    await _seed(async_session, earlier=True, tools=tools)
+    llm = ScriptedLLM([("text", "Hi")])
+    _use(monkeypatch, llm)
+    await emailbot.reply_once(
+        SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    )
+    text = " ".join(str(i.text_content) for i in llm.calls[0]["items"])
+    assert "Earlier private note" in text
+    assert "Search older mail with read_email" not in text
 
 
 async def test_the_cap_is_read_before_the_model_is_paid(
