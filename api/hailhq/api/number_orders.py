@@ -52,6 +52,11 @@ QUOTE_RETENTION = timedelta(hours=24)
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
+NUMBER_SETUP_HELP_DETAIL = (
+    "This number needs a little extra setup. "
+    "Your credits are back in your balance. "
+    "Email hi@hail.so and we will help you finish."
+)
 
 
 class RetryableError(HTTPException):
@@ -742,7 +747,7 @@ async def acquire_offer(
                 resource_id=None,
                 failed=True,
                 reason=(
-                    "number purchases are restricted on our side; contact support for help"
+                    NUMBER_SETUP_HELP_DETAIL
                     if restricted
                     else f"the carrier rejected the order (HTTP {status})"
                 ),
@@ -903,7 +908,12 @@ async def purchase_number(
         )
         raise HTTPException(
             status_code=409,
-            detail=f"Number order failed and credits were refunded: {reason}",
+            detail=(
+                NUMBER_SETUP_HELP_DETAIL
+                if number.provisioning_metadata.get("failure_code")
+                == "carrier_account_restricted"
+                else f"Number order failed and credits were refunded: {reason}"
+            ),
         )
     if number.provisioning_state == "released":
         # A replayed quote whose number was released since. It is not a new purchase.

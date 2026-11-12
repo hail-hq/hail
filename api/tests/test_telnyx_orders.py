@@ -235,7 +235,9 @@ async def test_account_rejection_is_diagnosable_refunded_and_safe_for_customer(
             with pytest.raises(HTTPException) as caught:
                 await purchase_number(async_session, principal, body)
             assert caught.value.status_code == 409
-            assert "restricted on our side" in caught.value.detail
+            assert "hi@hail.so" in caught.value.detail
+            assert "credits" in caught.value.detail.lower()
+            assert "restricted" not in caught.value.detail.lower()
             assert "private applicant information" not in caught.value.detail
         await async_session.refresh(row)
         number = await async_session.get(PhoneNumber, row.number_id)
