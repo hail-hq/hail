@@ -2434,9 +2434,7 @@ def register_tools(
         email_enabled: bool = True,
         handover_contacts: list[dict] | None = None,
     ) -> dict[str, Any]:
-        """Save an agent. Then call ``route_number`` so a number answers
-        with it, ``route_email_domain`` so an email address does, or pass
-        its id as ``agent_id`` to ``place_call``.
+        """Save an agent for calls, texts, and email replies.
 
         ``system_prompt`` defines the saved agent's behavior.
         ``first_message`` is an optional greeting after the AI disclosure.

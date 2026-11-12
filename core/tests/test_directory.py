@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 from hailhq.core.directory import (
     find_by_phone,
     list_directory,

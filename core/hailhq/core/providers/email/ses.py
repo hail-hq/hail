@@ -13,12 +13,10 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+import random
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-
-
-import random
 from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any

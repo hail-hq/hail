@@ -67,13 +67,15 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
-    prior_reply,
     reply_references,
     reply_subject,
     routed_agent,
     run_refusal,
     stamp_skip,
     tool_sends_for_reply,
+)
+from hailhq.core.email_agent import (
+    prior_reply as prior_email_reply,
 )
 from hailhq.core.email_agent import (
     thread_lock_key as email_thread_lock_key,
@@ -622,6 +624,16 @@ async def agent_send_sms(
             sent=_SPOKEN_SMS_SENT,
         )
 
+    gate = await check_sms_allowed(db, org, counterpart)
+    if not gate.allowed:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
+        )
+
     from_number = await sms_sender(db, org, counterpart, call=call)
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
@@ -965,7 +977,7 @@ async def agent_reply_email(
     await key_lock(db, email_thread_lock_key(inbound))
     await db.refresh(inbound)
     # Idempotent per inbound row: the worker retries with the same email_id.
-    prior = await prior_reply(db, inbound)
+    prior = await prior_email_reply(db, inbound)
     if prior is not None and (finished := _finished_reply(prior)) is not None:
         return finished
     if prior is not None and prior.status == "queued":
@@ -1437,6 +1449,7 @@ async def agent_send_email(
         db,
         email_provider,
         email,
+        at_most_once=True,
         **(
             {"billable": False}
             if call.transport == "browser" and call.metadata_.get("browser_trial")

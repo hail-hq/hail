@@ -328,7 +328,7 @@ async def test_a_slow_resend_cannot_be_sent_twice(
 
 def _lose_the_claim(monkeypatch, **values) -> None:
     """Another request changes the row after this one reads it."""
-    real = internal_agent.prior_reply
+    real = internal_agent.prior_email_reply
 
     async def stale(db, email):
         prior = await real(db, email)
@@ -343,7 +343,7 @@ def _lose_the_claim(monkeypatch, **values) -> None:
         )
         return prior
 
-    monkeypatch.setattr(internal_agent, "prior_reply", stale)
+    monkeypatch.setattr(internal_agent, "prior_email_reply", stale)
 
 
 async def test_a_lost_claim_sends_nothing(
@@ -384,7 +384,7 @@ async def test_a_claim_needs_the_status_it_read(
     await _prior_reply(
         async_session, org, agent, domain, inbound, status="failed", age=timedelta(0)
     )
-    real = internal_agent.prior_reply
+    real = internal_agent.prior_email_reply
 
     async def stale(db, email):
         prior = await real(db, email)
@@ -396,7 +396,7 @@ async def test_a_claim_needs_the_status_it_read(
         )
         return prior
 
-    monkeypatch.setattr(internal_agent, "prior_reply", stale)
+    monkeypatch.setattr(internal_agent, "prior_email_reply", stale)
     assert (await _reply(client, inbound.id))["state"] == "done"
     email_mock.send_email.assert_not_awaited()
 
