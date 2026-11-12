@@ -3,9 +3,15 @@
 import base64
 import io
 import json
+import uuid
+import zipfile
 from types import SimpleNamespace
 
 import pytest
+from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.voicebot.attachment_decoder import decode_file
+from hailhq.voicebot.attachment_reader import inspect_tool_file
+from hailhq.voicebot.tools import _make_handler
 from PIL import Image
 
 
@@ -19,11 +25,6 @@ def png():
 async def test_visual_tool_result_contains_facts_not_binary_or_private_paths(
     monkeypatch,
 ):
-    import uuid
-
-    from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
-    from hailhq.voicebot.tools import _make_handler
-
     payload = json.dumps(
         {
             "filename": "photo.png",
@@ -110,8 +111,6 @@ def pdf_bytes(pages=1):
 
 
 def test_pdf_reading_includes_rendered_scans_and_a_bounded_page_range():
-    from hailhq.voicebot.attachment_reader import decode_file
-
     result = decode_file(
         {
             "base64": base64.b64encode(pdf_bytes(5)).decode(),
@@ -128,8 +127,6 @@ def test_pdf_reading_includes_rendered_scans_and_a_bounded_page_range():
 
 
 def test_image_normalization_reads_pixels_without_mutating_the_original():
-    from hailhq.voicebot.attachment_reader import decode_file
-
     original = png()
     result = decode_file(
         {"base64": base64.b64encode(original).decode(), "content_type": "image/png"}
@@ -139,10 +136,6 @@ def test_image_normalization_reads_pixels_without_mutating_the_original():
 
 
 def test_word_documents_are_read_without_executing_xml_entities():
-    import zipfile
-
-    from hailhq.voicebot.attachment_reader import decode_file
-
     def file(xml):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -166,8 +159,6 @@ def test_word_documents_are_read_without_executing_xml_entities():
 
 @pytest.mark.asyncio
 async def test_unreadable_files_never_return_binary_data_to_the_agent():
-    from hailhq.voicebot.attachment_reader import inspect_tool_file
-
     result = await inspect_tool_file(
         json.dumps(
             {
@@ -185,10 +176,6 @@ async def test_unreadable_files_never_return_binary_data_to_the_agent():
 
 
 def test_excel_shared_strings_are_resolved_to_their_cells():
-    import zipfile
-
-    from hailhq.voicebot.attachment_reader import decode_file
-
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("xl/sharedStrings.xml", "<sst><si><t>Hello</t></si></sst>")
@@ -206,8 +193,6 @@ def test_excel_shared_strings_are_resolved_to_their_cells():
 
 
 def test_transparent_images_get_a_readable_white_background():
-    from hailhq.voicebot.attachment_reader import decode_file
-
     buffer = io.BytesIO()
     Image.new("RGBA", (5, 5), (0, 0, 0, 0)).save(buffer, "PNG")
     result = decode_file(
@@ -223,8 +208,6 @@ def test_transparent_images_get_a_readable_white_background():
 
 @pytest.mark.asyncio
 async def test_pdf_keeps_extracted_text_when_the_model_cannot_read_images():
-    from hailhq.voicebot.attachment_reader import inspect_tool_file
-
     result = json.loads(
         await inspect_tool_file(
             json.dumps(

@@ -10,6 +10,8 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from hailhq.api.agent_email_context import email_scope, read_file
+from hailhq.api.browser_history import browser_history
 from hailhq.api.browser_messaging import (
     capabilities,
     lease_browser_sms,
@@ -24,6 +26,7 @@ from hailhq.core.browser_voice import (
     TRIAL_CONCURRENCY,
     TRIAL_MS,
     bind_browser_context,
+    browser_sms_number,
     finish_browser_call,
     read_browser_budget,
     session_charge_cents,
@@ -31,12 +34,14 @@ from hailhq.core.browser_voice import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
+from hailhq.core.email_mime import readable_email_body
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import AccountCredit, Agent, Call
+from hailhq.core.models import AccountCredit, Agent, Call, Email, EmailAttachment, Sms
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.threads import is_e164
 from livekit import api
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -54,8 +59,6 @@ class Contacts(BaseModel):
     @field_validator("sms_recipient")
     @classmethod
     def phone(cls, value):
-        from hailhq.core.threads import is_e164
-
         if value is not None and not is_e164(value):
             raise ValueError("Enter a phone number in international format.")
         return value
@@ -368,10 +371,6 @@ async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_sess
 
 
 async def conversation_inbox(body: InboxRequest, db, call):
-    from hailhq.api.agent_email_context import email_scope, read_file
-    from hailhq.core.email_mime import readable_email_body
-    from hailhq.core.models import Email, EmailAttachment
-
     scope = await email_scope(db, call)
     if scope is None:
         return {"spoken": "This conversation has no verified email inbox."}
@@ -382,7 +381,6 @@ async def conversation_inbox(body: InboxRequest, db, call):
         ).scalar_one_or_none()
         if anchor is None:
             return {"spoken": "That email is not in this conversation."}
-        from sqlalchemy import tuple_
 
         query = query.where(
             tuple_(Email.created_at, Email.id) < tuple_(anchor.created_at, anchor.id)
@@ -466,8 +464,6 @@ class TextsRequest(BaseModel):
 @router.post("/texts")
 async def texts(body: TextsRequest, db: Annotated[AsyncSession, Depends(get_session)]):
     """Only messages from the consented phone during this number's lease."""
-    from hailhq.core.browser_voice import browser_sms_number
-    from hailhq.core.models import Sms
 
     call = await db.get(Call, body.call_id)
     if call is None or call.transport != "browser" or call.status != "in_progress":
@@ -525,7 +521,6 @@ async def history(
     body: HistoryRequest, db: Annotated[AsyncSession, Depends(get_session)]
 ):
     """Website-admin history, available before a call and after it ends."""
-    from hailhq.api.browser_history import browser_history
 
     before = before_key = None
     if body.cursor:

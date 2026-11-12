@@ -10,10 +10,14 @@ from __future__ import annotations
 import asyncio
 import base64
 
+from hailhq.api import deps
+from hailhq.api.browser_messaging import verified_email
+from hailhq.api.routes.emails import verified_senders
 from hailhq.core.email_attachment_limits import (
     AGENT_ATTACHMENT_READ_BYTES,
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
+from hailhq.core.email_sender import from_address_for
 from hailhq.core.email_threads import EmailScope, same_thread
 from hailhq.core.models import (
     Call,
@@ -30,8 +34,6 @@ READS_PER_CALL = 8
 
 async def email_scope(db, call: Call) -> EmailScope | None:
     """Never accept a model-supplied organization, user, mailbox or path."""
-    from hailhq.api.browser_messaging import verified_email
-
     if call.transport == "browser":
         peer = await verified_email(
             db,
@@ -63,8 +65,6 @@ async def email_scope(db, call: Call) -> EmailScope | None:
         if len(set(peers)) != 1:
             return None
         peer = peers[0]
-        from hailhq.api.routes.emails import verified_senders
-        from hailhq.core.email_sender import from_address_for
 
         # Match resolve_sender(..., allow_ambiguous=True) without minting an
         # inbox as a side effect of a read. Custom domains keep their normal
@@ -110,8 +110,6 @@ async def source_files(db, call, reply_id, attachment_ids):
 
 
 async def read_file(db, call, attachment, *, page=1, allow_binary=False):
-    from hailhq.api.deps import get_s3_mail_optional
-
     if attachment.size_bytes > READ_BYTES:
         return {
             "spoken": "This file is too large to read. I can still send the original back."
@@ -135,7 +133,7 @@ async def read_file(db, call, attachment, *, page=1, allow_binary=False):
         return {"spoken": "No more files can be read in this conversation."}
     locked.metadata_ = {**locked.metadata_, "attachment_reads": used + 1}
     await db.commit()
-    s3 = get_s3_mail_optional()
+    s3 = deps.get_s3_mail_optional()
     if s3 is None:
         return {"spoken": "File storage is not available right now."}
     try:

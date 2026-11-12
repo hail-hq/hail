@@ -7,7 +7,6 @@ GET /emails/suppressions - the org's suppressed addresses.
 DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
-
   explicit ``from`` → the org's one verified custom domain → its hail-mail
   address → freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
 
@@ -76,6 +75,8 @@ from hailhq.core.email_attachment_limits import (
 )
 from hailhq.core.email_delivery_events import record_sent_event
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.email_threads import reference_ids
+from hailhq.core.file_uploads import object_key
 from hailhq.core.models import (
     Email,
     EmailAttachment,
@@ -378,7 +379,6 @@ async def deliver_email(
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
-    from hailhq.core.email_threads import reference_ids
 
     references = reference_ids(email)
     if references:
@@ -412,7 +412,6 @@ async def deliver_email(
             # retained outbound copy using the existing upload/GC contract,
             # before sending. Failed or interrupted sends leave unused uploads
             # for the normal sweeper; successful sends mark them used below.
-            from hailhq.core.file_uploads import object_key
 
             retained = []
             for row, payload in zip(attachment_rows, payloads):

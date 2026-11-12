@@ -5,7 +5,16 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from hailhq.core.models import Email, EmailAttachment, FileUpload, PhoneNumber
+from hailhq.api import deps
+from hailhq.api.routes import emails
+from hailhq.core.models import (
+    Email,
+    EmailAttachment,
+    EmailDomain,
+    FileUpload,
+    PhoneNumber,
+    User,
+)
 from sqlalchemy import select
 
 from tests.test_browser_messaging import (
@@ -78,8 +87,6 @@ async def test_inbox_does_not_read_another_person_in_the_same_workspace(
 async def test_image_read_returns_private_bytes_only_after_user_and_org_checks(
     client, async_session, monkeypatch
 ):
-    from hailhq.api import deps
-
     call, domain = await seed(async_session)
     _, att = await mail(async_session, call, domain)
     s3 = AsyncMock()
@@ -103,9 +110,6 @@ async def test_image_read_returns_private_bytes_only_after_user_and_org_checks(
 async def test_reattaches_original_bytes_and_keeps_reply_headers(
     client, async_session, monkeypatch, email_mock
 ):
-    from hailhq.api import deps
-    from hailhq.api.routes import emails
-
     call, domain = await seed(async_session)
     source, att = await mail(async_session, call, domain)
     s3 = AsyncMock()
@@ -160,8 +164,6 @@ async def test_reattaches_original_bytes_and_keeps_reply_headers(
 async def test_reuse_rejects_foreign_files_before_fetch_or_send(
     client, async_session, monkeypatch, email_mock, foreign
 ):
-    from hailhq.api import deps
-
     call, domain = await seed(async_session)
     source, _ = await mail(async_session, call, domain)
     _, att = await mail(
@@ -199,8 +201,6 @@ async def test_reuse_rejects_foreign_files_before_fetch_or_send(
 async def test_reuses_a_file_from_an_earlier_email_in_the_same_thread(
     client, async_session, monkeypatch, email_mock
 ):
-    from hailhq.api.routes import emails
-
     call, domain = await seed(async_session)
     old, att = await mail(async_session, call, domain)
     reply, _ = await mail(
@@ -235,8 +235,6 @@ async def test_reuses_a_file_from_an_earlier_email_in_the_same_thread(
 async def test_file_reads_stop_before_storage_when_not_allowed(
     client, async_session, monkeypatch, reason
 ):
-    from hailhq.api import deps
-
     call, domain = await seed(async_session)
     email, att = await mail(async_session, call, domain)
     if reason == "quota":
@@ -335,8 +333,6 @@ async def test_inbox_pages_to_older_mail_without_changing_scope(client, async_se
 async def test_failed_retained_copy_never_sends_and_remains_collectible(
     client, async_session, monkeypatch, email_mock
 ):
-    from hailhq.api.routes import emails
-
     call, domain = await seed(async_session)
     source, att = await mail(async_session, call, domain)
     s3 = AsyncMock()
@@ -366,8 +362,6 @@ async def test_failed_retained_copy_never_sends_and_remains_collectible(
 async def test_older_worker_never_receives_binary_tool_data(
     client, async_session, monkeypatch
 ):
-    from hailhq.api import deps
-
     call, domain = await seed(async_session)
     _, att = await mail(async_session, call, domain)
     s3 = AsyncMock()
@@ -385,8 +379,6 @@ async def test_older_worker_never_receives_binary_tool_data(
 async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_sending(
     client, async_session
 ):
-    from hailhq.core.models import EmailDomain, User
-
     call, _ = await seed(async_session)
     number = (await async_session.execute(select(PhoneNumber))).scalar_one()
     user = (await async_session.execute(select(User))).scalar_one()

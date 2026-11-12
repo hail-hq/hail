@@ -25,6 +25,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from hailhq.api.agent_email_context import source_files
 from hailhq.api.audit import write_audit_log
 from hailhq.api.browser_messaging import (
     email_provider_ready,
@@ -39,6 +40,10 @@ from hailhq.api.routes.emails import (
     resolve_sender,
 )
 from hailhq.api.routes.internal.auth import verify_internal_request
+from hailhq.api.routes.internal.browser_sessions import (
+    InboxRequest as AgentInboxRequest,
+)
+from hailhq.api.routes.internal.browser_sessions import conversation_inbox
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
 from hailhq.core.agent_tools.send_email import (
@@ -82,6 +87,8 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.forward_targets import normalize_address
+from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
+from hailhq.core.email_threads import reference_ids
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
@@ -1390,9 +1397,6 @@ async def agent_send_email(
             spoken="Your workspace email changed. Start a new conversation before sending.",
         )
 
-    from hailhq.api.agent_email_context import source_files
-    from hailhq.core.email_threads import reference_ids
-
     parent = None
     source_attachments = []
     if body.reply_to_email_id or body.attachment_ids:
@@ -1402,7 +1406,6 @@ async def agent_send_email(
             )
             if recipient.lower() != scope.peer.lower():
                 raise ValueError("Files can only return to this conversation's person")
-            from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 
             if (
                 sum(a.size_bytes for a in source_attachments)
@@ -2041,15 +2044,6 @@ async def agent_handover_result(
     return {"ok": True}
 
 
-__all__ = ["router"]
-
-
-from hailhq.api.routes.internal.browser_sessions import (
-    InboxRequest as AgentInboxRequest,
-)
-from hailhq.api.routes.internal.browser_sessions import conversation_inbox
-
-
 @router.post("/inbox")
 async def agent_inbox(
     body: AgentInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
@@ -2059,3 +2053,6 @@ async def agent_inbox(
         return {"spoken": "This conversation has ended. Inbox access is closed."}
     await _tag_call(db, call)
     return await conversation_inbox(body, db, call)
+
+
+__all__ = ["router"]
