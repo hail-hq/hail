@@ -179,7 +179,7 @@ filters still apply. Incoming email does not gain access to phone history from a
 phone number. That field is editable without ownership verification. A verified
 phone-to-email link is required before this cross-channel capability can ship.
 
-Email runs allow six model rounds within the existing 90-second total budget.
+Email runs allow six model rounds within a three-minute model/tool budget.
 Tool sends remain capped at three; extra rounds permit search, opening a result,
 reading a file, and then replying. Retries after a previous send still have no
 tools, so a reworded retry cannot send another message.

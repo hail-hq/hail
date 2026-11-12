@@ -99,7 +99,7 @@ __all__ = [
 
 MAX_REPLY_CHARS = 5000  # same cap as the send_email tool
 # A worker that has not finished within this long is presumed dead. Longer than
-# the text lease: one email run is a 90-second model call plus tool sends and
+# the text lease: one email run has a three-minute model/tool budget and
 # the reply post, so a slow run must not be claimed again and paid twice.
 EMAIL_CLAIM_LEASE = timedelta(minutes=5)
 # Characters of one email in the chat. Quoted history makes bodies long.

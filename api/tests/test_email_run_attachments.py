@@ -165,11 +165,28 @@ async def test_email_attachment_reply_is_the_final_reply_not_a_second_email(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("older_thread", [False, True])
 async def test_safe_email_retry_keeps_original_attachments(
-    client, async_session, monkeypatch, email_mock
+    client, async_session, monkeypatch, email_mock, older_thread
 ):
     _, _, _, inbound = await _seed(async_session)
-    att = await file(async_session, inbound)
+    source = inbound
+    if older_thread:
+        source = Email(
+            organization_id=inbound.organization_id,
+            email_domain_id=inbound.email_domain_id,
+            direction="inbound",
+            from_address=inbound.from_address,
+            from_verified=True,
+            to_addresses=inbound.to_addresses,
+            status="received",
+            subject="Older receipt",
+            body_text="Receipt from a separate thread",
+            message_id="<older@example.test>",
+        )
+        async_session.add(source)
+        await async_session.commit()
+    att = await file(async_session, source)
     s3 = AsyncMock()
     s3.fetch_raw.return_value = b"pngdata"
     monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
@@ -187,12 +204,17 @@ async def test_safe_email_retry_keeps_original_attachments(
             "subject": "Your file",
             "body_text": "Your file.",
             "attachment_ids": [str(att.id)],
+            "reply_to_email_id": str(source.id),
         },
     )
     assert result.status_code == 200 and result.json()["ok"] is False, result.text
     email_mock.send_email.side_effect = original_send
     result = await _reply(client, inbound.id)
     assert result["state"] == "done", result
+    assert (
+        email_mock.send_email.call_args.kwargs["headers"]["In-Reply-To"]
+        == inbound.message_id
+    )
     assert (
         email_mock.send_email.call_args.kwargs["attachments"][0].payload == b"pngdata"
     )

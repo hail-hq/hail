@@ -937,3 +937,27 @@ async def test_cancelled_attempt_is_recorded_and_cancellation_propagates(
     assert points(reader)["hail.email.reply.attempts"][0].attributes == {
         "outcome": "cancelled"
     }
+
+
+async def test_expanded_tool_workflow_can_finish_after_old_three_round_budget(
+    monkeypatch,
+):
+    monkeypatch.setattr(emailbot, "LLM_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(emailbot, "_prepare", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(emailbot, "_settle", AsyncMock(return_value="done"))
+
+    async def generation(*args):
+        await asyncio.sleep(0.2)
+        return "The searched file is attached."
+
+    monkeypatch.setattr(emailbot, "generate_reply", generation)
+    claimed = SimpleNamespace(
+        email=SimpleNamespace(id=uuid.uuid4(), requested_at=datetime.now(timezone.utc)),
+        attempt=1,
+    )
+    api = SimpleNamespace(post=AsyncMock(return_value={"state": "done"}))
+    await emailbot._reply_claimed(api, claimed)
+    api.post.assert_awaited_once_with(
+        "/internal/agent/reply-email",
+        {"email_id": str(claimed.email.id), "body": "The searched file is attached."},
+    )

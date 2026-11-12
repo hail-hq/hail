@@ -47,7 +47,6 @@ from hailhq.core.telemetry_identity import (
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.chat_loop import (
     LLM_TIMEOUT_SECONDS,
-    MAX_TOOL_ROUNDS,
     run_chat,
     tool_args,
 )
@@ -281,7 +280,7 @@ async def _reply_claimed(
                 messages, specs = prepared
                 text = await asyncio.wait_for(
                     generate_reply(claimed, messages, specs, api),
-                    timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
+                    timeout=LLM_TIMEOUT_SECONDS * EMAIL_TOOL_ROUNDS,
                 )
                 if not text:
                     logger.info("email_id=%s wrote nothing; skipped", email.id)

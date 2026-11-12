@@ -1067,7 +1067,10 @@ async def agent_reply_email(
                 ids = [
                     UUID(value) for value in prior.metadata_["source_attachment_ids"]
                 ]
-                _, _, files = await source_files(db, inbound, inbound.id, ids)
+                source_id = UUID(
+                    prior.metadata_.get("attachment_reply_to_email_id", str(inbound.id))
+                )
+                _, _, files = await source_files(db, inbound, source_id, ids)
             except (ValueError, TypeError):
                 prior.status = "failed"
                 prior.end_reason = "AttachmentsUnavailable"
@@ -1248,7 +1251,7 @@ async def agent_email_run_send_email(
         if existing is not None:
             return _replayed_send(existing)
         try:
-            scope, _, files = await source_files(
+            scope, source, files = await source_files(
                 db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
             )
         except ValueError:
@@ -1273,6 +1276,7 @@ async def agent_email_run_send_email(
         meta = {
             **meta,
             "reply_to_email_id": str(inbound.id),
+            "attachment_reply_to_email_id": str(source.id),
             "source_attachment_ids": [str(row.id) for row in files],
         }
     else:
