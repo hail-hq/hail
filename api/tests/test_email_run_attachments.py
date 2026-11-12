@@ -334,6 +334,7 @@ async def test_provider_timeout_after_acceptance_is_never_resent(
     client, async_session, monkeypatch, email_mock
 ):
     _, _, _, inbound = await _seed(async_session)
+    inbound_id = inbound.id
     accepted = []
 
     async def accepted_then_stalled(**kwargs):
@@ -342,9 +343,9 @@ async def test_provider_timeout_after_acceptance_is_never_resent(
 
     email_mock.send_email.side_effect = accepted_then_stalled
     monkeypatch.setattr(emails, "SES_SEND_BUDGET_SECONDS", 1)
-    first = await _reply(client, inbound.id)
+    first = await _reply(client, inbound_id)
     assert first["state"] == "failed" and first["reason"] == "TimeoutError"
-    again = await _reply(client, inbound.id)
+    again = await _reply(client, inbound_id)
     assert again["state"] == "failed" and again["reason"] == "TimeoutError"
     assert accepted == ["Happy to help."]
     outbound = (
