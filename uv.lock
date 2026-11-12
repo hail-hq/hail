@@ -1150,7 +1150,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "regex" },
     { name = "requests" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "tldextract" },
     { name = "twilio" },
 ]
@@ -1186,7 +1186,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.31" },
     { name = "responses", marker = "extra == 'dev'", specifier = ">=0.26" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=4" },
     { name = "tldextract", specifier = ">=5.3.2" },
     { name = "twilio", specifier = ">=9.3" },

@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  # The deployment workflow runs these checks for its exact main commit.
+  workflow_call:
 
 # Only superseded PR runs are cancelled; main pushes keep their own run.
 concurrency:
