@@ -530,9 +530,10 @@ async def finish_reply(
     *,
     attempt: int | None = None,
     reason: str | None = None,
-) -> None:
+) -> bool:
     """Record the final state, and with ``reason`` why it was skipped. With
-    ``attempt`` it applies only while that claim still owns the row."""
+    ``attempt`` it applies only while that claim still owns the row. Return
+    whether the row was updated, so stale attempts report lost ownership."""
     stmt = update(Email).where(Email.id == email.id)
     if attempt is not None:
         stmt = stmt.where(
@@ -543,6 +544,7 @@ async def finish_reply(
     await db.commit()
     if reason is not None and result.rowcount:  # type: ignore[attr-defined]
         await stamp_skip(db, email.id, reason)
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 async def retry_reply(
@@ -556,8 +558,10 @@ async def retry_reply(
     """
     waiting = delay is not None
     if not waiting and claimed.attempt >= MAX_ATTEMPTS:
-        await finish_reply(db, claimed.email, "failed", attempt=claimed.attempt)
-        return "failed"
+        settled = await finish_reply(
+            db, claimed.email, "failed", attempt=claimed.attempt
+        )
+        return "failed" if settled else None
     wait = delay or RETRY_BACKOFF * 2 ** (claimed.attempt - 1)
     result = await db.execute(
         update(Email)
