@@ -20,3 +20,18 @@ ATTACHMENT_TOO_LARGE_DETAIL = (
 )
 
 __all__ = ["ATTACHMENT_TOO_LARGE_DETAIL", "MAX_EMAIL_ATTACHMENT_BYTES"]
+
+# File inspection is narrower than forwarding original stored bytes.
+AGENT_ATTACHMENT_READ_BYTES = 10 * 1024 * 1024
+AGENT_ATTACHMENT_READ_TYPES = (
+    "text/plain",
+    "text/csv",
+    "application/json",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)

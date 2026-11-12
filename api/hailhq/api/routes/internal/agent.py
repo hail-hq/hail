@@ -159,6 +159,8 @@ class AgentSendEmailRequest(AgentSendBase):
     recipient_name: str = Field(min_length=1, max_length=MAX_RECIPIENT_NAME_CHARS)
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
+    reply_to_email_id: UUID | None = None
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
 
 class AgentSendResponse(BaseModel):
@@ -1388,6 +1390,32 @@ async def agent_send_email(
             spoken="Your workspace email changed. Start a new conversation before sending.",
         )
 
+    from hailhq.api.agent_email_context import source_files
+    from hailhq.core.email_threads import reference_ids
+
+    parent = None
+    source_attachments = []
+    if body.reply_to_email_id or body.attachment_ids:
+        try:
+            scope, parent, source_attachments = await source_files(
+                db, call, body.reply_to_email_id, body.attachment_ids
+            )
+            if recipient.lower() != scope.peer.lower():
+                raise ValueError("Files can only return to this conversation's person")
+            from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
+
+            if (
+                sum(a.size_bytes for a in source_attachments)
+                + len(body.body_text.encode())
+                > MAX_EMAIL_ATTACHMENT_BYTES
+            ):
+                raise ValueError("Files too large")
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files or that email are not available in this conversation. Nothing was sent.",
+            )
+
     if call.transport == "browser" and not await reserve_browser_preview(
         db,
         call.id,
@@ -1424,6 +1452,19 @@ async def agent_send_email(
             ),
         },
     )
+    if parent is not None:
+        subject = " ".join((parent.subject or body.subject).splitlines())
+        email.subject = (
+            subject if subject.lower().startswith("re:") else "Re: " + subject
+        )[:MAX_SUBJECT_CHARS]
+        refs = reference_ids(parent, limit=None)
+        email.in_reply_to = parent.message_id if parent.message_id in refs else None
+        email.references_ids = refs or None
+    email.metadata_ = {
+        **email.metadata_,
+        "source_attachment_ids": [str(a.id) for a in source_attachments],
+        "reply_to_email_id": str(parent.id) if parent else None,
+    }
     db.add(email)
     await db.commit()
     await db.refresh(email)
@@ -1450,6 +1491,7 @@ async def agent_send_email(
         email_provider,
         email,
         at_most_once=True,
+        **({"attachment_rows": source_attachments} if source_attachments else {}),
         **(
             {"billable": False}
             if call.transport == "browser" and call.metadata_.get("browser_trial")
@@ -2000,3 +2042,20 @@ async def agent_handover_result(
 
 
 __all__ = ["router"]
+
+
+from hailhq.api.routes.internal.browser_sessions import (
+    InboxRequest as AgentInboxRequest,
+)
+from hailhq.api.routes.internal.browser_sessions import conversation_inbox
+
+
+@router.post("/inbox")
+async def agent_inbox(
+    body: AgentInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    call = await db.get(Call, body.call_id)
+    if call is None or call.status != "in_progress":
+        return {"spoken": "This conversation has ended. Inbox access is closed."}
+    await _tag_call(db, call)
+    return await conversation_inbox(body, db, call)

@@ -94,7 +94,12 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                     )
                     return STILL_TALKING
             # None means no reply turn (a transfer that started ringing).
-            return await spec.execute(tctx, raw_arguments)
+            result = await spec.execute(tctx, raw_arguments)
+            if spec.name in ("read_email", "read_browser_inbox"):
+                from hailhq.voicebot.attachment_reader import inspect_tool_file
+
+                result = await inspect_tool_file(result, context.session.llm)
+            return result
         except Exception:
             logger.exception(
                 "agent tool %s failed for call_id=%s", spec.name, tctx.call_id

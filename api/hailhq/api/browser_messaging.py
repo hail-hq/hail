@@ -9,6 +9,7 @@ from hailhq.api.routes.emails import resolve_hail_mail_sender
 from hailhq.core.carrier_routing import sms_route_configured
 from hailhq.core.compliance_gate import check_email_allowed, check_sms_allowed
 from hailhq.core.config import settings
+from hailhq.core.email_attachment_limits import AGENT_ATTACHMENT_READ_TYPES
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.models import OrganizationMember, PhoneNumber, User
 from hailhq.core.providers.email.ses import credentials_ready
@@ -169,7 +170,7 @@ async def capabilities(
                 )
             )
         ),
-        "attachmentReadTypes": ["text/plain", "text/csv", "application/json"],
+        "attachmentReadTypes": list(AGENT_ATTACHMENT_READ_TYPES),
     }
 
 

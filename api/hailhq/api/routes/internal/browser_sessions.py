@@ -352,28 +352,40 @@ class InboxRequest(BaseModel):
     call_id: UUID
     email_id: UUID | None = None
     attachment_id: UUID | None = None
+    before_email_id: UUID | None = None
+    page: int = Field(default=1, ge=1, le=10000)
 
 
 @router.post("/inbox")
 async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_session)]):
     """Read mail to this session's inbox. No arbitrary org, mailbox or S3 key."""
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.core.email_mime import readable_email_body
-    from hailhq.core.models import Email, EmailAttachment
-
     call = await db.get(Call, body.call_id)
     if call is None or call.transport != "browser" or call.status != "in_progress":
         return {"spoken": "This conversation has ended. Inbox access is closed."}
     await bind_browser_context(db, call)
-    caps = call.metadata_.get("browser_capabilities", {})
-    address = caps.get("inboxAddress")
-    if not address or not caps.get("inboundEmailReady"):
-        return {"spoken": "This workspace inbox is not ready yet."}
-    query = select(Email).where(
-        Email.organization_id == call.organization_id,
-        Email.direction == "inbound",
-        Email.to_addresses.any(address),
-    )
+    return await conversation_inbox(body, db, call)
+
+
+async def conversation_inbox(body: InboxRequest, db, call):
+    from hailhq.api.agent_email_context import email_scope, read_file
+    from hailhq.core.email_mime import readable_email_body
+    from hailhq.core.models import Email, EmailAttachment
+
+    scope = await email_scope(db, call)
+    if scope is None:
+        return {"spoken": "This conversation has no verified email inbox."}
+    query = scope.query()
+    if body.before_email_id:
+        anchor = (
+            await db.execute(query.where(Email.id == body.before_email_id))
+        ).scalar_one_or_none()
+        if anchor is None:
+            return {"spoken": "That email is not in this conversation."}
+        from sqlalchemy import tuple_
+
+        query = query.where(
+            tuple_(Email.created_at, Email.id) < tuple_(anchor.created_at, anchor.id)
+        )
     if body.email_id:
         query = query.where(Email.id == body.email_id)
     if body.attachment_id:
@@ -389,35 +401,13 @@ async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_sess
         ).scalar_one_or_none()
         if attachment is None:
             return {"spoken": "I cannot find that file in this inbox."}
-        # Only text is fed to the voice model. Never mistake a download URL
-        # or binary file metadata for a model-readable document.
-        kind = attachment.content_type.partition(";")[0].lower()
-        if (
-            kind not in ("text/plain", "text/csv", "application/json")
-            or attachment.size_bytes > 262144
-        ):
-            return {
-                "spoken": "I can see this file, but I cannot read its contents. Send a plain text or CSV file up to 256 KB.",
-                "filename": attachment.filename,
-                "content_type": attachment.content_type,
-            }
-        s3 = get_s3_mail_optional()
-        if s3 is None:
-            return {"spoken": "File storage is not available right now."}
-        try:
-            raw = await s3.fetch_raw(attachment.s3_key)
-            content = raw[:262144].decode("utf-8")
-        except Exception:
-            return {
-                "spoken": "I could not read this file. Try a UTF-8 text or CSV file."
-            }
-        return {
-            "filename": attachment.filename,
-            "quoted_untrusted_content": content[:12000],
-            "truncated": len(content) > 12000,
-        }
+        return await read_file(db, call, attachment, page=body.page)
     messages = (
-        (await db.execute(query.order_by(Email.created_at.desc()).limit(5)))
+        (
+            await db.execute(
+                query.order_by(Email.created_at.desc(), Email.id.desc()).limit(5)
+            )
+        )
         .scalars()
         .all()
     )
@@ -434,6 +424,9 @@ async def inbox(body: InboxRequest, db: Annotated[AsyncSession, Depends(get_sess
             {
                 "id": str(email.id),
                 "from": email.from_address,
+                "direction": email.direction,
+                "message_id": email.message_id,
+                "in_reply_to": email.in_reply_to,
                 "subject": email.subject[:200],
                 "body_text": readable_email_body(email.body_text, email.body_html)[
                     :6000

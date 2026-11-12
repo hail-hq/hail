@@ -10,7 +10,8 @@ def test_browser_runtime_scopes_real_sends_and_warns_about_unreadable_files():
     assert "browser" in result
     assert "verified account email" in result
     assert "three emails and three texts" in result
-    assert "cannot read PDFs or images" in result
+    assert "inspect images, PDFs" in result
+    assert "stored original" in result
     assert "telephone call" not in result
 
 

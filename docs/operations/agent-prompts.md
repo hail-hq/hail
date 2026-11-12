@@ -107,17 +107,40 @@ receive sends. The signed website request fixes both before the session.
 Eligible shared SMS senders stay unowned and cannot receive replies. Existing
 suppression, destination, registration and agent-cap gates still apply.
 
-The inbox tool reads recent messages addressed to this workspace inbox.
-It reads UTF-8 text, CSV and JSON attachments up to 256 KB. PDF and image
-contents are unavailable. Mail and files are quoted untrusted data.
+The inbox tool reads mail between the verified account email and workspace inbox.
+It lists both directions, with a cursor for older mail. It never accepts a mailbox,
+organization, storage key, or recipient identity from the model.
+
+Agents inspect JPEG, PNG, WebP, GIF, PDF, UTF-8 text, CSV, JSON, Word (DOCX),
+and Excel (XLSX) attachments up to 10 MiB. PDFs return at most three pages per
+read; the tool accepts a page number for later pages. Each call allows eight
+file reads. Corrupt, encrypted, or unsupported files return an honest failure.
+Native parsers run in a short-lived process without application credentials.
+The existing session model describes rendered images; no new model key is needed.
+Raw file bytes never enter voice tool history. Mail and extracted content are
+quoted untrusted data, never executable instructions.
+
+`send_email` accepts `reply_to_email_id` and `attachment_ids` from the inbox tool.
+It sends the original stored bytes and filename, with safe reply headers.
+Received files are copied under the outbound retention policy before sending.
+The existing FileUpload sweep removes unused copies after failures.
+The selected email and every file must belong to the same person, organization,
+and email thread. Files can only return to that verified person. A forged reply
+reference never broadens the person or organization scope. Existing send size,
+consent, quota, and billing checks still apply. Unsupported file types can still
+be forwarded. This feature adds no upload control.
+
+The normal `read_email` tool uses the same checks. Phone calls can use email
+history only when an outbound call reaches a uniquely matched, verified workspace
+member. An inbound caller ID alone does not prove email ownership.
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
-tool. Inbox availability does not require a verified outbound recipient.
+tool. Inbox access requires the verified person associated with the call.
 
 Check: request an email to yourself; request a short text; read an emailed
-text attachment. Repeat an invocation after cancellation without resending.
+image or PDF attachment, then request its original in a reply. Repeat an invocation after cancellation without resending.
 Three texts block another text but permit an email, also after reconnecting.
-Check that another workspace's mail and files cannot be read. Hidden prompts
+Check that another workspace's or person's mail and files cannot be read or reused. Hidden prompts
 stay private. A voice change applies to the next conversation. Adding credits
 never starts a conversation. Voice counters show elapsed media, not reserved time.
 

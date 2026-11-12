@@ -24,10 +24,11 @@ from a tenant who hasn't registered a domain still goes out.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
@@ -330,7 +331,7 @@ async def deliver_email(
     db: AsyncSession,
     email_provider: EmailProvider,
     email: Email,
-    attachment_rows: list[FileUpload] | None = None,
+    attachment_rows: list[FileUpload | EmailAttachment] | None = None,
     *,
     billable: bool = True,
     claimed_at: datetime | None = None,
@@ -377,6 +378,14 @@ async def deliver_email(
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+    from hailhq.core.email_threads import reference_ids
+
+    references = reference_ids(email)
+    if references:
+        unsubscribe_headers = dict(unsubscribe_headers or {})
+        unsubscribe_headers["References"] = " ".join(references)
+        if email.in_reply_to in references:
+            unsubscribe_headers["In-Reply-To"] = email.in_reply_to
     provider_attachments: list[ProviderAttachment] = []
     try:
         if attachment_rows:
@@ -392,6 +401,45 @@ async def deliver_email(
             payloads = await asyncio.gather(
                 *(s3.fetch_raw(row.s3_key) for row in attachment_rows)
             )
+            if (
+                sum(len(raw) for raw in payloads)
+                + len((email.body_text or "").encode())
+                + len((email.body_html or "").encode())
+                > MAX_EMAIL_ATTACHMENT_BYTES
+            ):
+                raise ValueError("Email attachments exceed the message size limit")
+            # Received objects expire under the inbound lifecycle. Track a
+            # retained outbound copy using the existing upload/GC contract,
+            # before sending. Failed or interrupted sends leave unused uploads
+            # for the normal sweeper; successful sends mark them used below.
+            from hailhq.core.file_uploads import object_key
+
+            retained = []
+            for row, payload in zip(attachment_rows, payloads):
+                if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
+                    "outbound-attachments/"
+                ):
+                    upload_id = uuid4()
+                    upload = FileUpload(
+                        id=upload_id,
+                        organization_id=email.organization_id,
+                        purpose="email_attachment",
+                        filename=row.filename,
+                        content_type=row.content_type,
+                        size_bytes=len(payload),
+                        s3_key=object_key(
+                            "email_attachment", email.organization_id, upload_id
+                        ),
+                        sha256=hashlib.sha256(payload).hexdigest(),
+                        uploaded_at=func.statement_timestamp(),
+                    )
+                    db.add(upload)
+                    await db.commit()
+                    await s3.put_attachment(upload.s3_key, payload, upload.content_type)
+                    retained.append(upload)
+                else:
+                    retained.append(row)
+            attachment_rows = retained
             provider_attachments = [
                 ProviderAttachment(
                     filename=row.filename,
@@ -491,7 +539,7 @@ async def deliver_email(
                 s3_key=row.s3_key,
             )
         )
-        if row.first_used_at is None:
+        if isinstance(row, FileUpload) and row.first_used_at is None:
             # The database clock, like every other upload time.
             row.first_used_at = func.statement_timestamp()
     await db.commit()

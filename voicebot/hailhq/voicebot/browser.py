@@ -108,7 +108,7 @@ class BrowserAgent(Agent):
             for message in messages:
                 entry = {
                     key: message[key]
-                    for key in ("id", "from", "subject", "attachments")
+                    for key in ("id", "from", "direction", "subject", "attachments")
                     if key in message
                 }
                 entry["text"] = (message.get("body_text") or message.get("body") or "")[

@@ -103,6 +103,11 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             "recipient_name": recipient_name,
             "subject": subject,
             "body_text": body_text,
+            **{
+                key: args[key]
+                for key in ("reply_to_email_id", "attachment_ids")
+                if args.get(key)
+            },
         },
     )
     return str(resp.get("spoken", SPOKEN_FALLBACK))
@@ -115,7 +120,7 @@ SPEC = ToolSpec(
         "(use list_contacts to see who). You cannot email arbitrary "
         "addresses, only directory names. When the person on the call asks "
         "for the email, send it right away; their request is the "
-        "confirmation. Then say it is sent. Ask one short question only when "
+        "confirmation. Reattach original files with their attachment_ids and reply_to_email_id from this person’s email thread. Never invent file IDs. Then say it is sent. Ask one short question only when "
         "the recipient, the channel (text or email) or the content is "
         "unclear, and never ask the same question twice. Before sending "
         "something they did not ask for, say what you will send and to whom, "
@@ -124,6 +129,17 @@ SPEC = ToolSpec(
     parameters={
         "type": "object",
         "properties": {
+            "reply_to_email_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The email to reply to, from the conversation inbox tool.",
+            },
+            "attachment_ids": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {"type": "string", "format": "uuid"},
+                "description": "Original file IDs from that email thread. Requires reply_to_email_id. Never invent IDs.",
+            },
             "recipient_name": {
                 "type": "string",
                 "description": "The directory name of the recipient.",
