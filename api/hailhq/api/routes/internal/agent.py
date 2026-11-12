@@ -1636,7 +1636,7 @@ async def agent_send_email(
             else {}
         ),
     )
-    await _record_browser_outcome(db, call.id, body.tool_invocation_id, email)
+    await _record_browser_outcome(db, body.call_id, body.tool_invocation_id, email)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -2111,7 +2111,7 @@ async def agent_handover_email(
             action="agent.handover.email_failed",
             resource_type="email",
             resource_id=email.id,
-            payload={"call_id": str(call.id), "end_reason": err},
+            payload={"call_id": str(body.call_id), "end_reason": err},
             actor_kind="system",
         )
         return AgentHandoverEmailResponse(email="failed")

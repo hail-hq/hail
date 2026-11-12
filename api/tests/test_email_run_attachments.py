@@ -338,10 +338,10 @@ async def test_provider_timeout_after_acceptance_is_never_resent(
 
     async def accepted_then_stalled(**kwargs):
         accepted.append(kwargs["body_text"])
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(3)
 
     email_mock.send_email.side_effect = accepted_then_stalled
-    monkeypatch.setattr(emails, "SES_SEND_BUDGET_SECONDS", 0.1)
+    monkeypatch.setattr(emails, "SES_SEND_BUDGET_SECONDS", 1)
     first = await _reply(client, inbound.id)
     assert first["state"] == "failed" and first["reason"] == "TimeoutError"
     again = await _reply(client, inbound.id)

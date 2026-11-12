@@ -600,3 +600,34 @@ async def test_text_attachment_rejects_a_cursor_inside_a_utf8_character(
     assert result.status_code == 200, result.text
     assert "text position" in result.json()["spoken"]
     assert "continuation" not in result.json()
+
+
+@pytest.mark.asyncio
+async def test_browser_attachment_timeout_returns_a_failure_and_records_outcome(
+    client, async_session, monkeypatch, email_mock
+):
+    call, domain = await seed(async_session)
+    source, att = await mail(async_session, call, domain)
+    call_id = call.id
+    s3 = AsyncMock()
+    s3.fetch_raw.side_effect = TimeoutError("storage stalled")
+    monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
+    body = {
+        "call_id": str(call_id),
+        "tool_invocation_id": str(uuid.uuid4()),
+        "recipient_name": "you",
+        "subject": "Your file",
+        "body_text": "Here is your file.",
+        "reply_to_email_id": str(source.id),
+        "attachment_ids": [str(att.id)],
+    }
+    response = await post(client, "/internal/agent/send-email", body)
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is False
+    email_mock.send_email.assert_not_awaited()
+    outbound = (
+        await async_session.execute(select(Email).where(Email.direction == "outbound"))
+    ).scalar_one()
+    assert outbound.status == "failed" and outbound.end_reason == "TimeoutError"
+    again = await post(client, "/internal/agent/send-email", body)
+    assert again.status_code == 200 and again.json()["ok"] is False
