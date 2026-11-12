@@ -9,6 +9,7 @@ accepted. Resolution, gate, cap, and billing run server-side in
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from typing import Any
 
@@ -85,9 +86,21 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.inbound_email_id is not None:
         # Same message, same id: a retried run cannot send it twice, and a
         # different message to the same person still goes.
+        files = (
+            json.dumps(
+                {
+                    key: args[key]
+                    for key in ("reply_to_email_id", "attachment_ids")
+                    if args.get(key)
+                },
+                sort_keys=True,
+            )
+            if args.get("reply_to_email_id") or args.get("attachment_ids")
+            else ""
+        )
         invocation = uuid.uuid5(
             ctx.inbound_email_id,
-            f"send_email\x00{recipient_name}\x00{subject}\x00{body_text}",
+            f"send_email\x00{recipient_name}\x00{subject}\x00{body_text}" + files,
         )
         path = "/internal/agent/email-run/send-email"
         source = {"inbound_email_id": str(ctx.inbound_email_id)}
@@ -164,6 +177,6 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     description=(
         "Send an email to a member of the organization's team directory "
         "(use list_contacts to see who). You cannot email arbitrary "
-        "addresses, only directory names."
+        "addresses, only directory names. To reply with original files to the authenticated sender, use recipient_name=sender, attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice."
     ),
 )

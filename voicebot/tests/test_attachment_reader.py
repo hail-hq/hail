@@ -5,10 +5,14 @@ import io
 import json
 import uuid
 import zipfile
+from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core.agent_tools import read_email
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.voicebot import emailbot
 from hailhq.voicebot.attachment_decoder import decode_file
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.tools import _make_handler
@@ -22,8 +26,10 @@ def png():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["voice", "email"])
 async def test_visual_tool_result_contains_facts_not_binary_or_private_paths(
     monkeypatch,
+    transport,
 ):
     payload = json.dumps(
         {
@@ -68,9 +74,20 @@ async def test_visual_tool_result_contains_facts_not_binary_or_private_paths(
         execute=execute,
     )
     ctx = ToolContext(uuid.uuid4(), uuid.uuid4(), None, None, None)
-    result = await _make_handler(spec, ctx)(
-        {}, SimpleNamespace(session=SimpleNamespace(llm=model))
-    )
+    if transport == "voice":
+        result = await _make_handler(spec, ctx)(
+            {}, SimpleNamespace(session=SimpleNamespace(llm=model))
+        )
+    else:
+        spec = replace(spec, name="read_email")
+        ctx = replace(ctx, call_id=None, inbound_email_id=uuid.uuid4())
+        result, error = await emailbot._run_tool(
+            SimpleNamespace(name="read_email", arguments="{}"),
+            {"read_email": spec},
+            ctx,
+            model=model,
+        )
+        assert error is False
     assert "base64" not in result and "attachment_data" not in result
     assert "red rectangle" in result
     assert seen and seen[0]["tool_choice"] == "none"
@@ -225,3 +242,29 @@ async def test_pdf_keeps_extracted_text_when_the_model_cannot_read_images():
     assert "Receipt page 1" in result["quoted_untrusted_content"]
     assert result["visual_read"] is False and result["partial"] is True
     assert "attachment_data" not in result
+
+
+@pytest.mark.asyncio
+async def test_email_read_tool_cannot_replace_its_authenticated_source():
+    inbound = uuid.uuid4()
+    post = AsyncMock(return_value={"quoted_untrusted_messages": []})
+    ctx = ToolContext(
+        None,
+        uuid.uuid4(),
+        SimpleNamespace(post=post),
+        None,
+        None,
+        inbound_email_id=inbound,
+    )
+    await read_email.SPEC.execute(
+        ctx,
+        {
+            "inbound_email_id": str(uuid.uuid4()),
+            "call_id": str(uuid.uuid4()),
+            "organization_id": str(uuid.uuid4()),
+        },
+    )
+    path, body = post.call_args.args
+    assert path == "/internal/agent/email-run/inbox"
+    assert body["inbound_email_id"] == str(inbound)
+    assert "organization_id" not in body and "call_id" not in body

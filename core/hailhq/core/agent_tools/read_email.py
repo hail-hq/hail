@@ -7,12 +7,18 @@ from hailhq.core.agent_tools.spec import NO_CALL, ToolSpec
 
 
 async def _execute(ctx, args):
-    if ctx.call_id is None or ctx.api is None:
+    if (ctx.call_id is None and ctx.inbound_email_id is None) or ctx.api is None:
         return NO_CALL
+    email_run = ctx.inbound_email_id is not None
+    source = (
+        {"inbound_email_id": str(ctx.inbound_email_id)}
+        if email_run
+        else {"call_id": str(ctx.call_id)}
+    )
     result = await ctx.api.post(
-        "/internal/agent/inbox",
+        "/internal/agent/email-run/inbox" if email_run else "/internal/agent/inbox",
         {
-            "call_id": str(ctx.call_id),
+            **source,
             "attachment_format": "inspection_v1",
             **{
                 key: args[key]

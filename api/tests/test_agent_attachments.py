@@ -8,6 +8,7 @@ import pytest
 from hailhq.api import deps
 from hailhq.api.routes import emails
 from hailhq.core.models import (
+    AccountCredit,
     Email,
     EmailAttachment,
     EmailDomain,
@@ -411,3 +412,49 @@ async def test_verified_outbound_member_reads_the_same_custom_mailbox_used_for_s
     await async_session.commit()
     result = await post(client, "/internal/agent/inbox", {"call_id": str(call.id)})
     assert result.json()["quoted_untrusted_messages"][0]["id"] == str(message.id)
+
+
+@pytest.mark.asyncio
+async def test_verified_outbound_phone_run_can_return_its_original_file(
+    client, async_session, monkeypatch, email_mock
+):
+    call, domain = await seed(async_session)
+    source, att = await mail(async_session, call, domain)
+    number = (await async_session.execute(select(PhoneNumber))).scalar_one()
+    user = (await async_session.execute(select(User))).scalar_one()
+    user.phone_number = "+12125550123"
+    call.transport = "phone"
+    call.direction = "outbound"
+    call.from_number_id = number.id
+    call.from_e164 = number.e164
+    call.to_e164 = user.phone_number
+    async_session.add(
+        AccountCredit(
+            organization_id=call.organization_id,
+            kind="credit",
+            channel="credit",
+            amount_cents=1000,
+            source="test",
+        )
+    )
+    await async_session.commit()
+    s3 = AsyncMock()
+    s3.fetch_raw.return_value = b"pngdata"
+    monkeypatch.setattr(emails, "get_s3_mail", lambda: s3)
+    result = await post(
+        client,
+        "/internal/agent/send-email",
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": "you",
+            "subject": "Original",
+            "body_text": "Your file.",
+            "reply_to_email_id": str(source.id),
+            "attachment_ids": [str(att.id)],
+        },
+    )
+    assert result.json()["ok"] is True, result.text
+    assert (
+        email_mock.send_email.call_args.kwargs["attachments"][0].payload == b"pngdata"
+    )

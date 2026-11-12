@@ -6,11 +6,11 @@ an organization, price, billing mode, tool set, or duration via this route.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from hailhq.api.agent_email_context import email_scope, read_file
+from hailhq.api.agent_email_context import InboxSelection, email_scope, read_file
 from hailhq.api.browser_history import browser_history
 from hailhq.api.browser_messaging import (
     capabilities,
@@ -351,13 +351,8 @@ async def stop(
     }
 
 
-class InboxRequest(BaseModel):
+class InboxRequest(InboxSelection):
     call_id: UUID
-    email_id: UUID | None = None
-    attachment_id: UUID | None = None
-    before_email_id: UUID | None = None
-    attachment_format: Literal["inspection_v1"] | None = None
-    page: int = Field(default=1, ge=1, le=10000)
 
 
 @router.post("/inbox")

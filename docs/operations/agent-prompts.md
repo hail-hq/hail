@@ -154,3 +154,21 @@ and pool-reservation sweepers running. This does not disable sending.
 Email readiness resolves the SES adapter's AWS credential chain in a bounded
 background thread. It sends no test message. SMS readiness includes the
 carrier credentials and webhook verification key.
+
+
+## Attachments in incoming-email runs
+
+The email worker uses `read_email` with the claimed inbound email ID. It never
+uses a call ID. The existing authenticated `email_thread` query owns access,
+including sender proof, organization, current agent route, and allowed history.
+A bounded file index gives the model file IDs without another discovery round.
+Filenames are quoted untrusted data. File bytes never enter tool history.
+
+An original-file send back to `sender` is the final reply. Its recorded reply
+prevents a second body-only email. A safe provider retry rebuilds the same
+attachment intent; it cannot drop the files and send only text. Reads stop when
+the claim ends or its eight-read budget is used. Outsider replies require the
+address's explicit Anyone setting and sender authentication.
+
+Phone file sends use the same verified workspace-member scope as phone reads.
+The API and email workers must ship before the companion frontend updates.

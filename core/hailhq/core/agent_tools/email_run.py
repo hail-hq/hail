@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from hailhq.core.agent_tools import list_contacts, send_email, send_sms
+from hailhq.core.agent_tools import list_contacts, read_email, send_email, send_sms
 from hailhq.core.agent_tools.spec import ToolSpec
 from hailhq.core.models import Agent
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +29,7 @@ async def email_run_tools(
     """
     specs: list[ToolSpec] = []
     for spec in (
+        read_email.SPEC,
         list_contacts.EMAIL_RUN_SPEC,
         send_email.EMAIL_RUN_SPEC,
         send_sms.EMAIL_RUN_SPEC,

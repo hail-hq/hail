@@ -316,10 +316,11 @@ def _send_headers(email: Email, extra: dict[str, str] | None) -> dict[str, str] 
     """Headers for the wire. An agent's mail threads in the sender's client and
     marks itself automatic, so another agent does not answer it."""
     headers = dict(extra or {})
-    if email.in_reply_to:
+    references = reference_ids(email)
+    if email.in_reply_to in references:
         headers["In-Reply-To"] = email.in_reply_to
-    if email.references_ids:
-        headers["References"] = " ".join(email.references_ids)
+    if references:
+        headers["References"] = " ".join(references)
     meta = email.metadata_ or {}
     if meta.get("reply_to_email_id"):
         headers["Auto-Submitted"] = "auto-replied"
@@ -380,12 +381,6 @@ async def deliver_email(
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
 
-    references = reference_ids(email)
-    if references:
-        unsubscribe_headers = dict(unsubscribe_headers or {})
-        unsubscribe_headers["References"] = " ".join(references)
-        if email.in_reply_to in references:
-            unsubscribe_headers["In-Reply-To"] = email.in_reply_to
     provider_attachments: list[ProviderAttachment] = []
     try:
         if attachment_rows:

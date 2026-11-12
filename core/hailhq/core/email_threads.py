@@ -12,14 +12,19 @@ class EmailScope:
     organization_id: UUID
     peer: str
     inbox: str
+    email_ids: tuple[UUID, ...] | None = None
 
     def query(self):
-        return select(Email).where(
+        query = select(Email).where(
             Email.organization_id == self.organization_id,
             or_(
                 Email.virus_verdict.is_(None),
                 func.upper(Email.virus_verdict).not_in(("FAIL", "FAILED")),
             ),
+        )
+        if self.email_ids is not None:
+            return query.where(Email.id.in_(self.email_ids))
+        return query.where(
             or_(
                 and_(
                     Email.direction == "inbound",
@@ -31,7 +36,7 @@ class EmailScope:
                     func.lower(Email.from_address) == self.inbox.lower(),
                     Email.to_addresses.any(self.peer),
                 ),
-            ),
+            )
         )
 
 

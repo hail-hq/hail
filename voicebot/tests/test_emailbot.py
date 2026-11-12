@@ -17,6 +17,7 @@ from hailhq.core.models import (
     AccountCredit,
     Agent,
     Email,
+    EmailAttachment,
     EmailDomain,
     OrganizationMember,
     User,
@@ -692,3 +693,31 @@ async def test_send_tools_refuse_without_a_call_or_an_email() -> None:
     assert await send_sms.SPEC.execute(ctx, args) == NO_CALL
     assert await send_sms.EMAIL_RUN_SPEC.execute(ctx, args) != "ok"
     api.post.assert_not_awaited()
+
+
+async def test_file_index_contains_only_thread_files_with_bounded_names(
+    async_session, monkeypatch
+):
+    email_id = await _seed(async_session)
+    att = EmailAttachment(
+        email_id=email_id,
+        filename="receipt-" + "x" * 1000,
+        content_type="image/png",
+        size_bytes=7,
+        s3_key="attachments/private-storage-key",
+    )
+    async_session.add(att)
+    await async_session.commit()
+    llm = ScriptedLLM([("text", "I can check that file.")])
+    _use(monkeypatch, llm)
+    api = SimpleNamespace(post=AsyncMock(return_value={"ok": True, "state": "done"}))
+    assert await emailbot.reply_once(api)
+    text = "\n".join(
+        part
+        for item in llm.calls[0]["items"]
+        for part in getattr(item, "content", [])
+        if isinstance(part, str)
+    )
+    assert str(att.id) in text and str(email_id) in text
+    assert "x" * 201 not in text
+    assert att.s3_key not in text and "base64" not in text

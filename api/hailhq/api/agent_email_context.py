@@ -9,16 +9,24 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from typing import Literal
+from uuid import UUID
 
 from hailhq.api import deps
 from hailhq.api.browser_messaging import verified_email
 from hailhq.api.routes.emails import verified_senders
+from hailhq.core.email_agent import (
+    email_thread,
+    routed_agent,
+    run_refusal,
+)
 from hailhq.core.email_attachment_limits import (
     AGENT_ATTACHMENT_READ_BYTES,
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_sender import from_address_for
 from hailhq.core.email_threads import EmailScope, same_thread
+from hailhq.core.forward_targets import normalize_address
 from hailhq.core.models import (
     Call,
     Email,
@@ -26,14 +34,42 @@ from hailhq.core.models import (
     OrganizationMember,
     User,
 )
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 READ_BYTES = AGENT_ATTACHMENT_READ_BYTES
 READS_PER_CALL = 8
 
 
-async def email_scope(db, call: Call) -> EmailScope | None:
+class InboxSelection(BaseModel):
+    email_id: UUID | None = None
+    attachment_id: UUID | None = None
+    before_email_id: UUID | None = None
+    attachment_format: Literal["inspection_v1"] | None = None
+    page: int = Field(default=1, ge=1, le=10000)
+
+
+async def email_scope(db, call: Call | Email) -> EmailScope | None:
     """Never accept a model-supplied organization, user, mailbox or path."""
+    if isinstance(call, Email):
+        routed = await routed_agent(db, call)
+        if (
+            call.direction != "inbound"
+            or call.agent_reply_state != "processing"
+            or routed is None
+            or call.agent_id != routed[1].id
+        ):
+            return None
+        domain, _ = routed
+        if await run_refusal(db, domain, call, check_cap=False) is not None:
+            return None
+        thread = await email_thread(db, call)
+        return EmailScope(
+            call.organization_id,
+            normalize_address(call.from_address),
+            from_address_for(domain),
+            tuple(row.id for row in thread),
+        )
     if call.transport == "browser":
         peer = await verified_email(
             db,
@@ -99,7 +135,8 @@ async def source_files(db, call, reply_id, attachment_ids):
     )
     indexed = {att.id: (att, email) for att, email in rows}
     if len(set(attachment_ids)) != len(attachment_ids) or any(
-        aid not in indexed or not same_thread(parent, indexed[aid][1])
+        aid not in indexed
+        or (scope.email_ids is None and not same_thread(parent, indexed[aid][1]))
         for aid in attachment_ids
     ):
         raise ValueError("File not in this email thread")
@@ -120,16 +157,22 @@ async def read_file(db, call, attachment, *, page=1, allow_binary=False):
         # It must never receive file bytes in its model tool result.
         return {"spoken": "Start a new conversation to inspect this file."}
     # Serialize the per-call limit before starting any storage or model work.
+    model = Email if isinstance(call, Email) else Call
     locked = (
         await db.execute(
-            select(Call)
-            .where(Call.id == call.id)
+            select(model)
+            .where(model.id == call.id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
     ).scalar_one()
     used = locked.metadata_.get("attachment_reads", 0)
-    if locked.status != "in_progress" or used >= READS_PER_CALL:
+    active = (
+        locked.agent_reply_state == "processing"
+        if isinstance(locked, Email)
+        else locked.status == "in_progress"
+    )
+    if not active or used >= READS_PER_CALL:
         return {"spoken": "No more files can be read in this conversation."}
     locked.metadata_ = {**locked.metadata_, "attachment_reads": used + 1}
     await db.commit()
