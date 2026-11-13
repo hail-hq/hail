@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core import db as core_db
 from hailhq.core import text_agent
 from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
@@ -485,10 +486,22 @@ async def test_no_row_lock_is_held_while_the_model_runs(
 
 
 async def test_run_forever_answers_several_texts_at_once(
-    async_session, fake_llm, monkeypatch: pytest.MonkeyPatch
+    async_session, fake_llm, database_url, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Six pollers share the production pool limit and still answer texts
+    side by side."""
     from hailhq.core.config import settings
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    capped = create_async_engine(
+        core_db.to_async_url(database_url),
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+    )
+    monkeypatch.setattr(
+        core_db, "_sessionmaker", async_sessionmaker(capped, expire_on_commit=False)
+    )
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "hail-draining")
     monkeypatch.setattr(settings, "hail_text_reply_concurrency", 3)
     monkeypatch.setattr(settings, "hail_api_url", "http://api")
     monkeypatch.setattr(settings, "hail_internal_secret", "s")
@@ -521,10 +534,13 @@ async def test_run_forever_answers_several_texts_at_once(
         "AgentApiClient",
         lambda *a, **k: SimpleNamespace(post=slow_post, aclose=AsyncMock()),
     )
-    task = asyncio.create_task(textbot.run_forever(stop))
-    await asyncio.sleep(1.5)
-    stop.set()
-    await asyncio.wait_for(task, 10)
+    try:
+        task = asyncio.create_task(textbot.run_forever(stop))
+        await asyncio.sleep(1.5)
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    finally:
+        await capped.dispose()
     assert peak >= 2
 
 
@@ -567,3 +583,60 @@ async def test_a_slow_email_does_not_delay_texts(monkeypatch, tmp_path) -> None:
     stop.set()
     release.set()
     await asyncio.wait_for(asyncio.gather(email_task, text_task), timeout=1)
+
+
+def _no_api(monkeypatch, aclose=None) -> None:
+    monkeypatch.setattr(
+        textbot,
+        "AgentApiClient",
+        lambda *a, **k: SimpleNamespace(aclose=aclose or AsyncMock()),
+    )
+
+
+async def test_run_forever_frees_the_pool_when_draining(
+    database_url, monkeypatch, tmp_path
+) -> None:
+    """The old voicebot keeps running for its live calls after a deploy, so
+    its text worker must give its database connections back when it drains."""
+    from hailhq.core.config import settings
+
+    flag = tmp_path / "hail-draining"
+    flag.touch()
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
+    monkeypatch.setattr(settings, "database_url", database_url)
+    for name in ("_engine", "_sessionmaker", "_independent_engine"):
+        monkeypatch.setattr(core_db, name, None)
+    monkeypatch.setattr(core_db, "_independent_sessionmaker", None)
+    monkeypatch.setattr(core_db, "telemetry_enabled", lambda: False)
+    core_db._ensure_initialized()
+    _no_api(monkeypatch)
+    await asyncio.wait_for(textbot.run_forever(), timeout=2)
+    assert core_db._engine is None
+    assert core_db._sessionmaker is None
+
+
+async def test_run_forever_keeps_the_pool_when_stopped_without_draining(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "hail-draining")
+    disposed = AsyncMock()
+    monkeypatch.setattr(textbot, "dispose_engine", disposed)
+    _no_api(monkeypatch)
+    stop = threading.Event()
+    stop.set()
+    await asyncio.wait_for(textbot.run_forever(stop), timeout=2)
+    disposed.assert_not_awaited()
+
+
+async def test_run_forever_frees_the_pool_even_if_the_api_client_fails_to_close(
+    monkeypatch, tmp_path
+) -> None:
+    flag = tmp_path / "hail-draining"
+    flag.touch()
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
+    disposed = AsyncMock()
+    monkeypatch.setattr(textbot, "dispose_engine", disposed)
+    _no_api(monkeypatch, AsyncMock(side_effect=OSError))
+    with pytest.raises(OSError):
+        await asyncio.wait_for(textbot.run_forever(), timeout=2)
+    disposed.assert_awaited_once()
