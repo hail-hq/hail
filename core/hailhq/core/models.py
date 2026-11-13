@@ -1745,6 +1745,9 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The console asks "does this domain have mail?" (EXISTS), and
+        # DELETE /email-domains checks the same. Mirrors migration 0077.
+        Index("emails_email_domain_id_idx", "email_domain_id"),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.
