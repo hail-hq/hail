@@ -67,9 +67,9 @@ def test_voice_preferences_are_operator_configuration_with_provenance(monkeypatc
         Settings(_env_file=None)
 
 
-def test_audio_filter_rejects_unknown_choice(monkeypatch):
+@pytest.mark.parametrize("value", ["", "BVC", "unknown"])
+def test_audio_filter_value_never_blocks_settings(monkeypatch, value):
     from hailhq.core.config import Settings
 
-    monkeypatch.setenv("HAIL_AUDIO_FILTER", "unknown")
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None)
+    monkeypatch.setenv("HAIL_AUDIO_FILTER", value)
+    assert Settings(_env_file=None).hail_audio_filter == value

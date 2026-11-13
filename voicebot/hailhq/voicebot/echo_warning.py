@@ -196,27 +196,41 @@ class EchoOutput(io.AudioOutput):
         )
         self.detector = detector
         self._data = bytearray()
+        self._dropped = 0  # bytes trimmed from the start of this segment
         self._rate = 24000
         self.on("playback_progressed", self._played)
-        self.on("playback_finished", lambda _: self._data.clear())
+        self.on("playback_finished", lambda _: self.reset())
+
+    def reset(self) -> None:
+        self._data.clear()
+        self._dropped = 0
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
         await super().capture_frame(frame)
         if self.detector.active and frame.num_channels == 1:
             self._rate = frame.sample_rate
-            remaining = max(0, self._rate * 12 * 2 - len(self._data))
-            self._data.extend(frame.data.cast("B")[:remaining])
+            # Keep the latest 12 s: playout is often confirmed once, at the end
+            # of a long reply, and only recent audio can still be matched.
+            self._data.extend(frame.data.cast("B"))
+            extra = len(self._data) - self._rate * 12 * 2
+            if extra > 0:
+                extra += extra % 2
+                del self._data[:extra]
+                self._dropped += extra
         await self.next_in_chain.capture_frame(frame)
 
     def _played(self, event) -> None:
         try:
-            start = round(event.offset * self._rate) * 2
-            end = min(len(self._data), start + round(event.duration * self._rate) * 2)
+            first = round(event.offset * self._rate) * 2 - self._dropped
+            start = max(0, first)
+            end = min(len(self._data), first + round(event.duration * self._rate) * 2)
             if end > start:
                 frame = rtc.AudioFrame(
                     bytes(self._data[start:end]), self._rate, 1, (end - start) // 2
                 )
-                self.detector.add_played(_samples(frame), event.started_at)
+                # Audio trimmed from the start played before this stretch.
+                skipped = (start - first) / 2 / self._rate
+                self.detector.add_played(_samples(frame), event.started_at + skipped)
         except Exception:
             logger.exception("echo reference observation failed; continuing call")
 
@@ -242,6 +256,7 @@ class EchoWarning:
         self.on_warning = on_warning
         self.detector = EchoDetector()
         self._warned = False
+        self._context_added = False
         self._closed = False
         self._task: asyncio.Task | None = None
         self._output: EchoOutput | None = None
@@ -314,10 +329,13 @@ class EchoWarning:
             return
         # Keep the condition available after this one reply. Otherwise the
         # warning's own returned words can prompt another, longer explanation.
-        agent = self.session.current_agent
-        context = agent.chat_ctx.copy()
-        context.add_message(role="system", content=ECHO_CONFIRMED_CONTEXT)
-        await agent.update_chat_ctx(context)
+        # Written once: a failed reply request is retried on the next tick.
+        if not self._context_added:
+            agent = self.session.current_agent
+            context = agent.chat_ctx.copy()
+            context.add_message(role="system", content=ECHO_CONFIRMED_CONTEXT)
+            await agent.update_chat_ctx(context)
+            self._context_added = True
         self.session.generate_reply(
             instructions=(
                 "In the conversation's language, say only this short sentence: "
@@ -352,7 +370,7 @@ class EchoWarning:
     def _clear(self) -> None:
         self.detector.clear()
         if self._output:
-            self._output._data.clear()
+            self._output.reset()
 
     async def aclose(self) -> None:
         self._closed = True

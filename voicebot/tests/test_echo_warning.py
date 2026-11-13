@@ -239,3 +239,59 @@ def test_unrelated_voiced_speech_does_not_trigger_on_similar_pitch(seed):
         return wave * (0.2 + 0.8 * np.sin(2 * np.pi * rng.uniform(1, 3) * t) ** 2)
 
     assert replay(voice(seed), voice(seed + 100)) is None
+
+
+@pytest.mark.asyncio
+async def test_long_reply_keeps_recent_audio_and_context_is_written_once():
+    from hailhq.voicebot.echo_warning import EchoOutput
+    from livekit import rtc
+    from livekit.agents.voice import io
+
+    class Sink(io.AudioOutput):
+        def __init__(self):
+            super().__init__(
+                label="sink",
+                sample_rate=RATE,
+                capabilities=io.AudioOutputCapabilities(pause=True),
+            )
+
+        async def capture_frame(self, frame):
+            await super().capture_frame(frame)
+
+        def flush(self):
+            super().flush()
+
+        def clear_buffer(self):
+            pass
+
+    detector = EchoDetector()
+    sink = Sink()
+    output = EchoOutput(sink, detector)
+    raw = speech(1, seconds=20).astype("<i2")
+    await output.capture_frame(rtc.AudioFrame(raw.tobytes(), RATE, 1, len(raw)))
+    # One confirmation at the end of a 20 s reply that began at t=100.
+    sink.on_playback_progressed(started_at=100, offset=0, duration=20)
+    assert len(detector.references) == 24  # the latest 12 s
+    at, first = detector.references[0]
+    assert at == pytest.approx(108)
+    assert np.array_equal(first, raw[8 * RATE : 8 * RATE + WINDOW].astype(float))
+
+    session = Session()
+    session.generate_reply.side_effect = [RuntimeError("draining"), None]
+    warning = EchoWarning(session, can_warn=lambda: True)
+    ref = speech(5)
+    incoming = np.zeros_like(ref)
+    incoming[6400:] = ref[:-6400] * 0.5
+    warning.detector.add_input(incoming, 0)
+    warning.detector.add_played(ref, 0)
+    with pytest.raises(RuntimeError):
+        await warning.check(6)
+    await warning.check(6.5)
+    assert session.generate_reply.call_count == 2
+    markers = [
+        item
+        for item in session.current_agent.chat_ctx.messages()
+        if item.role == "system" and "echo_only" in (item.text_content or "")
+    ]
+    assert len(markers) == 1
+    await warning.aclose()

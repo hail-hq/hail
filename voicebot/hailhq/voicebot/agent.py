@@ -2683,7 +2683,11 @@ async def _run_call(
         legs_recorded = False
         try:
             await recovery.aclose()
-            await echo_warning.aclose()
+            try:
+                # Never let the extra audio reader delay the final call record.
+                await asyncio.wait_for(echo_warning.aclose(), timeout=2)
+            except Exception:
+                logger.warning("echo observer did not close cleanly", exc_info=True)
             # Never close the classifier under a running check: let the
             # menu finish its check first.
             if agent.phone_menu is not None:

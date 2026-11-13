@@ -115,3 +115,15 @@ def test_voice_focus_uses_documented_model(monkeypatch, choice, model):
         )
     )
     factory.assert_called_once_with(model=model)
+
+
+@pytest.mark.parametrize("value", ["", "unknown"])
+def test_unknown_filter_falls_back_to_bvc(monkeypatch, value):
+    monkeypatch.setattr(settings, "livekit_url", "wss://test.livekit.cloud")
+    monkeypatch.setattr(settings, "hail_audio_filter", value)
+    imported = Mock(return_value=SimpleNamespace(BVCTelephony=Mock(return_value="sip")))
+    monkeypatch.setattr(audio, "import_module", imported)
+    selector = room_options().audio_input.noise_cancellation
+    kind = rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+    assert selector(SimpleNamespace(participant=SimpleNamespace(kind=kind))) == "sip"
+    imported.assert_called_once_with("livekit.plugins.noise_cancellation")
