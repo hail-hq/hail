@@ -486,10 +486,22 @@ async def test_no_row_lock_is_held_while_the_model_runs(
 
 
 async def test_run_forever_answers_several_texts_at_once(
-    async_session, fake_llm, monkeypatch: pytest.MonkeyPatch
+    async_session, fake_llm, database_url, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Six pollers share the production cap of connections and still answer
+    texts side by side."""
     from hailhq.core.config import settings
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    capped = create_async_engine(
+        core_db.to_async_url(database_url),
+        pool_size=textbot.DB_CONNECTIONS,
+        max_overflow=0,
+    )
+    monkeypatch.setattr(
+        core_db, "_sessionmaker", async_sessionmaker(capped, expire_on_commit=False)
+    )
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "hail-draining")
     monkeypatch.setattr(settings, "hail_text_reply_concurrency", 3)
     monkeypatch.setattr(settings, "hail_api_url", "http://api")
     monkeypatch.setattr(settings, "hail_internal_secret", "s")
@@ -522,10 +534,13 @@ async def test_run_forever_answers_several_texts_at_once(
         "AgentApiClient",
         lambda *a, **k: SimpleNamespace(post=slow_post, aclose=AsyncMock()),
     )
-    task = asyncio.create_task(textbot.run_forever(stop))
-    await asyncio.sleep(1.5)
-    stop.set()
-    await asyncio.wait_for(task, 10)
+    try:
+        task = asyncio.create_task(textbot.run_forever(stop))
+        await asyncio.sleep(1.5)
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    finally:
+        await capped.dispose()
     assert peak >= 2
 
 
