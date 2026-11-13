@@ -8,6 +8,7 @@ classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hailhq-core",
     "asyncpg>=0.30",
+    "numpy>=1.26",
     "sqlalchemy[asyncio]>=2.0",
     "livekit==1.1.20",
     "livekit-agents~=1.8.8",
@@ -25,6 +26,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Non-default LiveKit Cloud input filters (HAIL_AUDIO_FILTER), large native wheels.
+filters = [
+    "livekit-plugins-krisp>=0.4.8",
+    "livekit-plugins-ai-coustics>=0.2.12",
+]
 dev = [
     "pytest",
     "pytest-asyncio>=0.23",

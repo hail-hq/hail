@@ -1251,6 +1251,7 @@ dependencies = [
     { name = "livekit-plugins-openai" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-speechmatics" },
+    { name = "numpy" },
     { name = "pillow" },
     { name = "pypdfium2" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -1265,6 +1266,10 @@ dev = [
     { name = "ruff" },
     { name = "testcontainers" },
 ]
+filters = [
+    { name = "livekit-plugins-ai-coustics" },
+    { name = "livekit-plugins-krisp" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1272,16 +1277,19 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "livekit", specifier = "==1.1.20" },
     { name = "livekit-agents", specifier = "~=1.8.8" },
+    { name = "livekit-plugins-ai-coustics", marker = "extra == 'filters'", specifier = ">=0.2.12" },
     { name = "livekit-plugins-anthropic", specifier = "~=1.8.8" },
     { name = "livekit-plugins-cartesia", specifier = "~=1.8.8" },
     { name = "livekit-plugins-deepgram", specifier = "~=1.8.8" },
     { name = "livekit-plugins-elevenlabs", specifier = "~=1.8.8" },
     { name = "livekit-plugins-google", specifier = "~=1.8.8" },
+    { name = "livekit-plugins-krisp", marker = "extra == 'filters'", specifier = ">=0.4.8" },
     { name = "livekit-plugins-noise-cancellation", specifier = "~=0.3.2" },
     { name = "livekit-plugins-openai", specifier = "~=1.8.8" },
     { name = "livekit-plugins-silero", specifier = "~=1.8.8" },
     { name = "livekit-plugins-speechmatics", specifier = "~=1.8.8" },
     { name = "mypy", marker = "extra == 'dev'" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=12" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
     { name = "pypdfium2", specifier = ">=5,<6" },
@@ -1291,7 +1299,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=4" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["filters", "dev"]
 
 [[package]]
 name = "httpcore"
@@ -1827,6 +1835,23 @@ wheels = [
 ]
 
 [[package]]
+name = "livekit-plugins-ai-coustics"
+version = "0.2.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit" },
+    { name = "livekit-agents" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/c8/5ad27f4fc78f3c24bf4e7df1377970ee0f1402fc5bd2134144f0b5701355/livekit_plugins_ai_coustics-0.2.12.tar.gz", hash = "sha256:4387b9f70baa961d897e1f086bfd6523d64742417f00eb9bdb912b5a509563be", size = 16485, upload-time = "2026-05-07T13:14:32.367Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/92/0c28a971709751b1e06de87749f526121cef465ecd79e8b5897d2a807f44/livekit_plugins_ai_coustics-0.2.12-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:53505755f77967677dbca2de36f4a972e6b7f320d480b5d0ac327faffd15cd62", size = 70527514, upload-time = "2026-05-07T13:14:12.979Z" },
+    { url = "https://files.pythonhosted.org/packages/56/79/10d30efd35928f20b437864e06e59b35a157026a7652284ced02ddfbf055/livekit_plugins_ai_coustics-0.2.12-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:4a5e3826e271fc6ac988619099fde1f1c6912cf31ccae3ae397e08c47a1f8765", size = 70709538, upload-time = "2026-05-07T13:14:16.875Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/1d/fc1fb9ed1ebecf8b15e12baac48b764d1d68e816d789f3bc54808340be1c/livekit_plugins_ai_coustics-0.2.12-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:c0fe7cc704273199341b65b80a67bcbd9bfcff874be619d8fa3b540ab3259d87", size = 70332634, upload-time = "2026-05-07T13:14:21.086Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/83/b43f639652c2a14392b135bbe786c46eb64c133580b6422a3addf8d83a6d/livekit_plugins_ai_coustics-0.2.12-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:d3f41135b04bf05ff6a58b3acc6c3de5150315aab9f70279a519541663d02572", size = 70678736, upload-time = "2026-05-07T13:14:24.987Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/53/16f848495384b0ad2e53081da4dc6709608d8595f034f94b2c67a4e85544/livekit_plugins_ai_coustics-0.2.12-cp310-abi3-win_amd64.whl", hash = "sha256:4e774d50329484cafcfcaf09643e203443745a164b5e79af61337fd1e9a404ae", size = 70074242, upload-time = "2026-05-07T13:14:29.717Z" },
+]
+
+[[package]]
 name = "livekit-plugins-anthropic"
 version = "1.8.8"
 source = { registry = "https://pypi.org/simple" }
@@ -1892,6 +1917,38 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0a/2c/8f911cb8d88ffa9b9d4e0c75c4a1197c7ada3d635745464fb74f05fd39db/livekit_plugins_google-1.8.8.tar.gz", hash = "sha256:d01b5907ededb02185b7a363e12e62566d7813d9788293e7cf244698330ecf07", size = 64139, upload-time = "2026-10-15T06:07:51.096Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/f0/953e4f72977ea6ce0cb0a67a2e8b7e2ffd4ddd1fbb7506bf2f867252761f/livekit_plugins_google-1.8.8-py3-none-any.whl", hash = "sha256:a44151e7397dc6cb2bfc5b657704d8db1673d6c6a9561e1ea2db8e0be85ea87b", size = 72326, upload-time = "2026-10-15T06:07:49.514Z" },
+]
+
+[[package]]
+name = "livekit-plugins-krisp"
+version = "0.4.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit" },
+    { name = "livekit-agents" },
+    { name = "livekit-plugins-krisp-internal" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/90/85086c067fc41306177d6fe633023f0562fee67a00abbb274216333e3421/livekit_plugins_krisp-0.4.8.tar.gz", hash = "sha256:3b0febdf9fc4920999fe7aaf29027e75f254910aaeab8d91eeb71ae46923bb37", size = 13235, upload-time = "2026-10-15T06:08:16.272Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/64/8c425b1a117949debdae6fb283bd05621b91ab5183181d6151c42676e197/livekit_plugins_krisp-0.4.8-py3-none-any.whl", hash = "sha256:22823528918868803e38ae7b945ea9bb6ac83235d037ada8e73b50db7979adf3", size = 16490, upload-time = "2026-10-15T06:08:14.711Z" },
+]
+
+[[package]]
+name = "livekit-plugins-krisp-internal"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/06/00f16159f24c7c87a17b2a295a4b5e460d82ead087eb838fc5bce11c0e1e/livekit_plugins_krisp_internal-0.2.0.tar.gz", hash = "sha256:3cbc22b55c74bb1f04518c066c559749fe4940eedbc6927fee7c16992414c96e", size = 70996779, upload-time = "2026-07-22T15:19:42.166Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/0d/202d3521abf4efbf09a5aec05803027f651bb65481b3c2c5ace5c531428d/livekit_plugins_krisp_internal-0.2.0-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:99692e2a65f870cdb0d4d0762056fbbb8d4f4be13646e97d3e74a0788b6b8a66", size = 58858515, upload-time = "2026-07-22T15:19:23.741Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/5d/bfa911c125903bd4d16612b17359e6c64c7afe670e7098022f9526f85435/livekit_plugins_krisp_internal-0.2.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:d79d24269fcbd06ecdff0b69a2bb041db1d931057079f1588a99aeec23838cfb", size = 57970069, upload-time = "2026-07-22T15:19:27.188Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/98/63269a0a65788e49f81b7dd742f39b8aaf3990e51f9d59f2e2c199e8321b/livekit_plugins_krisp_internal-0.2.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:ea29e6a3901af3c62e09e90d116d660c8b1bacff895001fc8fa7bef47ad152d6", size = 64775270, upload-time = "2026-07-22T15:19:30.884Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/49/f97ce56bd234338511956f3b5f0e19accad7db3b3db7e059619eb5b5c9f8/livekit_plugins_krisp_internal-0.2.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:baa80ed742c370b24e2c4fd55018adb1cc09c7e0d37455a801c685b090d35729", size = 71128415, upload-time = "2026-07-22T15:19:34.417Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/15/04db5d46103e372ab72a23caae1236faee46d7a72cd68d37668459758707/livekit_plugins_krisp_internal-0.2.0-cp310-abi3-win_amd64.whl", hash = "sha256:7c75b439a86c78711d0147fd4c47814c876f0b02358f42f17c045a048154427d", size = 58508658, upload-time = "2026-07-22T15:19:38.303Z" },
 ]
 
 [[package]]

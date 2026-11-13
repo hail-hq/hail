@@ -24,7 +24,10 @@ COPY pyproject.toml uv.lock /app/
 COPY api/pyproject.toml /app/api/pyproject.toml
 COPY mcp/pyproject.toml /app/mcp/pyproject.toml
 COPY sdk/pyproject.toml /app/sdk/pyproject.toml
-RUN uv sync --frozen --package hailhq-voicebot --no-editable --no-dev
+# Set VOICEBOT_EXTRAS=filters to include the non-default input filters.
+ARG VOICEBOT_EXTRAS=""
+RUN uv sync --frozen --package hailhq-voicebot --no-editable --no-dev \
+    ${VOICEBOT_EXTRAS:+--extra $VOICEBOT_EXTRAS}
 
 # Pre-download model weights (Silero VAD, turn-detector, etc.) so the runtime
 # image is self-contained — the first call doesn't pay a multi-second download
