@@ -345,6 +345,7 @@ async def deliver_email(
     attachment_rows: list[FileUpload | EmailAttachment] | None = None,
     *,
     billable: bool = True,
+    message_type: Literal["marketing", "informational"] = "informational",
     claimed_at: datetime | None = None,
     at_most_once: bool = False,
 ) -> str | None:
@@ -352,7 +353,7 @@ async def deliver_email(
 
     Shared by POST /emails and the internal agent-send route (spec:
     docs/superpowers/specs/2026-07-11-voicebot-agent-tools-design.md).
-    Mints the one-click unsubscribe header (single-recipient sends only),
+    Mints one-click unsubscribe headers for single-recipient marketing sends,
     sends the stored body exactly as authored (with ``attachment_rows``
     payloads when the caller resolved any), and writes sent/failed back. Bills the flat 1¢ usage
     event on success. Returns None on success or the exception class name
@@ -382,7 +383,8 @@ async def deliver_email(
         )
         budget = max(0, SES_SEND_BUDGET_SECONDS - age)
     attachment_rows = attachment_rows or []
-    # One-click unsubscribe (RFC 8058) only when the send has exactly one
+    # List headers mark bulk mail to receiving agents, so informational mail
+    # must not carry them. One-click unsubscribe (RFC 8058) also needs one
     # recipient (to + cc + bcc, deduped). The headers are the same for every
     # copy of the message and the token names one address, so with 2 or more
     # recipients a cc or bcc pressing the button would suppress someone else.
@@ -395,7 +397,7 @@ async def deliver_email(
         ]
     }
     unsubscribe_headers: dict[str, str] | None = None
-    if len(recipients) == 1:
+    if message_type == "marketing" and len(recipients) == 1:
         unsubscribe_url = build_unsubscribe_url(
             email.to_addresses[0], email.organization_id
         )
@@ -776,7 +778,9 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
-    err = await deliver_email(db, email_provider, email, attachment_rows)
+    err = await deliver_email(
+        db, email_provider, email, attachment_rows, message_type=body.message_type
+    )
     if err is not None:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(

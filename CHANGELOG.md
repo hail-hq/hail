@@ -19,6 +19,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Email: informational mail no longer carries `List-Unsubscribe` headers, so an email agent no longer skips it as list mail. Marketing mail still does.
 - Billing: the same charge or credit can no longer be written to the ledger twice.
 - Numbers: among numbers you can buy online, the cheapest now comes first, even when it needs more papers.
 - Verification: when several Twilio requirements accept only the same document, the form asks for it once.
