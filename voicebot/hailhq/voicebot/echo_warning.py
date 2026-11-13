@@ -295,10 +295,12 @@ class EchoWarning:
         self,
         session: AgentSession,
         *,
+        line: str,
         can_warn: Callable[[], bool],
         on_warning: Callable[[dict], Awaitable[None]] | None = None,
     ) -> None:
         self.session = session
+        self.line = line  # the fixed warning, already in the call's language
         self.can_warn = can_warn
         self.on_warning = on_warning
         self.detector = EchoDetector()
@@ -420,23 +422,16 @@ class EchoWarning:
             return
         # Drop returned fragments already transcribed, so they are not answered.
         self.session.clear_user_turn()
-        handle = self.session.generate_reply(
-            instructions=(
-                "In the conversation's language, say only these two short "
-                "sentences: I'm hearing an echo. It's disrupting the call. "
-                "Do not add advice, questions, explanations, or laughter. "
-                "Do not claim the problem is fixed."
-            ),
-            tool_choice="none",
-            allow_interruptions=False,
-        )
+        # A fixed line, not a model reply: the same words on every call, and
+        # spoken even when the model is failing.
+        handle = self.session.say(self.line, allow_interruptions=False)
         self._warned = True
         delay = evidence.delay_ms / 1000
         spoken_from = self._output._expected_end if self._output else 0.0
 
         def spoken(_) -> None:
             # Gate only once the caller has been told why. A reply that never
-            # produced audio (model error, hangup) leaves the call as it was.
+            # produced audio (speech failure, hangup) leaves the call as it was.
             if self._output and self._output._expected_end > spoken_from:
                 self._output.gate_delay = delay
                 self._echo_scored = self.detector.scored

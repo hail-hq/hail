@@ -3,8 +3,10 @@
 `HAIL_ECHO_WARNING_ENABLED=true` (default) enables a single warning when repeated
 waveform matches show the agent's played voice returning to the caller track
 and the agent's own input reacted to it.
-The reply says only, in the call's language: “I'm hearing an echo. It's disrupting
-the call.” It adds no advice or questions and does not claim the echo is fixed. Set the flag false to disable the observer.
+The agent says one fixed line in the call's configured language (English when it
+is unknown): “I'm hearing an echo. It's disrupting the call.” The 39 translations
+are in [`spoken_lines.py`](../../voicebot/hailhq/voicebot/spoken_lines.py). No
+model call is involved. Set the flag false to disable the observer.
 
 [Detector and warning](../../voicebot/hailhq/voicebot/echo_warning.py) use a raw,
 bounded local reader of the already-subscribed caller track, independently of
@@ -31,10 +33,8 @@ ends. This is an echo fallback, not general reverberation detection.
 Raw frames are dropped while the agent input is muted for handover.
 The warning waits while the agent speaks/thinks and is blocked during opening,
 IVR navigation, and connected handover. Detections expire after eight seconds
-instead of producing stale warnings after those phases. The line is generated
-without tools and with interruptions disabled, so returned audio cannot
-immediately cut it off. It may overlap caller VAD because echo itself triggers
-VAD; there is no blanket caller-muting rule.
+instead of producing stale warnings after those phases. The line is spoken
+with interruptions disabled, so returned audio cannot cut it off.
 
 Once the warning has been spoken, the agent's own input is replaced with
 silence while it speaks and for the measured return delay plus 300 ms after

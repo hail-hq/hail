@@ -1,6 +1,7 @@
 """Repeated waveform echo must earn a warning; similar words are not evidence."""
 
 import time
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ class Session(RecoverySession):
         super().__init__()
         self.current_agent = Agent(instructions="test")
         self.user_state = "listening"
+        self.say = Mock()
 
 
 def disturb(session):
@@ -66,42 +68,37 @@ def test_does_not_warn_on_silence_independent_speech_or_one_short_match(kind):
 async def test_warning_is_deferred_and_spoken_only_once():
     session = Session()
     allowed = [False]
-    warning = EchoWarning(session, can_warn=lambda: allowed[0])
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: allowed[0])
     ref = speech(5)
     incoming = np.zeros_like(ref)
     incoming[6400:] = ref[:-6400] * 0.5
     warning.detector.add_input(incoming, 0)
     warning.detector.add_played(ref, 0)
     await warning.check(6)
-    session.generate_reply.assert_not_called()
+    session.say.assert_not_called()
     allowed[0] = True
     session.agent_state = "speaking"
     await warning.check(6)
-    session.generate_reply.assert_not_called()
+    session.say.assert_not_called()
     session.agent_state = "listening"
     # Raw echo that never reached the agent's own input is not worth a warning.
     await warning.check(6)
-    session.generate_reply.assert_not_called()
+    session.say.assert_not_called()
     session.emit("agent_false_interruption")
     await warning.check(6)
-    session.generate_reply.assert_not_called()  # one reaction can be the caller
+    session.say.assert_not_called()  # one reaction can be the caller
     session.emit("agent_false_interruption")
     session.user_state = "speaking"
     await warning.check(6)
-    session.generate_reply.assert_not_called()  # never over the caller
+    session.say.assert_not_called()  # never over the caller
     session.user_state = "listening"
     await warning.check(6)
     await warning.check(7)
-    session.generate_reply.assert_called_once()
+    session.say.assert_called_once()
     session.clear_user_turn.assert_called_once()
-    kwargs = session.generate_reply.call_args.kwargs
-    assert "echo" in kwargs["instructions"]
-    assert "It's disrupting the call" in kwargs["instructions"]
-    assert "\u2014" not in kwargs["instructions"]
-    assert "speakerphone" not in kwargs["instructions"]
-    assert "headphones" not in kwargs["instructions"]
-    assert kwargs["allow_interruptions"] is False
-    assert kwargs["tool_choice"] == "none"
+    # The fixed line, not a model reply, and it cannot be cut off by its echo.
+    assert session.say.call_args.args == ("Echo line.",)
+    assert session.say.call_args.kwargs == {"allow_interruptions": False}
     # Later turns are protected by the input gate, not by model instructions.
     assert not session.current_agent.chat_ctx.messages()
     await warning.aclose()
@@ -131,7 +128,7 @@ def test_buffers_are_bounded_and_stop_after_close():
 async def test_stale_echo_does_not_warn_after_a_long_bridge_or_menu():
     session = Session()
     allowed = [False]
-    warning = EchoWarning(session, can_warn=lambda: allowed[0])
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: allowed[0])
     ref = speech(1)
     received = np.zeros_like(ref)
     received[6400:] = ref[:-6400] * 0.5
@@ -141,7 +138,7 @@ async def test_stale_echo_does_not_warn_after_a_long_bridge_or_menu():
     allowed[0] = True
     disturb(session)
     await warning.check(30)
-    session.generate_reply.assert_not_called()
+    session.say.assert_not_called()
     await warning.aclose()
 
 
@@ -218,7 +215,7 @@ async def test_raw_sidecar_bypasses_filter_and_closes_with_call(monkeypatch):
     session = Session()
     session.room_io = SimpleNamespace(linked_participant=object())
     session.input = SimpleNamespace(audio_enabled=False)
-    warning = EchoWarning(session, can_warn=lambda: True)
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: True)
     warning._raw_task = asyncio.create_task(warning._observe_raw())
     await asyncio.sleep(0.01)
     assert arguments["noise_cancellation"] is None
@@ -232,10 +229,10 @@ async def test_raw_sidecar_bypasses_filter_and_closes_with_call(monkeypatch):
 @pytest.mark.asyncio
 async def test_close_prevents_pending_warning():
     session = Session()
-    warning = EchoWarning(session, can_warn=lambda: True)
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: True)
     session.emit("close")
     await warning.check(100)
-    session.generate_reply.assert_not_called()
+    session.say.assert_not_called()
     assert not warning.detector.active
     await warning.aclose()
 
@@ -342,7 +339,7 @@ def gated_call():
     session.output = SimpleNamespace(audio=sink)
     session.input = SimpleNamespace(audio=Source(), audio_enabled=True)
     session.room_io = SimpleNamespace(linked_participant=None)
-    warning = EchoWarning(session, can_warn=lambda: True)
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: True)
     warning.attach()
     return session, sink, warning, loud
 
@@ -374,8 +371,8 @@ async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
     session.emit("user_state_changed", new_state="speaking")
     feed_echo(warning)
     await warning.check(6)
-    session.generate_reply.assert_called_once()
-    done = session.generate_reply.return_value.add_done_callback.call_args.args[0]
+    session.say.assert_called_once()
+    done = session.say.return_value.add_done_callback.call_args.args[0]
     # The gate waits until the warning was really spoken.
     assert output.gate_delay is None
     await output.capture_frame(loud)
@@ -402,7 +399,7 @@ async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
     for step in range(12):
         await warning.check(43 + step * 0.5)
     assert output.gate_delay == pytest.approx(0.8, abs=0.02)
-    session.generate_reply.assert_called_once()
+    session.say.assert_called_once()
     session.emit("close")
     assert output.gate_delay is None
     await warning.aclose()
@@ -414,7 +411,7 @@ async def test_warning_that_was_never_spoken_leaves_the_call_ungated():
     disturb(session)
     feed_echo(warning)
     await warning.check(6)
-    done = session.generate_reply.return_value.add_done_callback.call_args.args[0]
+    done = session.say.return_value.add_done_callback.call_args.args[0]
     done(None)  # the reply failed before any audio
     assert session.output.audio.gate_delay is None
     await warning.aclose()
@@ -459,7 +456,7 @@ async def test_raw_frames_are_timed_by_sample_count_through_a_stall(monkeypatch)
     session = Session()
     session.room_io = SimpleNamespace(linked_participant=object())
     session.input = SimpleNamespace(audio_enabled=True)
-    warning = EchoWarning(session, can_warn=lambda: True)
+    warning = EchoWarning(session, line="Echo line.", can_warn=lambda: True)
     from hailhq.voicebot import echo_warning
 
     fake = SimpleNamespace(time=lambda: next(clock, time.time()))
@@ -470,3 +467,12 @@ async def test_raw_frames_are_timed_by_sample_count_through_a_stall(monkeypatch)
     assert starts == pytest.approx([100.0, 100.05, 100.10, 100.15])
     monkeypatch.undo()
     await warning.aclose()
+
+
+def test_every_language_has_a_dash_free_echo_line():
+    from hailhq.voicebot.spoken_lines import SPOKEN_LINES
+
+    for language, lines in SPOKEN_LINES.items():
+        assert lines.echo.strip(), language
+        assert "\u2014" not in lines.echo and "\u2013" not in lines.echo, language
+    assert SPOKEN_LINES["en"].echo == "I'm hearing an echo. It's disrupting the call."

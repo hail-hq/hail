@@ -2658,6 +2658,7 @@ async def _run_call(
 
     echo_warning = EchoWarning(
         session,
+        line=spoken_lines(language).echo,
         can_warn=lambda: (
             not shutting_down
             and captured["end_reason"] is None
