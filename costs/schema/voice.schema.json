@@ -29,6 +29,11 @@
       "minItems": 1,
       "items": { "type": "string", "pattern": "^(ALL|ROW|LOCAL|[0-9]+)$" }
     },
+    "digit_prefixes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[0-9]+$" }
+    },
     "rate": {
       "type": "object",
       "additionalProperties": false,
@@ -52,7 +57,7 @@
         "line_type": {
           "enum": ["landline", "mobile", "toll_free", "special", "other"]
         },
-        "destination_prefixes": { "$ref": "#/$defs/prefixes" },
+        "destination_prefixes": { "$ref": "#/$defs/digit_prefixes" },
         "origination_prefixes": { "$ref": "#/$defs/prefixes" },
         "usd_per_minute": { "$ref": "#/$defs/decimal" },
         "usd_per_call": { "$ref": "#/$defs/decimal" },
