@@ -13,13 +13,18 @@ The SESv2 surface is much cleaner than v1 for identity management:
 from __future__ import annotations
 
 import asyncio
+import random
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from email.headerregistry import Address
 from email.message import EmailMessage
 from typing import Any
 from uuid import UUID
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from hailhq.core.config import settings
 from hailhq.core.providers.email.base import (
     DkimRecord,
@@ -30,8 +35,31 @@ from hailhq.core.providers.email.base import (
     ProviderSendResult,
 )
 
+# Every SES call shares these timeouts. botocore's default of 5 attempts lets one
+# send run for minutes. Agent delivery also bounds attachment preparation plus
+# the provider call within SES_SEND_BUDGET_SECONDS. A queued send with an unknown
+# outcome is never resent. The read timeout stays at 60 seconds for attachments.
+SES_CONNECT_TIMEOUT_SECONDS = 10
+SES_READ_TIMEOUT_SECONDS = 60
+SES_MAX_ATTEMPTS = 3
+# Failures that prove SES did not accept the message, so a resend cannot deliver
+# it twice. After anything else, such as a read timeout or a closed connection,
+# SES may already have sent it.
+SES_NOT_ACCEPTED_FAILURES = frozenset(
+    {
+        "ConnectTimeoutError",
+        "EndpointConnectionError",
+        "LimitExceededException",
+        "TooManyRequestsException",
+    }
+)
+# All attempts timing out, plus the two waits between them (at most 1 and 2 seconds).
+SES_SEND_BUDGET_SECONDS = (
+    SES_MAX_ATTEMPTS * (SES_CONNECT_TIMEOUT_SECONDS + SES_READ_TIMEOUT_SECONDS) + 3
+)
 
-def _build_default_client() -> Any:
+
+def _build_default_client(*, max_attempts: int = SES_MAX_ATTEMPTS) -> Any:
     """Lazy-construct a SESv2 boto3 client from ``settings``.
 
     boto3 itself falls back to the AWS credential chain (env vars,
@@ -43,7 +71,90 @@ def _build_default_client() -> Any:
         region_name=settings.aws_region or None,
         aws_access_key_id=settings.aws_access_key_id or None,
         aws_secret_access_key=settings.aws_secret_access_key or None,
+        config=Config(
+            connect_timeout=SES_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=SES_READ_TIMEOUT_SECONDS,
+            retries={"total_max_attempts": max_attempts, "mode": "standard"},
+        ),
     )
+
+
+def _default_aws_options() -> dict[str, str | None]:
+    return {
+        "region_name": settings.aws_region or None,
+        "aws_access_key_id": settings.aws_access_key_id or None,
+        "aws_secret_access_key": settings.aws_secret_access_key or None,
+    }
+
+
+# Credential providers can run a credential_process or wait on role endpoints.
+# One dedicated worker and one shared future bound both running work and queue
+# size, even after callers time out. Never use the application's executor here.
+_credential_executor = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="hail-aws-readiness"
+)
+_credential_lock = threading.Lock()
+_credential_future: Future[bool] | None = None
+_credential_expires_at = 0.0
+_CREDENTIAL_WAIT_SECONDS = 2.0
+_CREDENTIAL_SUCCESS_TTL = 30.0
+_CREDENTIAL_FAILURE_TTL = 2.0
+
+
+def _resolve_credentials(options: dict[str, str | None]) -> bool:
+    try:
+        session = boto3.Session(**options)
+        if not session.region_name:
+            return False
+        credentials = session.get_credentials()
+        if credentials is None:
+            return False
+        frozen = credentials.get_frozen_credentials()
+        return bool(frozen.access_key and frozen.secret_key)
+    except Exception:
+        return False
+
+
+def _credentials_completed(future: Future[bool]) -> None:
+    global _credential_expires_at
+    ttl = _CREDENTIAL_SUCCESS_TTL if future.result() else _CREDENTIAL_FAILURE_TTL
+    with _credential_lock:
+        if _credential_future is future:
+            _credential_expires_at = time.monotonic() + ttl
+
+
+async def credentials_ready() -> bool:
+    """Share one bounded credential lookup without calling SES.
+
+    A slow SDK call occupies only the dedicated worker. Timeout/cancellation
+    never cancels its future or queues another lookup. Completed outcomes are
+    briefly cached; failures can retry after two seconds.
+    """
+    global _credential_future, _credential_expires_at
+    created = False
+    with _credential_lock:
+        if _credential_future is None or (
+            _credential_future.done() and time.monotonic() >= _credential_expires_at
+        ):
+            _credential_future = _credential_executor.submit(
+                _resolve_credentials, _default_aws_options()
+            )
+            _credential_expires_at = float("inf")
+            created = True
+        future = _credential_future
+    # add_done_callback can run immediately: do this outside the lock.
+    if created:
+        future.add_done_callback(_credentials_completed)
+    # Poll this single shared SDK future rather than attaching a new asyncio
+    # wrapper per request. A hung provider therefore retains no timed-out
+    # callers or callbacks. Each caller owns at most one short-lived timer.
+    deadline = time.monotonic() + _CREDENTIAL_WAIT_SECONDS
+    while not future.done():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+    return future.result()
 
 
 def _status_from_ses(raw: str | None) -> IdentityVerificationStatus:
@@ -186,6 +297,23 @@ class SesEmailProvider(EmailProvider):
 
     def __init__(self, *, client: Any | None = None) -> None:
         self._client = client if client is not None else _build_default_client()
+        # botocore would repeat a read timeout or a closed connection, and SES may
+        # already have sent that message. _send repeats only what SES did not take.
+        self._send_client = (
+            client if client is not None else _build_default_client(max_attempts=1)
+        )
+
+    async def _send(self, *, at_most_once: bool, **kwargs: Any) -> dict[str, Any]:
+        if not at_most_once:
+            return await asyncio.to_thread(self._client.send_email, **kwargs)
+        for attempt in range(SES_MAX_ATTEMPTS - 1):
+            try:
+                return await asyncio.to_thread(self._send_client.send_email, **kwargs)
+            except (BotoCoreError, ClientError) as exc:
+                if type(exc).__name__ not in SES_NOT_ACCEPTED_FAILURES:
+                    raise
+            await asyncio.sleep(random.random() * 2**attempt)
+        return await asyncio.to_thread(self._send_client.send_email, **kwargs)
 
     async def send_email(
         self,
@@ -202,6 +330,7 @@ class SesEmailProvider(EmailProvider):
         headers: dict[str, str] | None = None,
         attachments: list[ProviderAttachment] | None = None,
         organization_id: UUID,
+        at_most_once: bool = False,
     ) -> ProviderSendResult:
         if not to_addresses:
             raise ValueError("send_email requires at least one recipient")
@@ -249,8 +378,8 @@ class SesEmailProvider(EmailProvider):
                 headers={k: v for k, v in (headers or {}).items() if v},
                 attachments=attachments,
             )
-            response = await asyncio.to_thread(
-                self._client.send_email,
+            response = await self._send(
+                at_most_once=at_most_once,
                 **shared,
                 FromEmailAddress=from_address,
                 Content={"Raw": {"Data": raw}},
@@ -272,7 +401,7 @@ class SesEmailProvider(EmailProvider):
         if reply_to:
             kwargs["ReplyToAddresses"] = [reply_to]
 
-        response = await asyncio.to_thread(self._client.send_email, **kwargs)
+        response = await self._send(at_most_once=at_most_once, **kwargs)
         return ProviderSendResult(provider_message_id=response["MessageId"])
 
     async def create_identity(self, domain: str) -> ProviderIdentity:

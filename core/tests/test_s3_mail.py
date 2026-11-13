@@ -1,4 +1,5 @@
 import asyncio
+import io
 from unittest.mock import MagicMock
 
 import pytest
@@ -69,6 +70,19 @@ def test_delete_prefix_deletes_every_page():
     assert stub.delete_objects.call_count == 2
 
 
+def test_delete_prefix_keeps_the_named_key():
+    stub = MagicMock()
+    stub.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "p/id.a"}, {"Key": "p/id.b"}]},
+    ]
+    stub.delete_objects.return_value = {}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    assert asyncio.run(client.delete_prefix("p/id", keep="p/id.b")) == 1
+    stub.delete_objects.assert_called_once_with(
+        Bucket="hail-inbound", Delete={"Objects": [{"Key": "p/id.a"}], "Quiet": True}
+    )
+
+
 def test_delete_prefix_raises_when_s3_keeps_a_file():
     stub = MagicMock()
     stub.get_paginator.return_value.paginate.return_value = [
@@ -101,3 +115,24 @@ def test_count_prefix_reads_key_count():
     stub.list_objects_v2.assert_called_once_with(
         Bucket="hail-inbound", Prefix="sms-evidence/o/", MaxKeys=100
     )
+
+
+def test_fetch_raw_bounds_buffering_and_closes_body():
+    stub = MagicMock()
+    body = io.BytesIO(b"abcdef")
+    stub.get_object.return_value = {"Body": body}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(ValueError, match="limit"):
+        asyncio.run(client.fetch_raw("file", max_bytes=3))
+    assert body.closed
+
+
+def test_fetch_raw_rejects_large_content_length_without_reading():
+    stub = MagicMock()
+    body = MagicMock()
+    stub.get_object.return_value = {"Body": body, "ContentLength": 4}
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    with pytest.raises(ValueError, match="limit"):
+        asyncio.run(client.fetch_raw("file", max_bytes=3))
+    body.read.assert_not_called()
+    body.close.assert_called_once()

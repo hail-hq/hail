@@ -57,6 +57,14 @@ cd cli      && go test ./... && go vet ./...
 
 Python tests use **testcontainers/postgres** locally (this starts a Postgres container automatically). When the `DATABASE_URL` env var is set, the tests use it instead (this is the CI path).
 
+Unit tests install the full workspace, so they can hide a service's missing
+dependency. Each production Dockerfile also imports its entry point in the final
+runtime image, without network access. MCP CI starts the app lifespan and checks
+`/healthz` in that image. These checks do not exercise external providers.
+
+The deployment workflow calls CI for its exact commit and waits for it before
+changing the VM. The VM also waits for API and MCP health checks during rollout.
+
 ### Lint + format
 
 Pre-commit runs `ruff check --fix`, `black`, `gofmt -w`, and `prettier --write` on staged files via husky + lint-staged. To run the checks manually:

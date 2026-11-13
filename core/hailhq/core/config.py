@@ -279,6 +279,9 @@ class Settings(BaseSettings):
     # shared-key + API-key paths are tried.
     hail_auth_url: str = ""
     hail_auth_audiences: str = ""
+    # Optional access to JWKS on a protected Vercel preview. Never changes JWT
+    # signature, issuer, audience, expiration, or organization validation.
+    hail_auth_vercel_protection_bypass: str = ""
 
     # MCP service resource identity (cloud), the public URL the MCP
     # serves under (e.g. "https://mcp.hail.so"). Used by the MCP server's

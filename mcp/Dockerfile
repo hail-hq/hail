@@ -39,6 +39,11 @@ COPY --from=builder --chown=hail:hail /app/.venv /app/.venv
 
 USER hail
 
+# Check the installed runtime, including core's declared async SQLAlchemy support.
+# No credentials or external services are available during this check.
+RUN --network=none HAIL_API_KEY=hl_live_test python -c \
+    "import hailhq.core.db; from hailhq.mcp.server import app"
+
 EXPOSE 8081
 # For stdio, override CMD with: python -u -m hailhq.mcp.stdio
 CMD ["uvicorn", "hailhq.mcp.server:app", "--host", "0.0.0.0", "--port", "8081"]

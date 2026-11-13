@@ -19,5 +19,12 @@
     "alt": "Hail - Featured on Postman",
     "name": "Postman",
     "icon": "https://hail.so/assets/third-party/badges/postman.svg"
+  },
+  {
+    "id": "tessl",
+    "href": "https://tessl.io/registry/hail-hq/hail",
+    "alt": "Hail - Featured on Tessl",
+    "name": "Tessl",
+    "icon": "https://hail.so/assets/third-party/badges/tessl.svg"
   }
 ]

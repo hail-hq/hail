@@ -89,6 +89,7 @@ from hailhq.voicebot.amd import (
     run_amd,
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
+from hailhq.voicebot.browser import run_browser_session
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
@@ -2263,6 +2264,12 @@ async def _run_call(
 ) -> None:
     """The function ``WorkerOptions.entrypoint_fnc`` points at."""
     metadata = parse_metadata(ctx.job.metadata)
+
+    if metadata.get("transport") == "browser":
+        await run_browser_session(
+            ctx, metadata["call_id"], attach_handlers=attach_event_handlers
+        )
+        return
 
     await ctx.connect()
 

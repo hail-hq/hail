@@ -1,6 +1,7 @@
 # core/hailhq/core/sms_ingest.py
 """Inbound SMS ingest: resolve the owning org by the Twilio `To` number,
-idempotently persist the message, detect and apply STOP/START opt-out
+or an exclusive browser-call lease. Pool texts require the exact consented
+sender and an active call. Idempotently persist the message, detect and apply STOP/START opt-out
 signals, and fan out to the org's webhook subscribers.
 
 Mirrors core/hailhq/core/email_ingest.py's shape (verify -> resolve org ->
@@ -13,22 +14,25 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 
+from hailhq.core.browser_voice import browser_sms_number
 from hailhq.core.compliance_gate import (
     add_suppression,
     is_suppressed,
     remove_suppression,
 )
 from hailhq.core.config import settings
-from hailhq.core.models import PhoneNumber, Sms, SmsEvent
+from hailhq.core.db import org_lock
+from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.threads import ACTIVE_CALL_SKIP, active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,6 +82,7 @@ async def _send_compliance_reply(
     org_number: PhoneNumber,
     sender_e164: str,
     body: str,
+    organization_id: UUID | None = None,
 ) -> None:
     """Send a single carrier-mandated compliance reply and persist it as an
     outbound Sms row for audit. Bypasses check_sms_allowed / usage / funds.
@@ -102,7 +107,7 @@ async def _send_compliance_reply(
     reply_status = "failed" if carrier_rejected else "sent"
     db.add(
         Sms(
-            organization_id=org_number.organization_id,
+            organization_id=organization_id or org_number.organization_id,
             from_number_id=org_number.id,
             to_number_id=None,
             from_e164=org_number.e164,
@@ -130,6 +135,56 @@ async def active_dedicated_number(db: AsyncSession, to_e164: str) -> PhoneNumber
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def active_browser_sms_call(db, number, sender):
+    """Resolve only a live lease and the exact consented external phone.
+
+    Lock order matches browser sends: organization, call, then number.
+    No pool destination is ever resolved by last user or guessed ownership.
+    """
+    if number.is_pool:
+        if number.reserved_call_id is None:
+            return None
+        call = await db.get(Call, number.reserved_call_id)
+    else:
+        call = (
+            await db.execute(
+                select(Call)
+                .where(
+                    Call.transport == "browser",
+                    Call.status == "in_progress",
+                    Call.organization_id == number.organization_id,
+                    Call.metadata_["browser_sms_number_id"].astext == str(number.id),
+                    Call.metadata_["browser_contacts"]["sms"].astext == sender,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if call is None or call.transport != "browser":
+        return None
+    await org_lock(db, call.organization_id)
+    call = (
+        await db.execute(
+            select(Call)
+            .where(Call.id == call.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    await db.refresh(number, with_for_update=True)
+    if (
+        call.status != "in_progress"
+        or call.metadata_.get("browser_contacts", {}).get("sms") != sender
+    ):
+        return None
+    anchor = call.answered_at or call.requested_at
+    if (
+        datetime.now(timezone.utc) - anchor
+    ).total_seconds() >= call.max_duration_seconds:
+        return None
+    held = await browser_sms_number(db, call)
+    return call if held is not None and held.id == number.id else None
+
+
 async def ingest_inbound_sms(
     db: AsyncSession,
     *,
@@ -142,23 +197,95 @@ async def ingest_inbound_sms(
     provider: SmsProvider | None = None,
 ) -> IngestResult:
     number = await active_dedicated_number(db, to_e164)
-    if number is None or number.organization_id is None:
-        logger.info("inbound sms to unrecognized/pool number=%s dropped", to_e164)
-        return IngestResult(sms_id=None, dropped_reason="unknown_number")
-
+    browser_call = None
+    if number is None:
+        number = (
+            await db.execute(
+                select(PhoneNumber).where(
+                    PhoneNumber.e164 == to_e164,
+                    PhoneNumber.is_pool.is_(True),
+                    PhoneNumber.provisioning_state == "active",
+                )
+            )
+        ).scalar_one_or_none()
+        if number is not None:
+            if number.provider != carrier or "sms" not in number.capabilities:
+                return IngestResult(
+                    sms_id=None, dropped_reason="wrong_carrier_or_capability"
+                )
+            browser_call = await active_browser_sms_call(db, number, from_e164)
+        if browser_call is None:
+            return IngestResult(sms_id=None, dropped_reason="unknown_number")
     if number.provider != carrier or "sms" not in number.capabilities:
-        logger.info(
-            "inbound sms to number=%s dropped: carrier=%s number carrier=%s "
-            "capabilities=%s",
-            to_e164,
-            carrier,
-            number.provider,
-            number.capabilities,
-        )
         return IngestResult(sms_id=None, dropped_reason="wrong_carrier_or_capability")
-
-    organization_id = number.organization_id
-
+    if not number.is_pool:
+        browser_call = await active_browser_sms_call(db, number, from_e164)
+    organization_id = (
+        browser_call.organization_id if browser_call else number.organization_id
+    )
+    if organization_id is None:
+        return IngestResult(sms_id=None, dropped_reason="unknown_number")
+    quota_compliance = False
+    if browser_call:
+        body = body[:2000]
+        if not provider_message_sid:
+            return IngestResult(sms_id=None, dropped_reason="missing_message_id")
+        prior = (
+            await db.execute(
+                select(Sms).where(Sms.provider_message_sid == provider_message_sid)
+            )
+        ).scalar_one_or_none()
+        if prior:
+            if (
+                prior.organization_id == organization_id
+                and prior.to_number_id == number.id
+                and prior.metadata_.get("call_id") == str(browser_call.id)
+            ):
+                return IngestResult(sms_id=prior.id)
+            return IngestResult(sms_id=None, dropped_reason="wrong_message_scope")
+        incoming = (
+            select(func.count())
+            .select_from(Sms)
+            .where(Sms.organization_id == organization_id, Sms.direction == "inbound")
+        )
+        incoming = (
+            incoming.where(Sms.metadata_["browser_trial"].as_boolean().is_(True))
+            if browser_call.metadata_.get("browser_trial")
+            else incoming.where(Sms.metadata_["call_id"].astext == str(browser_call.id))
+        )
+        if (await db.execute(incoming)).scalar_one() >= 3:
+            action = _opt_out_action(body, opt_out_type)
+            if action == "START" and not await is_suppressed(
+                db, organization_id, from_e164, "sms"
+            ):
+                action = None
+            if (
+                action is not None
+                and provider is not None
+                and settings.hail_sms_compliance_replies_enabled
+            ):
+                # Store control messages outside the inbox quota so their SID
+                # dedupes webhook retries and each configured acknowledgement
+                # runs once. They never reopen ordinary message capacity.
+                quota_compliance = True
+            else:
+                if action == "STOP":
+                    await add_suppression(
+                        db,
+                        organization_id=organization_id,
+                        recipient=from_e164,
+                        channel="sms",
+                        reason="recipient replied STOP",
+                        source="stop_keyword",
+                    )
+                elif action == "START":
+                    await remove_suppression(
+                        db,
+                        organization_id=organization_id,
+                        recipient=from_e164,
+                        channel="sms",
+                    )
+                return IngestResult(sms_id=None, dropped_reason="browser_inbound_limit")
     # A missing/blank MessageSid must be stored as NULL, not "": the column
     # is UNIQUE-but-nullable, so NULLs coexist while two blank strings would
     # collide and the second genuine message would be swallowed as a "dup".
@@ -187,6 +314,15 @@ async def ingest_inbound_sms(
         body=body,
         provider=carrier,
         provider_message_sid=sid,
+        metadata_=(
+            {
+                "call_id": str(browser_call.id),
+                "browser_trial": bool(browser_call.metadata_.get("browser_trial")),
+                **({"browser_compliance": True} if quota_compliance else {}),
+            }
+            if browser_call
+            else {}
+        ),
     )
     try:
         async with db.begin_nested():
@@ -241,15 +377,20 @@ async def ingest_inbound_sms(
         and settings.hail_sms_compliance_replies_enabled
     ):
         await _send_compliance_reply(
-            db, provider, org_number=number, sender_e164=from_e164, body=reply_body
+            db,
+            provider,
+            org_number=number,
+            sender_e164=from_e164,
+            body=reply_body,
+            organization_id=organization_id,
         )
 
     # Hand a plain message to the number's text agent. STOP, HELP and an
     # opt-in from an opted-out sender are Hail's to answer, never the agent's.
     # The row belongs to the number's text agent (live or not): that is what
     # puts it in the agent's thread.
-    sms.agent_id = number.sms_agent_id
-    if action is None and await should_queue_reply(db, number):
+    sms.agent_id = browser_call.agent_id if browser_call else number.sms_agent_id
+    if not browser_call and action is None and await should_queue_reply(db, number):
         if await active_call_for_thread(
             db, organization_id, number.sms_agent_id, from_e164
         ):

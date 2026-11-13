@@ -226,10 +226,21 @@ class VerificationRequirements(BaseModel):
     )
 
 
+AddressScope = Literal["any", "country", "area"]
+
+
 class Requirements(VerificationRequirements):
     """Internal requirements: the public form plus the carrier it is for."""
 
     provider: str = Field(description="The carrier these requirements come from.")
+    address_scope: AddressScope | None = Field(
+        default=None,
+        description=(
+            "Where the address may be, when the carrier says: in any country, "
+            "in the country, or in the number's area. None when unknown. "
+            "Only DIDWW sets it, from address_area_level."
+        ),
+    )
 
     @property
     def version(self) -> str:
@@ -240,6 +251,8 @@ class Requirements(VerificationRequirements):
         body = self.model_dump(mode="json", exclude={"subject_types"})
         # Fields added after hashes were stored count only when set, so
         # older forms keep their hash.
+        if body.get("address_scope") is None:
+            body.pop("address_scope", None)
         for field in body["fields"]:
             for key in ("min_choices", "max_choices", "max_length"):
                 if field.get(key) is None:

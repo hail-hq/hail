@@ -127,13 +127,22 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def org_lock(db: AsyncSession, org: UUID) -> None:
-    """Hold this organization's lock until the transaction ends. Billing
-    and number writes of one organization take it, so they run in order."""
+async def key_lock(db: AsyncSession, key: str) -> None:
+    """Hold an advisory lock on ``key`` until the transaction ends. For
+    short work that must run in order but must not wait on ``org_lock``
+    (held through carrier calls), prefix the key so it never matches a
+    bare organization id."""
     await db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": str(org)},
+        {"key": key},
     )
+
+
+async def org_lock(db: AsyncSession, org: UUID) -> None:
+    """Hold this organization's lock until the transaction ends. Billing
+    and number writes of one organization take it, so they run in order.
+    The key is the bare organization id, as ``try_org_lock`` uses."""
+    await key_lock(db, str(org))
 
 
 async def try_org_lock(db: AsyncSession, org: UUID) -> bool:

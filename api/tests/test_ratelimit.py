@@ -165,7 +165,7 @@ async def test_webhook_event_catalog_is_not_rate_limited(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, mount_prefix: str
 ) -> None:
     # The console fetches this public catalog with no key. Anonymous callers
-    # share one proxy-IP bucket, so unrelated traffic must not 429 it.
+    # behind one IP share a bucket, so unrelated traffic must not 429 it.
     monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
     for _ in range(3):
         resp = await client.get(f"{mount_prefix}/webhooks/event-types")
@@ -236,8 +236,8 @@ async def test_cosmetic_variants_of_one_credential_share_one_bucket(
 async def test_docs_and_spec_paths_are_not_rate_limited(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
-    # Anonymous callers share one remote-IP bucket behind the proxy; the
-    # spec agents fetch must not 429 because of unrelated anonymous traffic.
+    # Anonymous callers behind one IP share a bucket; the spec agents fetch
+    # must not 429 because of unrelated anonymous traffic.
     monkeypatch.setattr(settings, "api_rate_limit_per_minute", 1)
     for _ in range(3):
         resp = await client.get(path)

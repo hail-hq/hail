@@ -240,6 +240,42 @@ func (e EmailDomainDnsCheckKind) Valid() bool {
 	}
 }
 
+// Defines values for EmailDomainPatchEmailAgentScope.
+const (
+	EmailDomainPatchEmailAgentScopeAnyone  EmailDomainPatchEmailAgentScope = "anyone"
+	EmailDomainPatchEmailAgentScopeMembers EmailDomainPatchEmailAgentScope = "members"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainPatchEmailAgentScope enum.
+func (e EmailDomainPatchEmailAgentScope) Valid() bool {
+	switch e {
+	case EmailDomainPatchEmailAgentScopeAnyone:
+		return true
+	case EmailDomainPatchEmailAgentScopeMembers:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EmailDomainResponseEmailAgentScope.
+const (
+	EmailDomainResponseEmailAgentScopeAnyone  EmailDomainResponseEmailAgentScope = "anyone"
+	EmailDomainResponseEmailAgentScopeMembers EmailDomainResponseEmailAgentScope = "members"
+)
+
+// Valid indicates whether the value is a known member of the EmailDomainResponseEmailAgentScope enum.
+func (e EmailDomainResponseEmailAgentScope) Valid() bool {
+	switch e {
+	case EmailDomainResponseEmailAgentScopeAnyone:
+		return true
+	case EmailDomainResponseEmailAgentScopeMembers:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmailDomainResponseKind.
 const (
 	Custom   EmailDomainResponseKind = "custom"
@@ -516,6 +552,60 @@ func (e FieldSpecKind) Valid() bool {
 	case FieldSpecKindText:
 		return true
 	case FieldSpecKindUrl:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileUploadCreatePurpose.
+const (
+	FileUploadCreatePurposeEmailAttachment      FileUploadCreatePurpose = "email_attachment"
+	FileUploadCreatePurposeVerificationDocument FileUploadCreatePurpose = "verification_document"
+)
+
+// Valid indicates whether the value is a known member of the FileUploadCreatePurpose enum.
+func (e FileUploadCreatePurpose) Valid() bool {
+	switch e {
+	case FileUploadCreatePurposeEmailAttachment:
+		return true
+	case FileUploadCreatePurposeVerificationDocument:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileUploadLinkResponsePurpose.
+const (
+	FileUploadLinkResponsePurposeEmailAttachment      FileUploadLinkResponsePurpose = "email_attachment"
+	FileUploadLinkResponsePurposeVerificationDocument FileUploadLinkResponsePurpose = "verification_document"
+)
+
+// Valid indicates whether the value is a known member of the FileUploadLinkResponsePurpose enum.
+func (e FileUploadLinkResponsePurpose) Valid() bool {
+	switch e {
+	case FileUploadLinkResponsePurposeEmailAttachment:
+		return true
+	case FileUploadLinkResponsePurposeVerificationDocument:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileUploadResponsePurpose.
+const (
+	EmailAttachment      FileUploadResponsePurpose = "email_attachment"
+	VerificationDocument FileUploadResponsePurpose = "verification_document"
+)
+
+// Valid indicates whether the value is a known member of the FileUploadResponsePurpose enum.
+func (e FileUploadResponsePurpose) Valid() bool {
+	switch e {
+	case EmailAttachment:
+		return true
+	case VerificationDocument:
 		return true
 	default:
 		return false
@@ -1584,6 +1674,9 @@ type AgentCreate struct {
 	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
 
+	// EmailEnabled Answer email on addresses that route email to this agent.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
+
 	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
@@ -1638,6 +1731,9 @@ type AgentResponse struct {
 
 	// CreatedAt ISO 8601 timestamp.
 	CreatedAt time.Time `json:"created_at"`
+
+	// EmailEnabled Whether the agent answers email.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
 	// FirstMessage Opening line, or null to wait.
 	FirstMessage *string `json:"first_message"`
@@ -1697,6 +1793,9 @@ type AgentUpdate struct {
 
 	// AiDisclosureLine New AI line template ('{org}' = organization name); null returns to the workspace line.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
+
+	// EmailEnabled Whether the agent answers email.
+	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
 	// FirstMessage New opening line; null makes the agent wait for the other side.
 	FirstMessage *string `json:"first_message,omitempty"`
@@ -2111,7 +2210,7 @@ type EmailCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers' and 'system_kind' are reserved for Hail's own queue bookkeeping and are rejected.
+	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers', 'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender' are reserved for Hail's own bookkeeping and are rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -2210,6 +2309,12 @@ type EmailDomainListResponse struct {
 // re-implement it here because the patch may merge with existing row
 // state to satisfy the invariant.
 type EmailDomainPatch struct {
+	// EmailAgentId The agent that answers mail to this address. The agent must be live and answer email. A custom domain must be verified with inbound on. Null stops agent replies. Omit to leave unchanged.
+	EmailAgentId *openapi_types.UUID `json:"email_agent_id,omitempty"`
+
+	// EmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged, except that a new agent starts at 'members'.
+	EmailAgentScope *EmailDomainPatchEmailAgentScope `json:"email_agent_scope,omitempty"`
+
 	// ForwardRatePerHour Cap on forwarded messages per hour. Omit to leave unchanged.
 	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
 
@@ -2226,6 +2331,9 @@ type EmailDomainPatch struct {
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 }
 
+// EmailDomainPatchEmailAgentScope Who the agent answers. 'members': verified members of the organization whose mail passes DMARC. 'anyone': every sender whose mail passes DMARC and the spam and header rules; such a sender can make the agent use its tools. Mail without a DMARC pass gets no reply. Omit to leave unchanged, except that a new agent starts at 'members'.
+type EmailDomainPatchEmailAgentScope string
+
 // EmailDomainResponse Read view for an email domain.
 //
 // The inbound-action fields (“inbound_enabled“, “forward_to“,
@@ -2240,6 +2348,12 @@ type EmailDomainResponse struct {
 
 	// Domain The DNS domain mail is sent from.
 	Domain string `json:"domain"`
+
+	// EmailAgentId The agent that answers mail to this address. Null when none does.
+	EmailAgentId *openapi_types.UUID `json:"email_agent_id,omitempty"`
+
+	// EmailAgentScope Who the agent answers: 'members' or 'anyone'.
+	EmailAgentScope *EmailDomainResponseEmailAgentScope `json:"email_agent_scope,omitempty"`
 
 	// ForwardRatePerHour Configured cap on forwarded messages per hour, if set.
 	ForwardRatePerHour *int `json:"forward_rate_per_hour,omitempty"`
@@ -2286,6 +2400,9 @@ type EmailDomainResponse struct {
 	// VerifiedAt When the domain became verified, ISO 8601 timestamp. Null until it is.
 	VerifiedAt *time.Time `json:"verified_at"`
 }
+
+// EmailDomainResponseEmailAgentScope Who the agent answers: 'members' or 'anyone'.
+type EmailDomainResponseEmailAgentScope string
 
 // EmailDomainResponseKind 'hail_mail' (Hail-hosted address) or 'custom' (your own domain).
 type EmailDomainResponseKind string
@@ -2334,6 +2451,12 @@ type EmailListResponse struct {
 
 // EmailResponse defines model for EmailResponse.
 type EmailResponse struct {
+	// AgentId The agent this email belongs to: the address's agent on inbound rows, the writer on outbound rows.
+	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
+
+	// AgentReplyState Inbound rows routed to an agent: 'pending', 'processing', 'done', 'skipped', or 'failed'. A skipped row names why in metadata.agent_skip_reason.
+	AgentReplyState *string `json:"agent_reply_state,omitempty"`
+
 	// Attachments Inbound MIME attachments on this email. Empty on outbound rows.
 	Attachments *[]EmailAttachmentResponse `json:"attachments,omitempty"`
 
@@ -2376,7 +2499,7 @@ type EmailResponse struct {
 	// Id Unique identifier for this email.
 	Id openapi_types.UUID `json:"id"`
 
-	// InReplyTo RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.
+	// InReplyTo RFC 5322 In-Reply-To header. Set on inbound emails and agent replies; null on other outbound rows.
 	InReplyTo *string `json:"in_reply_to,omitempty"`
 
 	// LastEventAt When the most recent delivery event for this email occurred, ISO 8601 timestamp.
@@ -2400,7 +2523,7 @@ type EmailResponse struct {
 	// RawUrl API endpoint that redirects to the original MIME blob. Inbound emails only; null on outbound rows.
 	RawUrl *string `json:"raw_url,omitempty"`
 
-	// ReferencesIds RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.
+	// ReferencesIds RFC 5322 References header, split into ids. Set on inbound emails and agent replies; null on other outbound rows.
 	ReferencesIds *[]string `json:"references_ids,omitempty"`
 
 	// ReplyTo Reply-To email address, if set.
@@ -2720,6 +2843,72 @@ type FieldSpec struct {
 
 // FieldSpecKind Input kind: 'text', 'email', 'phone', 'url', or 'choices' (pick several of `options`; send their keys joined by commas).
 type FieldSpecKind string
+
+// FileUploadCreate Body of “POST /uploads“: what the file is for, and its name and type.
+type FileUploadCreate struct {
+	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
+	ContentType string `json:"content_type"`
+
+	// Filename The file's name, 1 to 255 chars, no control characters.
+	Filename string `json:"filename"`
+
+	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+	Purpose FileUploadCreatePurpose `json:"purpose"`
+}
+
+// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+type FileUploadCreatePurpose string
+
+// FileUploadLinkResponse Returned by “POST /uploads“: a one-time link to send the bytes to.
+type FileUploadLinkResponse struct {
+	// ContentType The type the file is stored with.
+	ContentType string `json:"content_type"`
+
+	// ExpiresAt When the link stops working.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The upload's id.
+	Id openapi_types.UUID `json:"id"`
+
+	// MaxBytes The largest file the link takes, in bytes.
+	MaxBytes int `json:"max_bytes"`
+
+	// Method The HTTP method for `upload_url`.
+	Method string `json:"method"`
+
+	// Purpose What the file is for.
+	Purpose FileUploadLinkResponsePurpose `json:"purpose"`
+
+	// UploadUrl Send the raw file bytes here with `PUT`. No Authorization header: the `token` in the URL is the only credential. Works once, until `expires_at`. Treat it like a password.
+	UploadUrl string `json:"upload_url"`
+}
+
+// FileUploadLinkResponsePurpose What the file is for.
+type FileUploadLinkResponsePurpose string
+
+// FileUploadResponse Returned by “PUT /uploads/{id}“: what Hail stored.
+type FileUploadResponse struct {
+	// ContentType The type given when the link was made.
+	ContentType string `json:"content_type"`
+
+	// Filename The name given when the link was made.
+	Filename string `json:"filename"`
+
+	// Id The upload's id.
+	Id openapi_types.UUID `json:"id"`
+
+	// Purpose What the file is for.
+	Purpose FileUploadResponsePurpose `json:"purpose"`
+
+	// Sha256 sha256 of the bytes stored, hex. Compare with the local file.
+	Sha256 string `json:"sha256"`
+
+	// SizeBytes Bytes stored. Compare with the local file.
+	SizeBytes int `json:"size_bytes"`
+}
+
+// FileUploadResponsePurpose What the file is for.
+type FileUploadResponsePurpose string
 
 // ForwardTargetListResponse defines model for ForwardTargetListResponse.
 type ForwardTargetListResponse struct {
@@ -3485,6 +3674,33 @@ type ValidationError_Loc_Item struct {
 	union json.RawMessage
 }
 
+// VerificationCheckFile One file a verification check read.
+type VerificationCheckFile struct {
+	// Sha256 sha256 of the file, hex.
+	Sha256 string `json:"sha256"`
+
+	// SizeBytes Size of the file in bytes.
+	SizeBytes int `json:"size_bytes"`
+
+	// Slot The document slot.
+	Slot string `json:"slot"`
+
+	// UploadId The upload used for the slot, or null for a `file.<slot>` part.
+	UploadId *openapi_types.UUID `json:"upload_id"`
+}
+
+// VerificationCheckResponse Returned by “POST /verifications/check“ when every local check passes.
+type VerificationCheckResponse struct {
+	// Files The files the check read, one per slot.
+	Files []VerificationCheckFile `json:"files"`
+
+	// Note What the check does not cover.
+	Note string `json:"note"`
+
+	// Ok Always true: a failed check is a 4xx.
+	Ok bool `json:"ok"`
+}
+
 // VerificationRequirements What the carrier needs for one (country, number type, subject type),
 // as the public API shows it: without the carrier's name.
 type VerificationRequirements struct {
@@ -4144,6 +4360,17 @@ type UnsubscribeV1UnsubscribePostParams struct {
 // UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe defines parameters for UnsubscribeV1UnsubscribePost.
 type UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe string
 
+// CreateFileUploadParams defines parameters for CreateFileUpload.
+type CreateFileUploadParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// PutFileUploadParams defines parameters for PutFileUpload.
+type PutFileUploadParams struct {
+	// Token The token from `upload_url`. The only credential.
+	Token string `form:"token" json:"token"`
+}
+
 // ListVerificationsParams defines parameters for ListVerifications.
 type ListVerificationsParams struct {
 	Purpose       *string `form:"purpose,omitempty" json:"purpose,omitempty"`
@@ -4152,6 +4379,11 @@ type ListVerificationsParams struct {
 
 // CreateVerificationParams defines parameters for CreateVerification.
 type CreateVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CheckVerificationParams defines parameters for CheckVerification.
+type CheckVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -4329,6 +4561,9 @@ type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
 
 // UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
+
+// CreateFileUploadJSONRequestBody defines body for CreateFileUpload for application/json ContentType.
+type CreateFileUploadJSONRequestBody = FileUploadCreate
 
 // UploadSmsEvidenceMultipartRequestBody defines body for UploadSmsEvidence for multipart/form-data ContentType.
 type UploadSmsEvidenceMultipartRequestBody UploadSmsEvidenceMultipartBody
@@ -4930,11 +5165,22 @@ type ClientInterface interface {
 
 	UnsubscribeV1UnsubscribePostWithFormdataBody(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CreateFileUploadWithBody request with any body
+	CreateFileUploadWithBody(ctx context.Context, params *CreateFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateFileUpload(ctx context.Context, params *CreateFileUploadParams, body CreateFileUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutFileUploadWithBody request with any body
+	PutFileUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *PutFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListVerifications request
 	ListVerifications(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateVerification request
 	CreateVerification(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckVerification request
+	CheckVerification(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5943,6 +6189,42 @@ func (c *Client) UnsubscribeV1UnsubscribePostWithFormdataBody(ctx context.Contex
 	return c.Client.Do(req)
 }
 
+func (c *Client) CreateFileUploadWithBody(ctx context.Context, params *CreateFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateFileUploadRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateFileUpload(ctx context.Context, params *CreateFileUploadParams, body CreateFileUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateFileUploadRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutFileUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *PutFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutFileUploadRequestWithBody(c.Server, uploadId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListVerifications(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListVerificationsRequest(c.Server, params)
 	if err != nil {
@@ -5957,6 +6239,18 @@ func (c *Client) ListVerifications(ctx context.Context, params *ListVerification
 
 func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateVerificationRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVerification(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVerificationRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9912,6 +10206,115 @@ func NewUnsubscribeV1UnsubscribePostRequestWithBody(server string, params *Unsub
 	return req, nil
 }
 
+// NewCreateFileUploadRequest calls the generic CreateFileUpload builder with application/json body
+func NewCreateFileUploadRequest(server string, params *CreateFileUploadParams, body CreateFileUploadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateFileUploadRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateFileUploadRequestWithBody generates requests for CreateFileUpload with any type of body
+func NewCreateFileUploadRequestWithBody(server string, params *CreateFileUploadParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/uploads")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewPutFileUploadRequestWithBody generates requests for PutFileUpload with any type of body
+func NewPutFileUploadRequestWithBody(server string, uploadId openapi_types.UUID, params *PutFileUploadParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "upload_id", uploadId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/uploads/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "token", params.Token, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListVerificationsRequest generates requests for ListVerifications
 func NewListVerificationsRequest(server string, params *ListVerificationsParams) (*http.Request, error) {
 	var err error
@@ -9986,6 +10389,48 @@ func NewCreateVerificationRequest(server string, params *CreateVerificationParam
 	}
 
 	operationPath := fmt.Sprintf("/v1/verifications")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCheckVerificationRequest generates requests for CheckVerification
+func NewCheckVerificationRequest(server string, params *CheckVerificationParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/check")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -11448,11 +11893,22 @@ type ClientWithResponsesInterface interface {
 
 	UnsubscribeV1UnsubscribePostWithFormdataBodyWithResponse(ctx context.Context, params *UnsubscribeV1UnsubscribePostParams, body UnsubscribeV1UnsubscribePostFormdataRequestBody, reqEditors ...RequestEditorFn) (*UnsubscribeV1UnsubscribePostResponse, error)
 
+	// CreateFileUploadWithBodyWithResponse request with any body
+	CreateFileUploadWithBodyWithResponse(ctx context.Context, params *CreateFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateFileUploadResponse, error)
+
+	CreateFileUploadWithResponse(ctx context.Context, params *CreateFileUploadParams, body CreateFileUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateFileUploadResponse, error)
+
+	// PutFileUploadWithBodyWithResponse request with any body
+	PutFileUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *PutFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutFileUploadResponse, error)
+
 	// ListVerificationsWithResponse request
 	ListVerificationsWithResponse(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*ListVerificationsResponse, error)
 
 	// CreateVerificationWithResponse request
 	CreateVerificationWithResponse(ctx context.Context, params *CreateVerificationParams, reqEditors ...RequestEditorFn) (*CreateVerificationResponse, error)
+
+	// CheckVerificationWithResponse request
+	CheckVerificationWithResponse(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*CheckVerificationResponse, error)
 
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
@@ -12891,6 +13347,52 @@ func (r UnsubscribeV1UnsubscribePostResponse) StatusCode() int {
 	return 0
 }
 
+type CreateFileUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *FileUploadLinkResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateFileUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateFileUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutFileUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *FileUploadResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutFileUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutFileUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListVerificationsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12931,6 +13433,29 @@ func (r CreateVerificationResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreateVerificationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CheckVerificationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationCheckResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckVerificationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckVerificationResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14077,6 +14602,32 @@ func (c *ClientWithResponses) UnsubscribeV1UnsubscribePostWithFormdataBodyWithRe
 	return ParseUnsubscribeV1UnsubscribePostResponse(rsp)
 }
 
+// CreateFileUploadWithBodyWithResponse request with arbitrary body returning *CreateFileUploadResponse
+func (c *ClientWithResponses) CreateFileUploadWithBodyWithResponse(ctx context.Context, params *CreateFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateFileUploadResponse, error) {
+	rsp, err := c.CreateFileUploadWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateFileUploadResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateFileUploadWithResponse(ctx context.Context, params *CreateFileUploadParams, body CreateFileUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateFileUploadResponse, error) {
+	rsp, err := c.CreateFileUpload(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateFileUploadResponse(rsp)
+}
+
+// PutFileUploadWithBodyWithResponse request with arbitrary body returning *PutFileUploadResponse
+func (c *ClientWithResponses) PutFileUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *PutFileUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutFileUploadResponse, error) {
+	rsp, err := c.PutFileUploadWithBody(ctx, uploadId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutFileUploadResponse(rsp)
+}
+
 // ListVerificationsWithResponse request returning *ListVerificationsResponse
 func (c *ClientWithResponses) ListVerificationsWithResponse(ctx context.Context, params *ListVerificationsParams, reqEditors ...RequestEditorFn) (*ListVerificationsResponse, error) {
 	rsp, err := c.ListVerifications(ctx, params, reqEditors...)
@@ -14093,6 +14644,15 @@ func (c *ClientWithResponses) CreateVerificationWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseCreateVerificationResponse(rsp)
+}
+
+// CheckVerificationWithResponse request returning *CheckVerificationResponse
+func (c *ClientWithResponses) CheckVerificationWithResponse(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*CheckVerificationResponse, error) {
+	rsp, err := c.CheckVerification(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVerificationResponse(rsp)
 }
 
 // GetVerificationRequirementsWithResponse request returning *GetVerificationRequirementsResponse
@@ -16197,6 +16757,72 @@ func ParseUnsubscribeV1UnsubscribePostResponse(rsp *http.Response) (*Unsubscribe
 	return response, nil
 }
 
+// ParseCreateFileUploadResponse parses an HTTP response from a CreateFileUploadWithResponse call
+func ParseCreateFileUploadResponse(rsp *http.Response) (*CreateFileUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateFileUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest FileUploadLinkResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutFileUploadResponse parses an HTTP response from a PutFileUploadWithResponse call
+func ParsePutFileUploadResponse(rsp *http.Response) (*PutFileUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutFileUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest FileUploadResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListVerificationsResponse parses an HTTP response from a ListVerificationsWithResponse call
 func ParseListVerificationsResponse(rsp *http.Response) (*ListVerificationsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -16250,6 +16876,39 @@ func ParseCreateVerificationResponse(rsp *http.Response) (*CreateVerificationRes
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckVerificationResponse parses an HTTP response from a CheckVerificationWithResponse call
+func ParseCheckVerificationResponse(rsp *http.Response) (*CheckVerificationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError
