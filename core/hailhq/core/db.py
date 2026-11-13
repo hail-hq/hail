@@ -161,15 +161,20 @@ def background_context() -> contextvars.Context:
 async def dispose_engine() -> None:
     global _engine, _sessionmaker, _independent_engine, _independent_sessionmaker
     global _background_engine, _background_sessionmaker
-    for engine in (_engine, _independent_engine, _background_engine):
-        if engine is not None:
-            await engine.dispose()
+    engines = (_engine, _independent_engine, _background_engine)
+    # Reset first: a failed dispose must not keep later pools or stale globals.
     _engine = None
     _sessionmaker = None
     _independent_engine = None
     _independent_sessionmaker = None
     _background_engine = None
     _background_sessionmaker = None
+    for engine in engines:
+        if engine is not None:
+            try:
+                await engine.dispose()
+            except Exception:
+                logger.warning("database pool dispose failed", exc_info=True)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -198,16 +203,14 @@ async def retry_on_pool_timeout(work: Callable[[], Awaitable[T]], tries: int = 3
     once: a session checks out a new connection after each commit, so a
     timeout after the first commit would run that commit again.
     """
-    for attempt in range(1, tries + 1):
+    for attempt in range(1, tries):
         try:
             return await work()
         except PoolTimeout:
-            if attempt == tries:
-                raise
             logger.warning(
                 "database pool busy; retrying (attempt %s of %s)", attempt, tries
             )
-    raise AssertionError("unreachable")
+    return await work()
 
 
 @asynccontextmanager

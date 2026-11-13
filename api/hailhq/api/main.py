@@ -253,6 +253,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 allow_private_networks=settings.hail_webhook_allow_private_networks,
             ),
             decrypt=cipher.decrypt,
+            # Each delivery holds a background connection through its POST.
+            # More deliveries than connections would wait out the pool timeout
+            # and stay deferred by the claim without a recorded attempt.
+            concurrency=settings.database_pool_size + settings.database_max_overflow,
         )
         webhook_task = _background_task(
             webhook_worker.run_forever(), name="webhook-worker"
