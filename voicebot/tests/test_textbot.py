@@ -640,3 +640,28 @@ async def test_run_forever_frees_the_pool_even_if_the_api_client_fails_to_close(
     with pytest.raises(OSError):
         await asyncio.wait_for(textbot.run_forever(), timeout=2)
     disposed.assert_awaited_once()
+
+
+async def test_settle_retries_when_the_pool_is_busy(monkeypatch):
+    """A pool timeout must not leave the reply claimed until the claim
+    expires: the write runs again once a connection frees up."""
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    opened = 0
+
+    @asynccontextmanager
+    async def session():
+        nonlocal opened
+        opened += 1
+        if opened == 1:
+            raise PoolTimeout("pool busy")
+        yield object()
+
+    retried = AsyncMock(return_value=None)
+    monkeypatch.setattr(textbot, "session_scope", session)
+    monkeypatch.setattr(textbot, "retry_reply", retried)
+    await textbot._settle(object(), None, retry=True)
+    assert opened == 2
+    retried.assert_awaited_once()

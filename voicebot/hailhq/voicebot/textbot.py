@@ -28,7 +28,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
-from hailhq.core.db import dispose_engine, session_scope
+from hailhq.core.db import dispose_engine, retry_on_pool_timeout, session_scope
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
@@ -131,11 +131,15 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
 async def _settle(
     claimed: ClaimedReply, state: ReplyState | None, *, retry: bool = False
 ) -> None:
-    async with session_scope() as db:
-        if retry:
-            await retry_reply(db, claimed)
-        elif state is not None:
-            await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+    async def write() -> None:
+        async with session_scope() as db:
+            if retry:
+                await retry_reply(db, claimed)
+            elif state is not None:
+                await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+
+    # A busy pool must not leave the text claimed until the claim expires.
+    await retry_on_pool_timeout(write)
 
 
 async def reply_once(api: AgentApiClient) -> bool:

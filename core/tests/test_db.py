@@ -191,3 +191,44 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await holder.rollback()
         assert await core_db.try_org_lock(other, org) is True
         await other.rollback()
+
+
+@pytest.mark.asyncio
+async def test_retry_on_pool_timeout_waits_out_a_busy_pool(database_url, monkeypatch):
+    """A write that times out waiting for a connection runs again and
+    succeeds once the holder lets go."""
+    from hailhq.core import db
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(
+        to_async_url(database_url), pool_size=1, max_overflow=0, pool_timeout=0.2
+    )
+    monkeypatch.setattr(
+        db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
+    )
+
+    async def read_one():
+        async with db.session_scope() as session:
+            return (await session.execute(text("SELECT 1"))).scalar_one()
+
+    async def hold(seconds):
+        async with db.session_scope() as session:
+            await session.execute(text("SELECT 1"))
+            await asyncio.sleep(seconds)
+
+    try:
+        holder = asyncio.create_task(hold(0.3))
+        await asyncio.sleep(0.05)
+        with pytest.raises(PoolTimeout):
+            await read_one()
+        assert await db.retry_on_pool_timeout(read_one) == 1
+        await holder
+
+        holder = asyncio.create_task(hold(1))
+        await asyncio.sleep(0.05)
+        with pytest.raises(PoolTimeout):
+            await db.retry_on_pool_timeout(read_one, tries=2)
+        await holder
+    finally:
+        await engine.dispose()

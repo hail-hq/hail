@@ -8,8 +8,10 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -17,12 +19,16 @@ import logfire
 from hailhq.core.config import settings
 from hailhq.core.telemetry import instrument, telemetry_enabled
 from sqlalchemy import text
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -148,6 +154,25 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
     async with _ensure_initialized()() as session:
         yield session
+
+
+async def retry_on_pool_timeout(work: Callable[[], Awaitable[T]], tries: int = 3) -> T:
+    """Run ``work`` again when no pooled connection freed up in time.
+
+    Pools are small (``DATABASE_POOL_SIZE``), so a slow database can keep a
+    short write waiting past the pool timeout. The timeout comes before any
+    SQL runs, so ``work`` (one session) never writes twice.
+    """
+    for attempt in range(1, tries + 1):
+        try:
+            return await work()
+        except PoolTimeout:
+            if attempt == tries:
+                raise
+            logger.warning(
+                "database pool busy; retrying (attempt %s of %s)", attempt, tries
+            )
+    raise AssertionError("unreachable")
 
 
 @asynccontextmanager
