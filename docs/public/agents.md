@@ -189,8 +189,8 @@ What happens on inbound mail:
    from the address itself, and a custom-domain reply from `noreply@<domain>`. The agent reads
    its instructions and the last 20 proven messages of the thread.
 3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
-   addresses. Mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
-   list mail. For one sender in any 24 hours, the agent sends at most 20 messages, counting
+   addresses. Marketing mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
+   list mail. Informational mail does not. For one sender in any 24 hours, the agent sends at most 20 messages, counting
    replies and tool sends.
 4. With no credit, the mail is stored and the agent stays quiet. The row carries
    `suppressed_reasons: ["insufficient_funds"]`.
