@@ -211,3 +211,9 @@ def test_main_without_credentials_writes_nothing(tmp_path, monkeypatch):
     target = tmp_path / "voice.json"
     assert sv.main(["--provider", "twilio", "--file", str(target)]) == 1
     assert not target.exists()
+
+
+def test_committed_voice_json_matches_schema_and_sync_output():
+    path = HERE.parents[1] / "costs" / "voice.json"
+    jsonschema.validate(json.loads(path.read_text()), SCHEMA)
+    assert sv.dump(sv.load(path)) == path.read_text()
