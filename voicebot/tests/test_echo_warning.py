@@ -494,7 +494,7 @@ async def test_gate_holds_through_steady_voiced_echo_and_lifts_without_it():
 
     for echo in (True, False):
         warning = EchoWarning(Session(), line="Echo line.", can_warn=lambda: True)
-        warning._output = SimpleNamespace(gate_delay=0.8)
+        warning._output = SimpleNamespace(gate_delay=0.8, reset=lambda: None)
         warning._warned = warning._gated = True
         ref = voice(1)
         incoming = voice(2) * 0.05
