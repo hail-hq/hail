@@ -1,12 +1,12 @@
 # Echo warning fallback
 
-`HAIL_ECHO_WARNING_ENABLED=true` (default) enables a single warning when repeated
+`HAIL_ECHO_WARNING_ENABLED=true` (default: false) enables a single warning when repeated
 waveform matches show the agent's played voice returning to the caller track
 and the agent's own input reacted to it.
 The agent says one fixed line in the call's configured language (English when it
 is unknown): “I'm hearing an echo. It's disrupting the call.” The 39 translations
 are in [`spoken_lines.py`](../../voicebot/hailhq/voicebot/spoken_lines.py). No
-model call is involved. Set the flag false to disable the observer.
+model call is involved. With the flag false, no observer runs.
 
 [Detector and warning](../../voicebot/hailhq/voicebot/echo_warning.py) use a raw,
 bounded local reader of the already-subscribed caller track, independently of

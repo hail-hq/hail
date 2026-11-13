@@ -71,7 +71,8 @@ class Settings(BaseSettings):
     google_amd_model: str = ""
 
     # Voice pipeline
-    hail_echo_warning_enabled: bool = True
+    # Off until a phone smoke test with real echo has passed.
+    hail_echo_warning_enabled: bool = False
     # LiveKit Cloud input filter: bvc, krisp_viva, voice_focus_s, voice_focus_l.
     # A plain string: every service loads Settings, and a bad voice-only value
     # must not stop the API. The voicebot falls back to bvc on an unknown one.
