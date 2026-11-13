@@ -160,8 +160,9 @@ async def retry_on_pool_timeout(work: Callable[[], Awaitable[T]], tries: int = 3
     """Run ``work`` again when no pooled connection freed up in time.
 
     Pools are small (``DATABASE_POOL_SIZE``), so a slow database can keep a
-    short write waiting past the pool timeout. The timeout comes before any
-    SQL runs, so ``work`` (one session) never writes twice.
+    short write waiting past the pool timeout. ``work`` must commit at most
+    once: a session checks out a new connection after each commit, so a
+    timeout after the first commit would run that commit again.
     """
     for attempt in range(1, tries + 1):
         try:

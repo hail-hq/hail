@@ -328,8 +328,6 @@ The default reduces that risk. It does not enforce a global connection limit.
 Keep `DATABASE_POOL_SIZE` positive and `DATABASE_MAX_OVERFLOW` nonnegative.
 SQLAlchemy treats zero pool size and negative overflow as unlimited, so Hail rejects them.
 
-Changing these settings on a running production service requires an approved deployment.
-
 ## Releases
 
 Tag conventions:

@@ -135,9 +135,10 @@ async def async_session(
     """A per-test ``AsyncSession`` against empty tables.
 
     Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
-    so production ``session_scope()`` callers (auth bookkeeping, audit-log
-    writes, voicebot event writes) talk to the test database without any
-    FastAPI dep override.
+    and ``_independent_sessionmaker``, so production ``session_scope()`` and
+    ``independent_session_scope()`` callers (audit, usage, idempotency,
+    voicebot event writes) talk to the test database without any FastAPI
+    dep override.
 
     The ``db`` fixture handles the schema setup and sessionmaker patch.
     """
