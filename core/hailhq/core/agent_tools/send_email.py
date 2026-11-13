@@ -36,6 +36,9 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
         .where(
             EmailDomain.organization_id == organization_id,
             EmailDomain.verification_status == "verified",
+            # A switched-off custom domain cannot send (verified_senders
+            # skips it), so it does not make email available.
+            EmailDomain.sends_enabled,
         )
         .limit(1)
     )
