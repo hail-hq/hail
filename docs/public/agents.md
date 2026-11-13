@@ -180,7 +180,7 @@ address, because anyone can write a `From` header. Other mail gets no reply, so 
 domain with no DMARC policy gets none.
 
 A hail-mail address always receives mail, so the route is its only switch. A custom domain must
-be verified with inbound on.
+be verified with inbound and sending on.
 
 What happens on inbound mail:
 

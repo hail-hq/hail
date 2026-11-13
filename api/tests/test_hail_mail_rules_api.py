@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from hailhq.api.routes.emails import resolve_sender
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import ROLE_MAILBOXES
@@ -184,7 +185,9 @@ async def test_first_send_with_a_retired_pinned_head_returns_409(
     email_mock.send_email.assert_not_awaited()
 
 
-async def _verified_custom(session: AsyncSession, org_id, domain: str) -> None:
+async def _verified_custom(
+    session: AsyncSession, org_id, domain: str, *, sends_enabled: bool = True
+) -> None:
     session.add(
         EmailDomain(
             organization_id=org_id,
@@ -193,6 +196,7 @@ async def _verified_custom(session: AsyncSession, org_id, domain: str) -> None:
             verification_status="verified",
             verified_at=datetime.now(timezone.utc),
             provider="ses",
+            sends_enabled=sends_enabled,
         )
     )
     await session.commit()
@@ -337,6 +341,60 @@ async def test_pending_custom_domain_does_not_replace_hail_mail(
     assert listed.json()["default_from"] == "alice+acme@mail.hail.so"
     rows = await async_session.execute(select(EmailDomain.kind))
     assert sorted(rows.scalars()) == ["custom", "hail_mail"]
+
+
+async def test_disabled_custom_domain_is_not_a_sender_pick(
+    async_session: AsyncSession,
+) -> None:
+    """A verified custom row with sends_enabled=false is never picked."""
+    org_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        EmailDomain(
+            organization_id=org_id,
+            kind="hail_mail",
+            domain="alice+acme@mail.hail.so",
+            local_prefix_user="alice",
+            local_prefix_org="acme",
+            verification_status="verified",
+            provider="ses",
+            created_at=now - timedelta(days=1),
+        )
+    )
+    await async_session.commit()
+    await _verified_custom(async_session, org_id, "acme.com", sends_enabled=False)
+
+    plain = await resolve_sender(async_session, org_id, None, allow_ambiguous=True)
+    assert plain.domain == "alice+acme@mail.hail.so"
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_sender(async_session, org_id, "user@acme.com")
+    assert "blocked from sending" in str(exc.value.detail)
+
+
+async def test_pending_disabled_custom_does_not_raise_the_pending_422(
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending custom row that is switched off must not block a send."""
+    monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
+    org_id = uuid.uuid4()
+    async_session.add(
+        EmailDomain(
+            organization_id=org_id,
+            kind="custom",
+            domain="acme.com",
+            verification_status="pending",
+            provider="ses",
+            sends_enabled=False,
+        )
+    )
+    await async_session.commit()
+
+    sd = await resolve_sender(async_session, org_id, None)
+
+    assert sd.kind == "hail_mail"
+    assert sd.verification_status == "verified"
 
 
 async def test_claim_waits_for_a_release_of_the_same_head(db) -> None:

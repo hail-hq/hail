@@ -559,6 +559,36 @@ async def test_no_funds_stores_the_row_and_alerts(async_session):
 
 
 @pytest.mark.asyncio
+async def test_a_custom_domain_with_sends_off_queues_nothing(async_session):
+    org, agent, _ = await _seed(async_session)
+    custom = EmailDomain(
+        organization_id=org,
+        kind="custom",
+        domain="example.org",
+        verification_status="verified",
+        provider="ses",
+        verified_at=NOW,
+        inbound_enabled=True,
+        sends_enabled=False,
+        email_agent_id=agent.id,
+    )
+    async_session.add(custom)
+    await async_session.commit()
+    decision = await email_agent.queue_decision(
+        async_session,
+        custom,
+        parsed=parse_mime(_raw()),
+        envelope_from=MEMBER,
+        dmarc_verdict="PASS",
+        suppress=None,
+        over_cap=False,
+        funded=False,
+        base_domain="mail.hail.so",
+    )
+    assert decision is None
+
+
+@pytest.mark.asyncio
 async def test_no_funds_does_not_alert_for_mail_no_agent_would_answer(async_session):
     await _seed(async_session)
     row = await _ingest(

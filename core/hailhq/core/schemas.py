@@ -1406,6 +1406,10 @@ class EmailDomainPatch(BaseModel):
     * Hail-mail addressing — the user/org prefix pair (only valid on
       ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
       to PATCH these on a custom row).
+    * Send switch — ``sends_enabled`` (only valid on ``kind='custom'``
+      rows; the handler returns 422 otherwise). ``false`` stops the
+      domain from sending at all: skipped by sender selection, explicit
+      ``from`` refused.
     * Inbound action — ``inbound_enabled`` + ``forward_to`` + the optional
       ``forward_rate_per_hour`` cap. These apply to either kind, but this
       milestone routes inbound only to ``hail_mail`` rows; custom-domain
@@ -1448,12 +1452,21 @@ class EmailDomainPatch(BaseModel):
         default=None,
         description="Cap on forwarded messages per hour. Omit to leave unchanged.",
     )
+    sends_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: skipped by default sender selection and a "
+            "send naming it explicitly returns 422. Only allowed on custom "
+            "rows; Omit to leave unchanged."
+        ),
+    )
     email_agent_id: UUID | None = Field(
         default=None,
         description=(
             "The agent that answers mail to this address. The agent must be "
             "live and answer email. A custom domain must be verified with "
-            "inbound on. Null stops agent replies. Omit to leave unchanged."
+            "inbound and sending on. Null stops agent replies. Omit to leave unchanged."
         ),
     )
     email_agent_scope: EmailAgentScope | None = Field(
@@ -1507,13 +1520,14 @@ class EmailDomainPatch(BaseModel):
             and self.inbound_enabled is None
             and self.forward_to is None
             and self.forward_rate_per_hour is None
+            and self.sends_enabled is None
             and "email_agent_id" not in self.model_fields_set
             and self.email_agent_scope is None
         ):
             raise ValueError(
                 "at least one of local_prefix_user, local_prefix_org, "
                 "inbound_enabled, forward_to, forward_rate_per_hour, "
-                "email_agent_id, or email_agent_scope must be set"
+                "sends_enabled, email_agent_id, or email_agent_scope must be set"
             )
         return self
 
@@ -1562,6 +1576,15 @@ class EmailDomainResponse(BaseModel):
     inbound_enabled: bool = Field(
         default=False,
         description="Whether this domain accepts and forwards inbound mail.",
+    )
+    sends_enabled: bool = Field(
+        default=True,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: it is skipped by default sender selection "
+            "and a send that names it explicitly returns 422. Always true "
+            "for hail_mail rows."
+        ),
     )
     forward_to: list[str] | None = Field(
         default=None,

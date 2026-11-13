@@ -163,8 +163,11 @@ async def routed_agent(
     domain = await db.get(EmailDomain, email.email_domain_id)
     if domain is None or domain.email_agent_id is None:
         return None
+    # A custom domain with sends off cannot send the reply, so no run starts.
     if domain.kind == "custom" and (
-        domain.verification_status != "verified" or not domain.inbound_enabled
+        domain.verification_status != "verified"
+        or not domain.inbound_enabled
+        or not domain.sends_enabled
     ):
         return None
     agent = await db.get(Agent, domain.email_agent_id)
@@ -365,6 +368,10 @@ async def queue_decision(
     address. The first failed rule names the skip reason; funds come last, so
     the out-of-credit alert means a reply was really missed."""
     if domain.email_agent_id is None:
+        return None
+    # Same rule as routed_agent: a custom domain with sends off gets no run,
+    # so it must not queue one or stamp a skip reason such as no funds.
+    if domain.kind == "custom" and not domain.sends_enabled:
         return None
     agent = await db.get(Agent, domain.email_agent_id)
     if not answers_emails(agent):

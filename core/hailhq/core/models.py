@@ -1252,6 +1252,16 @@ class EmailDomain(Base):
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
     provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # Send switch. False means this identity must not send at all: it is
+    # skipped by verified_senders (so from-less sends fall back to hail-mail
+    # or resolveSender's remaining cases), and a send that names it
+    # explicitly is refused with 422. Hail-mail rows may not be switched off
+    # (see email_domains_sends_enabled_check) — they are the fallback
+    # identity a from-less send resolves to. Inbound mail is unaffected.
+    # Mirrors migration 0076.
+    sends_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
     inbound_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
@@ -1288,6 +1298,13 @@ class EmailDomain(Base):
         CheckConstraint(
             "verification_status IN ('pending','verified','failed')",
             name="email_domains_verification_status_check",
+        ),
+        # Hail-mail rows may not stop sending: they are the fallback a
+        # from-less send resolves to, and system mail (forward confirmations)
+        # names their address. Mirrors migration 0076.
+        CheckConstraint(
+            "kind <> 'hail_mail' OR sends_enabled",
+            name="email_domains_sends_enabled_check",
         ),
         # Hail-mail rows need both prefixes; custom rows leave both NULL.
         # Mirrors the migration so Base.metadata.create_all (tests) produces
@@ -1728,6 +1745,9 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The console asks "does this domain have mail?" (EXISTS), and
+        # DELETE /email-domains checks the same. Mirrors migration 0077.
+        Index("emails_email_domain_id_idx", "email_domain_id"),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.
