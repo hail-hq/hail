@@ -20,10 +20,11 @@ class Session(RecoverySession):
         self.say = Mock()
 
 
-def disturb(session):
-    """The agent was cut off twice: its own input reacted to returning audio."""
-    session.emit("agent_false_interruption")
-    session.emit("agent_false_interruption")
+def disturb(warning):
+    """The agent's own input reacted to returning audio twice, 5 s apart."""
+    now = time.time()
+    warning._react(now - 5)
+    warning._react(now)
 
 
 RATE = 8000
@@ -87,7 +88,11 @@ async def test_warning_is_deferred_and_spoken_only_once():
     session.emit("agent_false_interruption")
     await warning.check(6)
     session.say.assert_not_called()  # one reaction can be the caller
+    # The same sound reported again right away is still one reaction.
     session.emit("agent_false_interruption")
+    await warning.check(6)
+    session.say.assert_not_called()
+    warning._disturbed.appendleft(time.time() - 5)
     session.user_state = "speaking"
     await warning.check(6)
     session.say.assert_not_called()  # never over the caller
@@ -95,7 +100,7 @@ async def test_warning_is_deferred_and_spoken_only_once():
     await warning.check(6)
     await warning.check(7)
     session.say.assert_called_once()
-    session.clear_user_turn.assert_called_once()
+    session.clear_user_turn.assert_not_called()  # the caller's words are kept
     # The fixed line, not a model reply, and it cannot be cut off by its echo.
     assert session.say.call_args.args == ("Echo line.",)
     assert session.say.call_args.kwargs == {"allow_interruptions": False}
@@ -136,7 +141,7 @@ async def test_stale_echo_does_not_warn_after_a_long_bridge_or_menu():
     warning.detector.add_played(ref, 0)
     await warning.check(6)
     allowed[0] = True
-    disturb(session)
+    disturb(warning)
     await warning.check(30)
     session.say.assert_not_called()
     await warning.aclose()
@@ -368,7 +373,7 @@ async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
     assert await heard()
     # Speech detected twice while the agent itself plays: the call is disturbed.
     session.emit("user_state_changed", new_state="speaking")
-    session.emit("user_state_changed", new_state="speaking")
+    warning._disturbed.appendleft(time.time() - 5)
     feed_echo(warning)
     await warning.check(6)
     session.say.assert_called_once()
@@ -391,6 +396,7 @@ async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
 
     # Echo gone (speakerphone off): enough clean agent audio lifts the gate.
     warning.detector.evidence = None
+    await warning.check(29)  # the last match before the echo stopped
     warning.detector.scored += QUIET_WINDOWS
     await warning.check(30)
     assert output.gate_delay is None
@@ -408,7 +414,7 @@ async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
 @pytest.mark.asyncio
 async def test_warning_that_was_never_spoken_leaves_the_call_ungated():
     session, _, warning, _ = gated_call()
-    disturb(session)
+    disturb(warning)
     feed_echo(warning)
     await warning.check(6)
     done = session.say.return_value.add_done_callback.call_args.args[0]
@@ -510,3 +516,26 @@ async def test_gate_holds_through_steady_voiced_echo_and_lifts_without_it():
                 states.append(warning._output.gate_delay is not None)
         assert all(states) if echo else not states[-1]
         await warning.aclose()
+
+
+@pytest.mark.asyncio
+async def test_gate_holds_when_short_replies_keep_matching_one_window_at_a_time():
+    from types import SimpleNamespace
+
+    from hailhq.voicebot.echo_warning import QUIET_WINDOWS
+
+    warning = EchoWarning(Session(), line="Echo line.", can_warn=lambda: True)
+    warning._output = SimpleNamespace(gate_delay=0.8, reset=lambda: None)
+    warning._warned = warning._gated = True
+    for window in range(QUIET_WINDOWS + 4):
+        warning.detector.scored += 1
+        warning.detector.last_match = (float(window), 0.81)
+        await warning.check(1000.0 + window)
+    assert warning._output.gate_delay == 0.8
+    # Matches at an unrelated delay are not this echo.
+    for window in range(QUIET_WINDOWS):
+        warning.detector.scored += 1
+        warning.detector.last_match = (100.0 + window, 0.3)
+        await warning.check(2000.0 + window)
+    assert warning._output.gate_delay is None
+    await warning.aclose()

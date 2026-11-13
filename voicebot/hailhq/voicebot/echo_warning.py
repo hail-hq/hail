@@ -48,6 +48,7 @@ class EchoDetector:
         self.matches: deque[tuple[float, float, float]] = deque(maxlen=12)
         self.evidence: EchoEvidence | None = None
         self.scored = 0  # reference windows compared with the caller audio
+        self.last_match: tuple[float, float] | None = None
         self._latest = 0.0
         self.active = True
         self._partial = np.empty(0)
@@ -124,9 +125,9 @@ class EchoDetector:
             if at + WINDOW / RATE + MAX_DELAY > now:
                 break
             self.references.popleft()
-            processed += 1
             if at < now - 6:
-                continue
+                continue  # stale: costs nothing, so it does not use the budget
+            processed += 1
             ref = reference - reference.mean()
             energy = float(ref @ ref)
             if energy / WINDOW < 150**2:
@@ -166,6 +167,7 @@ class EchoDetector:
             if score < PEAK_RATIO * float(outside.max()):
                 continue
             self.matches.append((at, delay, score))
+            self.last_match = (at, delay)
             consistent = [
                 m
                 for m in self.matches
@@ -216,6 +218,7 @@ class EchoOutput(io.AudioOutput):
 
     def _finished(self, _event) -> None:
         self._playing = False
+        self._expected_end = 0.0  # unplayed audio of an interrupted reply is gone
         self._finished_at = time.time()
         self.reset()
 
@@ -236,6 +239,14 @@ class EchoOutput(io.AudioOutput):
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
         await super().capture_frame(frame)
+        try:
+            self._observe(frame)
+        except Exception:
+            # The observer must never cost the caller the agent's audio.
+            logger.exception("echo reference capture failed; continuing call")
+        await self.next_in_chain.capture_frame(frame)
+
+    def _observe(self, frame: rtc.AudioFrame) -> None:
         now = time.time()
         self._playing = True
         self._expected_end = max(self._expected_end, now) + frame.duration
@@ -249,7 +260,6 @@ class EchoOutput(io.AudioOutput):
                 extra += extra % 2
                 del self._data[:extra]
                 self._dropped += extra
-        await self.next_in_chain.capture_frame(frame)
 
     def _played(self, event) -> None:
         try:
@@ -308,6 +318,7 @@ class EchoWarning:
         self._disturbed: deque[float] = deque(maxlen=2)
         self._echo_scored = 0
         self._gated = False  # the gate has been on at least once
+        self._seen_match: tuple[float, float] | None = None
         self._closed = False
         self._task: asyncio.Task | None = None
         self._output: EchoOutput | None = None
@@ -336,11 +347,17 @@ class EchoWarning:
                 and self._output
                 and self._output.playing(now)
             ):
-                self._disturbed.append(now)
+                self._react(now)
 
         @session.on("agent_false_interruption")
         def cut_off(_):
-            self._disturbed.append(time.time())
+            self._react(time.time())
+
+    def _react(self, now: float) -> None:
+        # One sound gives both a speech start and, 2 s later, a false
+        # interruption. Count it once.
+        if not self._disturbed or now - self._disturbed[-1] > 3.0:
+            self._disturbed.append(now)
 
     def _is_disturbed(self) -> bool:
         """Two reactions to audio during agent speech within the last 20 s."""
@@ -420,8 +437,6 @@ class EchoWarning:
             or getattr(self.session, "user_state", None) == "speaking"
         ):
             return
-        # Drop returned fragments already transcribed, so they are not answered.
-        self.session.clear_user_turn()
         # A fixed line, not a model reply: the same words on every call, and
         # spoken even when the model is failing.
         handle = self.session.say(self.line, allow_interruptions=False)
@@ -455,7 +470,19 @@ class EchoWarning:
             if self._gated:
                 self._output.gate_delay = evidence.delay_ms / 1000
                 self._echo_scored = self.detector.scored
-        elif (
+            return
+        # Short replies never give three matches in a row. One window that
+        # matches at the gate's delay still shows the echo is there.
+        match = self.detector.last_match
+        if (
+            match is not None
+            and match != self._seen_match
+            and self._output.gate_delay is not None
+            and abs(match[1] - self._output.gate_delay) < 2 * LAG_TOLERANCE
+        ):
+            self._seen_match = match
+            self._echo_scored = self.detector.scored
+        if (
             self._output.gate_delay is not None
             and self.detector.scored - self._echo_scored >= QUIET_WINDOWS
         ):

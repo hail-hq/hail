@@ -2672,7 +2672,10 @@ async def _run_call(
         ),
     )
     if settings.hail_echo_warning_enabled:
-        echo_warning.attach()
+        try:
+            echo_warning.attach()
+        except Exception:
+            logger.exception("echo observer did not attach; continuing call")
 
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
