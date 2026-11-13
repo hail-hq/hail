@@ -476,3 +476,37 @@ def test_every_language_has_a_dash_free_echo_line():
         assert lines.echo.strip(), language
         assert "\u2014" not in lines.echo and "\u2013" not in lines.echo, language
     assert SPOKEN_LINES["en"].echo == "I'm hearing an echo. It's disrupting the call."
+
+
+@pytest.mark.asyncio
+async def test_gate_holds_through_steady_voiced_echo_and_lifts_without_it():
+    from types import SimpleNamespace
+
+    def voice(seed, seconds=30):
+        rng = np.random.default_rng(seed)
+        t = np.arange(RATE * seconds) / RATE
+        pitch = 130 + 25 * np.sin(2 * np.pi * rng.uniform(1, 3) * t)
+        phase = np.cumsum(pitch) / RATE * 2 * np.pi
+        wave = sum(np.sin(h * phase + rng.uniform(0, 6)) / h for h in range(1, 12))
+        env = 0.1 + 0.9 * np.sin(2 * np.pi * rng.uniform(2, 4) * t) ** 2
+        noise = np.convolve(rng.normal(0, 800, len(t)), np.ones(3) / 3, "same")
+        return wave * 2500 * env + noise * (1 - env)
+
+    for echo in (True, False):
+        warning = EchoWarning(Session(), line="Echo line.", can_warn=lambda: True)
+        warning._output = SimpleNamespace(gate_delay=0.8)
+        warning._warned = warning._gated = True
+        ref = voice(1)
+        incoming = voice(2) * 0.05
+        if echo:
+            incoming[6400:] += ref[:-6400] * 0.5
+        states = []
+        for i in range(0, len(incoming), 400):
+            at = i / RATE
+            warning.detector.add_input(incoming[i : i + 400], at)
+            warning.detector.add_played(ref[i : i + 400], at)
+            if i % 4000 == 0:
+                await warning.check(at + 0.05)
+                states.append(warning._output.gate_delay is not None)
+        assert all(states) if echo else not states[-1]
+        await warning.aclose()
