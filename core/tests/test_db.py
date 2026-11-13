@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import parse_qs, urlsplit
 
-import pytest
 from hailhq.core.db import to_async_url, to_sync_url
 
 
@@ -138,7 +137,7 @@ async def test_limit_pool_makes_sessions_wait_instead_of_opening_more(
         await asyncio.gather(*(one() for _ in range(8)))
         assert peak == 2
         assert core_db._engine.pool.size() == 2
-        with pytest.raises(RuntimeError):
-            core_db.limit_pool(3)
+        core_db.limit_pool(3)  # too late: logged, pool unchanged
+        assert core_db._engine.pool.size() == 2
     finally:
         await core_db.dispose_engine()

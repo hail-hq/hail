@@ -285,10 +285,11 @@ async def run_forever(stop: threading.Event | None = None) -> None:
         )
     finally:
         await api.aclose()
-        # A draining voicebot runs up to an hour more for its live calls (in
-        # child processes with their own engines). Return this process's
-        # connections now so the new voicebot can use them.
-        await dispose_engine()
+        if DRAIN_FLAG.exists():
+            # A draining voicebot runs up to an hour more for its live calls
+            # (in child processes with their own engines). The pollers have
+            # stopped, so return this process's connections to the new one.
+            await dispose_engine()
 
 
 def start_thread() -> threading.Thread | None:

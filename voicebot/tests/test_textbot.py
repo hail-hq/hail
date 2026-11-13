@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core import db as core_db
 from hailhq.core import text_agent
 from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
 from hailhq.core.sms_ingest import ingest_inbound_sms
@@ -580,9 +581,10 @@ async def test_run_forever_caps_its_pool_and_frees_it_when_draining(
     flag.touch()
     monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
     monkeypatch.setattr(settings, "hail_text_reply_concurrency", 4)
-    limits: list[int] = []
+    monkeypatch.setattr(core_db, "_engine", None)
+    monkeypatch.setattr(core_db, "_sessionmaker", None)
+    monkeypatch.setattr(core_db, "_pool_options", {})
     disposed = AsyncMock()
-    monkeypatch.setattr(textbot, "limit_pool", limits.append)
     monkeypatch.setattr(textbot, "dispose_engine", disposed)
     monkeypatch.setattr(
         textbot,
@@ -590,5 +592,26 @@ async def test_run_forever_caps_its_pool_and_frees_it_when_draining(
         lambda *a, **k: SimpleNamespace(aclose=AsyncMock()),
     )
     await asyncio.wait_for(textbot.run_forever(), timeout=2)
-    assert limits == [textbot.DB_CONNECTIONS]
+    assert core_db._pool_options == {
+        "pool_size": textbot.DB_CONNECTIONS,
+        "max_overflow": 0,
+    }
     disposed.assert_awaited_once()
+
+
+async def test_run_forever_keeps_the_pool_when_stopped_without_draining(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "hail-draining")
+    monkeypatch.setattr(core_db, "_pool_options", {})
+    disposed = AsyncMock()
+    monkeypatch.setattr(textbot, "dispose_engine", disposed)
+    monkeypatch.setattr(
+        textbot,
+        "AgentApiClient",
+        lambda *a, **k: SimpleNamespace(aclose=AsyncMock()),
+    )
+    stop = threading.Event()
+    stop.set()
+    await asyncio.wait_for(textbot.run_forever(stop), timeout=2)
+    disposed.assert_not_awaited()

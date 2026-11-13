@@ -8,6 +8,7 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -23,6 +24,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+logger = logging.getLogger(__name__)
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -115,9 +118,11 @@ def limit_pool(size: int) -> None:
     cap waits for a free connection instead of opening one more. Managed
     poolers (Supabase session mode) refuse clients past a small total shared
     by every service, so a process that does not need many must not take
-    them. Call it before the first session."""
-    if _engine is not None:
-        raise RuntimeError("limit_pool must run before the engine is created")
+    them. Call it before the first session; once sessions exist the pool
+    stays as it is, with a warning."""
+    if _sessionmaker is not None:
+        logger.warning("database pool already created; limit_pool(%s) skipped", size)
+        return
     _pool_options.update(pool_size=size, max_overflow=0)
 
 
