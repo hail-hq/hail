@@ -89,9 +89,18 @@ def _twilio_sms() -> SmsProvider:
     return twilio_sms.twilio_sms_provider()
 
 
+def sms_route_configured(provider: str) -> bool:
+    """Credentials and callback verification needed by the SMS adapters."""
+    if provider == TWILIO:
+        return bool(settings.twilio_account_sid and settings.twilio_auth_token)
+    if provider == TELNYX:
+        return bool(settings.telnyx_api_key and settings.telnyx_public_key)
+    return False
+
+
 def _telnyx_sms() -> SmsProvider:
-    if not settings.telnyx_public_key:
-        raise ValueError("Telnyx webhooks are not configured")
+    if not sms_route_configured(TELNYX):
+        raise ValueError("Telnyx SMS credentials or webhooks are not configured")
     return TelnyxSmsProvider()
 
 

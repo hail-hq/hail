@@ -28,9 +28,17 @@ async def _execute(ctx: ToolContext, _args: dict[str, Any]) -> str:
 SPEC = ToolSpec(
     name="end_call",
     description=(
-        "End this phone call. Use only when the other party says they need "
-        "nothing more, says goodbye, or asks to end the call. A thank-you "
-        "alone is not a goodbye: ask if there is anything else. Say your "
+        "End this phone call. On inbound and outbound conversational calls "
+        "(including tests, feedback, and welcome calls), use only when the "
+        "other party says they are done, says goodbye, or asks to stop. "
+        "After the initial task, ask a brief closing question and wait for "
+        "their answer in a separate turn; never call this tool in the turn "
+        "that asks. Caller instructions to end after collecting an answer "
+        "do not skip this check. On outbound business task calls, you may "
+        "also end when the task is complete or the other party cannot help, "
+        "without asking business staff if you can help them. Answer any "
+        "follow-up question and wait for their reply before closing. "
+        "A thank-you alone is not a goodbye. Say your "
         "goodbye out loud BEFORE calling this tool; it hangs up right after. "
         "If they start talking during your goodbye, the call stays open: "
         "listen and answer them."

@@ -19,14 +19,30 @@ here, scoped to the call's org.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from math import ceil
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from hailhq.api.agent_email_context import (
+    InboxSelection,
+    conversation_inbox,
+    source_files,
+)
 from hailhq.api.audit import write_audit_log
+from hailhq.api.browser_messaging import (
+    email_provider_ready,
+    sms_sender,
+    verified_email,
+)
 from hailhq.api.numbers import resolve_sms_number
 from hailhq.api.routes.email_domains import get_email_provider
-from hailhq.api.routes.emails import deliver_email, resolve_sender
+from hailhq.api.routes.emails import (
+    deliver_email,
+    resolve_hail_mail_sender,
+    resolve_sender,
+)
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
@@ -40,6 +56,7 @@ from hailhq.core.agent_tools.send_email import (
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.browser_voice import reserve_browser_preview
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
     check_email_allowed,
@@ -48,9 +65,29 @@ from hailhq.core.compliance_gate import (
     normalize_recipient,
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
-from hailhq.core.db import get_session
-from hailhq.core.directory import resolve_member_emails
+from hailhq.core.db import get_session, key_lock, org_lock
+from hailhq.core.directory import resolve_member_emails, resolve_member_phones
+from hailhq.core.email_agent import (
+    MAX_REPLY_CHARS as EMAIL_MAX_REPLY_CHARS,
+)
+from hailhq.core.email_agent import (
+    MAX_TOOL_SENDS,
+    reply_references,
+    reply_subject,
+    routed_agent,
+    run_refusal,
+    stamp_skip,
+    tool_sends_for_reply,
+)
+from hailhq.core.email_agent import (
+    prior_reply as prior_email_reply,
+)
+from hailhq.core.email_agent import (
+    thread_lock_key as email_thread_lock_key,
+)
+from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.forward_targets import normalize_address
 from hailhq.core.handover import (
     HANDOVER_ANSWERED,
     HANDOVER_EVENT_KIND,
@@ -67,10 +104,13 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     Email,
+    EmailAttachment,
+    EmailDomain,
     PhoneNumber,
     Sms,
 )
 from hailhq.core.providers.email import EmailProvider
+from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.sms_registration_gate import us_registration_block
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
@@ -85,7 +125,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -103,6 +143,12 @@ _SPOKEN_SMS_UNCONFIGURED = "Text messaging isn't set up for this account."
 _SPOKEN_EMAIL_SENT = "Email sent."
 _SPOKEN_EMAIL_FAILED = "I couldn't send the email."
 _SPOKEN_EMAIL_UNCONFIGURED = "Email isn't set up for this account."
+_SPOKEN_SMS_SENT_MEMBER = "Text message sent."
+_SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
+_SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
+# How long a queued reply counts as in flight. After this its delivery is
+# unknown: SES may have accepted it before the API stopped. Never resend it.
+_QUEUED_GRACE = timedelta(seconds=240)
 
 
 class AgentSendBase(BaseModel):
@@ -120,6 +166,8 @@ class AgentSendEmailRequest(AgentSendBase):
     recipient_name: str = Field(min_length=1, max_length=MAX_RECIPIENT_NAME_CHARS)
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
+    reply_to_email_id: UUID | None = None
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
 
 
 class AgentSendResponse(BaseModel):
@@ -150,8 +198,16 @@ async def _load_call_for_update(db: AsyncSession, call_id: UUID) -> Call | None:
     # in the caller, not a liveness denial that would misreport a send that
     # actually succeeded (or is still in flight). None only means the call
     # row itself doesn't exist.
+    candidate = await db.get(Call, call_id)
+    if candidate is not None and candidate.transport == "browser":
+        await org_lock(db, candidate.organization_id)
     return (
-        await db.execute(select(Call).where(Call.id == call_id).with_for_update())
+        await db.execute(
+            select(Call)
+            .where(Call.id == call_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one_or_none()
 
 
@@ -172,6 +228,8 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
 
 def _other_party(call: Call) -> str | None:
     """The person on the line: the caller on inbound, the callee on outbound."""
+    if call.transport == "browser":
+        return call.metadata_.get("browser_contacts", {}).get("sms")
     return call.from_e164 if call.direction == "inbound" else call.to_e164
 
 
@@ -198,6 +256,32 @@ async def _prior_send(
     ).scalar_one_or_none()
 
 
+async def _record_browser_outcome(db, call_id, invocation_id, message):
+    # Delivery commits before this lock. Preserve any simultaneous finalize
+    # or another tool's metadata when recording the external submission.
+    call = await _load_call_for_update(db, call_id)
+    if call is None or call.transport != "browser":
+        return
+    meta = dict(call.metadata_)
+    meta["browser_actions"] = [
+        (
+            {**action, "status": message.status, "message_id": str(message.id)}
+            if action.get("tool_invocation_id") == str(invocation_id)
+            else action
+        )
+        for action in meta.get("browser_actions", [])
+    ]
+    call.metadata_ = meta
+    await db.commit()
+
+
+def _ambiguous_recipient(name: str) -> AgentSendResponse:
+    return AgentSendResponse(
+        ok=False,
+        spoken=f"More than one person is named {name}, so I can't pick a recipient.",
+    )
+
+
 async def _deny(
     org_id: UUID,
     *,
@@ -222,6 +306,250 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
+async def _member_email(
+    db: AsyncSession, org: UUID, name: str
+) -> str | AgentSendResponse:
+    """The one member named ``name``, or the answer when there is none or
+    more than one."""
+    matches = await resolve_member_emails(db, org, name)
+    if not matches:
+        return AgentSendResponse(
+            ok=False, spoken=f"I couldn't find {name} in the directory."
+        )
+    if len(matches) > 1:
+        return _ambiguous_recipient(name)
+    return matches[0]
+
+
+async def _send_sms_to(
+    db: AsyncSession,
+    org: UUID,
+    *,
+    recipient: str,
+    body: str,
+    meta: dict[str, str],
+    agent_id: UUID | None,
+    dialed: PhoneNumber | None,
+    consent_source: str,
+    route_source: str,
+    route_ref: dict[str, str],
+    sent: str,
+) -> AgentSendResponse:
+    """Gate, cap, pick a number, write the row, audit, and deliver one text.
+    The caller chose ``recipient``: the person on the line, or a member."""
+    gate = await check_sms_allowed(db, org, recipient)
+    if not gate.allowed:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": gate.reason, "checks": gate.checks},
+        )
+
+    # Platform agent-caps gate (velocity + kill switch): voicebot sends must
+    # count toward the same per-recipient caps the public routes enforce —
+    # no-op for human-origin orgs. Same recipient set as the gate above.
+    cap_denial = await check_agent_send_allowed(db, org, "sms", [recipient])
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
+        )
+
+    # Text from the number the caller dialed when it can text; else a text
+    # number of this agent (see resolve_sms_number).
+    from_number = await resolve_sms_number(db, org, agent_id, dialed, recipient)
+    if from_number is None:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+
+    block = await us_registration_block(db, org, from_number, recipient)
+    if block is not None:
+        return await _deny(
+            org,
+            action="agent.sms.blocked",
+            resource_type="sms",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": block},
+        )
+
+    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+
+    sms = Sms(
+        organization_id=org,
+        provider=from_number.provider,
+        from_number_id=from_number.id,
+        from_e164=from_number.e164,
+        to_e164=recipient,
+        agent_id=agent_id,
+        direction="outbound",
+        status="queued",
+        body=body,
+        metadata_=meta,
+    )
+    db.add(sms)
+    await db.commit()
+
+    if auto_bound:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="number.route",
+            resource_type="phone_number",
+            resource_id=from_number.id,
+            payload={
+                "e164": from_number.e164,
+                "sms_agent_id": str(agent_id),
+                "automatic": True,
+                "source": route_source,
+                **route_ref,
+            },
+            actor_kind="system",
+        )
+
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.sms.send",
+        resource_type="sms",
+        resource_id=sms.id,
+        payload={
+            **meta,
+            "to": sms.to_e164,
+            "consent_source": consent_source,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+
+    err = await deliver_sms(db, sms)
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.sms.send_failed",
+            resource_type="sms",
+            resource_id=sms.id,
+            payload={**meta, "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_FAILED)
+    return AgentSendResponse(ok=True, spoken=sent)
+
+
+async def _send_email_to(
+    db: AsyncSession,
+    email_provider: EmailProvider,
+    org: UUID,
+    *,
+    recipient: str,
+    subject: str,
+    body_text: str,
+    meta: dict[str, Any],
+    agent_id: UUID | None,
+    consent_source: str,
+    reply_parent: Email | None = None,
+    reply_domain: EmailDomain | None = None,
+    attachment_rows: list[EmailAttachment] | None = None,
+) -> AgentSendResponse:
+    """Gate, cap, pick the sender, write the row, audit, and deliver one
+    email to a member the caller resolved from the directory."""
+    gate = await check_email_allowed(db, org, [recipient])
+    if not gate.allowed:
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": gate.reason, "checks": gate.checks},
+        )
+
+    # Same agent-caps gate as the public /emails route — one normalized
+    # recipient for voicebot sends (no cc/bcc fan-out on this path).
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(recipient)]
+    )
+    if cap_denial is not None:
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
+        )
+
+    try:
+        # An agent cannot name a sending domain. With several verified custom
+        # domains this path takes the oldest, where POST /emails returns 422
+        # and the caller chooses. A verified custom domain still wins over the
+        # hail-mail address, as it does on POST /emails.
+        sd = reply_domain or await resolve_sender(db, org, None, allow_ambiguous=True)
+    except HTTPException:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
+
+    email = Email(
+        organization_id=org,
+        email_domain_id=sd.id,
+        agent_id=agent_id,
+        from_address=from_address_for(sd, None),
+        to_addresses=[recipient],
+        subject=subject,
+        body_text=body_text,
+        status="queued",
+        provider="ses",
+        metadata_=meta,
+    )
+    if reply_parent is not None:
+        email.subject = reply_subject(reply_parent.subject)
+        email.in_reply_to, email.references_ids = reply_references(reply_parent)
+    db.add(email)
+    await db.commit()
+    await db.refresh(email)
+
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action=(
+            "agent.email.reply" if meta.get("reply_to_email_id") else "agent.email.send"
+        ),
+        resource_type="email",
+        resource_id=email.id,
+        payload={
+            **meta,
+            "to": email.to_addresses,
+            "subject": email.subject,
+            "consent_source": consent_source,
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+
+    err = await deliver_email(
+        db,
+        email_provider,
+        email,
+        at_most_once=True,
+        **({"attachment_rows": attachment_rows} if attachment_rows else {}),
+    )
+    if err is not None:
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=None,
+            action="agent.email.send_failed",
+            resource_type="email",
+            resource_id=email.id,
+            payload={**meta, "end_reason": err},
+            actor_kind="system",
+        )
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
+    return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
+
+
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
     """The funds check shared by the send routes. Sends are not capped per
     call: each is billed like any text or email.
@@ -230,9 +558,10 @@ async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None
     proceed. The audit reason distinguishes which gate fired; the spoken
     text stays vague for the callee.
     """
-    if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
-        db, call.organization_id
-    ):
+    if (
+        call.metadata_.get(CALL_META_BILLED)
+        or (call.transport == "browser" and not call.metadata_.get("browser_trial"))
+    ) and not await has_funds(db, call.organization_id):
         return _SPOKEN_NOT_ALLOWED, "insufficient_funds"
     return None
 
@@ -261,13 +590,29 @@ async def agent_send_sms(
         # worse error on a live call.
         ok = prior.status not in ("failed", "undelivered")
         return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
+            ok=ok,
+            spoken=(
+                "The text is still being submitted. Do not send it again."
+                if prior.status == "queued"
+                else _SPOKEN_SMS_SENT if ok else _SPOKEN_SMS_FAILED
+            ),
         )
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
+    if call.transport == "browser" and len(body.body.encode("utf-16-le")) // 2 > 70:
+        return AgentSendResponse(
+            ok=False,
+            spoken="Keep test texts to 70 characters. Emoji count twice. Nothing was sent.",
+        )
+
     counterpart = _other_party(call)
+    if call.transport == "browser" and not counterpart:
+        return AgentSendResponse(
+            ok=False,
+            spoken="Enter your mobile number and agree to receive test texts before starting a new conversation.",
+        )
 
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -280,6 +625,28 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": reason},
         )
 
+    # Text from the number the caller dialed when it can text; else a text
+    # number of this agent (see resolve_sms_number).
+    dialed = (
+        await db.get(PhoneNumber, call.to_number_id)
+        if call.direction == "inbound" and call.to_number_id is not None
+        else None
+    )
+    if call.transport != "browser":
+        return await _send_sms_to(
+            db,
+            org,
+            recipient=counterpart,  # the person on the line — never a parameter
+            body=body.body,
+            meta=_meta(body),
+            agent_id=call.agent_id,
+            dialed=dialed,
+            consent_source="voice_call",
+            route_source="in-call send_sms",
+            route_ref={"call_id": str(call.id)},
+            sent=_SPOKEN_SMS_SENT,
+        )
+
     gate = await check_sms_allowed(db, org, counterpart)
     if not gate.allowed:
         return await _deny(
@@ -290,31 +657,7 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": gate.reason, "checks": gate.checks},
         )
 
-    # Platform agent-caps gate (velocity + kill switch): voicebot sends must
-    # count toward the same per-recipient caps the public routes enforce —
-    # no-op for human-origin orgs. Same recipient set as the gate above.
-    cap_denial = await check_agent_send_allowed(db, org, "sms", [counterpart])
-    if cap_denial is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={
-                **_meta(body),
-                "reason": "agent_caps",
-                "detail": cap_denial.reason,
-            },
-        )
-
-    # Text from the number the caller dialed when it can text; else a text
-    # number of this agent (see resolve_sms_number).
-    dialed = (
-        await db.get(PhoneNumber, call.to_number_id)
-        if call.direction == "inbound" and call.to_number_id is not None
-        else None
-    )
-    from_number = await resolve_sms_number(db, org, call.agent_id, dialed, counterpart)
+    from_number = await sms_sender(db, org, counterpart, call=call)
     if from_number is None:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
 
@@ -330,6 +673,23 @@ async def agent_send_sms(
 
     auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
 
+    if call.transport == "browser" and not await reserve_browser_preview(
+        db,
+        call.id,
+        {
+            "channel": "sms",
+            "recipient": counterpart,
+            "body": body.body,
+            "preview": False,
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "status": "queued",
+        },
+    ):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your three test texts are used, or the conversation has ended. Nothing was sent.",
+        )
+
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -340,7 +700,14 @@ async def agent_send_sms(
         direction="outbound",
         status="queued",
         body=body.body,
-        metadata_=_meta(body),
+        metadata_={
+            **_meta(body),
+            **(
+                {"browser_trial": True}
+                if call.transport == "browser" and call.metadata_.get("browser_trial")
+                else {}
+            ),
+        },
     )
     db.add(sms)
     await db.commit()
@@ -378,7 +745,16 @@ async def agent_send_sms(
         actor_kind="system",
     )
 
-    err = await deliver_sms(db, sms)
+    err = await deliver_sms(
+        db,
+        sms,
+        **(
+            {"billable": False}
+            if call.transport == "browser" and call.metadata_.get("browser_trial")
+            else {}
+        ),
+    )
+    await _record_browser_outcome(db, call.id, body.tool_invocation_id, sms)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -456,10 +832,7 @@ async def agent_reply_sms(
     # per-thread reply cap below is exact. A lock on the inbound row (FOR
     # UPDATE) would deadlock with the worker's claim, hence an advisory lock
     # keyed by thread.
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": thread_lock_key(inbound)},
-    )
+    await key_lock(db, thread_lock_key(inbound))
     # Idempotent: the worker retries a timed-out POST with the same sms_id.
     # The oldest row wins, a belt for rows written before the lock existed.
     prior = await prior_reply(db, inbound)
@@ -520,6 +893,488 @@ async def agent_reply_sms(
     return AgentReplySmsResponse(ok=True, state="done", reply_id=reply.id)
 
 
+class AgentReplyEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email_id: UUID  # the inbound row being answered
+    # Omitted when the reply already exists: the stored text is delivered.
+    body: str | None = Field(
+        default=None, min_length=1, max_length=EMAIL_MAX_REPLY_CHARS
+    )
+
+
+class AgentReplyEmailResponse(BaseModel):
+    ok: bool
+    # done | skipped | failed: what the worker writes to agent_reply_state.
+    # retry: try again later, a send failed for now or may still be running.
+    state: str
+    reason: str | None = None
+    reply_id: UUID | None = None
+    # With retry: wait at least this long. None means the worker's own backoff.
+    retry_after_seconds: int | None = None
+
+
+def _send_failure(reason: str, reply: Email) -> AgentReplyEmailResponse:
+    """The worker keeps a safe failure for another attempt, and settles it as
+    failed after its last one."""
+    state = "retry" if reason in SES_NOT_ACCEPTED_FAILURES else "failed"
+    return AgentReplyEmailResponse(
+        ok=False, state=state, reason=reason, reply_id=reply.id
+    )
+
+
+def _in_flight(reply: Email, wait: timedelta) -> AgentReplyEmailResponse:
+    return AgentReplyEmailResponse(
+        ok=False,
+        state="retry",
+        reason="in_flight",
+        reply_id=reply.id,
+        retry_after_seconds=ceil(wait.total_seconds()),
+    )
+
+
+def _finished_reply(row: Email) -> AgentReplyEmailResponse | None:
+    """The answer for a reply row whose send is over, or None while it still
+    needs sending. Not just "sent": see the same reasoning in agent_send_email.
+    A failed row needs sending only if SES proved it took nothing."""
+    if row.status == "queued":
+        return None
+    if row.status == "failed":
+        if row.end_reason in SES_NOT_ACCEPTED_FAILURES:
+            return None
+        return AgentReplyEmailResponse(
+            ok=False, state="failed", reason=row.end_reason, reply_id=row.id
+        )
+    ok = row.status != "bounced"
+    return AgentReplyEmailResponse(
+        ok=ok,
+        state="done" if ok else "failed",
+        reason=None if ok else "bounced",
+        reply_id=row.id,
+    )
+
+
+async def _routed_email(
+    db: AsyncSession, inbound: Email
+) -> tuple[EmailDomain, Agent] | None:
+    """The inbound row's address and the agent that answers it now, or None.
+    Routing can change while the model writes."""
+    routed = await routed_agent(db, inbound)
+    if routed is None or inbound.agent_id != routed[1].id:
+        return None
+    await bind_organization(db, inbound.organization_id)
+    tag_context(
+        channel="email",
+        direction="inbound",
+        agent_id=routed[1].id,
+        email_id=inbound.id,
+        from_=inbound.from_address,
+        to=from_address_for(routed[0]),
+    )
+    return routed
+
+
+@router.post("/reply-email", response_model=AgentReplyEmailResponse)
+async def agent_reply_email(
+    body: AgentReplyEmailRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+    email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
+) -> AgentReplyEmailResponse:
+    """Send an agent's reply to an inbound email.
+
+    The worker (``hailhq.voicebot.emailbot``) wrote the body. This route owns
+    everything that must stay server-side: scope, thread cap, funds,
+    suppression, billing, audit, and delivery. The reply goes to the ``From``
+    address, never to ``Reply-To``: only ``From`` was authenticated.
+    """
+
+    async def skip(reason: str | None) -> AgentReplyEmailResponse:
+        await stamp_skip(db, body.email_id, reason or "refused")
+        return AgentReplyEmailResponse(ok=False, state="skipped", reason=reason)
+
+    inbound = await db.get(Email, body.email_id)
+    if inbound is None or inbound.direction != "inbound":
+        return await skip("no_agent")
+
+    # One request per thread at a time: a retry that races the original sees
+    # the reply below, and the thread cap is exact.
+    await key_lock(db, email_thread_lock_key(inbound))
+    await db.refresh(inbound)
+    # Idempotent per inbound row: the worker retries with the same email_id.
+    prior = await prior_email_reply(db, inbound)
+    if prior is not None and (finished := _finished_reply(prior)) is not None:
+        return finished
+    if prior is not None and prior.status == "queued":
+        age = datetime.now(timezone.utc) - prior.requested_at
+        if age < _QUEUED_GRACE:
+            # The original may still be in the provider call: sending now could
+            # deliver twice. The worker comes back when the grace ends.
+            return _in_flight(prior, _QUEUED_GRACE - age)
+
+    # After the checks above: the route can go while the first send is running,
+    # and that send must not be reported as skipped.
+    routed = await _routed_email(db, inbound)
+    if routed is None:
+        return await skip("no_agent")
+    domain, agent = routed
+    if prior is None and inbound.agent_reply_state != "processing":
+        # The worker lost its claim: the row expired, failed, or was settled.
+        # Its final state stands, so nothing is stamped.
+        return AgentReplyEmailResponse(ok=False, state="skipped", reason="not_claimed")
+    org = inbound.organization_id
+    recipient = normalize_address(inbound.from_address)
+
+    refusal = await run_refusal(db, domain, inbound, check_cap=prior is None)
+    if refusal is not None:
+        return await skip(refusal)
+    gate = await check_email_allowed(db, org, [recipient])
+    if not gate.allowed:
+        return await skip(gate.reason)
+    cap_denial = await check_agent_send_allowed(
+        db, org, "email", [normalize_recipient(recipient)]
+    )
+    if cap_denial is not None:
+        return await skip("agent_caps")
+
+    if prior is not None and prior.status == "queued":
+        # Age cannot prove that SES rejected a send. Settle the uncertainty
+        # without another provider call, and revoke the old request's claim.
+        settled_at = datetime.now(timezone.utc)
+        settled = await db.execute(
+            update(Email)
+            .where(
+                Email.id == prior.id,
+                Email.status == "queued",
+                Email.requested_at == prior.requested_at,
+            )
+            .values(
+                status="failed",
+                end_reason="DeliveryUnknown",
+                failed_at=settled_at,
+                requested_at=settled_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        await db.refresh(prior)
+        if not settled.rowcount:
+            return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
+        return _send_failure("DeliveryUnknown", prior)
+
+    if prior is not None:
+        # Only a persisted failure proving SES took nothing reaches this path.
+        # The row exists, so the audit row does too: only the send is missing.
+        # requested_at restarts the grace above, so a retry during a slow resend
+        # waits. The guard means one claim wins even without the thread lock.
+        claimed_at = datetime.now(timezone.utc)
+        claim = await db.execute(
+            update(Email)
+            .where(
+                Email.id == prior.id,
+                Email.status == prior.status,
+                Email.requested_at == prior.requested_at,
+            )
+            .values(
+                status="queued",
+                end_reason=None,
+                failed_at=None,
+                requested_at=claimed_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        if not claim.rowcount:  # type: ignore[attr-defined]
+            # Another request got there first. Report how it ended, or try later.
+            await db.refresh(prior)
+            return _finished_reply(prior) or _in_flight(prior, _QUEUED_GRACE)
+        await db.refresh(prior)
+        files = []
+        if prior.metadata_.get("source_attachment_ids"):
+            try:
+                ids = [
+                    UUID(value) for value in prior.metadata_["source_attachment_ids"]
+                ]
+                source_id = UUID(
+                    prior.metadata_.get("attachment_reply_to_email_id", str(inbound.id))
+                )
+                _, _, files = await source_files(db, inbound, source_id, ids)
+            except (ValueError, TypeError):
+                prior.status = "failed"
+                prior.end_reason = "AttachmentsUnavailable"
+                prior.failed_at = datetime.now(timezone.utc)
+                await db.commit()
+                return _send_failure("AttachmentsUnavailable", prior)
+        err = await deliver_email(
+            db,
+            email_provider,
+            prior,
+            claimed_at=claimed_at,
+            at_most_once=True,
+            **({"attachment_rows": files} if files else {}),
+        )
+        if err is not None:
+            return _send_failure(err, prior)
+        return AgentReplyEmailResponse(ok=True, state="done", reply_id=prior.id)
+
+    if body.body is None:
+        # Only the worker's retry omits the body, and it saw a reply row.
+        return AgentReplyEmailResponse(ok=False, state="failed", reason="no_body")
+
+    in_reply_to, references = reply_references(inbound)
+    reply = Email(
+        organization_id=org,
+        email_domain_id=domain.id,
+        agent_id=agent.id,
+        # Never To or Cc: the sender writes those headers.
+        from_address=from_address_for(domain),
+        from_name=agent.name,
+        to_addresses=[recipient],
+        subject=reply_subject(inbound.subject),
+        body_text=body.body,
+        status="queued",
+        provider="ses",
+        in_reply_to=in_reply_to,
+        references_ids=references,
+        metadata_={"reply_to_email_id": str(inbound.id), "agent_id": str(agent.id)},
+    )
+    db.add(reply)
+    await db.commit()
+    await db.refresh(reply)
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=None,
+        action="agent.email.reply",
+        resource_type="email",
+        resource_id=reply.id,
+        payload={
+            "reply_to": str(inbound.id),
+            "agent_id": str(agent.id),
+            "to": reply.to_addresses,
+            "consent_source": "inbound_email",
+            "message_type": "transactional",
+            "compliance": gate.checks,
+        },
+        actor_kind="system",
+    )
+    err = await deliver_email(
+        db, email_provider, reply, claimed_at=reply.requested_at, at_most_once=True
+    )
+    if err is not None:
+        return _send_failure(err, reply)
+    return AgentReplyEmailResponse(ok=True, state="done", reply_id=reply.id)
+
+
+class AgentEmailRunBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    inbound_email_id: UUID  # the email the agent is answering
+    tool_invocation_id: UUID
+    recipient_name: str = Field(min_length=1, max_length=MAX_RECIPIENT_NAME_CHARS)
+
+
+class AgentEmailRunEmailRequest(AgentEmailRunBase):
+    reply_to_email_id: UUID | None = None
+    attachment_ids: list[UUID] = Field(default_factory=list, max_length=10)
+    subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
+    body_text: str = Field(min_length=1, max_length=EMAIL_MAX_BODY_CHARS)
+
+
+class AgentEmailRunSmsRequest(AgentEmailRunBase):
+    body: str = Field(min_length=1, max_length=SMS_MAX_BODY_CHARS)
+
+
+def _email_run_meta(
+    body: AgentEmailRunBase, agent: Agent, inbound: Email
+) -> dict[str, str]:
+    return {
+        "inbound_email_id": str(body.inbound_email_id),
+        "tool_invocation_id": str(body.tool_invocation_id),
+        "agent_id": str(agent.id),
+        # Counts toward the sender's thread cap.
+        "thread_sender": normalize_address(inbound.from_address),
+    }
+
+
+def _replayed_send(prior: Email | Sms) -> AgentSendResponse:
+    """The answer for a send that already has a row. See agent_send_email for
+    why a queued row counts as sent."""
+    if isinstance(prior, Email):
+        ok = prior.status not in ("failed", "bounced")
+        return AgentSendResponse(
+            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+        )
+    ok = prior.status not in ("failed", "undelivered")
+    return AgentSendResponse(
+        ok=ok, spoken=_SPOKEN_SMS_SENT_MEMBER if ok else _SPOKEN_SMS_FAILED
+    )
+
+
+async def _email_run(
+    db: AsyncSession,
+    body: AgentEmailRunBase,
+    *,
+    model: type[Email | Sms],
+    action: str,
+    resource_type: str,
+) -> tuple[Email, Agent] | AgentSendResponse:
+    """Everything a tool send in an email run must pass before it picks a
+    recipient. Only a claimed row runs tools. Scope, funds, and the thread cap
+    are read again under the thread lock.
+
+    The retry of a send is answered first, under the lock, so it sees the row: a
+    send can take the last slot of the cap, or outlive the claim, and the retry
+    must still learn that it went out.
+    """
+    inbound = await db.get(Email, body.inbound_email_id)
+    if inbound is None or inbound.direction != "inbound":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
+    await key_lock(db, email_thread_lock_key(inbound))
+    await db.refresh(inbound)
+    prior = await _prior_send(
+        db, model, inbound.organization_id, body.tool_invocation_id
+    )
+    if prior is not None:
+        return _replayed_send(prior)
+    routed = await _routed_email(db, inbound)
+    if routed is None or inbound.agent_reply_state != "processing":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
+    domain, agent = routed
+    refusal = await run_refusal(db, domain, inbound, count_own_sends=True)
+    if refusal == "thread_cap":
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
+    if refusal == "insufficient_funds":
+        return await _deny(
+            inbound.organization_id,
+            action=action,
+            resource_type=resource_type,
+            spoken=_SPOKEN_NOT_ALLOWED,
+            payload={**_email_run_meta(body, agent, inbound), "reason": refusal},
+        )
+    if refusal is not None:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_UNAVAILABLE)
+    return inbound, agent
+
+
+@router.post("/email-run/send-email", response_model=AgentSendResponse)
+async def agent_email_run_send_email(
+    body: AgentEmailRunEmailRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+    email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
+) -> AgentSendResponse:
+    """The ``send_email`` tool in an email run: a member by directory name."""
+    run = await _email_run(
+        db, body, model=Email, action="agent.email.blocked", resource_type="email"
+    )
+    if isinstance(run, AgentSendResponse):
+        return run
+    inbound, agent = run
+    org = inbound.organization_id
+
+    parent = None
+    files = []
+    meta = _email_run_meta(body, agent, inbound)
+    if body.attachment_ids or body.reply_to_email_id:
+        existing = await prior_email_reply(db, inbound)
+        if existing is not None:
+            return _replayed_send(existing)
+        try:
+            scope, source, files = await source_files(
+                db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
+            )
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files are not available in this email thread. Nothing was sent.",
+            )
+        if body.recipient_name.casefold() in ("sender", "you"):
+            recipient = scope.peer
+        else:
+            recipient = await _member_email(db, org, body.recipient_name)
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
+        if recipient.casefold() != scope.peer.casefold():
+            return AgentSendResponse(
+                ok=False,
+                spoken="Original files can only return to this email's sender.",
+            )
+        # This file-bearing send is the automatic reply itself. The normal
+        # reply endpoint observes this row and does not send a second email.
+        parent = inbound
+        meta = {
+            **meta,
+            "reply_to_email_id": str(inbound.id),
+            "attachment_reply_to_email_id": str(source.id),
+            "source_attachment_ids": [str(row.id) for row in files],
+        }
+    else:
+        recipient = await _member_email(db, org, body.recipient_name)
+        if isinstance(recipient, AgentSendResponse):
+            return recipient
+
+    if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
+    return await _send_email_to(
+        db,
+        email_provider,
+        org,
+        recipient=recipient,
+        subject=body.subject,
+        body_text=body.body_text,
+        meta=meta,
+        agent_id=agent.id,
+        consent_source="inbound_email",
+        reply_parent=parent,
+        reply_domain=(
+            await db.get(EmailDomain, inbound.email_domain_id)
+            if parent is not None
+            else None
+        ),
+        attachment_rows=files,
+    )
+
+
+@router.post("/email-run/send-sms", response_model=AgentSendResponse)
+async def agent_email_run_send_sms(
+    body: AgentEmailRunSmsRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentSendResponse:
+    """The ``send_sms`` tool in an email run: a member by directory name."""
+    run = await _email_run(
+        db, body, model=Sms, action="agent.sms.blocked", resource_type="sms"
+    )
+    if isinstance(run, AgentSendResponse):
+        return run
+    inbound, agent = run
+    org = inbound.organization_id
+
+    matches = await resolve_member_phones(db, org, body.recipient_name)
+    if not any(matches):
+        return AgentSendResponse(
+            ok=False,
+            spoken=f"I couldn't find a number for {body.recipient_name}.",
+        )
+    if len(matches) > 1:
+        return _ambiguous_recipient(body.recipient_name)
+    recipient = matches[0]
+    assert recipient is not None
+
+    if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
+    return await _send_sms_to(
+        db,
+        org,
+        recipient=recipient,
+        body=body.body,
+        meta=_email_run_meta(body, agent, inbound),
+        agent_id=agent.id,
+        dialed=None,
+        consent_source="inbound_email",
+        route_source="email reply send_sms",
+        route_ref={"email_id": str(inbound.id)},
+        sent=_SPOKEN_SMS_SENT_MEMBER,
+    )
+
+
 @router.post("/send-email", response_model=AgentSendResponse)
 async def agent_send_email(
     body: AgentSendEmailRequest,
@@ -550,7 +1405,12 @@ async def agent_send_email(
         # afterward. Mirrors the SMS path's failed/undelivered exclusion.
         ok = prior.status not in ("failed", "bounced")
         return AgentSendResponse(
-            ok=ok, spoken=_SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+            ok=ok,
+            spoken=(
+                "The email is still being submitted. Do not send it again."
+                if prior.status == "queued"
+                else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+            ),
         )
 
     if call.status != "in_progress":
@@ -567,21 +1427,67 @@ async def agent_send_email(
             payload={**_meta(body), "reason": reason},
         )
 
-    matches = await resolve_member_emails(db, org, body.recipient_name)
-    if not matches:
-        return AgentSendResponse(
-            ok=False,
-            spoken=f"I couldn't find {body.recipient_name} in the directory.",
+    if call.transport != "browser":
+        parent = None
+        files = []
+        meta = _meta(body)
+        if body.reply_to_email_id or body.attachment_ids:
+            try:
+                scope, parent, files = await source_files(
+                    db, call, body.reply_to_email_id, body.attachment_ids
+                )
+            except ValueError:
+                return AgentSendResponse(
+                    ok=False,
+                    spoken="Those files are not available in this conversation.",
+                )
+            recipient = (
+                scope.peer
+                if body.recipient_name.casefold() in ("you", "sender")
+                else await _member_email(db, org, body.recipient_name)
+            )
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
+            if recipient.casefold() != scope.peer.casefold():
+                return AgentSendResponse(
+                    ok=False,
+                    spoken="Original files can only return to the person in this conversation.",
+                )
+            meta = {
+                **meta,
+                "source_attachment_ids": [str(row.id) for row in files],
+                "attachment_reply_to_email_id": str(parent.id),
+            }
+        else:
+            recipient = await _member_email(db, org, body.recipient_name)
+            if isinstance(recipient, AgentSendResponse):
+                return recipient
+        return await _send_email_to(
+            db,
+            email_provider,
+            org,
+            recipient=recipient,
+            subject=body.subject,
+            body_text=body.body_text,
+            meta=meta,
+            agent_id=None,
+            consent_source="voice_call",
+            reply_parent=parent,
+            attachment_rows=files,
         )
-    if len(matches) > 1:
-        return AgentSendResponse(
-            ok=False,
-            spoken=(
-                f"More than one person is named {body.recipient_name}, so I "
-                "can't pick a recipient."
-            ),
+
+    if call.transport == "browser":
+        if not await email_provider_ready():
+            return AgentSendResponse(
+                ok=False, spoken="Email sending is not configured for this test."
+            )
+        recipient = await verified_email(
+            db, org, call.metadata_.get("browser_contacts", {}).get("email")
         )
-    recipient = matches[0]
+        if not recipient:
+            return AgentSendResponse(
+                ok=False, spoken="Verify your account email before testing email."
+            )
 
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
@@ -616,9 +1522,61 @@ async def agent_send_email(
         # verified custom domains this path takes the oldest, where POST
         # /emails returns 422 and the caller chooses. A verified custom domain
         # still wins over the hail-mail address, as it does on POST /emails.
-        sd = await resolve_sender(db, org, None, allow_ambiguous=True)
+        sd = (
+            await resolve_hail_mail_sender(db, org)
+            if call.transport == "browser"
+            else await resolve_sender(db, org, None, allow_ambiguous=True)
+        )
     except HTTPException:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
+
+    if call.transport == "browser" and sd.domain != call.metadata_.get(
+        "browser_capabilities", {}
+    ).get("inboxAddress"):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your workspace email changed. Start a new conversation before sending.",
+        )
+
+    parent = None
+    source_attachments = []
+    if body.reply_to_email_id or body.attachment_ids:
+        try:
+            scope, parent, source_attachments = await source_files(
+                db, call, body.reply_to_email_id, body.attachment_ids
+            )
+            if recipient.lower() != scope.peer.lower():
+                raise ValueError("Files can only return to this conversation's person")
+
+            if (
+                sum(a.size_bytes for a in source_attachments)
+                + len(body.body_text.encode())
+                > MAX_EMAIL_ATTACHMENT_BYTES
+            ):
+                raise ValueError("Files too large")
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files or that email are not available in this conversation. Nothing was sent.",
+            )
+
+    if call.transport == "browser" and not await reserve_browser_preview(
+        db,
+        call.id,
+        {
+            "channel": "email",
+            "recipient": recipient,
+            "body": body.body_text,
+            "subject": body.subject,
+            "preview": False,
+            "tool_invocation_id": str(body.tool_invocation_id),
+            "status": "queued",
+        },
+    ):
+        return AgentSendResponse(
+            ok=False,
+            spoken="Your three test emails are used, or the conversation has ended. Nothing was sent.",
+        )
 
     email = Email(
         organization_id=org,
@@ -629,8 +1587,23 @@ async def agent_send_email(
         body_text=body.body_text,
         status="queued",
         provider="ses",
-        metadata_=_meta(body),
+        metadata_={
+            **_meta(body),
+            **(
+                {"browser_trial": True}
+                if call.transport == "browser" and call.metadata_.get("browser_trial")
+                else {}
+            ),
+        },
     )
+    if parent is not None:
+        email.subject = reply_subject(parent.subject or body.subject)
+        email.in_reply_to, email.references_ids = reply_references(parent)
+    email.metadata_ = {
+        **email.metadata_,
+        "source_attachment_ids": [str(a.id) for a in source_attachments],
+        "attachment_reply_to_email_id": str(parent.id) if parent else None,
+    }
     db.add(email)
     await db.commit()
     await db.refresh(email)
@@ -652,7 +1625,19 @@ async def agent_send_email(
         actor_kind="system",
     )
 
-    err = await deliver_email(db, email_provider, email)
+    err = await deliver_email(
+        db,
+        email_provider,
+        email,
+        at_most_once=True,
+        **({"attachment_rows": source_attachments} if source_attachments else {}),
+        **(
+            {"billable": False}
+            if call.transport == "browser" and call.metadata_.get("browser_trial")
+            else {}
+        ),
+    )
+    await _record_browser_outcome(db, body.call_id, body.tool_invocation_id, email)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -1119,7 +2104,7 @@ async def agent_handover_email(
         },
         actor_kind="system",
     )
-    err = await deliver_email(db, email_provider, email)
+    err = await deliver_email(db, email_provider, email, at_most_once=True)
     if err is not None:
         await write_audit_log(
             organization_id=org,
@@ -1127,7 +2112,7 @@ async def agent_handover_email(
             action="agent.handover.email_failed",
             resource_type="email",
             resource_id=email.id,
-            payload={"call_id": str(call.id), "end_reason": err},
+            payload={"call_id": str(body.call_id), "end_reason": err},
             actor_kind="system",
         )
         return AgentHandoverEmailResponse(email="failed")
@@ -1193,6 +2178,44 @@ async def agent_handover_result(
         )
     await db.commit()
     return {"ok": True}
+
+
+class AgentInboxRequest(InboxSelection):
+    call_id: UUID
+
+
+@router.post("/inbox")
+async def agent_inbox(
+    body: AgentInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    call = await db.get(Call, body.call_id)
+    if call is None or call.status != "in_progress":
+        return {"spoken": "This conversation has ended. Inbox access is closed."}
+    await _tag_call(db, call)
+    return await conversation_inbox(body, db, call)
+
+
+class EmailRunInboxRequest(InboxSelection):
+    inbound_email_id: UUID
+
+
+@router.post("/email-run/inbox")
+async def email_run_inbox(
+    body: EmailRunInboxRequest, db: Annotated[AsyncSession, Depends(get_session)]
+):
+    inbound = await db.get(Email, body.inbound_email_id)
+    if inbound is None or inbound.direction != "inbound":
+        return {"spoken": "This email conversation is not available."}
+    await key_lock(db, email_thread_lock_key(inbound))
+    await db.refresh(inbound)
+    routed = await _routed_email(db, inbound)
+    if (
+        routed is None
+        or inbound.agent_reply_state != "processing"
+        or await run_refusal(db, routed[0], inbound, count_own_sends=True) is not None
+    ):
+        return {"spoken": "This email conversation is no longer available."}
+    return await conversation_inbox(body, db, inbound)
 
 
 __all__ = ["router"]

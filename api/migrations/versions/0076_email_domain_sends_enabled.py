@@ -32,15 +32,15 @@ so an org that disabled every custom domain must still be able to send.
 Downgrade drops the CHECK and the column. Rows carry no other state, so
 nothing to backfill: upgrade only adds the column with its default.
 
-Revision ID: 0074
-Revises: 0073
+Revision ID: 0076
+Revises: 0075
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0074"
-down_revision = "0073"
+revision = "0076"
+down_revision = "0075"
 branch_labels = None
 depends_on = None
 

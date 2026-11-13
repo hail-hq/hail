@@ -11,9 +11,7 @@ metadata + first-use so the GC worker knows what's safe to delete.
 
 from __future__ import annotations
 
-import hashlib
 from typing import Annotated
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi import status as http_status
@@ -24,11 +22,10 @@ from hailhq.core.email_attachment_limits import (
     ATTACHMENT_TOO_LARGE_DETAIL,
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
-from hailhq.core.file_uploads import object_key
+from hailhq.core.file_uploads import store_upload
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import EmailAttachmentUploadResponse
-from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -86,24 +83,13 @@ async def create_email_attachment(
     payload = bytes(buf)
 
     content_type = file.content_type or "application/octet-stream"
-    upload_id = uuid4()
-    key = object_key("email_attachment", principal.organization_id, upload_id)
-    await s3.put_attachment(key, payload, content_type)
-
     row = FileUpload(
-        id=upload_id,
         organization_id=principal.organization_id,
         purpose="email_attachment",
         filename=file.filename or "attachment",
         content_type=content_type,
-        size_bytes=len(payload),
-        s3_key=key,
-        uploaded_at=func.statement_timestamp(),
-        sha256=hashlib.sha256(payload).hexdigest(),
     )
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
+    await store_upload(db, s3, row, payload)
 
     return EmailAttachmentUploadResponse.model_validate(row)
 

@@ -265,7 +265,7 @@ paths:
 
         for inbound and ring out again; numbers that routed texts to it go back
 
-        to webhooks only."
+        to webhooks only. Addresses it answered stop getting replies."
       operationId: delete_agent_v1_agents__agent_id__delete
       parameters:
         - name: agent_id
@@ -1865,14 +1865,16 @@ paths:
       summary: Patch Email Domain
       description:
         "Edit hail-mail prefixes, the send switch, and/or inbound action.\n\
-        \nThree modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
+        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
         \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
         * **Send switch** (``sends_enabled``): custom rows only. ``false``\n  stops\
         \ the domain from sending at all \u2014 it is skipped by sender\n  selection\
         \ and a send that names it explicitly is refused with 422.\n* **Inbound action\
         \ edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
-        \ any row kind."
+        \ any row kind.\n* **Agent route** (``email_agent_id`` / ``email_agent_scope``):\
+        \ any row\n  kind. The agent must be in the organization, live, and answer\
+        \ email."
       operationId: patch_email_domain_v1_email_domains__domain_id__patch
       parameters:
         - name: domain_id
@@ -6037,6 +6039,11 @@ components:
           title: Sms Enabled
           description: Answer texts on numbers that route texts to this agent.
           default: true
+        email_enabled:
+          type: boolean
+          title: Email Enabled
+          description: Answer email on addresses that route email to this agent.
+          default: true
         status:
           type: string
           enum:
@@ -6158,6 +6165,11 @@ components:
           type: boolean
           title: Sms Enabled
           description: Whether the agent answers texts.
+        email_enabled:
+          type: boolean
+          title: Email Enabled
+          description: Whether the agent answers email.
+          default: true
         status:
           type: string
           enum:
@@ -6290,6 +6302,12 @@ components:
             - type: "null"
           title: Sms Enabled
           description: Whether the agent answers texts.
+        email_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Email Enabled
+          description: Whether the agent answers email.
         status:
           anyOf:
             - type: string
@@ -7204,9 +7222,9 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the email and echoed back
-            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers'
-            and 'system_kind' are reserved for Hail's own queue bookkeeping and are
-            rejected.
+            on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers',
+            'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender'
+            are reserved for Hail's own bookkeeping and are rejected.
         attachment_ids:
           anyOf:
             - items:
@@ -7431,6 +7449,30 @@ components:
             from sending at all: skipped by default sender selection and a send naming
             it explicitly returns 422. Only allowed on custom rows; Omit to leave
             unchanged."
+        email_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Agent Id
+          description:
+            The agent that answers mail to this address. The agent must
+            be live and answer email. A custom domain must be verified with inbound
+            on. Null stops agent replies. Omit to leave unchanged.
+        email_agent_scope:
+          anyOf:
+            - type: string
+              enum:
+                - members
+                - anyone
+            - type: "null"
+          title: Email Agent Scope
+          description:
+            "Who the agent answers. 'members': verified members of the
+            organization whose mail passes DMARC. 'anyone': every sender whose mail
+            passes DMARC and the spam and header rules; such a sender can make the
+            agent use its tools. Mail without a DMARC pass gets no reply. Omit to
+            leave unchanged, except that a new agent starts at 'members'."
       additionalProperties: false
       type: object
       title: EmailDomainPatch
@@ -7562,6 +7604,23 @@ components:
             - type: "null"
           title: Forward Rate Per Hour
           description: Configured cap on forwarded messages per hour, if set.
+        email_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Email Agent Id
+          description:
+            The agent that answers mail to this address. Null when none
+            does.
+        email_agent_scope:
+          type: string
+          enum:
+            - members
+            - anyone
+          title: Email Agent Scope
+          description: "Who the agent answers: 'members' or 'anyone'."
+          default: members
         created_at:
           type: string
           format: date-time
@@ -7847,8 +7906,8 @@ components:
             - type: "null"
           title: In Reply To
           description:
-            RFC 5322 In-Reply-To header. Inbound emails only; null on outbound
-            rows.
+            RFC 5322 In-Reply-To header. Set on inbound emails and agent
+            replies; null on other outbound rows.
         references_ids:
           anyOf:
             - items:
@@ -7857,8 +7916,25 @@ components:
             - type: "null"
           title: References Ids
           description:
-            RFC 5322 References header, split into ids. Inbound emails
-            only; null on outbound rows.
+            RFC 5322 References header, split into ids. Set on inbound
+            emails and agent replies; null on other outbound rows.
+        agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Agent Id
+          description:
+            "The agent this email belongs to: the address's agent on inbound
+            rows, the writer on outbound rows."
+        agent_reply_state:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Agent Reply State
+          description:
+            "Inbound rows routed to an agent: 'pending', 'processing',
+            'done', 'skipped', or 'failed'. A skipped row names why in metadata.agent_skip_reason."
         spam_verdict:
           anyOf:
             - type: string

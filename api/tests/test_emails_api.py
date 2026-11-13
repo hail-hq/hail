@@ -1698,3 +1698,30 @@ async def test_post_emails_sends_full_document_html_byte_identical(
     assert call_kwargs["body_text"] == "x"
     assert call_kwargs["body_html"] == full_doc
     assert resp.json()["body_html"] == full_doc
+
+
+@pytest.mark.parametrize(
+    "key", ["reply_to_email_id", "inbound_email_id", "thread_sender"]
+)
+async def test_post_rejects_agent_bookkeeping_metadata(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    email_mock: AsyncMock,
+    key: str,
+) -> None:
+    """A planted key could pose as an agent's earlier reply."""
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/emails",
+        json={
+            "to": ["bob@example.com"],
+            "subject": "Hi",
+            "body_text": "Hello",
+            "recipient_consent": True,
+            "metadata": {key: "11111111-1111-4111-8111-111111111111"},
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+    assert "reserved" in resp.text
+    email_mock.send_email.assert_not_awaited()

@@ -33,10 +33,23 @@ class S3MailClient:
         self._client = client if client is not None else build_default_client()
         self._bucket = bucket
 
-    async def fetch_raw(self, key: str) -> bytes:
+    async def fetch_raw(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        if max_bytes is not None and max_bytes < 0:
+            raise ValueError("The storage read limit must be nonnegative")
+
         def _do() -> bytes:
             resp = self._client.get_object(Bucket=self._bucket, Key=key)
-            return resp["Body"].read()
+            body = resp["Body"]
+            try:
+                size = resp.get("ContentLength")
+                if max_bytes is not None and size is not None and size > max_bytes:
+                    raise ValueError("Object exceeds the storage read limit")
+                content = body.read() if max_bytes is None else body.read(max_bytes + 1)
+                if max_bytes is not None and len(content) > max_bytes:
+                    raise ValueError("Object exceeds the storage read limit")
+                return content
+            finally:
+                body.close()
 
         return await asyncio.to_thread(_do)
 

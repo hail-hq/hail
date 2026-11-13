@@ -5,6 +5,7 @@ from __future__ import annotations
 from hailhq.core.agent_tools import (
     end_call,
     list_contacts,
+    read_email,
     send_dtmf,
     send_email,
     send_sms,
@@ -23,6 +24,7 @@ def all_tools() -> tuple[ToolSpec, ...]:
         send_sms.SPEC,
         send_email.SPEC,
         thread_history.SPEC,
+        read_email.SPEC,
     )
 
 

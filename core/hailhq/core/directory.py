@@ -16,11 +16,9 @@ module only through ``resolve_member_emails``, which only the API
 service calls; the voicebot sees names and channel presence, never
 addresses.
 
-Follow-up (not done here): ``resolve_member_emails`` still resolves
-member emails only — extending agent-SEND resolution to manual contacts
-or phone numbers is a separate workstream. The voicebot's directory
-*browse* (``list_contacts``) already surfaces contacts via
-``list_directory``; agent-initiated sends to a contact are future work.
+Agent sends reach members only, so ``list_directory`` (what the agent
+reads in ``list_contacts``) lists members only. Manual contacts are used
+to name the other party on a call (``find_by_phone``), not as recipients.
 """
 
 from __future__ import annotations
@@ -28,6 +26,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from hailhq.core.models import Contact, OrganizationMember, User
 from sqlalchemy import func, select
@@ -48,50 +47,22 @@ class DirectoryEntry:
 async def list_directory(
     session: AsyncSession, organization_id: uuid.UUID
 ) -> list[DirectoryEntry]:
-    """All directory entries for one org, name-sorted, addresses omitted."""
-    member_stmt = (
+    """The org's members, name-sorted, addresses omitted.
+
+    Members only: agent sends cannot reach manual contacts, so listing them
+    would offer the agent names it cannot message.
+    """
+    stmt = (
         select(User.name, User.phone_number)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
         .where(OrganizationMember.organization_id == organization_id)
     )
-    member_rows = (await session.execute(member_stmt)).all()
     entries = [
         DirectoryEntry(
             name=name, has_email=True, has_phone=phone is not None, source="member"
         )
-        for name, phone in member_rows
+        for name, phone in (await session.execute(stmt)).all()
     ]
-
-    try:
-        contact_stmt = select(Contact.name, Contact.email, Contact.phone_e164).where(
-            Contact.organization_id == organization_id
-        )
-        contact_rows = (await session.execute(contact_stmt)).all()
-    except ProgrammingError as exc:
-        # Self-host posture: a deployment that hasn't run the contacts
-        # migration (0036) has no `contacts` table at all. Its absence
-        # means "no manual contacts to show", not a server error — degrade
-        # to members-only instead of raising UndefinedTable on every call.
-        logger.warning(
-            "directory contacts lookup failed (schema missing or drifted): %s",
-            exc,
-        )
-        # Load-bearing: the failed statement leaves the session's
-        # transaction aborted; roll back so the session is safe to reuse
-        # (mirrors build_agent_tools' availability-check posture).
-        await session.rollback()
-        contact_rows = []
-
-    entries.extend(
-        DirectoryEntry(
-            name=name,
-            has_email=email is not None,
-            has_phone=phone is not None,
-            source="contact",
-        )
-        for name, email, phone in contact_rows
-    )
-
     entries.sort(key=lambda e: e.name)
     return entries
 
@@ -104,8 +75,24 @@ async def resolve_member_emails(
     Returns every match — the caller owns the 0-match and >1-match
     policies (the internal route refuses ambiguous sends).
     """
+    return await _members_named(session, organization_id, name, User.email)
+
+
+async def resolve_member_phones(
+    session: AsyncSession, organization_id: uuid.UUID, name: str
+) -> list[str | None]:
+    """Phone numbers of members matching ``name``, for agent sends. Same
+    policy as :func:`resolve_member_emails`. A member with no phone stays in
+    the list as None, so a shared name stays ambiguous."""
+    return await _members_named(session, organization_id, name, User.phone_number)
+
+
+async def _members_named(
+    session: AsyncSession, organization_id: uuid.UUID, name: str, column: Any
+) -> list[Any]:
+    """``column`` of every member named ``name``, case-insensitively."""
     stmt = (
-        select(User.email)
+        select(column)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
         .where(
             OrganizationMember.organization_id == organization_id,
@@ -113,6 +100,34 @@ async def resolve_member_emails(
         )
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def is_verified_member(
+    session: AsyncSession, organization_id: uuid.UUID, address: str
+) -> bool:
+    """True when ``address`` is the verified login email of an org member.
+
+    False when the website-owned tables do not exist (a pure self-host): the
+    savepoint keeps the caller's transaction usable, and no member means no
+    trust. A member whose login is unverified does not count: anyone can
+    register an address they do not own.
+    """
+    stmt = (
+        select(User.id)
+        .join(OrganizationMember, OrganizationMember.user_id == User.id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            func.lower(User.email) == address.strip().lower(),
+            User.email_verified.is_(True),
+        )
+        .limit(1)
+    )
+    try:
+        async with session.begin_nested():
+            return (await session.execute(stmt)).first() is not None
+    except ProgrammingError as exc:
+        logger.warning("member lookup failed (schema missing or drifted): %s", exc)
+        return False
 
 
 async def find_by_phone(
@@ -154,6 +169,8 @@ async def find_by_phone(
 __all__ = [
     "DirectoryEntry",
     "find_by_phone",
+    "is_verified_member",
     "list_directory",
     "resolve_member_emails",
+    "resolve_member_phones",
 ]

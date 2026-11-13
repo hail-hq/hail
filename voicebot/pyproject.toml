@@ -20,6 +20,8 @@ dependencies = [
     "livekit-plugins-silero~=1.8.8",
     "livekit-plugins-speechmatics~=1.8.8",
     "livekit-plugins-noise-cancellation~=0.3.2",
+    "pypdfium2>=5,<6",
+    "pillow>=12",
 ]
 
 [project.optional-dependencies]

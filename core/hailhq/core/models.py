@@ -488,7 +488,8 @@ class ApiKey(Base):
 class Agent(Base):
     """A saved brain: what a number answers with, and what POST /calls can
     place calls with (``agent_id``). Numbers point at an agent for calls
-    (``voice_agent_id``) and for texts (``sms_agent_id``)."""
+    (``voice_agent_id``) and for texts (``sms_agent_id``); an email address
+    points at one with ``email_domains.email_agent_id``."""
 
     __tablename__ = "agents"
 
@@ -527,6 +528,9 @@ class Agent(Base):
         Boolean, server_default=text("TRUE"), nullable=False
     )
     sms_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
+    email_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
@@ -783,8 +787,9 @@ class Call(Base):
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    from_e164: Mapped[str] = mapped_column(Text, nullable=False)
-    to_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    from_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport: Mapped[str] = mapped_column(Text, server_default="phone", nullable=False)
     direction: Mapped[str] = mapped_column(
         Text, server_default="outbound", nullable=False
     )
@@ -837,9 +842,15 @@ class Call(Base):
             name="calls_end_reason_when_terminal",
         ),
         CheckConstraint(
-            "(direction = 'outbound' AND from_number_id IS NOT NULL)"
-            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
+            "(transport = 'browser' AND from_number_id IS NULL AND to_number_id IS NULL "
+            "AND from_e164 IS NULL AND to_e164 IS NULL) OR "
+            "(transport = 'phone' AND from_e164 IS NOT NULL AND to_e164 IS NOT NULL AND "
+            "((direction = 'outbound' AND from_number_id IS NOT NULL)"
+            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)))",
             name="calls_number_for_direction",
+        ),
+        CheckConstraint(
+            "transport IN ('phone', 'browser')", name="calls_transport_check"
         ),
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
@@ -1247,7 +1258,7 @@ class EmailDomain(Base):
     # explicitly is refused with 422. Hail-mail rows may not be switched off
     # (see email_domains_sends_enabled_check) — they are the fallback
     # identity a from-less send resolves to. Inbound mail is unaffected.
-    # Mirrors migration 0074.
+    # Mirrors migration 0076.
     sends_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("true"), nullable=False
     )
@@ -1256,6 +1267,18 @@ class EmailDomain(Base):
     )
     forward_to: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     forward_rate_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The agent that answers mail to this address, as phone_numbers.sms_agent_id
+    # does for texts. NULL: no agent replies.
+    email_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # members: verified org members only. anyone: every sender that passes the
+    # spam and header rules.
+    email_agent_scope: Mapped[str] = mapped_column(
+        Text, server_default="members", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1264,6 +1287,10 @@ class EmailDomain(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "email_agent_scope IN ('members','anyone')",
+            name="email_domains_email_agent_scope_check",
+        ),
         CheckConstraint(
             "kind IN ('hail_mail','custom')",
             name="email_domains_kind_check",
@@ -1274,7 +1301,7 @@ class EmailDomain(Base):
         ),
         # Hail-mail rows may not stop sending: they are the fallback a
         # from-less send resolves to, and system mail (forward confirmations)
-        # names their address. Mirrors migration 0074.
+        # names their address. Mirrors migration 0076.
         CheckConstraint(
             "kind <> 'hail_mail' OR sends_enabled",
             name="email_domains_sends_enabled_check",
@@ -1584,11 +1611,59 @@ class Email(Base):
     # branch on it without a join. NULL for outbound rows (kind is not
     # meaningful there) and for legacy inbound rows created before this column.
     email_domain_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The agent this email belongs to: the address's agent on inbound rows, the
+    # agent that wrote it on outbound rows. NULL when no agent is involved.
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # True only when ingest saw one From address and a DMARC PASS. The one proof
+    # of a sender: tools and thread history need it.
+    from_verified: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
+    # Inbound rows routed to an agent, as on ``sms``:
+    # pending | processing | done | skipped | failed.
+    agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_reply_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # Claim lease, or retry backoff when pending.
+    agent_reply_available_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "agent_reply_state IS NULL OR agent_reply_state IN "
+            "('pending','processing','done','skipped','failed')",
+            name="emails_agent_reply_state_check",
+        ),
+        Index(
+            "emails_agent_reply_pending_idx",
+            "requested_at",
+            postgresql_where=text("agent_reply_state IN ('pending','processing')"),
+        ),
+        Index(
+            "emails_agent_reply_queued_idx",
+            "requested_at",
+            postgresql_where=text(
+                "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "emails_agent_thread_idx",
+            "organization_id",
+            "requested_at",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
+        Index(
+            "emails_agent_idx",
+            "agent_id",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"
             "'complained','received')",
@@ -1710,9 +1785,10 @@ class FileUpload(Base):
     ``purpose`` says what it is for:
 
     * ``email_attachment``: an outbound email attachment, reusable across
-      many sends. Distinct from ``EmailAttachment`` (always 1:1 with an
-      already-received inbound email). Rows still unused 24h after upload
-      are deleted; used rows are kept.
+      many sends. Distinct from ``EmailAttachment`` (one file on one email).
+      A forwarded received file uses an outbound upload to preserve its bytes
+      beyond inbound retention. Rows still unused 24h after upload are
+      deleted; used rows are kept.
     * ``verification_document``: a document for one carrier verification.
       ``POST /verifications`` reads it and deletes it; rows left over are
       deleted 1 hour after upload.

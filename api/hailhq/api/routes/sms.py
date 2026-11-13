@@ -89,7 +89,9 @@ _MAX_LIST_LIMIT = 200
 _SMS_SEND_FAILED_DETAIL = "sms send failed"
 
 
-async def deliver_sms(db: AsyncSession, sms: Sms) -> str | None:
+async def deliver_sms(
+    db: AsyncSession, sms: Sms, *, billable: bool = True
+) -> str | None:
     """Wire-send one queued Sms row and reconcile its status.
 
     Shared by POST /sms and the internal agent-send route. Returns None
@@ -194,6 +196,9 @@ async def deliver_sms(db: AsyncSession, sms: Sms) -> str | None:
 
     if carrier_rejected:
         return result.error_code or "carrier_rejected"
+
+    if not billable:
+        return None
 
     tier = classify_pricing_tier(sms.to_e164)
     await write_usage_event(
