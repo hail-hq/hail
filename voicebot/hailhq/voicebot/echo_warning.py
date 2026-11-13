@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 from livekit import rtc
 from livekit.agents import AgentSession
+from livekit.agents.utils.audio import silence_frame_like
 from livekit.agents.voice import io
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -28,7 +29,8 @@ MIN_CORRELATION = 0.2
 PEAK_RATIO = 1.08
 LAG_TOLERANCE = 0.025
 TAIL = 0.3  # margin after the return delay before listening again
-DISTURBED_FOR = 20.0  # how long one disturbance supports a warning
+DISTURBED_FOR = 20.0  # how long disturbances support a warning
+QUIET_WINDOWS = 12  # scored agent windows without echo before the gate lifts
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class EchoDetector:
         self.references: deque[tuple[float, np.ndarray]] = deque()
         self.matches: deque[tuple[float, float, float]] = deque(maxlen=12)
         self.evidence: EchoEvidence | None = None
+        self.scored = 0  # reference windows compared with the caller audio
         self._latest = 0.0
         self.active = True
         self._partial = np.empty(0)
@@ -115,7 +118,8 @@ class EchoDetector:
             self.evidence = None
             self.matches.clear()
         processed = 0
-        while self.references and processed < 8:
+        # A few per tick: each one costs FFTs on the event loop.
+        while self.references and processed < 3:
             at, reference = self.references[0]
             if at + WINDOW / RATE + MAX_DELAY > now:
                 break
@@ -134,6 +138,7 @@ class EchoDetector:
                 continue
             # Search all positive delays, using normalized correlation so gain
             # and polarity changes do not defeat detection.
+            self.scored += 1
             heard = self._input_window(at, at + WINDOW / RATE + MAX_DELAY)
             size = 1 << (len(heard) + WINDOW - 1).bit_length()
             correlation = np.fft.irfft(
@@ -214,15 +219,16 @@ class EchoOutput(io.AudioOutput):
         self._finished_at = time.time()
         self.reset()
 
-    def near_playout(self, now: float, delay: float = MAX_DELAY) -> bool:
-        """Whether agent audio, or its return after ``delay``, can be on the line."""
+    def playing(self, now: float) -> bool:
         # Bounded by the audio handed over, so a lost finish event cannot
         # leave the agent deaf.
-        playing = self._playing and now < self._expected_end + 1.0
-        return playing or now < self._finished_at + delay + TAIL
+        return self._playing and now < self._expected_end + 1.0
 
     def muted(self, now: float) -> bool:
-        return self.gate_delay is not None and self.near_playout(now, self.gate_delay)
+        """Whether agent audio, or its return, can be on the line with the gate on."""
+        if self.gate_delay is None:
+            return False
+        return self.playing(now) or now < self._finished_at + self.gate_delay + TAIL
 
     def reset(self) -> None:
         self._data.clear()
@@ -281,12 +287,7 @@ class EchoGate(io.AudioInput):
         if not self._output.muted(time.time()):
             return frame
         # Silence, not a gap: VAD and STT streams stay continuous.
-        return rtc.AudioFrame(
-            bytes(frame.samples_per_channel * frame.num_channels * 2),
-            frame.sample_rate,
-            frame.num_channels,
-            frame.samples_per_channel,
-        )
+        return silence_frame_like(frame)
 
 
 class EchoWarning:
@@ -302,7 +303,9 @@ class EchoWarning:
         self.on_warning = on_warning
         self.detector = EchoDetector()
         self._warned = False
-        self._disturbed_at = float("-inf")
+        self._disturbed: deque[float] = deque(maxlen=2)
+        self._echo_scored = 0
+        self._gated = False  # the gate has been on at least once
         self._closed = False
         self._task: asyncio.Task | None = None
         self._output: EchoOutput | None = None
@@ -320,20 +323,29 @@ class EchoWarning:
                 self._output.gate_delay = None
 
         # Raw echo alone is not a reason to speak: the input filter may remove
-        # it. The agent's own input must also have reacted to it.
+        # it. The agent's own input must also have reacted to it: speech
+        # detected while the agent itself is playing. A quick reply after the
+        # agent stops is normal and does not count.
         @session.on("user_state_changed")
         def heard(event):
             now = time.time()
             if (
                 getattr(event, "new_state", None) == "speaking"
                 and self._output
-                and self._output.near_playout(now)
+                and self._output.playing(now)
             ):
-                self._disturbed_at = now
+                self._disturbed.append(now)
 
         @session.on("agent_false_interruption")
         def cut_off(_):
-            self._disturbed_at = time.time()
+            self._disturbed.append(time.time())
+
+    def _is_disturbed(self) -> bool:
+        """Two reactions to audio during agent speech within the last 20 s."""
+        return (
+            len(self._disturbed) == 2
+            and time.time() - self._disturbed[0] <= DISTURBED_FOR
+        )
 
     def attach(self) -> None:
         sink = getattr(getattr(self.session, "output", None), "audio", None)
@@ -365,6 +377,7 @@ class EchoWarning:
                     capacity=20,
                     noise_cancellation=None,
                 )
+                next_at = float("-inf")
                 try:
                     async for event in stream:
                         if self._closed or not self.detector.active:
@@ -374,10 +387,15 @@ class EchoWarning:
                         if not self.session.input.audio_enabled:
                             continue
                         frame = event.frame
+                        # Count samples from an anchor: arrival times bunch up
+                        # when the event loop stalls. Re-anchor after a real gap.
+                        arrived = time.time() - frame.duration
+                        if abs(arrived - next_at) > 0.2:
+                            next_at = arrived
                         self.detector.add_input(
-                            np.asarray(frame.data, dtype=float),
-                            time.time() - frame.duration,
+                            np.asarray(frame.data, dtype=float), next_at
                         )
+                        next_at += frame.duration
                 finally:
                     await stream.aclose()
                 await asyncio.sleep(0.1)
@@ -385,20 +403,27 @@ class EchoWarning:
             logger.exception("raw echo observation failed; continuing call")
 
     async def check(self, now: float | None = None) -> None:
-        if self._closed or self._warned:
+        if self._closed:
             return
         evidence = self.detector.check(time.time() if now is None else now)
+        if self._warned:
+            self._update_gate(evidence)
+            return
         if (
             evidence is None
-            or time.time() - self._disturbed_at > DISTURBED_FOR
+            or not self._is_disturbed()
             or not self.can_warn()
             or self.session.agent_state in ("speaking", "thinking")
+            # Never talk over the caller: the line cannot be interrupted.
+            or getattr(self.session, "user_state", None) == "speaking"
         ):
             return
-        self.session.generate_reply(
+        # Drop returned fragments already transcribed, so they are not answered.
+        self.session.clear_user_turn()
+        handle = self.session.generate_reply(
             instructions=(
-                "In the conversation's language, say only this short sentence: "
-                "I'm hearing an echo—it's disrupting the call. "
+                "In the conversation's language, say only these two short "
+                "sentences: I'm hearing an echo. It's disrupting the call. "
                 "Do not add advice, questions, explanations, or laughter. "
                 "Do not claim the problem is fixed."
             ),
@@ -406,13 +431,18 @@ class EchoWarning:
             allow_interruptions=False,
         )
         self._warned = True
-        # From here the agent no longer hears the line while its voice can be
-        # returning, so the warning and later replies cannot answer themselves.
-        if self._output:
-            self._output.gate_delay = evidence.delay_ms / 1000
-        if self._raw_task:
-            self._raw_task.cancel()
-        self._clear()
+        delay = evidence.delay_ms / 1000
+        spoken_from = self._output._expected_end if self._output else 0.0
+
+        def spoken(_) -> None:
+            # Gate only once the caller has been told why. A reply that never
+            # produced audio (model error, hangup) leaves the call as it was.
+            if self._output and self._output._expected_end > spoken_from:
+                self._output.gate_delay = delay
+                self._echo_scored = self.detector.scored
+                self._gated = True
+
+        handle.add_done_callback(spoken)
         if self.on_warning:
             await self.on_warning(
                 {
@@ -422,8 +452,23 @@ class EchoWarning:
                 }
             )
 
+    def _update_gate(self, evidence: EchoEvidence | None) -> None:
+        """Follow the echo after the warning: re-measure it, lift the gate when gone."""
+        if self._output is None:
+            return
+        if evidence is not None:
+            if self._gated:
+                self._output.gate_delay = evidence.delay_ms / 1000
+                self._echo_scored = self.detector.scored
+        elif (
+            self._output.gate_delay is not None
+            and self.detector.scored - self._echo_scored >= QUIET_WINDOWS
+        ):
+            # The caller left speakerphone: listen normally again.
+            self._output.gate_delay = None
+
     async def _run(self) -> None:
-        while not self._closed and not self._warned:
+        while not self._closed:
             await asyncio.sleep(0.5)
             try:
                 await self.check()

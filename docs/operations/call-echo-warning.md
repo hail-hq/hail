@@ -3,7 +3,7 @@
 `HAIL_ECHO_WARNING_ENABLED=true` (default) enables a single warning when repeated
 waveform matches show the agent's played voice returning to the caller track
 and the agent's own input reacted to it.
-The reply says only, in the call's language: “I'm hearing an echo—it's disrupting
+The reply says only, in the call's language: “I'm hearing an echo. It's disrupting
 the call.” It adds no advice or questions and does not claim the echo is fixed. Set the flag false to disable the observer.
 
 [Detector and warning](../../voicebot/hailhq/voicebot/echo_warning.py) use a raw,
@@ -13,9 +13,10 @@ voice isolation. The reference contains only audio confirmed by LiveKit's
 The observer does not change either audio track or playback timing.
 
 Raw echo alone does not trigger the warning, because the input filter may
-remove it. The call must also be disturbed within the last 20 s: the caller
-VAD fired while agent audio or its return could be on the line, or the SDK
-reported a false interruption.
+remove it. The agent's own input must also have reacted twice within 20 s:
+speech detected while the agent itself was playing, or a false interruption
+reported by the SDK. A quick caller reply after the agent stops does not count.
+The warning never starts while the caller is speaking.
 
 Detection requires three separate 500 ms waveform matches within four seconds,
 with correlation at least 0.2 and consistent return delay (within 25 ms),
@@ -35,15 +36,21 @@ without tools and with interruptions disabled, so returned audio cannot
 immediately cut it off. It may overlap caller VAD because echo itself triggers
 VAD; there is no blanket caller-muting rule.
 
-From the warning until the call ends, the agent's own input is replaced with
+Once the warning has been spoken, the agent's own input is replaced with
 silence while it speaks and for the measured return delay plus 300 ms after
 ([`EchoGate`](../../voicebot/hailhq/voicebot/echo_warning.py)). The agent then
-cannot interrupt or answer itself, whatever model runs the call. The cost: on
-these calls the caller cannot cut the agent off mid-sentence. Room tracks and
-recordings are unchanged. This is half-duplex gating, not echo cancellation.
+cannot interrupt or answer itself, whatever model runs the call. Two costs on
+these calls: the caller cannot cut the agent off mid-sentence, and a reply that
+starts within the return delay after the agent stops (about 1 s on the measured
+call) is not heard. A warning that produced no audio leaves the call ungated.
+
+The detector keeps running. It re-measures the delay, lifts the gate after 12
+compared agent windows (about 6 s of agent speech) with no echo, and restores
+it without a second warning if the echo returns. Room tracks and recordings
+are unchanged. This is half-duplex gating, not echo cancellation.
 
 The worker keeps at most 20 s of incoming samples and the latest 12 s of
-generated reference per segment in memory. Buffers and native streams close on warning or shutdown.
+generated reference per segment in memory. Buffers and native streams close on shutdown.
 No audio is saved; `audio_echo_warning` records only delay, correlation, and
 matched-window count when the warning is requested. It is not a delivery receipt.
 

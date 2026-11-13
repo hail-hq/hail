@@ -43,10 +43,19 @@ def filter_choice() -> str:
 
 
 def _cloud_filter():
-    """The proprietary Cloud filter module, or None off LiveKit Cloud."""
+    """(choice, plugin module) for LiveKit Cloud, or None off Cloud.
+
+    A non-default filter that cannot load never stops calls: bvc is used.
+    """
     if not is_cloud(settings.livekit_url):
         return None
-    return import_module(_MODULES[filter_choice()])
+    choice = filter_choice()
+    if choice != "bvc":
+        try:
+            return choice, import_module(_MODULES[choice])
+        except Exception:
+            logger.exception("HAIL_AUDIO_FILTER=%s failed to load; using bvc", choice)
+    return "bvc", import_module(_MODULES["bvc"])
 
 
 def prewarm_audio() -> None:
@@ -54,30 +63,40 @@ def prewarm_audio() -> None:
     _cloud_filter()
 
 
+def _build(choice: str, plugin, is_sip: bool):
+    if choice == "krisp_viva":
+        if is_sip:
+            return plugin.voice_isolation_telephony()
+        return plugin.voice_isolation()
+    if choice in {"voice_focus_s", "voice_focus_l"}:
+        model = (
+            plugin.EnhancerModel.QUAIL_VF_S
+            if choice == "voice_focus_s"
+            else plugin.EnhancerModel.QUAIL_VF_L
+        )
+        return plugin.audio_enhancement(model=model)
+    return plugin.BVCTelephony() if is_sip else plugin.BVC()
+
+
 def room_options() -> room_io.RoomOptions:
     selector = None
-    noise_cancellation = _cloud_filter()
-    if noise_cancellation is not None:
-        choice = filter_choice()
+    loaded = _cloud_filter()
+    if loaded is not None:
+        choice, plugin = loaded
         # It processes subscribed input frames without republishing cleaned audio;
         # composite Egress continues to capture the original room tracks.
 
         def selector(params):
             is_sip = params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-            if choice == "krisp_viva":
-                if is_sip:
-                    return noise_cancellation.voice_isolation_telephony()
-                return noise_cancellation.voice_isolation()
-            if choice in {"voice_focus_s", "voice_focus_l"}:
-                model = (
-                    noise_cancellation.EnhancerModel.QUAIL_VF_S
-                    if choice == "voice_focus_s"
-                    else noise_cancellation.EnhancerModel.QUAIL_VF_L
+            if choice == "bvc":
+                return _build(choice, plugin, is_sip)
+            try:
+                return _build(choice, plugin, is_sip)
+            except Exception:
+                logger.exception(
+                    "HAIL_AUDIO_FILTER=%s failed for this call; using bvc", choice
                 )
-                return noise_cancellation.audio_enhancement(model=model)
-            if is_sip:
-                return noise_cancellation.BVCTelephony()
-            return noise_cancellation.BVC()
+                return _build("bvc", import_module(_MODULES["bvc"]), is_sip)
 
     return room_io.RoomOptions(
         audio_input=room_io.AudioInputOptions(noise_cancellation=selector)

@@ -130,3 +130,26 @@ def test_unknown_or_uninstalled_filter_falls_back_to_bvc(monkeypatch, value):
     kind = rtc.ParticipantKind.PARTICIPANT_KIND_SIP
     assert selector(SimpleNamespace(participant=SimpleNamespace(kind=kind))) == "sip"
     imported.assert_called_once_with("livekit.plugins.noise_cancellation")
+
+
+def test_filter_that_fails_to_load_or_build_falls_back_to_bvc(monkeypatch):
+    monkeypatch.setattr(settings, "livekit_url", "wss://test.livekit.cloud")
+    monkeypatch.setattr(settings, "hail_audio_filter", "krisp_viva")
+    monkeypatch.setattr(audio, "find_spec", Mock(return_value=object()))
+    bvc = SimpleNamespace(BVCTelephony=Mock(return_value="bvc"))
+    broken = SimpleNamespace(voice_isolation_telephony=Mock(side_effect=OSError))
+    sip = SimpleNamespace(
+        participant=SimpleNamespace(kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP)
+    )
+
+    def failing_import(name):
+        if name.endswith("krisp"):
+            raise ImportError(name)
+        return bvc
+
+    monkeypatch.setattr(audio, "import_module", failing_import)
+    assert room_options().audio_input.noise_cancellation(sip) == "bvc"
+    monkeypatch.setattr(
+        audio, "import_module", lambda name: broken if name.endswith("krisp") else bvc
+    )
+    assert room_options().audio_input.noise_cancellation(sip) == "bvc"
