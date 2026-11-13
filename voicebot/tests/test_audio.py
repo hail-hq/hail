@@ -84,6 +84,7 @@ def test_configured_cloud_filter_uses_supported_participant_selector(
     )
     imported = Mock(return_value=factories)
     monkeypatch.setattr(audio, "import_module", imported)
+    monkeypatch.setattr(audio, "find_spec", Mock(return_value=object()))
     selector = room_options().audio_input.noise_cancellation
     for kind, expected in [
         (rtc.ParticipantKind.PARTICIPANT_KIND_SIP, "sip"),
@@ -108,6 +109,7 @@ def test_voice_focus_uses_documented_model(monkeypatch, choice, model):
         EnhancerModel=SimpleNamespace(QUAIL_VF_S="small", QUAIL_VF_L="large"),
     )
     monkeypatch.setattr(audio, "import_module", Mock(return_value=plugin))
+    monkeypatch.setattr(audio, "find_spec", Mock(return_value=object()))
     selector = room_options().audio_input.noise_cancellation
     selector(
         SimpleNamespace(
@@ -117,10 +119,11 @@ def test_voice_focus_uses_documented_model(monkeypatch, choice, model):
     factory.assert_called_once_with(model=model)
 
 
-@pytest.mark.parametrize("value", ["", "unknown"])
-def test_unknown_filter_falls_back_to_bvc(monkeypatch, value):
+@pytest.mark.parametrize("value", ["", "unknown", "krisp_viva"])
+def test_unknown_or_uninstalled_filter_falls_back_to_bvc(monkeypatch, value):
     monkeypatch.setattr(settings, "livekit_url", "wss://test.livekit.cloud")
     monkeypatch.setattr(settings, "hail_audio_filter", value)
+    monkeypatch.setattr(audio, "find_spec", Mock(return_value=None))
     imported = Mock(return_value=SimpleNamespace(BVCTelephony=Mock(return_value="sip")))
     monkeypatch.setattr(audio, "import_module", imported)
     selector = room_options().audio_input.noise_cancellation

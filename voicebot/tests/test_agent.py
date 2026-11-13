@@ -1152,8 +1152,6 @@ async def test_sanitize_tts_stream_filters_like_speech_text() -> None:
     assert await collect("One moment, ", "please.") == "One moment, please."
     assert await collect("```json", "\n{}") == ""
     assert await collect('{"digits"', ':"2"}') == ""
-    # Confirmed echo uses a private silence marker, never spoken as instructions.
-    assert await collect('{"echo_', 'only":true}') == ""
     assert await collect("Sure. `", "``json\n{}") == "Sure. "
     # Fence already stripped upstream by filter_markdown: truncate from the
     # newline-opening JSON remnant, split across chunks.

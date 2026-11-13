@@ -1,5 +1,7 @@
 """Repeated waveform echo must earn a warning; similar words are not evidence."""
 
+import time
+
 import numpy as np
 import pytest
 from hailhq.voicebot.echo_warning import WINDOW, EchoDetector, EchoWarning
@@ -70,6 +72,10 @@ async def test_warning_is_deferred_and_spoken_only_once():
     await warning.check(6)
     session.generate_reply.assert_not_called()
     session.agent_state = "listening"
+    # Raw echo that never reached the agent's own input is not worth a warning.
+    await warning.check(6)
+    session.generate_reply.assert_not_called()
+    session.emit("agent_false_interruption")
     await warning.check(6)
     await warning.check(7)
     session.generate_reply.assert_called_once()
@@ -80,12 +86,8 @@ async def test_warning_is_deferred_and_spoken_only_once():
     assert "headphones" not in kwargs["instructions"]
     assert kwargs["allow_interruptions"] is False
     assert kwargs["tool_choice"] == "none"
-    # The next turn must also know that echo was confirmed and already warned.
-    context = session.current_agent.chat_ctx.copy()
-    assert any(
-        item.role == "system" and '"echo_only":true' in (item.text_content or "")
-        for item in context.messages()
-    )
+    # Later turns are protected by the input gate, not by model instructions.
+    assert not session.current_agent.chat_ctx.messages()
     await warning.aclose()
 
 
@@ -121,6 +123,7 @@ async def test_stale_echo_does_not_warn_after_a_long_bridge_or_menu():
     warning.detector.add_played(ref, 0)
     await warning.check(6)
     allowed[0] = True
+    session.emit("agent_false_interruption")
     await warning.check(30)
     session.generate_reply.assert_not_called()
     await warning.aclose()
@@ -242,7 +245,7 @@ def test_unrelated_voiced_speech_does_not_trigger_on_similar_pitch(seed):
 
 
 @pytest.mark.asyncio
-async def test_long_reply_keeps_recent_audio_and_context_is_written_once():
+async def test_long_reply_keeps_recent_audio():
     from hailhq.voicebot.echo_warning import EchoOutput
     from livekit import rtc
     from livekit.agents.voice import io
@@ -276,22 +279,102 @@ async def test_long_reply_keeps_recent_audio_and_context_is_written_once():
     assert at == pytest.approx(108)
     assert np.array_equal(first, raw[8 * RATE : 8 * RATE + WINDOW].astype(float))
 
+
+class _Sink:
+    """Built lazily so the module imports without the SDK loaded first."""
+
+    def __new__(cls):
+        from livekit.agents.voice import io
+
+        class Sink(io.AudioOutput):
+            def __init__(self):
+                super().__init__(
+                    label="sink",
+                    sample_rate=RATE,
+                    capabilities=io.AudioOutputCapabilities(pause=True),
+                )
+
+            async def capture_frame(self, frame):
+                await super().capture_frame(frame)
+
+            def flush(self):
+                super().flush()
+
+            def clear_buffer(self):
+                pass
+
+        return Sink()
+
+
+@pytest.mark.asyncio
+async def test_confirmed_disturbing_echo_silences_input_around_agent_speech():
+    from types import SimpleNamespace
+
+    from hailhq.voicebot.echo_warning import EchoGate
+    from livekit import rtc
+    from livekit.agents.voice import io
+
+    loud = rtc.AudioFrame(np.full(400, 5000, "<i2").tobytes(), RATE, 1, 400)
+
+    class Source(io.AudioInput):
+        def __init__(self):
+            super().__init__(label="source")
+
+        async def __anext__(self):
+            return loud
+
     session = Session()
-    session.generate_reply.side_effect = [RuntimeError("draining"), None]
+    sink = _Sink()
+    session.output = SimpleNamespace(audio=sink)
+    session.input = SimpleNamespace(audio=Source(), audio_enabled=True)
+    session.room_io = SimpleNamespace(linked_participant=None)
     warning = EchoWarning(session, can_warn=lambda: True)
+    warning.attach()
+    gate, output = session.input.audio, session.output.audio
+    assert isinstance(gate, EchoGate)
+
+    async def heard():
+        return bool(np.any(np.asarray((await gate.__anext__()).data)))
+
+    # Before any warning the caller is always heard, even over agent speech.
+    await output.capture_frame(loud)
+    assert await heard()
+    # The caller's VAD firing during agent speech marks the call as disturbed.
+    session.emit("user_state_changed", new_state="speaking")
     ref = speech(5)
     incoming = np.zeros_like(ref)
     incoming[6400:] = ref[:-6400] * 0.5
     warning.detector.add_input(incoming, 0)
     warning.detector.add_played(ref, 0)
-    with pytest.raises(RuntimeError):
-        await warning.check(6)
-    await warning.check(6.5)
-    assert session.generate_reply.call_count == 2
-    markers = [
-        item
-        for item in session.current_agent.chat_ctx.messages()
-        if item.role == "system" and "echo_only" in (item.text_content or "")
-    ]
-    assert len(markers) == 1
+    await warning.check(6)
+    session.generate_reply.assert_called_once()
+    assert output.gate_delay == pytest.approx(0.8, abs=0.02)
+
+    await output.capture_frame(loud)
+    assert not await heard()  # agent speaking
+    sink.on_playback_finished(playback_position=0.05, interrupted=False)
+    assert not await heard()  # its voice is still on the way back
+    output._finished_at = time.time() - 2
+    assert await heard()  # the caller's reply
+    # A lost finish event must not leave the agent deaf.
+    await output.capture_frame(loud)
+    output._expected_end = time.time() - 5
+    assert await heard()
+    session.emit("close")
+    assert output.gate_delay is None
     await warning.aclose()
+
+
+def test_user_speech_away_from_agent_playout_is_not_a_disturbance():
+    from types import SimpleNamespace
+
+    session = Session()
+    session.output = SimpleNamespace(audio=_Sink())
+    session.input = SimpleNamespace(audio=None, audio_enabled=True)
+    warning = EchoWarning(session, can_warn=lambda: True)
+    from hailhq.voicebot.echo_warning import EchoDetector as Detector
+    from hailhq.voicebot.echo_warning import EchoOutput
+
+    warning._output = EchoOutput(session.output.audio, Detector())
+    session.emit("user_state_changed", new_state="speaking")
+    assert warning._disturbed_at == float("-inf")

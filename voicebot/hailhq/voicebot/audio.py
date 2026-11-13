@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from importlib import import_module
+from importlib.util import find_spec
 
 from hailhq.core.config import settings
 from livekit import rtc
@@ -18,25 +19,34 @@ logger = logging.getLogger("hailhq.voicebot")
 FILTERS = ("bvc", "krisp_viva", "voice_focus_s", "voice_focus_l")
 
 
+_MODULES = {
+    "bvc": "livekit.plugins.noise_cancellation",
+    "krisp_viva": "livekit.plugins.krisp",
+    "voice_focus_s": "livekit.plugins.ai_coustics",
+    "voice_focus_l": "livekit.plugins.ai_coustics",
+}
+
+
 def filter_choice() -> str:
-    """The configured filter; an unknown value falls back to bvc with a warning."""
+    """The configured filter; bvc when it is unknown or its plugin is missing."""
     choice = settings.hail_audio_filter.strip().lower()
-    if choice in FILTERS:
-        return choice
-    logger.warning("unknown HAIL_AUDIO_FILTER %r; using bvc", choice)
-    return "bvc"
+    if choice not in FILTERS:
+        logger.warning("unknown HAIL_AUDIO_FILTER %r; using bvc", choice)
+        return "bvc"
+    if choice != "bvc" and find_spec(_MODULES[choice]) is None:
+        logger.warning(
+            "HAIL_AUDIO_FILTER=%s needs the voicebot 'filters' extra; using bvc",
+            choice,
+        )
+        return "bvc"
+    return choice
 
 
 def _cloud_filter():
     """The proprietary Cloud filter module, or None off LiveKit Cloud."""
     if not is_cloud(settings.livekit_url):
         return None
-    choice = filter_choice()
-    if choice == "krisp_viva":
-        return import_module("livekit.plugins.krisp")
-    if choice in {"voice_focus_s", "voice_focus_l"}:
-        return import_module("livekit.plugins.ai_coustics")
-    return import_module("livekit.plugins.noise_cancellation")
+    return import_module(_MODULES[filter_choice()])
 
 
 def prewarm_audio() -> None:

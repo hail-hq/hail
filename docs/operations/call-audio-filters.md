@@ -3,6 +3,9 @@
 Set `HAIL_AUDIO_FILTER=krisp_viva` on a test voicebot to try Krisp VIVA. SIP
 participants use `krisp.voice_isolation_telephony()`; other participants use
 `krisp.voice_isolation()`. A worker restart applies the choice to new calls.
+The non-default filters are not in the default image: build the voicebot with
+`--build-arg VOICEBOT_EXTRAS=filters` (locally: `uv sync --extra filters`).
+Without them, or with an unknown value, the worker logs a warning and uses `bvc`.
 Production changes require a separate operator action.
 
 | Setting | LiveKit filter |

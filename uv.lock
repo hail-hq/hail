@@ -1242,13 +1242,11 @@ dependencies = [
     { name = "hailhq-core" },
     { name = "livekit" },
     { name = "livekit-agents" },
-    { name = "livekit-plugins-ai-coustics" },
     { name = "livekit-plugins-anthropic" },
     { name = "livekit-plugins-cartesia" },
     { name = "livekit-plugins-deepgram" },
     { name = "livekit-plugins-elevenlabs" },
     { name = "livekit-plugins-google" },
-    { name = "livekit-plugins-krisp" },
     { name = "livekit-plugins-noise-cancellation" },
     { name = "livekit-plugins-openai" },
     { name = "livekit-plugins-silero" },
@@ -1268,6 +1266,10 @@ dev = [
     { name = "ruff" },
     { name = "testcontainers" },
 ]
+filters = [
+    { name = "livekit-plugins-ai-coustics" },
+    { name = "livekit-plugins-krisp" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1275,13 +1277,13 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "livekit", specifier = "==1.1.20" },
     { name = "livekit-agents", specifier = "~=1.8.8" },
-    { name = "livekit-plugins-ai-coustics", specifier = ">=0.2.12" },
+    { name = "livekit-plugins-ai-coustics", marker = "extra == 'filters'", specifier = ">=0.2.12" },
     { name = "livekit-plugins-anthropic", specifier = "~=1.8.8" },
     { name = "livekit-plugins-cartesia", specifier = "~=1.8.8" },
     { name = "livekit-plugins-deepgram", specifier = "~=1.8.8" },
     { name = "livekit-plugins-elevenlabs", specifier = "~=1.8.8" },
     { name = "livekit-plugins-google", specifier = "~=1.8.8" },
-    { name = "livekit-plugins-krisp", specifier = ">=0.4.8" },
+    { name = "livekit-plugins-krisp", marker = "extra == 'filters'", specifier = ">=0.4.8" },
     { name = "livekit-plugins-noise-cancellation", specifier = "~=0.3.2" },
     { name = "livekit-plugins-openai", specifier = "~=1.8.8" },
     { name = "livekit-plugins-silero", specifier = "~=1.8.8" },
@@ -1297,7 +1299,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'dev'", specifier = ">=4" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["filters", "dev"]
 
 [[package]]
 name = "httpcore"

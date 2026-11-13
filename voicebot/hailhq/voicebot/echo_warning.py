@@ -1,6 +1,8 @@
 """Bounded waveform echo detection using confirmed playout, never transcript guesses.
 
-Audio stays in short in-memory buffers. Nothing is muted, republished, or saved.
+Audio stays in short in-memory buffers. Nothing is republished or saved. Once
+echo is confirmed and has disturbed the call, the agent's own input is silenced
+while it speaks and for the measured return delay after.
 """
 
 from __future__ import annotations
@@ -13,7 +15,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import numpy as np
-from hailhq.core.prompts import ECHO_CONFIRMED_CONTEXT
 from livekit import rtc
 from livekit.agents import AgentSession
 from livekit.agents.voice import io
@@ -26,6 +27,8 @@ HISTORY = 20.0
 MIN_CORRELATION = 0.2
 PEAK_RATIO = 1.08
 LAG_TOLERANCE = 0.025
+TAIL = 0.3  # margin after the return delay before listening again
+DISTURBED_FOR = 20.0  # how long one disturbance supports a warning
 
 
 @dataclass(frozen=True)
@@ -198,8 +201,28 @@ class EchoOutput(io.AudioOutput):
         self._data = bytearray()
         self._dropped = 0  # bytes trimmed from the start of this segment
         self._rate = 24000
+        # Return delay in seconds once the gate is on; None leaves input alone.
+        self.gate_delay: float | None = None
+        self._playing = False
+        self._expected_end = 0.0
+        self._finished_at = 0.0
         self.on("playback_progressed", self._played)
-        self.on("playback_finished", lambda _: self.reset())
+        self.on("playback_finished", self._finished)
+
+    def _finished(self, _event) -> None:
+        self._playing = False
+        self._finished_at = time.time()
+        self.reset()
+
+    def near_playout(self, now: float, delay: float = MAX_DELAY) -> bool:
+        """Whether agent audio, or its return after ``delay``, can be on the line."""
+        # Bounded by the audio handed over, so a lost finish event cannot
+        # leave the agent deaf.
+        playing = self._playing and now < self._expected_end + 1.0
+        return playing or now < self._finished_at + delay + TAIL
+
+    def muted(self, now: float) -> bool:
+        return self.gate_delay is not None and self.near_playout(now, self.gate_delay)
 
     def reset(self) -> None:
         self._data.clear()
@@ -207,6 +230,9 @@ class EchoOutput(io.AudioOutput):
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
         await super().capture_frame(frame)
+        now = time.time()
+        self._playing = True
+        self._expected_end = max(self._expected_end, now) + frame.duration
         if self.detector.active and frame.num_channels == 1:
             self._rate = frame.sample_rate
             # Keep the latest 12 s: playout is often confirmed once, at the end
@@ -243,6 +269,26 @@ class EchoOutput(io.AudioOutput):
         self.next_in_chain.clear_buffer()
 
 
+class EchoGate(io.AudioInput):
+    """Silence the agent's input while its own voice can be returning."""
+
+    def __init__(self, source: io.AudioInput, output: EchoOutput) -> None:
+        super().__init__(label="EchoGate", source=source)
+        self._output = output
+
+    async def __anext__(self) -> rtc.AudioFrame:
+        frame = await self.source.__anext__()
+        if not self._output.muted(time.time()):
+            return frame
+        # Silence, not a gap: VAD and STT streams stay continuous.
+        return rtc.AudioFrame(
+            bytes(frame.samples_per_channel * frame.num_channels * 2),
+            frame.sample_rate,
+            frame.num_channels,
+            frame.samples_per_channel,
+        )
+
+
 class EchoWarning:
     def __init__(
         self,
@@ -256,7 +302,7 @@ class EchoWarning:
         self.on_warning = on_warning
         self.detector = EchoDetector()
         self._warned = False
-        self._context_added = False
+        self._disturbed_at = float("-inf")
         self._closed = False
         self._task: asyncio.Task | None = None
         self._output: EchoOutput | None = None
@@ -270,6 +316,24 @@ class EchoWarning:
             if self._raw_task:
                 self._raw_task.cancel()
             self._clear()
+            if self._output:
+                self._output.gate_delay = None
+
+        # Raw echo alone is not a reason to speak: the input filter may remove
+        # it. The agent's own input must also have reacted to it.
+        @session.on("user_state_changed")
+        def heard(event):
+            now = time.time()
+            if (
+                getattr(event, "new_state", None) == "speaking"
+                and self._output
+                and self._output.near_playout(now)
+            ):
+                self._disturbed_at = now
+
+        @session.on("agent_false_interruption")
+        def cut_off(_):
+            self._disturbed_at = time.time()
 
     def attach(self) -> None:
         sink = getattr(getattr(self.session, "output", None), "audio", None)
@@ -277,6 +341,9 @@ class EchoWarning:
             return
         self._output = EchoOutput(sink, self.detector)
         self.session.output.audio = self._output
+        source = getattr(getattr(self.session, "input", None), "audio", None)
+        if source is not None:
+            self.session.input.audio = EchoGate(source, self._output)
         self._raw_task = asyncio.create_task(self._observe_raw(), name="echo_raw_input")
         self._task = asyncio.create_task(self._run(), name="echo_warning")
 
@@ -323,19 +390,11 @@ class EchoWarning:
         evidence = self.detector.check(time.time() if now is None else now)
         if (
             evidence is None
+            or time.time() - self._disturbed_at > DISTURBED_FOR
             or not self.can_warn()
             or self.session.agent_state in ("speaking", "thinking")
         ):
             return
-        # Keep the condition available after this one reply. Otherwise the
-        # warning's own returned words can prompt another, longer explanation.
-        # Written once: a failed reply request is retried on the next tick.
-        if not self._context_added:
-            agent = self.session.current_agent
-            context = agent.chat_ctx.copy()
-            context.add_message(role="system", content=ECHO_CONFIRMED_CONTEXT)
-            await agent.update_chat_ctx(context)
-            self._context_added = True
         self.session.generate_reply(
             instructions=(
                 "In the conversation's language, say only this short sentence: "
@@ -347,6 +406,10 @@ class EchoWarning:
             allow_interruptions=False,
         )
         self._warned = True
+        # From here the agent no longer hears the line while its voice can be
+        # returning, so the warning and later replies cannot answer themselves.
+        if self._output:
+            self._output.gate_delay = evidence.delay_ms / 1000
         if self._raw_task:
             self._raw_task.cancel()
         self._clear()
