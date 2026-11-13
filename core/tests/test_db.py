@@ -90,8 +90,8 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     ("options", "capacity"),
     [
         ({}, 2),
-        ({"database_pool_size": 1}, 1),
-        ({"database_pool_size": 1, "database_max_overflow": 1}, 2),
+        ({"database_pool_size": 3}, 3),
+        ({"database_pool_size": 2, "database_max_overflow": 1}, 3),
     ],
 )
 async def test_runtime_pool_waits_instead_of_exceeding_its_connection_limit(
@@ -127,7 +127,13 @@ async def test_runtime_pool_waits_instead_of_exceeding_its_connection_limit(
 
 
 @pytest.mark.parametrize(
-    "options", [{"database_pool_size": 0}, {"database_max_overflow": -1}]
+    "options",
+    [
+        {"database_pool_size": 0},
+        # Inbound call setup holds two sessions at once.
+        {"database_pool_size": 1},
+        {"database_max_overflow": -1},
+    ],
 )
 def test_runtime_pool_rejects_unlimited_connection_settings(options):
     from hailhq.core.config import Settings
@@ -137,7 +143,7 @@ def test_runtime_pool_rejects_unlimited_connection_settings(options):
 
 
 @pytest.mark.asyncio
-async def test_independent_commits_share_only_one_additional_connection(
+async def test_independent_commits_share_two_additional_connections(
     database_url, monkeypatch
 ):
     from hailhq.core import db
@@ -154,11 +160,66 @@ async def test_independent_commits_share_only_one_additional_connection(
             return (await session.execute(text("SELECT 1"))).scalar_one()
 
     try:
-        async with db.independent_session_scope() as first:
-            await first.execute(text("SELECT 1"))
+        async with AsyncExitStack() as holders:
+            for _ in range(2):
+                session = await holders.enter_async_context(
+                    db.independent_session_scope()
+                )
+                await session.execute(text("SELECT 1"))
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(read_one(), timeout=0.5)
         assert await asyncio.wait_for(read_one(), timeout=2) == 1
+    finally:
+        await db.dispose_engine()
+
+
+@pytest.mark.asyncio
+async def test_background_jobs_cannot_take_the_request_connections(
+    database_url, monkeypatch
+):
+    """A job holding every background connection (a slow webhook POST)
+    leaves the request pool free, and the other way round."""
+    from hailhq.core import db
+
+    for name in ("_engine", "_sessionmaker", "_background_engine"):
+        monkeypatch.setattr(db, name, None)
+    monkeypatch.setattr(db, "_background_sessionmaker", None)
+    monkeypatch.setattr(db.settings, "database_url", database_url)
+    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
+
+    async def read_one():
+        async with db.session_scope() as session:
+            return (await session.execute(text("SELECT 1"))).scalar_one()
+
+    async def hold_all(release: asyncio.Event, held: asyncio.Event):
+        async with AsyncExitStack() as holders:
+            for _ in range(db.settings.database_pool_size):
+                session = await holders.enter_async_context(db.session_scope())
+                await session.execute(text("SELECT 1"))
+            held.set()
+            await release.wait()
+
+    try:
+        for job_holds in (True, False):
+            release, held = asyncio.Event(), asyncio.Event()
+            if job_holds:
+                holder = asyncio.create_task(
+                    hold_all(release, held), context=db.background_context()
+                )
+                probe = read_one
+            else:
+                holder = asyncio.create_task(hold_all(release, held))
+
+                def probe():
+                    return asyncio.create_task(
+                        read_one(), context=db.background_context()
+                    )
+
+            await asyncio.wait_for(held.wait(), timeout=2)
+            assert await asyncio.wait_for(probe(), timeout=2) == 1
+            release.set()
+            await holder
+        assert db._background_engine is not db._engine
     finally:
         await db.dispose_engine()
 

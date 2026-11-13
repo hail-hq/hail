@@ -8,6 +8,7 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -34,6 +35,12 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 _independent_engine: AsyncEngine | None = None
 _independent_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_background_engine: AsyncEngine | None = None
+_background_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+# True inside background-job tasks (see ``background_context``).
+_in_background: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "hail_db_in_background", default=False
+)
 
 
 _SCHEME_ALIASES = (
@@ -127,20 +134,42 @@ def _ensure_independent_initialized() -> async_sessionmaker[AsyncSession]:
     global _independent_engine, _independent_sessionmaker
     if _independent_sessionmaker is None:
         # Audit, usage, and idempotency commits can run while a request holds
-        # a transaction. One separate slot prevents nested-checkout starvation.
-        _independent_engine, _independent_sessionmaker = _create_session_pool(1, 0)
+        # a transaction. Separate slots prevent nested-checkout starvation.
+        _independent_engine, _independent_sessionmaker = _create_session_pool(2, 0)
     return _independent_sessionmaker
+
+
+def _ensure_background_initialized() -> async_sessionmaker[AsyncSession]:
+    global _background_engine, _background_sessionmaker
+    if _background_sessionmaker is None:
+        _background_engine, _background_sessionmaker = _create_session_pool(
+            settings.database_pool_size, settings.database_max_overflow
+        )
+    return _background_sessionmaker
+
+
+def background_context() -> contextvars.Context:
+    """A context for a background-job task. ``session_scope`` inside it, and
+    in tasks it starts, uses the background pool. Jobs that hold a session
+    through a slow outside call (a webhook POST, an email send) then cannot
+    take the connections that requests need."""
+    context = contextvars.copy_context()
+    context.run(_in_background.set, True)
+    return context
 
 
 async def dispose_engine() -> None:
     global _engine, _sessionmaker, _independent_engine, _independent_sessionmaker
-    for engine in (_engine, _independent_engine):
+    global _background_engine, _background_sessionmaker
+    for engine in (_engine, _independent_engine, _background_engine):
         if engine is not None:
             await engine.dispose()
     _engine = None
     _sessionmaker = None
     _independent_engine = None
     _independent_sessionmaker = None
+    _background_engine = None
+    _background_sessionmaker = None
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -152,7 +181,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
-    async with _ensure_initialized()() as session:
+    factory = (
+        _ensure_background_initialized()
+        if _in_background.get()
+        else _ensure_initialized()
+    )
+    async with factory() as session:
         yield session
 
 
@@ -180,8 +214,9 @@ async def retry_on_pool_timeout(work: Callable[[], Awaitable[T]], tries: int = 3
 async def independent_session_scope() -> AsyncIterator[AsyncSession]:
     """Short independent commits that must not wait for a request's slot.
 
-    Never nest this scope inside another independent scope. Its one slot is
-    reserved for audit, usage, and idempotency writes, without network work.
+    Never nest this scope inside another independent scope. Its two slots
+    are reserved for audit, usage, and idempotency writes, without network
+    work.
     """
     async with _ensure_independent_initialized()() as session:
         yield session

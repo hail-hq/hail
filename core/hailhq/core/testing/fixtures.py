@@ -111,6 +111,11 @@ async def db(
             "_independent_sessionmaker",
             async_sessionmaker(engine, expire_on_commit=False),
         )
+        monkeypatch.setattr(
+            core_db,
+            "_background_sessionmaker",
+            async_sessionmaker(engine, expire_on_commit=False),
+        )
 
         yield engine
     finally:
@@ -135,8 +140,8 @@ async def async_session(
     """A per-test ``AsyncSession`` against empty tables.
 
     Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
-    and ``_independent_sessionmaker``, so production ``session_scope()`` and
-    ``independent_session_scope()`` callers (audit, usage, idempotency,
+    and the independent and background sessionmakers, so production
+    ``session_scope()`` and ``independent_session_scope()`` callers (audit, usage, idempotency,
     voicebot event writes) talk to the test database without any FastAPI
     dep override.
 
