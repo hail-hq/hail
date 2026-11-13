@@ -319,8 +319,9 @@ def build_instructions(
 
 
 # The other-party lookup runs before the session starts, so a slow DB must
-# not hold back the greeting.
-_OTHER_PARTY_TIMEOUT_SECONDS = 1.0
+# not hold back the greeting. It runs beside tool setup and may wait for one
+# of the voice job's pooled connections.
+_OTHER_PARTY_TIMEOUT_SECONDS = 3.0
 
 
 async def other_party(call_id: UUID) -> DirectoryEntry | None:

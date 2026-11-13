@@ -188,7 +188,8 @@ async def reply_once(api: AgentApiClient) -> bool:
 async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) -> bool:
     sms = claimed.sms
     try:
-        messages = await _prepare(claimed)
+        # Read-only, so a busy pool retries it instead of spending an attempt.
+        messages = await retry_on_pool_timeout(lambda: _prepare(claimed))
         text = await asyncio.wait_for(
             generate_reply(claimed, messages),
             timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,

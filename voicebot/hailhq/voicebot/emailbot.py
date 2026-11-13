@@ -289,7 +289,8 @@ async def _reply_claimed(
             report.finish(await _settle(*args, **kwargs))
 
         try:
-            prepared = await _prepare(claimed)
+            # Read-only, so a busy pool retries it instead of spending an attempt.
+            prepared = await retry_on_pool_timeout(lambda: _prepare(claimed))
             if isinstance(prepared, str):
                 logger.info("email_id=%s not answered: %s", email.id, prepared)
                 await settle(claimed, "skipped", reason=prepared)

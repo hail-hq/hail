@@ -665,3 +665,27 @@ async def test_settle_retries_when_the_pool_is_busy(monkeypatch):
     await textbot._settle(object(), None, retry=True)
     assert opened == 2
     retried.assert_awaited_once()
+
+
+async def test_reply_load_retries_when_the_pool_is_busy(monkeypatch):
+    """A pool timeout while loading the thread must not spend a reply
+    attempt: the load runs again."""
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    loads = 0
+
+    async def prepare(_claimed):
+        nonlocal loads
+        loads += 1
+        if loads == 1:
+            raise PoolTimeout("pool busy")
+        return [{"role": "user", "content": "hi"}]
+
+    settled = AsyncMock()
+    monkeypatch.setattr(textbot, "_prepare", prepare)
+    monkeypatch.setattr(textbot, "generate_reply", AsyncMock(return_value=""))
+    monkeypatch.setattr(textbot, "_settle", settled)
+    claimed = SimpleNamespace(sms=SimpleNamespace(id=uuid.uuid4()), attempt=1)
+    assert await textbot._reply_claimed(SimpleNamespace(), claimed) is True
+    assert loads == 2
+    settled.assert_awaited_once_with(claimed, "skipped")
