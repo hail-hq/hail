@@ -137,7 +137,7 @@ async def test_limit_pool_makes_sessions_wait_instead_of_opening_more(
         await asyncio.gather(*(one() for _ in range(8)))
         assert peak == 2
         assert core_db._engine.pool.size() == 2
-        core_db.limit_pool(3)  # too late: logged, pool unchanged
-        assert core_db._engine.pool.size() == 2
+        core_db.limit_pool(3)  # too late: logged and skipped
+        assert core_db._pool_options == {"pool_size": 2, "max_overflow": 0}
     finally:
         await core_db.dispose_engine()

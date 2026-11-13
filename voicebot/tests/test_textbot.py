@@ -603,6 +603,8 @@ async def test_run_forever_keeps_the_pool_when_stopped_without_draining(
     monkeypatch, tmp_path
 ) -> None:
     monkeypatch.setattr(textbot, "DRAIN_FLAG", tmp_path / "hail-draining")
+    monkeypatch.setattr(core_db, "_engine", None)
+    monkeypatch.setattr(core_db, "_sessionmaker", None)
     monkeypatch.setattr(core_db, "_pool_options", {})
     disposed = AsyncMock()
     monkeypatch.setattr(textbot, "dispose_engine", disposed)
@@ -614,4 +616,24 @@ async def test_run_forever_keeps_the_pool_when_stopped_without_draining(
     stop = threading.Event()
     stop.set()
     await asyncio.wait_for(textbot.run_forever(stop), timeout=2)
+    assert core_db._pool_options["pool_size"] == textbot.DB_CONNECTIONS
     disposed.assert_not_awaited()
+
+
+async def test_run_forever_frees_the_pool_even_if_the_api_client_fails_to_close(
+    monkeypatch, tmp_path
+) -> None:
+    flag = tmp_path / "hail-draining"
+    flag.touch()
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
+    monkeypatch.setattr(core_db, "_pool_options", {})
+    disposed = AsyncMock()
+    monkeypatch.setattr(textbot, "dispose_engine", disposed)
+    monkeypatch.setattr(
+        textbot,
+        "AgentApiClient",
+        lambda *a, **k: SimpleNamespace(aclose=AsyncMock(side_effect=OSError)),
+    )
+    with pytest.raises(OSError):
+        await asyncio.wait_for(textbot.run_forever(), timeout=2)
+    disposed.assert_awaited_once()

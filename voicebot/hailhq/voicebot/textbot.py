@@ -284,12 +284,14 @@ async def run_forever(stop: threading.Event | None = None) -> None:
             *(_email_poll_loop(api, stop) for _ in range(n)),
         )
     finally:
-        await api.aclose()
-        if DRAIN_FLAG.exists():
-            # A draining voicebot runs up to an hour more for its live calls
-            # (in child processes with their own engines). The pollers have
-            # stopped, so return this process's connections to the new one.
-            await dispose_engine()
+        try:
+            await api.aclose()
+        finally:
+            if DRAIN_FLAG.exists():
+                # A draining voicebot runs up to an hour more for its live
+                # calls (in child processes with their own engines). The
+                # pollers have stopped, so return this process's connections.
+                await dispose_engine()
 
 
 def start_thread() -> threading.Thread | None:
