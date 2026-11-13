@@ -217,3 +217,33 @@ def test_committed_voice_json_matches_schema_and_sync_output():
     path = HERE.parents[1] / "costs" / "voice.json"
     jsonschema.validate(json.loads(path.read_text()), SCHEMA)
     assert sv.dump(sv.load(path)) == path.read_text()
+
+
+def test_committed_voice_json_has_one_row_per_key():
+    rates = sv.load(HERE.parents[1] / "costs" / "voice.json")
+    assert len({sv.row_key(r) for r in rates}) == len(rates)
+
+
+def test_merge_keeps_one_label_priced_at_two_rates():
+    base = {
+        "provider": "telnyx",
+        "country_code": "AR",
+        "direction": "outbound",
+        "name": "Trunking Outbound Minute - Argentina - Fixed Land",
+        "line_type": "landline",
+        "origination_prefixes": ["ALL"],
+    }
+    fresh = [
+        {**base, "destination_prefixes": ["5411"], "usd_per_minute": "0.02"},
+        {**base, "destination_prefixes": ["54220"], "usd_per_minute": "0.026"},
+        {
+            **base,
+            "destination_prefixes": ["5411"],
+            "usd_per_minute": "0.02",
+            "exact_match": True,
+        },
+    ]
+    first, _ = sv.merge([], "telnyx", fresh, "2026-11-09")
+    second, changes = sv.merge(first, "telnyx", fresh, "2026-11-10")
+    assert len(second) == 3
+    assert changes == []
