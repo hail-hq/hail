@@ -163,8 +163,11 @@ async def routed_agent(
     domain = await db.get(EmailDomain, email.email_domain_id)
     if domain is None or domain.email_agent_id is None:
         return None
+    # A custom domain with sends off cannot send the reply, so no run starts.
     if domain.kind == "custom" and (
-        domain.verification_status != "verified" or not domain.inbound_enabled
+        domain.verification_status != "verified"
+        or not domain.inbound_enabled
+        or not domain.sends_enabled
     ):
         return None
     agent = await db.get(Agent, domain.email_agent_id)

@@ -1466,7 +1466,7 @@ class EmailDomainPatch(BaseModel):
         description=(
             "The agent that answers mail to this address. The agent must be "
             "live and answer email. A custom domain must be verified with "
-            "inbound on. Null stops agent replies. Omit to leave unchanged."
+            "inbound and sending on. Null stops agent replies. Omit to leave unchanged."
         ),
     )
     email_agent_scope: EmailAgentScope | None = Field(

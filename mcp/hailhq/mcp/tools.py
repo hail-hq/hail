@@ -2550,7 +2550,7 @@ def register_tools(
         DMARC and the spam checks). With ``"anyone"``, a stranger can make the
         agent use its allowed tools. Mail without
         a passing DMARC result gets no reply. A custom domain must be verified with
-        inbound on. A field left out keeps its value, except that a new agent
+        inbound and sending on. A field left out keeps its value, except that a new agent
         starts at ``"members"``. ``domain_id`` comes from
         ``list_email_domains``.
 

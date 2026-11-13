@@ -1348,7 +1348,7 @@ async def test_a_replaced_agent_cannot_send_the_previous_agents_run(
     email_mock.send_email.assert_not_awaited()
 
 
-@pytest.mark.parametrize("change", ["inbound", "verification"])
+@pytest.mark.parametrize("change", ["inbound", "verification", "sends"])
 async def test_a_disabled_custom_inbox_cannot_send_a_queued_reply(
     client, async_session, email_mock, change
 ):
@@ -1360,6 +1360,7 @@ async def test_a_disabled_custom_inbox_cannot_send_a_queued_reply(
     domain.inbound_enabled = change != "inbound"
     if change == "verification":
         domain.verification_status = "pending"
+    domain.sends_enabled = change != "sends"
     await async_session.commit()
     assert (await _reply(client, inbound.id))["state"] == "skipped"
     email_mock.send_email.assert_not_awaited()

@@ -904,6 +904,14 @@ async def patch_email_domain(
                     "its mail",
                     loc=["body", "email_agent_id"],
                 )
+            if sd.kind == "custom" and not updates.get(
+                "sends_enabled", sd.sends_enabled
+            ):
+                raise unprocessable(
+                    "turn on sending for this domain before an agent can answer "
+                    "its mail",
+                    loc=["body", "email_agent_id"],
+                )
         updates["email_agent_id"] = body.email_agent_id
         # A new agent starts at members: an old "anyone" was chosen for the
         # agent before it, and a cleared or deleted route leaves it on the row.

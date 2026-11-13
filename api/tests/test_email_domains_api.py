@@ -1873,6 +1873,25 @@ async def test_patch_needs_a_custom_domain_that_receives(
     assert text in resp.text
 
 
+async def test_patch_needs_a_custom_domain_that_sends(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple,
+) -> None:
+    org_id, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _custom_domain_and_agent(
+        client, async_session, headers, org_id, status="verified", inbound=True
+    )
+    resp = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"email_agent_id": agent_id, "sends_enabled": False},
+        headers=headers,
+    )
+    assert resp.status_code == 422, resp.text
+    assert "turn on sending for this domain" in resp.text
+
+
 async def test_clearing_the_route_needs_nothing_from_a_custom_domain(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
