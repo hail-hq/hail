@@ -26,6 +26,8 @@ from sqlalchemy.ext.asyncio import (
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+# Pool options for this process's engine, set by ``limit_pool``.
+_pool_options: dict[str, int] = {}
 
 
 _SCHEME_ALIASES = (
@@ -97,13 +99,26 @@ def to_sync_url(url: str) -> str:
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
+        _engine = create_async_engine(
+            to_async_url(settings.database_url), **_pool_options
+        )
         if telemetry_enabled():
             # Tracing must never take the database down: the instrumentation
             # refused SQLAlchemy 2.1 and failed every request.
             instrument("SQLAlchemy", logfire.instrument_sqlalchemy, engine=_engine)
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _sessionmaker
+
+
+def limit_pool(size: int) -> None:
+    """Cap this process at ``size`` database connections. A session past the
+    cap waits for a free connection instead of opening one more. Managed
+    poolers (Supabase session mode) refuse clients past a small total shared
+    by every service, so a process that does not need many must not take
+    them. Call it before the first session."""
+    if _engine is not None:
+        raise RuntimeError("limit_pool must run before the engine is created")
+    _pool_options.update(pool_size=size, max_overflow=0)
 
 
 async def dispose_engine() -> None:

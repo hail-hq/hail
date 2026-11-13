@@ -567,3 +567,28 @@ async def test_a_slow_email_does_not_delay_texts(monkeypatch, tmp_path) -> None:
     stop.set()
     release.set()
     await asyncio.wait_for(asyncio.gather(email_task, text_task), timeout=1)
+
+
+async def test_run_forever_caps_its_pool_and_frees_it_when_draining(
+    monkeypatch, tmp_path
+) -> None:
+    """The old voicebot keeps running for its live calls after a deploy, so
+    its text worker must give its database connections back when it drains."""
+    from hailhq.core.config import settings
+
+    flag = tmp_path / "hail-draining"
+    flag.touch()
+    monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
+    monkeypatch.setattr(settings, "hail_text_reply_concurrency", 4)
+    limits: list[int] = []
+    disposed = AsyncMock()
+    monkeypatch.setattr(textbot, "limit_pool", limits.append)
+    monkeypatch.setattr(textbot, "dispose_engine", disposed)
+    monkeypatch.setattr(
+        textbot,
+        "AgentApiClient",
+        lambda *a, **k: SimpleNamespace(aclose=AsyncMock()),
+    )
+    await asyncio.wait_for(textbot.run_forever(), timeout=2)
+    assert limits == [textbot.DB_CONNECTIONS]
+    disposed.assert_awaited_once()

@@ -28,7 +28,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
-from hailhq.core.db import session_scope
+from hailhq.core.db import dispose_engine, limit_pool, session_scope
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
@@ -61,8 +61,14 @@ from livekit.agents.llm import FunctionToolCall
 logger = logging.getLogger("hailhq.voicebot.textbot")
 
 POLL_SECONDS = 2.0
+# Database connections this process may hold. The pollers keep each session
+# short (no model call inside one), so they take turns on these instead of
+# opening one each: the database pooler allows few clients in total, shared
+# with the API and with the old voicebot while a deploy overlaps them.
+DB_CONNECTIONS = 2
 
 __all__ = [
+    "DB_CONNECTIONS",
     "MAX_TOOL_ROUNDS",
     "POLL_SECONDS",
     "TOOL_APOLOGY",
@@ -267,6 +273,7 @@ async def _email_poll_loop(api: AgentApiClient, stop: threading.Event | None) ->
 
 
 async def run_forever(stop: threading.Event | None = None) -> None:
+    limit_pool(DB_CONNECTIONS)
     api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
     n = settings.hail_text_reply_concurrency
     logger.info("text worker started (%s at once, poll every %ss)", n, POLL_SECONDS)
@@ -278,6 +285,10 @@ async def run_forever(stop: threading.Event | None = None) -> None:
         )
     finally:
         await api.aclose()
+        # A draining voicebot runs up to an hour more for its live calls (in
+        # child processes with their own engines). Return this process's
+        # connections now so the new voicebot can use them.
+        await dispose_engine()
 
 
 def start_thread() -> threading.Thread | None:

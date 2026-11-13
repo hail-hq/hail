@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from hailhq.core.db import to_async_url, to_sync_url
 
 
@@ -109,3 +110,35 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await holder.rollback()
         assert await core_db.try_org_lock(other, org) is True
         await other.rollback()
+
+
+async def test_limit_pool_makes_sessions_wait_instead_of_opening_more(
+    database_url, monkeypatch
+):
+    """Eight short sessions at once share two connections, so a managed pooler
+    with a small client limit never sees more than two from this process."""
+    from hailhq.core import db as core_db
+    from hailhq.core.config import settings
+    from sqlalchemy import text
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+    monkeypatch.setattr(core_db, "_engine", None)
+    monkeypatch.setattr(core_db, "_sessionmaker", None)
+    monkeypatch.setattr(core_db, "_pool_options", {})
+    core_db.limit_pool(2)
+    peak = 0
+
+    async def one() -> None:
+        nonlocal peak
+        async with core_db.session_scope() as session:
+            await session.execute(text("SELECT pg_sleep(0.05)"))
+            peak = max(peak, core_db._engine.pool.checkedout())
+
+    try:
+        await asyncio.gather(*(one() for _ in range(8)))
+        assert peak == 2
+        assert core_db._engine.pool.size() == 2
+        with pytest.raises(RuntimeError):
+            core_db.limit_pool(3)
+    finally:
+        await core_db.dispose_engine()
