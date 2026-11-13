@@ -215,8 +215,11 @@ call ends, or when the stale-call sweep closes the call. The reply age limit
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Prompts carry no history. Both agents read it with the `thread_history` tool:
-  `source` is `sms` (texts), `voice` (call turns) or `all`; `before` pages back
-  over the last 7 days; `item_id` returns one full message. The voice prompt
+  `source` is `sms` (texts), `voice` (call turns) or `all`.
+  `query` searches all stored history for this agent and caller, including older conversations.
+  `before` pages through older results; `item_id` returns one full message.
+  Without a query or cursor, the tool starts with recent messages. This is not a retention limit.
+  The voice prompt
   gets one line telling the agent to use the tool when the call has it; the
   text prompt always has it. Why: history in the prompt also held the agent's
   own past "I don't have that" lines, and the model repeated them.
