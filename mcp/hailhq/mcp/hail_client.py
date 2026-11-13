@@ -48,11 +48,15 @@ from hailhq.core.schemas import (
     ContactListResponse,
     EmailCreate,
     EmailDomainListResponse,
+    EmailDomainPatch,
+    EmailDomainResponse,
     EmailEventListResponse,
     EmailListResponse,
     EmailResponse,
     EmailStatsResponse,
     EventStreamResponse,
+    FileUploadCreate,
+    FileUploadLinkResponse,
     NumberAcquireRequest,
     NumberQuoteRequest,
     PhoneNumberListResponse,
@@ -63,6 +67,7 @@ from hailhq.core.schemas import (
     SmsCreate,
     SmsListResponse,
     SmsResponse,
+    VerificationCheckResponse,
     VerificationResponse,
     WhoamiResponse,
 )
@@ -322,6 +327,27 @@ class HailClient:
         number_id_ = _path_id(number_id, name="number_id")
         resp = await self._client.patch(f"/numbers/{number_id_}", json=body)
         return PhoneNumberResponse.model_validate(_decode(resp)).model_dump(mode="json")
+
+    async def route_email_domain(
+        self,
+        domain_id: str,
+        *,
+        email_agent_id: str | None = None,
+        email_agent_scope: str | None = None,
+        clear_agent: bool = False,
+    ) -> dict[str, Any]:
+        """PATCH /email-domains/{id} — which agent answers mail, and whom."""
+        body: dict[str, Any] = {}
+        if clear_agent:
+            body["email_agent_id"] = None
+        elif email_agent_id is not None:
+            body["email_agent_id"] = email_agent_id
+        if email_agent_scope is not None:
+            body["email_agent_scope"] = email_agent_scope
+        EmailDomainPatch.model_validate(body)
+        domain_id_ = _path_id(domain_id, name="domain_id")
+        resp = await self._client.patch(f"/email-domains/{domain_id_}", json=body)
+        return EmailDomainResponse.model_validate(_decode(resp)).model_dump(mode="json")
 
     async def get_agent(self, agent_id: str) -> dict[str, Any]:
         agent_id_ = _path_id(agent_id, name="agent_id")
@@ -702,11 +728,14 @@ class HailClient:
         quote_id: str | None = None,
         number_id: str | None = None,
         purpose: str = "number",
+        uploads: list[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         """POST /verifications — multipart/form-data, personal data in transit.
 
         ``files`` is ``(slot, content_type, bytes)``; each goes out as the
-        part ``file.<slot>`` with the fixed filename ``upload``. No
+        part ``file.<slot>`` with the fixed filename ``upload``. ``uploads``
+        is ``(slot, upload_id)``; each goes out as the text part
+        ``upload.<slot>`` and the API reads the file it names. No
         ``Idempotency-Key``: the route has none (a repeat returns 409).
 
         A non-2xx response never exposes its raw body. A 422 keeps only
@@ -715,44 +744,82 @@ class HailClient:
         status keeps ``detail`` only for the API's own short messages, which
         the tool layer decides to show.
         """
-        data: dict[str, str] = {
-            "country_code": country_code,
-            "number_type": number_type,
-            "subject_type": subject_type,
-            "purpose": purpose,
-            "fields": json.dumps(fields),
-            "documents": json.dumps(documents),
-        }
-        if quote_id is not None:
-            data["quote_id"] = quote_id
-        if number_id is not None:
-            data["number_id"] = number_id
-        if address is not None:
-            data["address"] = json.dumps(address)
-        parts = [
-            (f"file.{slot}", ("upload", content, content_type))
-            for slot, content_type, content in files
-        ]
         resp = await self._client.post(
-            "/verifications", data=data, files=parts, timeout=120.0
+            "/verifications",
+            files=_verification_parts(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                purpose=purpose,
+                fields=fields,
+                documents=documents,
+                files=files,
+                uploads=uploads or [],
+                address=address,
+                quote_id=quote_id,
+                number_id=number_id,
+            ),
+            timeout=120.0,
         )
-        if resp.status_code == 422:
-            raise HailAPIError(
-                status=422,
-                detail="verification rejected",
-                problems=_problems(resp),
-            )
-        if resp.status_code in (402, 409, 503):
-            # A 402 names the credit needed; it never echoes submitted values.
-            raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
-        if not 200 <= resp.status_code < 300:
-            # Unknown failure: keep the status, drop the body.
-            raise HailAPIError(
-                status=resp.status_code,
-                detail="request failed",
-                retry_after=resp.headers.get("retry-after"),
-            )
+        _raise_verification_error(resp)
         return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
+
+    async def check_verification(
+        self,
+        *,
+        country_code: str,
+        number_type: str,
+        fields: dict[str, str],
+        documents: dict[str, Any],
+        files: list[tuple[str, str, bytes]],
+        subject_type: str,
+        address: dict[str, str] | None = None,
+        quote_id: str | None = None,
+        number_id: str | None = None,
+        purpose: str = "number",
+        uploads: list[tuple[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications/check: the same form as submit, read-only.
+        Files nothing, saves nothing, uses no upload. Errors are reduced the
+        same way as ``submit_verification``."""
+        resp = await self._client.post(
+            "/verifications/check",
+            files=_verification_parts(
+                country_code=country_code,
+                number_type=number_type,
+                subject_type=subject_type,
+                purpose=purpose,
+                fields=fields,
+                documents=documents,
+                files=files,
+                uploads=uploads or [],
+                address=address,
+                quote_id=quote_id,
+                number_id=number_id,
+            ),
+            timeout=120.0,
+        )
+        _raise_verification_error(resp)
+        return VerificationCheckResponse.model_validate(resp.json()).model_dump(
+            mode="json"
+        )
+
+    # ------------------------------------------------------------------ #
+    # POST /uploads
+    # ------------------------------------------------------------------ #
+
+    async def create_file_upload(
+        self, *, purpose: str, filename: str, content_type: str
+    ) -> dict[str, Any]:
+        """POST /uploads: a one-time link to PUT a file to, with no key.
+        The request is validated by the shared model before any call."""
+        body = FileUploadCreate(
+            purpose=purpose, filename=filename, content_type=content_type
+        )
+        resp = await self._client.post("/uploads", json=body.model_dump(mode="json"))
+        return FileUploadLinkResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
 
     # ------------------------------------------------------------------ #
     # GET /emails/{id}
@@ -930,6 +997,67 @@ def _path_id(value: str, *, name: str = "id") -> str:
     ):
         raise InvalidPathIdError(f"{name} is not a valid id")
     return quote(value, safe="")
+
+
+def _verification_parts(
+    *,
+    country_code: str,
+    number_type: str,
+    subject_type: str,
+    purpose: str,
+    fields: dict[str, str],
+    documents: dict[str, Any],
+    files: list[tuple[str, str, bytes]],
+    uploads: list[tuple[str, str]],
+    address: dict[str, str] | None,
+    quote_id: str | None,
+    number_id: str | None,
+) -> list[tuple[str, tuple[str | None, Any] | tuple[str, bytes, str]]]:
+    """Every part of a verification form. Text parts go in as ``(None,
+    value)`` entries so the body is multipart even with no file part (the
+    API accepts multipart only; httpx sends ``data`` alone urlencoded)."""
+    text: dict[str, str] = {
+        "country_code": country_code,
+        "number_type": number_type,
+        "subject_type": subject_type,
+        "purpose": purpose,
+        "fields": json.dumps(fields),
+        "documents": json.dumps(documents),
+    }
+    if quote_id is not None:
+        text["quote_id"] = quote_id
+    if number_id is not None:
+        text["number_id"] = number_id
+    if address is not None:
+        text["address"] = json.dumps(address)
+    for slot, upload_id in uploads:
+        text[f"upload.{slot}"] = upload_id
+    return [(name, (None, value)) for name, value in text.items()] + [
+        (f"file.{slot}", ("upload", content, content_type))
+        for slot, content_type, content in files
+    ]
+
+
+def _raise_verification_error(resp: httpx.Response) -> None:
+    """Raise :class:`HailAPIError` for a failed verification form. Never
+    keeps a raw body: a 422 keeps ``loc`` and ``msg`` per problem, a 402,
+    409 or 503 keeps ``detail``, anything else only its status."""
+    if resp.status_code == 422:
+        raise HailAPIError(
+            status=422,
+            detail="verification rejected",
+            problems=_problems(resp),
+        )
+    if resp.status_code in (402, 409, 503):
+        # A 402 names the credit needed; it never echoes submitted values.
+        raise HailAPIError(status=resp.status_code, detail=_error_detail(resp))
+    if not 200 <= resp.status_code < 300:
+        # Unknown failure: keep the status, drop the body.
+        raise HailAPIError(
+            status=resp.status_code,
+            detail="request failed",
+            retry_after=resp.headers.get("retry-after"),
+        )
 
 
 def _decode(resp: httpx.Response, *, problems: bool = False) -> Any:

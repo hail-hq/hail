@@ -1034,3 +1034,14 @@ async def test_requirements_null_mandatory_fields(provider):
     )
     got = await provider.requirements_per_group("PT", "national", "person")
     assert [f.name for f in got[0].fields] == ["first_name", "last_name"]
+
+
+def test_address_scope_follows_the_address_level():
+    from hailhq.core.providers.verification.didww import _address_scope
+
+    assert _address_scope({"address_area_level": "world_wide"}) == "any"
+    assert _address_scope({"address_area_level": "country"}) == "country"
+    assert _address_scope({"address_area_level": "city"}) == "area"
+    # A level this code does not know promises nothing.
+    assert _address_scope({"address_area_level": "planet"}) is None
+    assert _address_scope({}) is None

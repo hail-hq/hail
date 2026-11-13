@@ -4,6 +4,7 @@ from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     field_problems,
     sms_requirements,
+    tax_number,
 )
 from hailhq.core.providers.verification.telnyx_sms import TelnyxSmsRegistrationProvider
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
@@ -135,16 +136,68 @@ def test_individual_tax_id_holders_must_use_business():
     assert not errors({**GOOD, "sender_country": "CA"})
 
 
-def test_business_requires_supported_registration_but_can_operate_abroad():
+def test_business_requires_a_registration_but_can_operate_abroad():
     assert not errors({**BUSINESS, "sender_country": "GB"}, "business")
     assert not errors(
         {**BUSINESS, "registration_country": "CA", "ein": "123456789"}, "business"
     )
-    assert "registration_country" in error_fields(
-        {**BUSINESS, "registration_country": "GB"}, "business"
-    )
     assert "has_tax_id" in error_fields({**BUSINESS, "has_tax_id": "NO"}, "business")
     assert "ein" in error_fields({**BUSINESS, "ein": "made up"}, "business")
+
+
+@pytest.mark.parametrize(
+    "country,number",
+    [
+        ("SE", "SE556677889901"),
+        ("SE", "556677-8899"),
+        ("GB", "SC123456"),
+        ("DE", "DE 123 456 789"),
+    ],
+)
+def test_businesses_from_any_country_file_their_own_number(country, number):
+    data = {
+        **BUSINESS,
+        "sender_country": country,
+        "registration_country": country,
+        "ein": number,
+    }
+    assert not errors(data, "business")
+
+
+@pytest.mark.parametrize(
+    "country,number",
+    [
+        ("US", "123456789012"),
+        ("CA", "123456789XY"),
+        ("SE", "SE1"),
+        ("SE", "ABCDEFGH"),
+        ("SE", "1" * 21),
+        ("se", "556677889901"),
+    ],
+)
+def test_bad_tax_numbers_are_refused(country, number):
+    data = {**BUSINESS, "registration_country": country, "ein": number}
+    assert error_fields(data, "business") & {"ein", "registration_country"}
+
+
+@pytest.mark.parametrize(
+    "number,country,filed",
+    [
+        ("12-3456789", "US", "123456789"),
+        ("SE 556677-8899 01", "SE", "556677889901"),
+        ("se556677889901", "SE", "556677889901"),
+        ("SC123456", "GB", "SC123456"),
+        ("GB123456789", "GB", "123456789"),
+        ("NL 1234.56.789.B01", "NL", "123456789B01"),
+        ("US123456789", "US", "US123456789"),
+        ("EL 123456789", "GR", "123456789"),
+        ("ATU12345678", "AT", "U12345678"),
+        ("GR123456789", "GR", "123456789"),
+        ("123456789 RT 0001", "CA", "123456789"),
+    ],
+)
+def test_tax_number_files_letters_and_digits(number, country, filed):
+    assert tax_number(number, country) == filed
 
 
 @pytest.mark.parametrize(
@@ -335,19 +388,75 @@ def test_samples_cover_one_to_five_purposes(count):
         assert "text_types" in error_fields(data)
 
 
-def test_unselected_and_missing_sample_mapping_are_rejected():
+def test_unselected_sample_purposes_are_rejected_and_missing_ones_allowed():
     assert "sample_1_type" in error_fields({**GOOD, "sample_1_type": "MARKETING"})
     assert "sample_3" in error_fields({**GOOD, "sample_3_type": "CUSTOMER_CARE"})
-    assert "sample_3_type" in error_fields({**GOOD, "sample_3": GOOD["sample_1"]})
+    # A sample without a purpose is fine: purposes are then not checked.
+    assert not errors({**GOOD, "sample_3": GOOD["sample_1"]})
+    assert not errors({**GOOD, "sample_1_type": "", "sample_2_type": ""})
+    # Without purposes: at least one sample for each kind of text.
+    three = {
+        **GOOD,
+        "text_types": "CUSTOMER_CARE,ACCOUNT_NOTIFICATION,DELIVERY_NOTIFICATION",
+        "sample_1_type": "",
+        "sample_2_type": "",
+    }
+    assert "text_types" in error_fields(three)
+    sample = "Acme: Your order 123 shipped today. Reply STOP to opt out."
+    assert "text_types" not in error_fields({**three, "sample_3": sample})
+    # Mixed: two samples name one kind, one has none, so two kinds lack a sample.
+    mixed = {
+        **three,
+        "sample_1_type": "CUSTOMER_CARE",
+        "sample_2_type": "CUSTOMER_CARE",
+        "sample_3": sample,
+    }
+    assert "text_types" in error_fields(mixed)
 
 
 def test_sample_identity_and_stop_must_be_real():
     assert "sample_1" in error_fields(
         {**GOOD, "sample_1": "Wrong brand: Your appointment is tomorrow. Reply STOP."}
     )
-    assert "sample_1" in error_fields(
+    # The opt-out is needed in one sample, not in each.
+    assert not errors(
         {**GOOD, "sample_1": "Acme: Your appointment is tomorrow at 2pm."}
     )
+    no_stop = {
+        **GOOD,
+        "sample_1": "Acme: Your appointment is tomorrow at 2pm.",
+        "sample_2": "Acme: Your order 123 shipped today. Thanks!",
+    }
+    assert "sample_1" in error_fields(no_stop)
+
+
+def test_the_name_error_quotes_the_program_name():
+    data = {
+        **GOOD,
+        "program_name": "Acme Tech",
+        "sample_1": "Hi: your code is 1234. Reply STOP.",
+    }
+    messages = [message for field, message in errors(data) if field == "sample_1"]
+    assert messages == [
+        'Add your program name "Acme Tech" to this sample, so people know who is texting.'
+    ]
+
+
+def test_sample_name_check_ignores_spaces_dots_and_case():
+    data = {**GOOD, "program_name": "Acme Tech"}
+    for name in ("acme.tech", "AcmeTech", "ACME TECH"):
+        sample = f"{name}: Your appointment is tomorrow. Reply STOP to opt out."
+        assert "sample_1" not in error_fields({**data, "sample_1": sample})
+    assert "sample_1" in error_fields(
+        {**data, "sample_1": "Acme: Your appointment is tomorrow. Reply STOP."}
+    )
+    # Both ways: a name without a space matches text with one.
+    joined = {**GOOD, "program_name": "AcmeTech"}
+    sample = "Acme Tech: your appointment is tomorrow. Reply STOP to opt out."
+    assert "sample_1" not in error_fields({**joined, "sample_1": sample})
+    # A one-word name keeps the plain match: a handle like @AcmeHQ is fine.
+    one = {**GOOD, "sample_1": "@AcmeHQ: your code is 1234. Reply STOP to opt out."}
+    assert "sample_1" not in error_fields(one)
 
 
 def test_sample_link_and_phone_must_match_answers():
@@ -555,7 +664,7 @@ def test_keyword_enrollment_requires_actual_confirmation_before_submission():
 @pytest.mark.parametrize(
     "missing,replace",
     [
-        ("sender", ("Acme", "Other sender")),
+        ('program name "Acme"', ("Acme", "Other sender")),
         ("frequency", ("once per appointment", "regularly")),
         ("rates", ("Msg and data rates may apply.", "Our service rates are low.")),
         ("HELP", ("HELP for help", "helpful assistance")),
@@ -614,3 +723,14 @@ def test_attestation_whitespace_does_not_change_compiled_flow():
             {**data, "consent_optional": "YES", "marketing_consent": "YES"}, "person"
         ).message_flow
     )
+
+
+def test_tax_number_help_names_the_vat_countries():
+    from hailhq.core.providers.verification.sms_form import VAT_COUNTRIES
+
+    help_text = next(
+        f.help for f in sms_requirements(TELNYX, "business").fields if f.name == "ein"
+    )
+    assert all(code in help_text for code in VAT_COUNTRIES)
+    assert "GB, DE and FR, use their company registration number" in help_text
+    assert "GB" not in VAT_COUNTRIES and "DE" not in VAT_COUNTRIES

@@ -4,8 +4,11 @@ carrier did not take at creation.
 
 Number-verification files and details pass through in memory to the carrier.
 SMS applications keep submitted text fields and address privately for repair;
-only the organization-scoped application endpoint returns them. Files are
-never stored. Other identifying data is not written to disk or logs, except
+only the organization-scoped application endpoint returns them. Files sent as
+``file.<slot>`` parts are never stored. A document uploaded with an upload link
+(``POST /uploads``, named here as ``upload.<slot>``) is kept in the mail bucket
+until a verification using it is saved, then deleted; the GC deletes any left
+1 hour after upload. Other identifying data is not written to disk or logs, except
 the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
@@ -22,6 +25,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -35,7 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api import verification_decisions  # noqa: F401 (session listeners)
 from hailhq.api.audit import actor_of, write_audit_log
-from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_optional
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
 from hailhq.api.multipart import parse_capped_form
@@ -47,10 +51,16 @@ from hailhq.api.sms_registration import (
 )
 from hailhq.api.superadmin import require_superadmin
 from hailhq.core import sms_registration_fees, sms_setup, verification_hold
-from hailhq.core.billing import get_balance_cents
+from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import get_session, org_lock, try_org_lock
+from hailhq.core.file_uploads import (
+    VERIFICATION_FILE_TYPES,
+    VERIFICATION_MAX_FILE_BYTES,
+    VERIFICATION_UPLOAD_TTL,
+    delete_upload_objects,
+)
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
     rate_sms_registration,
@@ -58,6 +68,7 @@ from hailhq.core.internal_webhook import (
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
+    FileUpload,
     NumberOffer,
     PhoneNumber,
 )
@@ -78,25 +89,40 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
+from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
+from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
     SmsApplicationResponse,
+    VerificationCheckFile,
+    VerificationCheckResponse,
     VerificationResponse,
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import DateTime, Row, String, case, cast, func, select, text, update
+from sqlalchemy import (
+    DateTime,
+    Row,
+    String,
+    case,
+    cast,
+    delete,
+    func,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified, get_history
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_FILE_BYTES = VERIFICATION_MAX_FILE_BYTES
 MAX_REQUEST_BYTES = 30 * 1024 * 1024
-ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
+ALLOWED_FILE_TYPES = set(VERIFICATION_FILE_TYPES)
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
 _READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
@@ -354,7 +380,7 @@ async def _uncharged_sms_steps(
     the one-time debit of a filing made before fees were charged per step.
     A submission happens at filing, except for a filing that reused a brand
     (never charged one); a review once the campaign is filed. Exact refs,
-    so the ref index is used."""
+    so the ledger's (organization, ref) index is used."""
     if step == "submission":
         happened = [
             CarrierVerification.created_at > func.now() - text("interval '1 day'"),
@@ -775,18 +801,25 @@ _GATE_COLUMNS = (
 
 async def _campaign_unfunded(
     db: AsyncSession, rows: list[CarrierVerification], registry: Registry
-) -> set[UUID]:
-    """Ids of the rows whose campaign is still to file (``_campaign_gated``)
-    while the credit does not cover the carrier's campaign fee. Their polls
-    file no campaign until a top-up. The public API knows no Hail prices; the
-    carrier's cost is the floor, as for the filing.
+) -> dict[UUID, int]:
+    """The rows whose campaign is still to file (``_campaign_gated``) while
+    the credit does not cover the carrier's campaign fee, each with the
+    credit it still needs, in cents. Their polls file no campaign until a
+    top-up. The public API knows no Hail prices; the carrier's cost is the
+    floor, as for the filing.
 
     The credit is the balance less the steps not yet charged
     (``_uncharged_cents``). It goes to the organization's registrations
     still before their campaign, reserved ones first (``_campaign_reserved_sql``)
     then oldest first, each using up its fee, so
     one credit never pays for two campaigns. All of them count, not only
-    ``rows``, so every path gives the credit to the same registration."""
+    ``rows``, so every path gives the credit to the same registration.
+
+    The credit needed is per row and adds up: the first row left without
+    credit needs its fee less what is left once every covered row has
+    taken its own (more than its fee when that is below zero), each later
+    one its whole fee. So the sum over an organization's waiting rows is
+    the one top-up that lets them all go."""
     given = {row.id for row in rows}
     # From every US texting row given, not only those gated in the caller's
     # copy: a copy can be stale. The stored rows decide below.
@@ -795,7 +828,7 @@ async def _campaign_unfunded(
         for row in rows
         if _billed_sms(row) and row.state not in _SETTLED_STATES
     }
-    unfunded: set[UUID] = set()
+    unfunded: dict[UUID, int] = {}
     for org in orgs:
         # The stored rows, not the caller's copies: a copy can be stale (the
         # sweeper reads all rows first). Columns only, so the rows the caller
@@ -810,9 +843,14 @@ async def _campaign_unfunded(
         found = found.all()
         if not any(_campaign_gated(r, registry) for r in found):
             continue
-        left = await get_balance_cents(db, org) - await _uncharged_cents(db, org)
+        # One read of the ledger: the check uses the balance as
+        # get_balance_cents reads it (truncated toward zero).
+        ledger = await get_ledger_cents(db, org)
+        balance = int(ledger)
+        left = balance - await _uncharged_cents(db, org)
         # A reserved row (its campaign may be in flight) keeps its claim.
         order = sorted(found, key=lambda r: (not r.reserved, r.created_at, r.id))
+        waiting: list[tuple[UUID, int]] = []
         for row in order:
             if not _campaign_gated(row, registry):
                 continue
@@ -824,10 +862,18 @@ async def _campaign_unfunded(
             if fee is None:
                 continue
             if left < fee:
-                unfunded.add(row.id)
+                waiting.append((row.id, fee))
             else:
                 left -= fee
-    return unfunded & given
+        # A top-up adds whole cents and the check truncates the sum toward
+        # zero: below zero, a fraction of a cent costs one more cent.
+        left -= balance - math.floor(ledger)
+        # ``left`` only falls, so it is below each waiting row's fee: the
+        # first one needs more than zero, the later ones their whole fee.
+        for row_id, fee in waiting:
+            unfunded[row_id] = fee - left
+            left = 0
+    return {row_id: need for row_id, need in unfunded.items() if row_id in given}
 
 
 class _CreditCheck(NamedTuple):
@@ -1203,11 +1249,12 @@ def _out(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
     *,
-    waiting_for_credit: bool = False,
+    credit_needed_cents: int | None = None,
 ) -> VerificationResponse:
     """The response for a row, with ``confirmation``, ``step`` and
-    ``identity_confirmed`` filled in. ``waiting_for_credit``: the row is in
-    ``_campaign_unfunded`` (the caller reads the balance)."""
+    ``identity_confirmed`` filled in. ``credit_needed_cents``: the row's
+    credit need from ``_campaign_unfunded`` (the caller reads the balance),
+    None when it does not wait for credit."""
     refs = row.provider_refs or {}
     identity_confirmed = bool(refs.get("kept_brand_id"))
     if row.purpose == "sms" and row.state == "rejected":
@@ -1227,7 +1274,8 @@ def _out(
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
             "cancellable": _can_cancel(row),
-            "waiting_for_credit": waiting_for_credit,
+            "waiting_for_credit": credit_needed_cents is not None,
+            "credit_needed_cents": credit_needed_cents,
         }
     )
 
@@ -1238,9 +1286,10 @@ async def _out_checked(
     registry: Registry,
     model: type[VerificationResponse] = VerificationResponse,
 ) -> VerificationResponse:
-    """``_out`` with ``waiting_for_credit`` read from the balance."""
-    waiting = row.id in await _campaign_unfunded(db, [row], registry)
-    return _out(row, registry, model, waiting_for_credit=waiting)
+    """``_out`` with ``waiting_for_credit`` and ``credit_needed_cents`` read
+    from the balance."""
+    waiting = await _campaign_unfunded(db, [row], registry)
+    return _out(row, registry, model, credit_needed_cents=waiting.get(row.id))
 
 
 async def approved_handles(
@@ -1433,7 +1482,7 @@ async def get_requirements(
     )
     # The public form leaves out which carrier it is for.
     return VerificationRequirements.model_validate(
-        requirements.model_dump(exclude={"provider"})
+        requirements.model_dump(exclude={"provider", "address_scope"})
     )
 
 
@@ -1591,9 +1640,17 @@ def _json_part(form, name: str, default):
         raise unprocessable(f"{name} must be valid JSON", loc=["body", name]) from exc
 
 
+# Text parts of a verification form: about 10 named parts plus one
+# ``upload.<slot>`` per file, and a file may be sent either way (20 at most).
+MAX_FORM_FIELDS = 40
+
+
 async def _parse_form(request: Request):
     return await parse_capped_form(
-        request, max_bytes=MAX_REQUEST_BYTES, max_files=20, max_fields=20
+        request,
+        max_bytes=MAX_REQUEST_BYTES,
+        max_files=20,
+        max_fields=MAX_FORM_FIELDS,
     )
 
 
@@ -1618,65 +1675,37 @@ async def _read_file(upload) -> UploadedFile:
     )
 
 
-@router.post(
-    "",
-    response_model=VerificationResponse,
-    status_code=http_status.HTTP_201_CREATED,
-    operation_id="create_verification",
-    responses={
-        402: {
-            "description": (
-                "Not enough credit. A number verification needs the offer's "
-                "setup and first month (`setup_cents` + `monthly_cents` of the "
-                "quote) and sets that amount aside until you buy the number. "
-                "A US SMS registration needs its filing fee. Nothing is filed."
-            ),
-        },
-    },
-)
-async def create_verification(
+class _Prepared(NamedTuple):
+    """A submission that passed every check Hail runs before filing."""
+
+    sub: _Submission
+    offer: dict
+    provider_name: str
+    provider: VerificationProvider
+    hold_cents: int
+    requirements: Requirements
+    subject_name: str | None
+    documents: dict[str, DocumentInput]
+    draft_kwargs: dict
+    # The ``upload.<slot>`` rows read, and every file read, for the check.
+    uploads: list[FileUpload]
+    files: list[VerificationCheckFile]
+
+
+async def _prepare_submission(
     request: Request,
-    principal: Annotated[Principal, Depends(get_current_principal)],
-    db: Annotated[AsyncSession, Depends(get_session)],
-    registry: Annotated[Registry, Depends(get_verification_registry)],
-) -> VerificationResponse:
-    """Submit your details and documents (multipart/form-data).
-
-    Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
-    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
-    are charged from credit per step, when the details are submitted and when
-    the carriers start their review, and 402 means there is not enough credit
-    to file, also when a kept brand cannot be reused and the credit does not
-    cover a new one), `country_code`, `number_type`, `subject_type` (required:
-    `person` for you, `business` for your company; ask the user which),
-    `quote_id` (required for `number`: the offer to verify for), `number_id`
-    (optional, for `sms`: one of your US numbers; needed when your US numbers
-    are with more than one carrier),
-    `fields` (JSON object), `address` (JSON object, when required), `documents`
-    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and one file
-    part per slot named `file.<slot>`. Get the slot and field names from
-    `GET /verifications/requirements`.
-
-    The name of the person or company comes from the form you send (for
-    example the business name, or the first and last name) and is shown
-    back as `subject_name`. For a number you may hold several verifications
-    of each subject type (several people, several companies); a second live
-    one of the same subject type and the same name is a 409, and so is a
-    second live one of the same subject type when the form holds no name.
-    A 409 comes before your files are checked and before anything is filed.
-
-    A number verification needs credit for the offer's setup and first month
-    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
-    nothing is filed. That amount is set aside from your balance while the
-    carrier checks your papers. It pays for setup and the first month when
-    you buy the number with this verification, and comes back if the
-    verification is rejected or cancelled, or if no number is bought with it
-    within 30 days of approval. A by-request offer sets nothing aside.
-
-    The carrier checks the details right away. Problems come back as 422 with
-    the field named, and nothing is kept. When it passes, the verification is
-    submitted to the carrier for its review; read it back to follow the state.
-    A `provider` part is deprecated and ignored: Hail picks the carrier.
+    principal: Principal,
+    db: AsyncSession,
+    registry: Registry,
+    s3: S3MailClient | None,
+    *,
+    lock: bool,
+) -> _Prepared:
+    """Every step of ``POST /verifications`` before anything is filed:
+    the form and purpose rules, the carrier pick, the credit checks (402),
+    the carrier's form (a read), the duplicate check (409), the length
+    limits and the files. Shared with ``POST /verifications/check``, which
+    passes ``lock=False``: it saves nothing, so it takes no lock.
     """
     form = await _parse_form(request)
     if _text_part(form, "subject_type") not in ("person", "business"):
@@ -1755,7 +1784,7 @@ async def create_verification(
         if await get_balance_cents(db, principal.organization_id) < hold_cents:
             raise _hold_402(hold_cents)
 
-    if sub.purpose == "sms":
+    if lock and sub.purpose == "sms":
         # Held until the row is saved: a second filing at the same time
         # waits here, then sees the first row and gets 409.
         await org_lock(db, principal.organization_id)
@@ -1818,16 +1847,82 @@ async def create_verification(
         raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
     documents: dict[str, DocumentInput] = {}
+    files: list[VerificationCheckFile] = []
+    for key in form:
+        if key.startswith("upload.") and key[len("upload.") :] not in sub.documents:
+            raise unprocessable(
+                "this upload names a slot that is not in documents",
+                loc=["body", key],
+            )
+    # The upload rows first (one session: one query at a time), and the file
+    # parts, then the total size from both, all before any object is fetched.
+    rows: dict[str, FileUpload] = {}
+    parts: dict[str, UploadedFile] = {}
+    total = 0
+    for slot in sub.documents:
+        part = form.get(f"file.{slot}")
+        has_part = part is not None and hasattr(part, "read")
+        upload_ref = form.get(f"upload.{slot}")
+        if upload_ref is not None and upload_ref != "":
+            if has_part:
+                raise unprocessable(
+                    f"send file.{slot} or upload.{slot}, not both",
+                    loc=["body", f"upload.{slot}"],
+                )
+            rows[slot] = await _usable_upload(
+                db, principal.organization_id, slot, upload_ref
+            )
+        elif has_part:
+            parts[slot] = await _read_file(part)
+            total += len(parts[slot].data)
+            if total > MAX_REQUEST_BYTES:
+                raise _files_too_large()
+    # Per slot: one upload in two slots is sent to the carrier twice.
+    total += sum(row.size_bytes or 0 for row in rows.values())
+    if total > MAX_REQUEST_BYTES:
+        raise _files_too_large()
+    if rows and s3 is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="file uploads are not configured on this server",
+        )
+    fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
+
+    async def fetch(row: FileUpload) -> UploadedFile:
+        async with fetches:
+            return await _read_upload(s3, row)
+
+    # Each distinct upload once. Every fetch finishes (the total was checked
+    # above, so this is bounded), then the first failure in slot order is
+    # raised, with its cause: the same request always gets the same error.
+    distinct = {row.id: row for row in rows.values()}
+    results = await asyncio.gather(
+        *(fetch(row) for row in distinct.values()), return_exceptions=True
+    )
+    fetched = dict(zip(distinct, results))
+    for slot in sub.documents:
+        if slot in rows and isinstance(fetched[rows[slot].id], BaseException):
+            raise fetched[rows[slot].id]
+    total = 0
     for slot, value in sub.documents.items():
-        upload = form.get(f"file.{slot}")
+        file: UploadedFile | None = (
+            fetched[rows[slot].id] if slot in rows else parts.get(slot)
+        )
+        if file is not None:
+            # Again with the bytes read: an object may differ from its row.
+            total += len(file.data)
+            if total > MAX_REQUEST_BYTES:
+                raise _files_too_large()
+            files.append(
+                VerificationCheckFile(
+                    slot=slot,
+                    upload_id=rows[slot].id if slot in rows else None,
+                    size_bytes=len(file.data),
+                    sha256=hashlib.sha256(file.data).hexdigest(),
+                )
+            )
         documents[slot] = DocumentInput(
-            option=value.option,
-            fields=value.fields,
-            file=(
-                await _read_file(upload)
-                if upload is not None and hasattr(upload, "read")
-                else None
-            ),
+            option=value.option, fields=value.fields, file=file
         )
 
     if sub.purpose == "sms":
@@ -1881,15 +1976,98 @@ async def create_verification(
             )
         )
 
+    return _Prepared(
+        sub=sub,
+        offer=offer,
+        provider_name=provider_name,
+        provider=provider,
+        hold_cents=hold_cents,
+        requirements=requirements,
+        subject_name=subject_name,
+        documents=documents,
+        draft_kwargs=draft_kwargs,
+        uploads=list(distinct.values()),
+        files=files,
+    )
+
+
+@router.post(
+    "",
+    response_model=VerificationResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    operation_id="create_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit. A number verification needs the offer's "
+                "setup and first month (`setup_cents` + `monthly_cents` of the "
+                "quote) and sets that amount aside until you buy the number. "
+                "A US SMS registration needs its filing fee. Nothing is filed."
+            ),
+        },
+    },
+)
+async def create_verification(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+) -> VerificationResponse:
+    """Submit your details and documents (multipart/form-data).
+
+    Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
+    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+    are charged from credit per step, when the details are submitted and when
+    the carriers start their review, and 402 means there is not enough credit
+    to file, also when a kept brand cannot be reused and the credit does not
+    cover a new one), `country_code`, `number_type`, `subject_type` (required:
+    `person` for you, `business` for your company; ask the user which),
+    `quote_id` (required for `number`: the offer to verify for), `number_id`
+    (optional, for `sms`: one of your US numbers; needed when your US numbers
+    are with more than one carrier),
+    `fields` (JSON object), `address` (JSON object, when required), `documents`
+    (JSON object: slot name to `{"option": ..., "fields": {...}}`), and for
+    each slot either a file part named `file.<slot>` or a text part named
+    `upload.<slot>` holding the id of a `verification_document` uploaded
+    with `POST /uploads` less than 1 hour ago (not both). Files are JPG, PNG
+    or PDF, 10 MB each at most. Get the slot and field names from
+    `GET /verifications/requirements`. Used uploads are deleted once the
+    verification is saved; after a failed submit they stay for a retry.
+
+    The name of the person or company comes from the form you send (for
+    example the business name, or the first and last name) and is shown
+    back as `subject_name`. For a number you may hold several verifications
+    of each subject type (several people, several companies); a second live
+    one of the same subject type and the same name is a 409, and so is a
+    second live one of the same subject type when the form holds no name.
+    A 409 comes before your files are checked and before anything is filed.
+
+    A number verification needs credit for the offer's setup and first month
+    (`setup_cents` + `monthly_cents` of the quote); without it, 402 and
+    nothing is filed. That amount is set aside from your balance while the
+    carrier checks your papers. It pays for setup and the first month when
+    you buy the number with this verification, and comes back if the
+    verification is rejected or cancelled, or if no number is bought with it
+    within 30 days of approval. A by-request offer sets nothing aside.
+
+    The carrier checks the details right away. Problems come back as 422 with
+    the field named, and nothing is kept. When it passes, the verification is
+    submitted to the carrier for its review; read it back to follow the state.
+    A `provider` part is deprecated and ignored: Hail picks the carrier.
+    """
+    prepared = await _prepare_submission(
+        request, principal, db, registry, s3, lock=True
+    )
     try:
-        draft = await provider.create_draft(
+        draft = await prepared.provider.create_draft(
             organization_id=str(principal.organization_id),
             contact_email=settings.hail_support_email,
-            requirements=requirements,
-            fields=sub.fields,
-            address=sub.address,
-            documents=documents,
-            **draft_kwargs,
+            requirements=prepared.requirements,
+            fields=prepared.sub.fields,
+            address=prepared.sub.address,
+            documents=prepared.documents,
+            **prepared.draft_kwargs,
         )
     except VerificationProviderError as exc:
         raise HTTPException(
@@ -1910,65 +2088,70 @@ async def create_verification(
                 f"applies. Add credit at {BILLING_URL} and file again."
             ),
         )
-    if sub.purpose == "sms":
+    if prepared.sub.purpose == "sms":
         # Stored privately for rejected-application repair; no files, provider
         # feedback, or arbitrary extra multipart fields belong in this record.
         draft.refs["application"] = _application_record(
-            sub.subject_type, requirements, sub.fields, sub.address
+            prepared.sub.subject_type,
+            prepared.requirements,
+            prepared.sub.fields,
+            prepared.sub.address,
         )
 
-    _stamp_campaign_filed(provider, draft.refs)
+    _stamp_campaign_filed(prepared.provider, draft.refs)
     if draft.billed_refs:
-        if sub.purpose == "sms":
+        if prepared.sub.purpose == "sms":
             draft.billed_refs["application"] = copy.deepcopy(draft.refs["application"])
-        _stamp_campaign_filed(provider, draft.billed_refs)
+        _stamp_campaign_filed(prepared.provider, draft.billed_refs)
     if draft.problems:
         if draft.billed_refs:
             await _record_billed_refusal(
                 db,
                 principal,
-                provider_name,
-                sub,
-                subject_name,
+                prepared.provider_name,
+                prepared.sub,
+                prepared.subject_name,
                 draft.billed_refs,
                 "; ".join(p.message for p in draft.problems),
-                requirements.version,
+                prepared.requirements.version,
             )
-        raise _problems_422(draft.problems, principal.organization_id, provider_name)
+        raise _problems_422(
+            draft.problems, principal.organization_id, prepared.provider_name
+        )
 
     row = CarrierVerification(
         organization_id=principal.organization_id,
-        provider=provider_name,
-        purpose=sub.purpose,
-        country_code=sub.country_code,
-        number_type=sub.number_type,
-        subject_type=sub.subject_type,
-        subject_name=subject_name,
+        provider=prepared.provider_name,
+        purpose=prepared.sub.purpose,
+        country_code=prepared.sub.country_code,
+        number_type=prepared.sub.number_type,
+        subject_type=prepared.sub.subject_type,
+        subject_name=prepared.subject_name,
         state="awaiting_review",
         provider_refs=draft.refs,
-        requirements_version=requirements.version,
+        requirements_version=prepared.requirements.version,
     )
-    if hold_cents:
+    if prepared.hold_cents:
         # Not held across the carrier calls above: a top-up must not wait.
         await org_lock(db, principal.organization_id)
-        if await get_balance_cents(db, principal.organization_id) < hold_cents:
+        if await get_balance_cents(db, principal.organization_id) < prepared.hold_cents:
             await db.rollback()
             # Nothing of the customer's is left at the carrier.
             try:
-                await provider.discard(draft.refs)
+                await prepared.provider.discard(draft.refs)
             except Exception:
                 logger.exception("verification draft discard failed")
-            raise _hold_402(hold_cents)
+            raise _hold_402(prepared.hold_cents)
     db.add(row)
     try:
-        if hold_cents:
+        if prepared.hold_cents:
             await db.flush()
             await verification_hold.place_hold(
                 db,
                 principal.organization_id,
                 row.id,
-                hold_cents,
-                channel="voice" if "voice" in offer["capabilities"] else "sms",
+                prepared.hold_cents,
+                channel="voice" if "voice" in prepared.offer["capabilities"] else "sms",
             )
         await db.commit()
     except Exception as exc:
@@ -1978,13 +2161,13 @@ async def create_verification(
         # Not a reused brand: this request did not make it, and a filing that
         # won the race may be using it.
         if not draft.refs.get("brand_reused"):
-            await provider.discard(draft.refs)
+            await prepared.provider.discard(draft.refs)
         if isinstance(exc, IntegrityError):
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    _duplicate_detail(sub.subject_type, subject_name)
-                    if sub.purpose == "number"
+                    _duplicate_detail(prepared.sub.subject_type, prepared.subject_name)
+                    if prepared.sub.purpose == "number"
                     else "a verification already exists for this number type"
                 ),
             ) from exc
@@ -1996,12 +2179,167 @@ async def create_verification(
     await _submit_row(
         db,
         row,
-        provider,
+        prepared.provider,
         before=None,
         actor=actor_of(principal),
         action="verification.submit",
     )
+    await _delete_used_uploads(db, s3, prepared.uploads)
     return _out(row, registry)
+
+
+# ``upload.<slot>`` objects fetched from the bucket at once.
+_MAX_PARALLEL_FETCHES = 4
+
+
+def _files_too_large() -> HTTPException:
+    return unprocessable("the files total more than 30 MB", loc=["body", "files"])
+
+
+async def _usable_upload(
+    db: AsyncSession, organization_id: UUID, slot: str, value: object
+) -> FileUpload:
+    """The ``upload.<slot>`` row: this organization's verification document,
+    uploaded less than ``VERIFICATION_UPLOAD_TTL`` ago. Else 422 naming the
+    slot only."""
+    where = ["body", f"upload.{slot}"]
+    try:
+        upload_id = UUID(str(value))
+    except ValueError:
+        raise unprocessable(f"upload.{slot} must be an upload id", loc=where) from None
+    row = (
+        await db.execute(
+            select(FileUpload).where(
+                FileUpload.id == upload_id,
+                FileUpload.organization_id == organization_id,
+                FileUpload.purpose == "verification_document",
+                FileUpload.uploaded_at.is_not(None),
+                FileUpload.uploaded_at
+                > func.statement_timestamp() - VERIFICATION_UPLOAD_TTL,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise unprocessable(
+            f"upload.{slot}: no usable upload with this id; it must be a "
+            "verification_document of this organization, uploaded less than "
+            "1 hour ago",
+            loc=where,
+        )
+    return row
+
+
+async def _read_upload(s3: S3MailClient, row: FileUpload) -> UploadedFile:
+    """The upload's bytes from the mail bucket, in memory only."""
+    try:
+        data = await s3.fetch_raw(row.s3_key)
+    except Exception as exc:
+        logger.warning("verification upload read failed (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from exc
+    if row.content_type not in ALLOWED_FILE_TYPES or len(data) > MAX_FILE_BYTES:
+        # The PUT checked both; this is a guard against an edited row.
+        raise unprocessable("files must be JPG, PNG or PDF, 10 MB or smaller")
+    return UploadedFile(filename="upload", content_type=row.content_type, data=data)
+
+
+async def _delete_used_uploads(
+    db: AsyncSession, s3: S3MailClient | None, uploads: list[FileUpload]
+) -> None:
+    """Delete the uploads a saved verification used. Best effort: the GC
+    removes any left after ``VERIFICATION_UPLOAD_TTL``."""
+    if not uploads or s3 is None:
+        return
+    # Plain values first: a rollback below expires the ORM objects.
+    targets = [(upload.id, upload.s3_key) for upload in uploads]
+    results = await asyncio.gather(
+        *(delete_upload_objects(s3, s3_key) for _, s3_key in targets),
+        return_exceptions=True,
+    )
+    deleted = []
+    for (upload_id, _), result in zip(targets, results):
+        if isinstance(result, BaseException):
+            # The row stays, so the GC tries the object again.
+            logger.warning(
+                "could not delete used verification upload %s (%s); the GC "
+                "removes it later",
+                upload_id,
+                type(result).__name__,
+            )
+        else:
+            deleted.append(upload_id)
+    if not deleted:
+        return
+    try:
+        await db.execute(delete(FileUpload).where(FileUpload.id.in_(deleted)))
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not delete %d used verification upload row(s) (%s); the GC "
+            "removes them later",
+            len(deleted),
+            type(exc).__name__,
+        )
+
+
+@router.post(
+    "/check",
+    response_model=VerificationCheckResponse,
+    operation_id="check_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit to submit this form. Same rule as "
+                "`POST /verifications`."
+            ),
+        },
+        409: {"description": "Submit would be a duplicate. Same rule as submit."},
+    },
+)
+async def check_verification(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+) -> VerificationCheckResponse:
+    """Check a verification form without filing anything (multipart/form-data).
+
+    Takes the same parts as `POST /verifications` and runs every check Hail
+    can run before filing: the purpose rules, the credit check (402), the
+    carrier's form (a read), the duplicate check (409), field lengths, the
+    files (`file.<slot>` and `upload.<slot>`: type, size, owner, age), and
+    the form's own rules (required fields, documents, address; for `sms`
+    the US texting application). Errors are the same codes and shapes
+    submit gives.
+
+    Nothing is filed at the carrier, saved, held or charged, and uploads
+    are not used up. The carrier runs its own checks when you submit.
+    """
+    prepared = await _prepare_submission(
+        request, principal, db, registry, s3, lock=False
+    )
+    sub, provider = prepared.sub, prepared.provider
+    if sub.purpose == "sms" and isinstance(provider, SmsRegistrationProvider):
+        problems = provider.validate_application(
+            sub.fields, sub.address, sub.subject_type
+        )
+    else:
+        problems = validate_input(
+            prepared.requirements, sub.fields, sub.address, prepared.documents
+        )
+    # Nothing was written; end the read transaction.
+    await db.rollback()
+    if problems:
+        raise HTTPException(status_code=422, detail=_problem_details(problems))
+    return VerificationCheckResponse(
+        ok=True,
+        files=prepared.files,
+        note="The carrier runs its own checks when you submit.",
+    )
 
 
 async def _submit_row(
@@ -2482,7 +2820,7 @@ async def list_verifications(
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
     waiting = await _campaign_unfunded(db, rows, registry)
-    return [_out(r, registry, waiting_for_credit=r.id in waiting) for r in rows]
+    return [_out(r, registry, credit_needed_cents=waiting.get(r.id)) for r in rows]
 
 
 @router.get(
@@ -2817,8 +3155,9 @@ async def confirm_verification(
     registration. Use it when the verification shows `confirmation: "code"`.
     On success the campaign is usually filed at once. It waits when your
     credit does not cover its fee (`waiting_for_credit` is true until you
-    add credit). It also waits while another check of it is running or
-    recently failed, or another process holds it; a later check files it.
+    add credit; `credit_needed_cents` says how much). It also waits while
+    another check of it is running or recently failed, or another process
+    holds it; a later check files it.
     Poll GET /verifications/{id} until `approved`. A wrong or expired code is
     422 on `code`; after five wrong codes, 429 until the carrier sends a
     new code (once a day). 409 when there is nothing to confirm."""
@@ -2923,7 +3262,7 @@ async def admin_list(
     )
     waiting = await _campaign_unfunded(db, rows, registry)
     return [
-        _out(r, registry, AdminVerification, waiting_for_credit=r.id in waiting)
+        _out(r, registry, AdminVerification, credit_needed_cents=waiting.get(r.id))
         for r in rows
     ]
 

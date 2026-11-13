@@ -69,7 +69,7 @@ from hailhq.core.forward_targets import (
     sync_targets,
 )
 from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
-from hailhq.core.models import Email, EmailDomain
+from hailhq.core.models import Agent, Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
@@ -284,11 +284,18 @@ async def verified_senders(
     The hail-mail address is a candidate only with no verified custom domain,
     and stays available through an explicit ``from``. Ordered by ``created_at``
     so a single-identity org resolves the same row on every retry.
+
+    A row the org switched off (``sends_enabled = false``) is never a
+    candidate. Dropping it here shapes every downstream case: a ``from``-less
+    send falls back to the hail-mail address, and a pending custom row that
+    is switched off no longer causes the "pending DKIM" 422 — the org said
+    it must not send, so it must not block sending either.
     """
     stmt = (
         select(EmailDomain)
         .where(EmailDomain.organization_id == organization_id)
         .where(EmailDomain.verification_status == "verified")
+        .where(EmailDomain.sends_enabled)
         .order_by(EmailDomain.created_at.asc())
     )
     verified = list((await db.execute(stmt)).scalars().all())
@@ -296,12 +303,17 @@ async def verified_senders(
 
 
 async def first_pending_custom(db: AsyncSession, organization_id: UUID) -> str | None:
-    """The domain of one custom row still waiting on DKIM, if any."""
+    """The domain of one custom row still waiting on DKIM, if any.
+
+    Switched-off rows (``sends_enabled = false``) are excluded: they must
+    not send and must not block a from-less send either.
+    """
     stmt = (
         select(EmailDomain.domain)
         .where(EmailDomain.organization_id == organization_id)
         .where(EmailDomain.kind == "custom")
         .where(EmailDomain.verification_status == "pending")
+        .where(EmailDomain.sends_enabled)
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
@@ -790,15 +802,20 @@ async def patch_email_domain(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> EmailDomainResponse:
-    """Edit hail-mail prefixes and/or inbound action settings.
+    """Edit hail-mail prefixes, the send switch, and/or inbound action.
 
-    Two modes, mutually compatible:
+    Four modes, mutually compatible:
 
     * **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):
       hail_mail rows only. The managed-cloud console writes here when
       an org admin changes the visible hail-mail address.
+    * **Send switch** (``sends_enabled``): custom rows only. ``false``
+      stops the domain from sending at all — it is skipped by sender
+      selection and a send that names it explicitly is refused with 422.
     * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /
       ``forward_rate_per_hour``): any row kind.
+    * **Agent route** (``email_agent_id`` / ``email_agent_scope``): any row
+      kind. The agent must be in the organization, live, and answer email.
     """
     stmt = select(EmailDomain).where(
         EmailDomain.id == domain_id,
@@ -829,6 +846,16 @@ async def patch_email_domain(
         updates["local_prefix_org"] = new_org
         updates["domain"] = new_address
 
+    # ---- send switch (custom only) ----
+    if body.sends_enabled is not None:
+        if sd.kind != "custom":
+            raise unprocessable(
+                "sends_enabled is only allowed on kind='custom' rows; the "
+                "hail-mail address is the fallback sender and always sends",
+                loc=["body", "sends_enabled"],
+            )
+        updates["sends_enabled"] = body.sends_enabled
+
     # ---- inbound action edits (any kind) ----
     if body.inbound_enabled is not None:
         updates["inbound_enabled"] = body.inbound_enabled
@@ -836,6 +863,62 @@ async def patch_email_domain(
         updates["forward_to"] = body.forward_to or None
     if body.forward_rate_per_hour is not None:
         updates["forward_rate_per_hour"] = body.forward_rate_per_hour
+
+    # ---- agent route (any kind) ----
+    # Null clears the route, so "sent" is what counts here.
+    if "email_agent_id" in body.model_fields_set:
+        if body.email_agent_id is not None:
+            agent = (
+                await db.execute(
+                    select(Agent).where(
+                        Agent.id == body.email_agent_id,
+                        Agent.organization_id == principal.organization_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if agent is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_404_NOT_FOUND,
+                    detail="agent not found",
+                )
+            if agent.status != "live":
+                raise unprocessable(
+                    "this agent is paused", loc=["body", "email_agent_id"]
+                )
+            if not agent.email_enabled:
+                raise unprocessable(
+                    "this agent does not answer email",
+                    loc=["body", "email_agent_id"],
+                )
+            # A hail-mail address always receives: the route is its own switch.
+            if sd.kind == "custom" and sd.verification_status != "verified":
+                raise unprocessable(
+                    "verify this domain before an agent can answer its mail",
+                    loc=["body", "email_agent_id"],
+                )
+            if sd.kind == "custom" and not updates.get(
+                "inbound_enabled", sd.inbound_enabled
+            ):
+                raise unprocessable(
+                    "turn on inbound for this domain before an agent can answer "
+                    "its mail",
+                    loc=["body", "email_agent_id"],
+                )
+            if sd.kind == "custom" and not updates.get(
+                "sends_enabled", sd.sends_enabled
+            ):
+                raise unprocessable(
+                    "turn on sending for this domain before an agent can answer "
+                    "its mail",
+                    loc=["body", "email_agent_id"],
+                )
+        updates["email_agent_id"] = body.email_agent_id
+        # A new agent starts at members: an old "anyone" was chosen for the
+        # agent before it, and a cleared or deleted route leaves it on the row.
+        if body.email_agent_id not in (None, sd.email_agent_id):
+            updates["email_agent_scope"] = "members"
+    if body.email_agent_scope is not None:
+        updates["email_agent_scope"] = body.email_agent_scope
 
     if not updates:
         return EmailDomainResponse.model_validate(sd)
@@ -907,13 +990,20 @@ async def patch_email_domain(
 
     await db.refresh(sd)
     actor_user_id, actor_kind = actor_of(principal)
+    audit_payload: dict[str, Any] = {"domain": sd.domain}
+    if "email_agent_id" in updates:
+        audit_payload["email_agent_id"] = (
+            str(sd.email_agent_id) if sd.email_agent_id else None
+        )
+    if "email_agent_scope" in updates:
+        audit_payload["email_agent_scope"] = sd.email_agent_scope
     await write_audit_log(
         organization_id=principal.organization_id,
         api_key_id=principal.api_key_id,
         action="email_domain.patch",
         resource_type="email_domain",
         resource_id=sd.id,
-        payload={"domain": sd.domain},
+        payload=audit_payload,
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )

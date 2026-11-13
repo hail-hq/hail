@@ -1,9 +1,14 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  # The deployment workflow runs these checks for its exact main commit.
+  workflow_call:
+
+# Only superseded PR runs are cancelled; main pushes keep their own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -19,8 +24,14 @@ jobs:
       - run: uvx ruff==0.16.10 check .
       - run: uvx black==26.10.0 --check .
 
-  test:
+  python-tests:
+    name: Python tests (${{ matrix.package }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, api, voicebot, sdk, mcp]
     services:
       postgres:
         image: postgres:16-alpine
@@ -39,28 +50,24 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: false
-      - run: uv sync --all-packages --all-extras
-      - name: core tests
-        working-directory: core
-        run: uv run pytest tests -v
+      - run: uv sync --frozen --all-packages --all-extras
+      - name: Run tests
+        working-directory: ${{ matrix.package }}
+        run: uv run --frozen pytest tests -v --durations=20
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: api tests
-        working-directory: api
-        run: uv run pytest tests -v
+
+  # Preserve the existing required check while the suites run in parallel.
+  test:
+    if: ${{ always() }}
+    needs: python-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every Python suite to pass
         env:
-          DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: voicebot tests
-        working-directory: voicebot
-        run: uv run --frozen pytest tests -v
-        env:
-          DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
-      - name: sdk tests
-        working-directory: sdk
-        run: uv run pytest tests -v
-      - name: mcp tests
-        working-directory: mcp
-        run: uv run pytest tests -v
+          RESULT: ${{ needs.python-tests.result }}
+        run: test "$RESULT" = success
 
   go:
     runs-on: ubuntu-latest
@@ -77,7 +84,20 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: hail-ci
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - run: docker compose build api voicebot mcp
+      - name: Start MCP with production dependencies
+        run: |
+          docker run --rm --network none -i \
+            -e HAIL_API_KEY=hl_live_test hail-ci-mcp python - <<'PY'
+          from hailhq.mcp.server import app
+          from starlette.testclient import TestClient
+
+          with TestClient(app) as client:
+              response = client.get("/healthz")
+              assert response.status_code == 200, response.text
+          PY

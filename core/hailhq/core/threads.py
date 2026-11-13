@@ -198,7 +198,8 @@ async def thread_items(
     until: datetime | None = None,
     unassigned_pair: tuple[str, str] | None = None,
     source: Source = "all",
-    window: timedelta = THREAD_WINDOW,
+    window: timedelta | None = THREAD_WINDOW,
+    query: str | None = None,
 ) -> list[ThreadItem]:
     """The last ``limit`` items of the thread inside ``window`` (default
     ``THREAD_WINDOW``), oldest first. ``source`` keeps only texts (``"sms"``)
@@ -209,7 +210,7 @@ async def thread_items(
     between those two numbers, either direction. Only the text agent asks."""
     if not is_e164(caller_e164):
         return []
-    since = datetime.now(timezone.utc) - window
+    since = datetime.now(timezone.utc) - window if window is not None else None
     anchor = None
     if before is not None:
         anchor = await thread_item(
@@ -224,7 +225,7 @@ async def thread_items(
             return []
 
     sms_where = _sms_where(organization_id, agent_id, caller_e164, unassigned_pair)
-    sms_stmt = select(Sms).where(sms_where).where(Sms.requested_at >= since)
+    sms_stmt = select(Sms).where(sms_where)
     # Injected-text turns and blank turns are excluded in SQL, so ``limit``
     # counts only items that can be returned.
     text = func.coalesce(CallEvent.payload["text"].astext, "")
@@ -233,7 +234,6 @@ async def thread_items(
         .join(Call, Call.id == CallEvent.call_id)
         .where(*_call_filter(organization_id, agent_id, caller_e164))
         .where(CallEvent.kind.in_(("user_turn", "agent_turn")))
-        .where(CallEvent.occurred_at >= since)
         .where(func.btrim(text) != "")
         .where(
             ~and_(
@@ -242,6 +242,12 @@ async def thread_items(
             )
         )
     )
+    if since is not None:
+        sms_stmt = sms_stmt.where(Sms.requested_at >= since)
+        ev_stmt = ev_stmt.where(CallEvent.occurred_at >= since)
+    if query:
+        sms_stmt = sms_stmt.where(Sms.body.icontains(query, autoescape=True))
+        ev_stmt = ev_stmt.where(text.icontains(query, autoescape=True))
     # Cut at the anchor by (time, id), the same key the result is sorted by.
     # Ties on time are broken by the id prefix, then by the uuid.
     if anchor is not None:

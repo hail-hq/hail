@@ -4,9 +4,54 @@ import logging
 
 import pytest
 from hailhq.core import telemetry
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import SpanContext, TraceFlags
+from opentelemetry.trace import Link, SpanContext, Status, StatusCode, TraceFlags
+
+
+@pytest.mark.parametrize("resource_override", [False, True])
+def test_mcp_export_excludes_content_from_attributes_events_and_links(
+    resource_override,
+):
+    """MCP input/output content is unnecessary for operational diagnostics."""
+    context = SpanContext(123, 456, False, TraceFlags(1))
+    content = {
+        "gen_ai.system_instructions": "PRIVATE-MCP-CONTENT",
+        "gen_ai.input.messages": "PRIVATE-MCP-CONTENT",
+        "gen_ai.output.messages": "PRIVATE-MCP-CONTENT",
+        "gen_ai.tool.call.arguments": "PRIVATE-MCP-CONTENT",
+        "gen_ai.tool.call.result": "PRIVATE-MCP-CONTENT",
+        "lk.pii.user_transcript": "PRIVATE-MCP-CONTENT",
+    }
+    original = ReadableSpan(
+        "MCP server handle request: tools/call",
+        context=context,
+        resource=Resource({"service.name": "hail-mcp"}),
+        attributes={
+            **content,
+            "mcp.tool.name": "send_email",
+            "gen_ai.usage.input_tokens": 42,
+        },
+        events=[Event("tool_result", {**content, "exception.type": "ValueError"}, 1)],
+        links=[Link(context, {**content, "call_id": "call-123"})],
+        status=Status(StatusCode.ERROR, "ValueError: input_value=PRIVATE-MCP-CONTENT"),
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    override = {"service.name": "hail-mcp"} if resource_override else None
+    telemetry.PrivateSpanExporter(memory, override).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert exported.attributes == {
+        "mcp.tool.name": "send_email",
+        "gen_ai.usage.input_tokens": 42,
+    }
+    assert exported.events[0].attributes == {"exception.type": "ValueError"}
+    assert exported.links[0].attributes == {"call_id": "call-123"}
+    assert exported.status.status_code == StatusCode.ERROR
+    assert exported.status.description is None
+    assert original.attributes["gen_ai.tool.call.arguments"] == "PRIVATE-MCP-CONTENT"
 
 
 def test_export_removes_content_but_preserves_trace_and_usage():
@@ -269,3 +314,32 @@ def test_instrument_raises_a_mistake_in_our_own_call():
 
     with pytest.raises(TypeError):
         instrument("Example", setup, engin=None)
+
+
+def test_upload_link_token_never_reaches_the_export():
+    """PUT /v1/uploads/{id}?token=... : the token is the upload credential."""
+    token = "UPLOADTOKENabc123-_xyz"
+    url = f"https://api.example.org/v1/uploads/0b7c?token={token}"
+    original = ReadableSpan(
+        "PUT /v1/uploads/{upload_id}",
+        context=SpanContext(123, 456, False, TraceFlags(1)),
+        attributes={
+            "url.full": url,
+            "http.url": url,
+            "http.target": f"/v1/uploads/0b7c?token={token}",
+            "url.query": f"token={token}",
+            "http.route": "/v1/uploads/{upload_id}",
+            "logfire.msg": f"PUT /v1/uploads/0b7c?token={token}",
+        },
+        events=[Event("note", {"http.url": url}, 1)],
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert token not in str(exported.attributes)
+    assert token not in str(exported.events[0].attributes)
+    assert token not in exported.name
+    assert exported.attributes["url.full"] == "https://api.example.org/v1/uploads/0b7c"
+    assert exported.attributes["http.route"] == "/v1/uploads/{upload_id}"

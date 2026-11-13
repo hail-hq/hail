@@ -13,6 +13,11 @@ from uuid import UUID
 
 import boto3
 import pytest
+from botocore.exceptions import (
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+)
 from botocore.stub import ANY, Stubber
 from hailhq.core.providers.email import SesEmailProvider
 from hailhq.core.providers.email.base import (
@@ -21,6 +26,7 @@ from hailhq.core.providers.email.base import (
     ProviderIdentity,
     ProviderSendResult,
 )
+from hailhq.core.providers.email.ses import SES_MAX_ATTEMPTS
 
 FULL_DOCUMENT_HTML = "<!DOCTYPE html><html><head></head><body><p>x</p></body></html>"
 ORG_ID = UUID("6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b")
@@ -800,3 +806,121 @@ async def test_send_email_raw_path_sends_the_feedback_id_tag() -> None:
     assert fake.kwargs["EmailTags"] == [
         {"Name": "ses:feedback-id-a", "Value": str(org_id)}
     ]
+
+
+async def test_credential_readiness_bounds_hung_resolution_and_reuses_result(
+    monkeypatch,
+):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from hailhq.core.providers.email import ses
+
+    release = threading.Event()
+    calls = 0
+    lock = threading.Lock()
+
+    def session(**kwargs):
+        nonlocal calls
+        with lock:
+            calls += 1
+        release.wait(timeout=5)
+        return SimpleNamespace(region_name="us-east-1", get_credentials=lambda: None)
+
+    monkeypatch.setattr(ses.boto3, "Session", session)
+    monkeypatch.setattr(ses, "_credential_future", None, raising=False)
+    monkeypatch.setattr(ses, "_CREDENTIAL_WAIT_SECONDS", 0.02, raising=False)
+    monkeypatch.setattr(ses, "_CREDENTIAL_FAILURE_TTL", 0.03, raising=False)
+    try:
+        first = await asyncio.gather(*(ses.credentials_ready() for _ in range(40)))
+        assert first == [False] * 40
+        assert calls == 1
+        assert len(ses._credential_future._done_callbacks) <= 1
+        # Later timed-out callers must not leave wrappers attached forever.
+        await asyncio.gather(*(ses.credentials_ready() for _ in range(40)))
+        assert len(ses._credential_future._done_callbacks) <= 1
+        # The ordinary executor remains usable while the credential SDK hangs.
+        assert (
+            await asyncio.wait_for(asyncio.to_thread(lambda: "available"), 0.2)
+            == "available"
+        )
+        assert not await ses.credentials_ready()
+        assert calls == 1
+        release.set()
+        await asyncio.sleep(0.01)
+        assert not await ses.credentials_ready()
+        assert calls == 1  # completed failure is cached for its short TTL
+        await asyncio.sleep(0.04)
+        assert not await ses.credentials_ready()
+        assert calls == 2  # a completed lookup can be refreshed
+    finally:
+        release.set()
+
+
+class FailingClient:
+    """Raises each failure in turn, then returns a MessageId."""
+
+    def __init__(self, *failures: Exception) -> None:
+        self.failures = list(failures)
+        self.calls = 0
+
+    def send_email(self, **kwargs):
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return {"MessageId": "msg-1"}
+
+
+async def _send(client, *, at_most_once: bool = True) -> ProviderSendResult:
+    return await SesEmailProvider(client=client).send_email(
+        at_most_once=at_most_once,
+        from_address="a@example.com",
+        to_addresses=["b@example.com"],
+        subject="Hi",
+        body_text="Hello",
+        body_html=None,
+        organization_id=ORG_ID,
+    )
+
+
+async def test_a_plain_send_is_left_to_the_client_retries(no_wait) -> None:
+    client = FailingClient(ReadTimeoutError(endpoint_url="x"))
+    with pytest.raises(ReadTimeoutError):
+        await _send(client, at_most_once=False)
+    assert client.calls == 1
+
+
+@pytest.fixture()
+def no_wait(monkeypatch):
+    monkeypatch.setattr("hailhq.core.providers.email.ses.random.random", lambda: 0)
+
+
+async def test_a_throttled_send_is_tried_again(
+    ses_client, stub: Stubber, no_wait
+) -> None:
+    stub.add_client_error("send_email", service_error_code="TooManyRequestsException")
+    stub.add_response("send_email", {"MessageId": "msg-1"})
+    result = await _send(ses_client)
+    assert result.provider_message_id == "msg-1"
+
+
+async def test_a_connect_timeout_stops_after_the_last_attempt(no_wait) -> None:
+    client = FailingClient(*(ConnectTimeoutError(endpoint_url="x") for _ in range(9)))
+    with pytest.raises(ConnectTimeoutError):
+        await _send(client)
+    assert client.calls == SES_MAX_ATTEMPTS
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ReadTimeoutError(endpoint_url="x"),
+        ConnectionClosedError(endpoint_url="x"),
+    ],
+)
+async def test_a_send_ses_may_have_taken_is_not_repeated(failure, no_wait) -> None:
+    client = FailingClient(failure)
+    with pytest.raises(type(failure)):
+        await _send(client)
+    assert client.calls == 1

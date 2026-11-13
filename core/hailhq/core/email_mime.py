@@ -1,19 +1,36 @@
-"""Stdlib-`email` MIME parser tailored to inbound ingestion.
+"""Email MIME parsing, readable bodies and safe reply headers.
 
-The parser keeps the API tight: a single ``parse_mime`` entry point
-returns a ``ParsedMime`` dataclass with the fields the inbound pipeline
-needs (envelope-like header derivatives, body parts, attachments as raw
-bytes). Storing attachments to S3 is the caller's job.
+Inbound ingestion uses parse_mime. Delivery and agent history share the
+same message-ID validation and bounded reply-header construction here.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from email import message_from_bytes, policy
+from email import errors, message_from_bytes, policy
 from email.message import Message
 from email.utils import getaddresses
+from html.parser import HTMLParser
 
-__all__ = ["ParsedAttachment", "ParsedMime", "parse_mime"]
+__all__ = [
+    "MAX_HEADER_CHARS",
+    "MAX_SUBJECT_CHARS",
+    "ParsedAttachment",
+    "ParsedMime",
+    "parse_mime",
+    "readable_email_body",
+    "reference_ids",
+    "reply_references",
+    "reply_subject",
+    "usable_message_id",
+]
+
+# Leave room beneath the provider's 995-character header value cap.
+MAX_HEADER_CHARS = 900
+# Same cap as POST /emails; incoming subjects have no stored length cap.
+MAX_SUBJECT_CHARS = 998
+_MESSAGE_ID = re.compile(r"<[!-;=?-~]+@[!-;=?-~]+>")
 
 
 @dataclass
@@ -36,6 +53,22 @@ class ParsedMime:
     body_text: str | None
     body_html: str | None
     attachments: list[ParsedAttachment] = field(default_factory=list)
+    # How many addresses the From header holds. Only one can be verified.
+    from_count: int = 1
+    # False when the header parsed with defects (a dot in a display name aside),
+    # or its angle-bracket address is not the address parsed. The parser and DMARC
+    # may then read different names.
+    from_clean: bool = True
+    # True for mail no person wrote: auto-replies, lists, bulk. No agent answers it.
+    auto_generated: bool = False
+
+
+_BULK_PRECEDENCE = frozenset({"auto_reply", "bulk", "list", "junk"})
+_LIST_HEADERS = ("List-Id", "List-Unsubscribe")
+_ANGLE_ADDRESS = re.compile(r"<([^<>]*)>")
+# What the parser says about "Dr. Ada <ada@example.com>". Common in real mail,
+# and only the display name is affected.
+_DOTTED_NAME = "period in 'phrase'"
 
 
 def _addresses(msg: Message, header: str) -> list[str]:
@@ -49,6 +82,41 @@ def _references(msg: Message) -> list[str] | None:
         return None
     parts = [p.strip() for p in raw.split() if p.strip()]
     return parts or None
+
+
+def _auto_generated(msg: Message) -> bool:
+    """RFC 3834 ``Auto-Submitted`` (any value but ``no``), plus the headers
+    that mark list and bulk mail."""
+    auto = str(msg.get("Auto-Submitted") or "").split(";")[0].strip().lower()
+    if auto and auto != "no":
+        return True
+    if str(msg.get("Precedence") or "").strip().lower() in _BULK_PRECEDENCE:
+        return True
+    return any(msg.get(name) is not None for name in _LIST_HEADERS)
+
+
+def _harmless_defect(defect: Exception) -> bool:
+    return isinstance(defect, errors.ObsoleteHeaderDefect) and (
+        str(defect) == _DOTTED_NAME
+    )
+
+
+def _from_clean(msg: Message, parsed: str) -> bool:
+    """One well-formed ``From`` header that means ``parsed`` and nothing else.
+
+    ``alice@member.com <evil@attacker.com>`` parses to alice, with a defect,
+    while the mail really comes from the attacker's domain.
+    """
+    headers = msg.get_all("From") or []
+    if len(headers) != 1:
+        return False
+    if not all(_harmless_defect(d) for d in getattr(headers[0], "defects", ())):
+        return False
+    raw = next(value for name, value in msg.raw_items() if name.lower() == "from")
+    return all(
+        address.strip().lower() == parsed.lower()
+        for address in _ANGLE_ADDRESS.findall(raw)
+    )
 
 
 def _safe_text(part: Message) -> str:
@@ -139,4 +207,113 @@ def parse_mime(raw: bytes) -> ParsedMime:
         body_text=text,
         body_html=html,
         attachments=atts,
+        from_count=len(from_list),
+        from_clean=_from_clean(msg, from_list[0]) if from_list else False,
+        auto_generated=_auto_generated(msg),
     )
+
+
+def readable_email_body(body_text: str | None, body_html: str | None) -> str:
+    """Show plain text for HTML-only mail without rendering active content."""
+    if body_text:
+        return body_text
+    if not body_html:
+        return "This email has no text message."
+
+    class Reader(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.ignored = 0
+            self.parts = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style", "head"):
+                self.ignored += 1
+            elif not self.ignored and tag in (
+                "p",
+                "div",
+                "br",
+                "li",
+                "tr",
+                "h1",
+                "h2",
+                "h3",
+            ):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style", "head"):
+                self.ignored = max(0, self.ignored - 1)
+            elif not self.ignored and tag in ("p", "div", "li", "tr"):
+                self.parts.append("\n")
+
+        def handle_data(self, data):
+            if not self.ignored:
+                self.parts.append(data)
+
+    reader = Reader()
+    reader.feed(body_html)
+    return (
+        "\n".join(
+            line.strip() for line in "".join(reader.parts).splitlines() if line.strip()
+        )
+        or "This email has no text message."
+    )
+
+
+def reply_subject(subject: str | None) -> str:
+    clean = " ".join((subject or "").split())
+    if clean.lower().startswith("re:"):
+        return clean[:MAX_SUBJECT_CHARS]
+    return f"Re: {clean}"[:MAX_SUBJECT_CHARS] if clean else "Re: your email"
+
+
+def usable_message_id(value: str, *, max_chars: int = 998) -> bool:
+    """A single printable RFC message ID, safe to compare or emit in headers."""
+    return (
+        isinstance(value, str)
+        and len(value) <= max_chars
+        and bool(_MESSAGE_ID.fullmatch(value))
+    )
+
+
+def reference_ids(email, *, limit=30):
+    """Only safe Message-ID header values; never copy arbitrary headers."""
+    ids = list(
+        dict.fromkeys(
+            x
+            for x in [
+                *(email.references_ids or []),
+                email.in_reply_to,
+                (email.message_id or "").strip(),
+            ]
+            if isinstance(x, str) and usable_message_id(x)
+        )
+    )
+    if limit is None:
+        return ids
+    # Preserve the root and newest parents within both service header limits.
+    # Unbounded IDs above remain available for comparing stored threads.
+    ids = [value for value in ids if len(value) <= MAX_HEADER_CHARS]
+    if not ids:
+        return []
+    root = ids[0]
+    if len(ids) > 1 and len(root) + 1 + len(ids[-1]) > MAX_HEADER_CHARS:
+        return ids[-1:]
+    recent = []
+    length = len(root)
+    for value in reversed(ids[1:]):
+        if len(recent) >= limit - 1 or length + 1 + len(value) > MAX_HEADER_CHARS:
+            break
+        recent.append(value)
+        length += 1 + len(value)
+    return [root, *reversed(recent)]
+
+
+def reply_references(email) -> tuple[str | None, list[str] | None]:
+    """Safe reply headers, retaining the root and most recent parents."""
+    message_id = (email.message_id or "").strip()
+    if not usable_message_id(message_id, max_chars=MAX_HEADER_CHARS):
+        return None, None
+    chain = reference_ids(email)
+    return message_id, chain or None

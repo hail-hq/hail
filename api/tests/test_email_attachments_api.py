@@ -9,6 +9,7 @@ import pytest
 from hailhq.api.deps import get_s3_mail
 from hailhq.api.main import app
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
+from hailhq.core.models import FileUpload
 
 from .conftest import insert_org_and_key  # noqa: F401
 
@@ -68,3 +69,27 @@ async def test_upload_requires_auth(
         files={"file": ("a.txt", b"hi", "text/plain")},
     )
     assert resp.status_code == 401
+
+
+async def test_upload_records_uploaded_at_and_sha256(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    s3_mail_mock: AsyncMock,
+    async_session,
+) -> None:
+    import hashlib
+    from uuid import UUID
+
+    _, _, plain = org_and_key
+    data = b"%PDF-1.4 fake pdf bytes"
+    resp = await client.post(
+        "/email-attachments",
+        files={"file": ("invoice.pdf", data, "application/pdf")},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    row = await async_session.get(FileUpload, UUID(resp.json()["id"]))
+    assert row.purpose == "email_attachment"
+    assert row.uploaded_at is not None
+    assert row.sha256 == hashlib.sha256(data).hexdigest()
+    assert row.token_hash is None

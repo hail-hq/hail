@@ -91,17 +91,21 @@ def _run_alembic(url: str, args: list[str]) -> None:
 
 
 @pytest.fixture()
-def empty_db(database_url: str) -> Iterator[str]:  # noqa: F811
+def empty_db(
+    database_url: str, database_schemas: set[str]  # noqa: F811
+) -> Iterator[str]:
     """A wiped DB yielded to the test; wiped again on teardown.
 
-    Other tests in this package use ``async_session`` which does its own
-    ``drop_all`` + ``create_all`` cycle, so they're insulated from this
-    fixture's effects either way.
+    Invalidate the shared fixture's schema so the next ordinary DB test
+    recreates the model schema after these migrations.
     """
-    _wipe_public_schema(database_url)
-    _seed_website_owned_tables(database_url)
-    yield database_url
-    _wipe_public_schema(database_url)
+    database_schemas.discard(database_url)
+    try:
+        _wipe_public_schema(database_url)
+        _seed_website_owned_tables(database_url)
+        yield database_url
+    finally:
+        _wipe_public_schema(database_url)
 
 
 def _column_data_type(conn: psycopg.Connection, table: str, column: str) -> str | None:

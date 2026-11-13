@@ -35,6 +35,19 @@ resource "aws_s3_bucket_lifecycle_configuration" "inbound" {
     }
   }
 
+  # Backstop for identity documents: the app deletes them within about an
+  # hour (EmailAttachmentGcWorker); S3 removes any it missed after a day.
+  rule {
+    id     = "expire-verification-uploads"
+    status = "Enabled"
+    filter {
+      prefix = "verification-uploads/"
+    }
+    expiration {
+      days = 1
+    }
+  }
+
   # No bucket-wide expiration rule for outbound-attachments/: those objects
   # are retained per the app-level contract (used attachments are kept
   # indefinitely and reusable across sends; only never-used uploads expire,

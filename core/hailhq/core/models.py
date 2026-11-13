@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
+from hailhq.core.file_uploads import LINK_SWEEP_GRACE
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
@@ -174,6 +175,8 @@ class Contact(Base):
 class AccountCredit(Base):
     """Append-only ledger; balance = SUM(amount_cents) per org.
 
+    ``ref`` is unique per organization (``account_credits_org_ref_uq``).
+
     Aggregate per-batch for high-volume channels: one row per email blast
     (qty=N), not per send, otherwise the table grows linearly with traffic.
     """
@@ -210,6 +213,10 @@ class AccountCredit(Base):
             "(kind = 'debit' AND amount_cents < 0)",
             name="account_credits_amount_sign_check",
         ),
+        # One row per ref: a replayed charge or credit is refused, and
+        # writers can use ON CONFLICT (organization_id, ref) DO NOTHING.
+        # Not partial, so that clause needs no WHERE; NULL refs stay distinct.
+        Index("account_credits_org_ref_uq", "organization_id", "ref", unique=True),
     )
 
 
@@ -481,7 +488,8 @@ class ApiKey(Base):
 class Agent(Base):
     """A saved brain: what a number answers with, and what POST /calls can
     place calls with (``agent_id``). Numbers point at an agent for calls
-    (``voice_agent_id``) and for texts (``sms_agent_id``)."""
+    (``voice_agent_id``) and for texts (``sms_agent_id``); an email address
+    points at one with ``email_domains.email_agent_id``."""
 
     __tablename__ = "agents"
 
@@ -520,6 +528,9 @@ class Agent(Base):
         Boolean, server_default=text("TRUE"), nullable=False
     )
     sms_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
+    email_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
@@ -776,8 +787,9 @@ class Call(Base):
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
     )
-    from_e164: Mapped[str] = mapped_column(Text, nullable=False)
-    to_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    from_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    to_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport: Mapped[str] = mapped_column(Text, server_default="phone", nullable=False)
     direction: Mapped[str] = mapped_column(
         Text, server_default="outbound", nullable=False
     )
@@ -830,9 +842,15 @@ class Call(Base):
             name="calls_end_reason_when_terminal",
         ),
         CheckConstraint(
-            "(direction = 'outbound' AND from_number_id IS NOT NULL)"
-            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)",
+            "(transport = 'browser' AND from_number_id IS NULL AND to_number_id IS NULL "
+            "AND from_e164 IS NULL AND to_e164 IS NULL) OR "
+            "(transport = 'phone' AND from_e164 IS NOT NULL AND to_e164 IS NOT NULL AND "
+            "((direction = 'outbound' AND from_number_id IS NOT NULL)"
+            " OR (direction = 'inbound' AND to_number_id IS NOT NULL)))",
             name="calls_number_for_direction",
+        ),
+        CheckConstraint(
+            "transport IN ('phone', 'browser')", name="calls_transport_check"
         ),
         Index("calls_thread_from_idx", "organization_id", "agent_id", "from_e164"),
         Index("calls_thread_to_idx", "organization_id", "agent_id", "to_e164"),
@@ -1234,11 +1252,33 @@ class EmailDomain(Base):
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
     provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # Send switch. False means this identity must not send at all: it is
+    # skipped by verified_senders (so from-less sends fall back to hail-mail
+    # or resolveSender's remaining cases), and a send that names it
+    # explicitly is refused with 422. Hail-mail rows may not be switched off
+    # (see email_domains_sends_enabled_check) — they are the fallback
+    # identity a from-less send resolves to. Inbound mail is unaffected.
+    # Mirrors migration 0076.
+    sends_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
     inbound_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
     forward_to: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     forward_rate_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The agent that answers mail to this address, as phone_numbers.sms_agent_id
+    # does for texts. NULL: no agent replies.
+    email_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # members: verified org members only. anyone: every sender that passes the
+    # spam and header rules.
+    email_agent_scope: Mapped[str] = mapped_column(
+        Text, server_default="members", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1248,12 +1288,23 @@ class EmailDomain(Base):
 
     __table_args__ = (
         CheckConstraint(
+            "email_agent_scope IN ('members','anyone')",
+            name="email_domains_email_agent_scope_check",
+        ),
+        CheckConstraint(
             "kind IN ('hail_mail','custom')",
             name="email_domains_kind_check",
         ),
         CheckConstraint(
             "verification_status IN ('pending','verified','failed')",
             name="email_domains_verification_status_check",
+        ),
+        # Hail-mail rows may not stop sending: they are the fallback a
+        # from-less send resolves to, and system mail (forward confirmations)
+        # names their address. Mirrors migration 0076.
+        CheckConstraint(
+            "kind <> 'hail_mail' OR sends_enabled",
+            name="email_domains_sends_enabled_check",
         ),
         # Hail-mail rows need both prefixes; custom rows leave both NULL.
         # Mirrors the migration so Base.metadata.create_all (tests) produces
@@ -1560,11 +1611,59 @@ class Email(Base):
     # branch on it without a join. NULL for outbound rows (kind is not
     # meaningful there) and for legacy inbound rows created before this column.
     email_domain_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The agent this email belongs to: the address's agent on inbound rows, the
+    # agent that wrote it on outbound rows. NULL when no agent is involved.
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # True only when ingest saw one From address and a DMARC PASS. The one proof
+    # of a sender: tools and thread history need it.
+    from_verified: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
+    # Inbound rows routed to an agent, as on ``sms``:
+    # pending | processing | done | skipped | failed.
+    agent_reply_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_reply_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # Claim lease, or retry backoff when pending.
+    agent_reply_available_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "agent_reply_state IS NULL OR agent_reply_state IN "
+            "('pending','processing','done','skipped','failed')",
+            name="emails_agent_reply_state_check",
+        ),
+        Index(
+            "emails_agent_reply_pending_idx",
+            "requested_at",
+            postgresql_where=text("agent_reply_state IN ('pending','processing')"),
+        ),
+        Index(
+            "emails_agent_reply_queued_idx",
+            "requested_at",
+            postgresql_where=text(
+                "direction = 'outbound' AND status = 'queued' AND agent_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "emails_agent_thread_idx",
+            "organization_id",
+            "requested_at",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
+        Index(
+            "emails_agent_idx",
+            "agent_id",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"
             "'complained','received')",
@@ -1646,6 +1745,9 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The console asks "does this domain have mail?" (EXISTS), and
+        # DELETE /email-domains checks the same. Mirrors migration 0077.
+        Index("emails_email_domain_id_idx", "email_domain_id"),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.
@@ -1680,19 +1782,28 @@ class EmailAttachment(Base):
     )
 
 
-class EmailAttachmentUpload(Base):
-    """A caller-uploaded file, pre-send, awaiting reference from a `send`.
+class FileUpload(Base):
+    """A file an organization uploaded, kept until it is used or expires.
 
-    Distinct from ``EmailAttachment`` (which is always 1:1 with an
-    already-received inbound email, created once at ingest, never reused).
-    This row is org-owned, reusable across many outbound sends until
-    referenced or garbage-collected — see
-    ``hailhq.core.email_attachment_gc.EmailAttachmentGcWorker``, which
-    deletes rows where ``first_used_at`` is still null 24h after upload.
-    Rows that have been used at least once are kept indefinitely.
+    ``purpose`` says what it is for:
+
+    * ``email_attachment``: an outbound email attachment, reusable across
+      many sends. Distinct from ``EmailAttachment`` (one file on one email).
+      A forwarded received file uses an outbound upload to preserve its bytes
+      beyond inbound retention. Rows still unused 24h after upload are
+      deleted; used rows are kept.
+    * ``verification_document``: a document for one carrier verification.
+      ``POST /verifications`` reads it and deletes it; rows left over are
+      deleted 1 hour after upload.
+
+    An upload link (``POST /uploads``) makes the row first with
+    ``uploaded_at`` null and ``token_hash`` set; the ``PUT`` that sends the
+    bytes clears the hash and sets ``uploaded_at``, ``size_bytes`` and
+    ``sha256``. A direct upload (``POST /email-attachments``) sets all of
+    them at once. See ``hailhq.core.email_attachment_gc`` for the sweeps.
     """
 
-    __tablename__ = "email_attachment_uploads"
+    __tablename__ = "file_uploads"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -1702,23 +1813,64 @@ class EmailAttachmentUpload(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
+    purpose: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'email_attachment'")
+    )
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     s3_key: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
     first_used_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # sha256 hex of the upload link's token; null once used, or for a
+    # direct upload.
+    token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    link_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The link rules, on the database clock (``statement_timestamp()``, the
+    # time of each statement), so they hold on any number of API hosts.
+    @classmethod
+    def link_open(cls):
+        """SQL: the link has not expired."""
+        return cls.link_expires_at > func.statement_timestamp()
+
+    @classmethod
+    def link_storable(cls):
+        """SQL: a PUT may still mark this link used. The exact opposite of
+        ``link_sweepable``, so a PUT and the sweep never both take a row."""
+        return cls.link_expires_at >= func.statement_timestamp() - LINK_SWEEP_GRACE
+
+    @classmethod
+    def link_sweepable(cls):
+        """SQL: the link sweep may delete this unused link."""
+        return cls.link_expires_at < func.statement_timestamp() - LINK_SWEEP_GRACE
 
     __table_args__ = (
-        Index(
-            "email_attachment_uploads_gc_idx",
-            "created_at",
-            postgresql_where=text("first_used_at IS NULL"),
+        CheckConstraint(
+            "purpose IN ('email_attachment', 'verification_document')",
+            name="file_uploads_purpose_check",
+        ),
+        CheckConstraint(
+            "uploaded_at IS NULL OR size_bytes IS NOT NULL",
+            name="file_uploads_uploaded_has_size",
         ),
         Index(
-            "email_attachment_uploads_org_idx",
+            "file_uploads_gc_idx",
+            "purpose",
+            "uploaded_at",
+            postgresql_where=text("uploaded_at IS NOT NULL AND first_used_at IS NULL"),
+        ),
+        Index(
+            "file_uploads_link_expiry_idx",
+            "link_expires_at",
+            postgresql_where=text("uploaded_at IS NULL"),
+        ),
+        Index(
+            "file_uploads_org_idx",
             "organization_id",
         ),
     )

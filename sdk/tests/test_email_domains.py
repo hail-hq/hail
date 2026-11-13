@@ -423,3 +423,13 @@ async def test_email_domains_list_default_from_null_when_ambiguous(
     async with Client(api_key=api_key, base_url=base_url) as c:
         resp = await c.email_domains.list()
     assert resp.default_from is None
+
+
+async def test_patch_refuses_a_new_agent_with_a_clear() -> None:
+    async with Client(api_key="hail_test", base_url="https://api.example") as c:
+        with pytest.raises(ValueError, match="not both"):
+            await c.email_domains.patch(
+                "11111111-1111-1111-1111-111111111111",
+                email_agent_id="22222222-2222-2222-2222-222222222222",
+                clear_email_agent=True,
+            )

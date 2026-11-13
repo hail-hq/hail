@@ -1,10 +1,20 @@
-"""Background sweep deleting never-used outbound attachment uploads.
+"""Background sweep deleting uploads nobody will use (``file_uploads``).
 
-Uploads are reusable across sends (see EmailAttachmentUpload) so nothing
-deletes them on use — only rows that were uploaded and never referenced
-by any POST /emails within 24h are garbage. Same run_forever/tick shape
-as OutboundForwardWorker (core/hailhq/core/outbound_worker.py), gated in
-api/hailhq/api/main.py's lifespan on the mail bucket being configured.
+Three rules, run on every tick:
+
+* An upload link never used, ``LINK_SWEEP_GRACE`` past ``link_expires_at``:
+  the row, then any object a cut-off PUT left behind (each PUT writes
+  ``<s3_key>.<attempt>``).
+* A verification document uploaded more than ``VERIFICATION_UPLOAD_TTL``
+  ago (1 hour): ``POST /verifications`` deletes the ones it uses, so these
+  are left over. Ticks run every 10 minutes so a document never stays long
+  past the hour.
+* An email attachment uploaded and never used by a send within
+  ``UNUSED_TTL`` (24h). Used ones are reusable and kept.
+
+Same run_forever/tick shape as OutboundForwardWorker
+(core/hailhq/core/outbound_worker.py), gated in api/hailhq/api/main.py's
+lifespan on the mail bucket being configured.
 """
 
 from __future__ import annotations
@@ -13,11 +23,15 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
-from hailhq.core.models import EmailAttachmentUpload
+from hailhq.core.file_uploads import (
+    VERIFICATION_UPLOAD_TTL,
+    delete_upload_objects,
+)
+from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -34,7 +48,7 @@ class EmailAttachmentGcWorker:
         *,
         session_factory: SessionFactory,
         s3_factory: Callable[[], S3MailClient],
-        poll_interval: float = 3600.0,
+        poll_interval: float = 600.0,
     ) -> None:
         self._session_factory = session_factory
         self._s3_factory = s3_factory
@@ -63,7 +77,25 @@ class EmailAttachmentGcWorker:
         self._stop.set()
 
     async def tick(self) -> int:
-        """Delete stale never-used uploads (S3 object + row). Returns count deleted.
+        """Run every sweep once. Returns how many rows were deleted."""
+        # The database clock, the one every upload time is written with.
+        deleted = await self._sweep_links()
+        deleted += await self._sweep_uploaded(
+            (FileUpload.purpose == "verification_document")
+            & (
+                FileUpload.uploaded_at
+                < func.statement_timestamp() - VERIFICATION_UPLOAD_TTL
+            )
+        )
+        deleted += await self._sweep_uploaded(
+            (FileUpload.purpose == "email_attachment")
+            & FileUpload.first_used_at.is_(None)
+            & (FileUpload.uploaded_at < func.statement_timestamp() - UNUSED_TTL)
+        )
+        return deleted
+
+    async def _sweep_uploaded(self, condition) -> int:
+        """Delete uploaded rows matching ``condition`` (S3 object + row).
 
         Each row's S3 delete and DB row-delete commit together, one row at a
         time — a crash between rows leaves already-processed rows fully gone
@@ -79,13 +111,11 @@ class EmailAttachmentGcWorker:
         session, then processed one row (its own S3 delete + DB delete +
         commit) at a time.
         """
-        cutoff = datetime.now(timezone.utc) - UNUSED_TTL
         async with self._session_factory() as session:
             stmt = (
-                select(EmailAttachmentUpload.id, EmailAttachmentUpload.s3_key)
-                .where(EmailAttachmentUpload.first_used_at.is_(None))
-                .where(EmailAttachmentUpload.created_at < cutoff)
-                .order_by(EmailAttachmentUpload.created_at.asc())
+                select(FileUpload.id, FileUpload.s3_key)
+                .where(FileUpload.uploaded_at.is_not(None), condition)
+                .order_by(FileUpload.uploaded_at.asc())
                 .limit(GC_BATCH)
             )
             candidates = (await session.execute(stmt)).all()
@@ -96,7 +126,7 @@ class EmailAttachmentGcWorker:
         deleted = 0
         for row_id, s3_key in candidates:
             try:
-                await s3.delete(s3_key)
+                await delete_upload_objects(s3, s3_key)
             except Exception:
                 logger.warning(
                     "GC: failed to delete S3 object for upload_id=%s; "
@@ -106,13 +136,59 @@ class EmailAttachmentGcWorker:
                 )
                 continue
             async with self._session_factory() as session:
-                await session.execute(
-                    delete(EmailAttachmentUpload).where(
-                        EmailAttachmentUpload.id == row_id
-                    )
-                )
+                await session.execute(delete(FileUpload).where(FileUpload.id == row_id))
                 await session.commit()
             deleted += 1
+        return deleted
+
+    async def _sweep_links(self) -> int:
+        """Delete upload links never used, ``LINK_SWEEP_GRACE`` past expiry.
+
+        The row goes first, and only while it is still unused. A PUT marks a
+        link used only while it is within ``LINK_SWEEP_GRACE`` of its expiry,
+        the opposite of this rule, so the two never take the same row. A PUT
+        later than that deletes its own object and answers 404. Both rules
+        (``link_storable`` and ``link_sweepable``) read the database clock,
+        so they hold with several API hosts. Then
+        the objects of PUTs cut off before their update, usually none. A
+        failed S3 delete only logs, so one bad row never blocks the batch;
+        such an object stays. With the Terraform module, verification
+        documents also expire after 1 day by lifecycle rule.
+        """
+        expired = (
+            FileUpload.uploaded_at.is_(None),
+            FileUpload.link_sweepable(),
+        )
+        async with self._session_factory() as session:
+            stmt = (
+                select(FileUpload.id, FileUpload.s3_key)
+                .where(*expired)
+                .order_by(FileUpload.link_expires_at.asc())
+                .limit(GC_BATCH)
+            )
+            candidates = (await session.execute(stmt)).all()
+        if not candidates:
+            return 0
+
+        deleted = 0
+        for row_id, s3_key in candidates:
+            async with self._session_factory() as session:
+                # Same rule again: a PUT may have finished meanwhile.
+                result = await session.execute(
+                    delete(FileUpload).where(FileUpload.id == row_id, *expired)
+                )
+                await session.commit()
+            if not result.rowcount:
+                continue
+            deleted += 1
+            try:
+                await delete_upload_objects(self._get_s3(), s3_key)
+            except Exception:
+                logger.warning(
+                    "GC: failed to delete S3 objects for expired link upload_id=%s",
+                    row_id,
+                    exc_info=True,
+                )
         return deleted
 
 

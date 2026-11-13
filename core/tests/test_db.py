@@ -161,3 +161,33 @@ async def test_independent_commits_share_only_one_additional_connection(
         assert await asyncio.wait_for(read_one(), timeout=2) == 1
     finally:
         await db.dispose_engine()
+
+
+async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
+    """org_lock goes through key_lock with the bare organization id, so the
+    lock is the one every org_lock and try_org_lock caller already takes."""
+    import uuid
+    from unittest.mock import AsyncMock
+
+    from hailhq.core import db as core_db
+
+    org = uuid.uuid4()
+    calls = []
+
+    async def fake_key_lock(_session, key):
+        calls.append(key)
+
+    original = core_db.key_lock
+    core_db.key_lock = fake_key_lock
+    try:
+        await core_db.org_lock(AsyncMock(), org)
+    finally:
+        core_db.key_lock = original
+    assert calls == [str(org)]
+
+    async with session_factory() as holder, session_factory() as other:
+        await core_db.org_lock(holder, org)
+        assert await core_db.try_org_lock(other, org) is False
+        await holder.rollback()
+        assert await core_db.try_org_lock(other, org) is True
+        await other.rollback()

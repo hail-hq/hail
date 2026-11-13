@@ -31,9 +31,11 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
+    NINE_DIGIT_COUNTRIES,
     campaign_text,
     sms_requirements,
     sms_subject_name,
+    tax_number,
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
@@ -321,11 +323,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     message="First and last name together must fit in 100 characters.",
                 )
             )
+        # Outside the US and Canada, sender_problems runs the same check.
+        issuer = (fields.get("registration_country") or "").strip().upper()
         if (
             subject_type == "business"
             and address
-            and fields.get("registration_country")
-            not in (None, address.country_code.upper())
+            and issuer in NINE_DIGIT_COUNTRIES
+            and issuer != address.country_code.upper()
         ):
             problems.append(
                 Problem(
@@ -507,7 +511,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 "email": fields["rep_email"],
                 "phone": fields["rep_phone"],
                 "vertical": fields["industry"],
-                "ein": fields["ein"].replace("-", ""),
+                "ein": tax_number(fields["ein"], fields.get("registration_country")),
                 "website": fields["website"],
             }
         body.update(
@@ -1287,7 +1291,7 @@ def _safe_message(response: httpx.Response) -> str:
         f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
     ).lower()
     for words, text in (
-        (("ein", "tax id", "registration number"), "Check the tax ID (EIN)."),
+        (("ein", "tax id", "registration number"), "Check the business tax number."),
         (("website", "url"), "Check the website address."),
         (("address", "street", "postal", "zip"), "Check the address."),
         (("phone", "mobile"), "Check the phone number."),

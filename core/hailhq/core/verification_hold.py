@@ -6,9 +6,13 @@ A billed number verification debits setup plus the first month
 cancelled, when a number is bought with it (the purchase then charges the
 number the usual way), or when it stays approved and unused too long.
 
-The ledger has no unique index on ``ref``, so a release locks the hold row
-first: two releases of one verification run one after the other, and the
-second sees the first one's return row. The caller commits.
+A release locks the hold row first: two releases of one verification run
+one after the other, and the second sees the first one's return row and adds
+nothing. The ledger's unique (organization, ref) index is the backstop: a
+second return row would make the session's next flush or commit raise
+IntegrityError (the caller's own error handling decides what the user sees),
+never credit twice.
+The caller commits.
 """
 
 from __future__ import annotations

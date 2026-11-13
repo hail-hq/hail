@@ -16,12 +16,37 @@ curl -X POST "$HAIL_API_URL/v1/emails" \
   -d '{"to": ["ada@example.com"], "subject": "Hi", "body_text": "Hello", "recipient_consent": true}'
 ```
 
+## Attachments
+
+Upload the file, then pass its id in `attachment_ids`. With a key, upload it directly ([`POST /v1/email-attachments`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml)):
+
+```bash
+curl -X POST "$HAIL_API_URL/v1/email-attachments" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -F file=@invoice.pdf
+```
+
+From a shell with no key (an agent using the MCP), make a one-time link with `POST /v1/uploads` (MCP: `create_file_upload`), then send the bytes to it:
+
+```bash
+curl -X POST "$HAIL_API_URL/v1/uploads" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}'
+# → {"id": "...", "upload_url": "https://api.hail.so/v1/uploads/<id>?token=<token>", ...}
+
+curl -sS -X PUT --data-binary @invoice.pdf '<upload_url>'
+# → {"id": "...", "size_bytes": 48213, "sha256": "..."}
+```
+
+The link needs no key, works once, and expires after 15 minutes. Each id works in many sends; one unused 24 hours after upload is deleted. The whole message, attachments included, is 25 MB at most.
+
 ## What Hail does when you send
 
 These apply to mail you send with `POST /v1/emails` or through an agent. Forwarded mail and Hail's own notices follow other rules ([architecture](./architecture.md#bounces-and-complaints)).
 
 - **Your domain signs the mail.** A custom domain gets DKIM and a MAIL FROM on `send.<domain>`, so SPF and DKIM align with your `From`. `hail email domain dns-check <id>` checks DKIM, MAIL FROM and DMARC, and gives a DMARC record to publish if you have none.
-- **One-click unsubscribe.** An email with exactly one recipient carries `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). The link works for one year. A click on it, or the Unsubscribe button in Gmail or Yahoo, adds the address to your suppression list. An email with two or more recipients carries no unsubscribe header.
+- **One-click unsubscribe.** A marketing email with exactly one recipient carries `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). The link works for one year. A click on it, or the Unsubscribe button in Gmail or Yahoo, adds the address to your suppression list. Informational emails and emails with two or more recipients carry no unsubscribe headers.
 - **Hard bounces and spam complaints stop future sends.** The addresses named in the bounce or complaint are added to your suppression list. A soft bounce (mailbox full, server busy) is recorded as an event only.
 - **Send limits.** Each organization has an hourly and a daily send cap. Over the cap, `POST /v1/emails` returns `403`.
 

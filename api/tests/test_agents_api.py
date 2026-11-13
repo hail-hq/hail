@@ -10,7 +10,8 @@ import httpx
 import pytest
 from hailhq.core import carrier_routing
 from hailhq.core.config import settings
-from hailhq.core.models import PhoneNumber
+from hailhq.core.models import AuditLog, EmailDomain, PhoneNumber
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key
@@ -297,6 +298,40 @@ async def test_delete_agent_detaches_numbers(
     assert row.voice_agent_id is None
     assert row.sms_agent_id is None
     assert row.inbound_registered_at is None
+
+
+async def test_delete_agent_records_the_email_route(
+    client: httpx.AsyncClient,
+    org,
+    async_session: AsyncSession,
+) -> None:
+    org_id, headers = org
+    agent = await _create_agent(client, headers)
+    domain = EmailDomain(
+        organization_id=org_id,
+        kind="hail_mail",
+        domain="amber-heron-42+acme@mail.hail.so",
+        local_prefix_user="amber-heron-42",
+        local_prefix_org="acme",
+        provider="ses",
+        email_agent_id=uuid.UUID(agent["id"]),
+    )
+    async_session.add(domain)
+    await async_session.commit()
+
+    r = await client.delete(f"/agents/{agent['id']}", headers=headers)
+    assert r.status_code == 204
+    log = (
+        await async_session.execute(
+            select(AuditLog).where(
+                AuditLog.organization_id == org_id,
+                AuditLog.action == "agent.delete",
+            )
+        )
+    ).scalar_one()
+    assert log.payload["email_routes_detached"] == 1
+    await async_session.refresh(domain)
+    assert domain.email_agent_id is None
 
 
 async def test_release_unregisters_first(
@@ -1004,3 +1039,23 @@ async def test_agent_handover_team_member_rejected(
         headers=headers,
     )
     assert r.status_code == 422, r.text
+
+
+async def test_email_enabled_defaults_on_and_can_be_changed(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Inbox", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["email_enabled"] is True
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": False}, headers=headers
+    )
+    assert r.json()["email_enabled"] is False
+    # Null means leave it: the column is not nullable.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_enabled": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email_enabled"] is False

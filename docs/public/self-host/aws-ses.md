@@ -164,13 +164,15 @@ curl -X POST $HAIL_API_URL/v1/emails \
 
 The `from` field is optional. Resolution order:
 
-1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org.
+1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org. A custom domain switched off for sending (`PATCH /email-domains/{id}` with `sends_enabled: false`) is refused with `422`.
 2. The org's single verified custom domain, which wins over the hail-mail address. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
 3. The org's hail-mail address. Hail mints it on the first send if the org has none and `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
 
 If none of these resolve, the call returns `503` with instructions to register a domain.
 
 To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified custom domains.
+
+A `custom` row can be blocked from sending with `PATCH /email-domains/{id}` (`sends_enabled: false`): it is skipped by the pick above and refuses an explicit `from`. Inbound mail on the domain is unaffected. Hail-mail rows cannot be blocked — they are the fallback a `from`-less send resolves to.
 
 The optional `from_name` field sets a display name on the `From:` header (`"Acme Billing" <billing@acme.com>`). Non-ASCII names are RFC-2047-encoded automatically; control characters are rejected with `422`.
 
@@ -236,6 +238,16 @@ A Terragrunt wrapper at `infra/terragrunt.hcl` automates provisioning
 around the bare Terraform module in `infra/terraform/`. The wrapper
 configures an S3-backed remote state with a DynamoDB lock table. It
 pulls every input from the repo's `.env` — no parallel `tfvars` file.
+
+The same bucket stores email attachments, verification documents and SMS
+consent screenshots. If you
+write the API's bucket policy by hand instead of with the module, copy the
+statements in [`infra/terraform/iam.tf`](https://github.com/hail-hq/hail/blob/main/infra/terraform/iam.tf).
+Copy all of them. Besides the inbound mail folders, the API gets, puts and
+deletes objects under `outbound-attachments/*`, `verification-uploads/*` and
+`sms-evidence/*`, and lists those three folders. `s3:ListBucket` is granted
+on the bucket ARN itself (not on an object path), with a `StringLike`
+condition on `s3:prefix`, as in that file.
 
 ### 10.1 Terragrunt apply
 

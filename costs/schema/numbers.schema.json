@@ -122,6 +122,7 @@
                   "proof_of_address",
                   "address_in_country",
                   "address_in_area",
+                  "address_any_country",
                   "company_registration",
                   "company_id",
                   "company_name",

@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from decimal import Decimal
 
 from hailhq.core.models import AccountCredit
 from sqlalchemy import func, select
@@ -61,6 +62,15 @@ def monthly_fee_ref(
     return f"monthly_fee:{organization_id}:{number_id}:dedicated_number:{at:%Y-%m}"
 
 
+async def get_ledger_cents(db: AsyncSession, organization_id: uuid.UUID) -> Decimal:
+    """The org's ledger SUM in cents, unrounded (0.1-cent precision)."""
+    stmt = select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
+        AccountCredit.organization_id == organization_id
+    )
+    result = await db.execute(stmt)
+    return Decimal(result.scalar_one() or 0)
+
+
 async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int:
     """Current balance for an org, in cents. SUM over the ledger.
 
@@ -68,11 +78,7 @@ async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int
     toward zero, so 499.8 reads as 499 — sub-cent remainders never count
     in the caller's favor, which keeps the has_funds gate conservative.
     """
-    stmt = select(func.coalesce(func.sum(AccountCredit.amount_cents), 0)).where(
-        AccountCredit.organization_id == organization_id
-    )
-    result = await db.execute(stmt)
-    return int(result.scalar_one() or 0)
+    return int(await get_ledger_cents(db, organization_id))
 
 
 async def has_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:

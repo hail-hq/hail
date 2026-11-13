@@ -357,6 +357,7 @@ class AgentResponse(BaseModel):
     max_duration_seconds: int | None = None
     voice_enabled: bool = True
     sms_enabled: bool = True
+    email_enabled: bool = True
     status: AgentStatus = "live"
     created_at: datetime
     updated_at: datetime
@@ -567,12 +568,15 @@ class EmailAttachmentUploadResponse(BaseModel):
 class EmailResponse(EmailSummary):
     body_text: str | None = None
     body_html: str | None = None
-    # Inbound-only metadata. Outbound rows leave these all null/empty.
+    # Inbound metadata. Outbound rows leave these null/empty, except that an
+    # agent's reply carries in_reply_to and references_ids.
     # Defaults match the outbound shape so existing serializations keep
     # working. Mirrors ``core/hailhq/core/schemas.py:EmailResponse``.
     message_id: str | None = None
     in_reply_to: str | None = None
     references_ids: list[str] | None = None
+    agent_id: UUID | None = None
+    agent_reply_state: str | None = None
     spam_verdict: str | None = None
     virus_verdict: str | None = None
     dkim_verdict: str | None = None
@@ -684,6 +688,9 @@ class EmailDomainCreate(BaseModel):
         return self
 
 
+EmailAgentScope = Literal["members", "anyone"]
+
+
 class EmailDomainPatch(BaseModel):
     """Body for ``PATCH /email-domains/{id}``.
 
@@ -694,6 +701,9 @@ class EmailDomainPatch(BaseModel):
     * Inbound action — ``inbound_enabled``, ``forward_to``,
       ``webhook_url`` (empty string clears it; the server returns the new
       plaintext secret once when set), ``forward_rate_per_hour``.
+    * Agent route — ``email_agent_id`` (null stops replies) and
+      ``email_agent_scope`` (``members`` or ``anyone``). A new agent starts
+      at ``members`` unless the call names a scope.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -704,6 +714,8 @@ class EmailDomainPatch(BaseModel):
     forward_to: list[str] | None = None
     webhook_url: str | None = None
     forward_rate_per_hour: int | None = None
+    email_agent_id: UUID | None = None
+    email_agent_scope: EmailAgentScope | None = None
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -740,6 +752,8 @@ class EmailDomainResponse(BaseModel):
     mail_from_status: str | None = None
     provider: str
     verified_at: datetime | None = None
+    email_agent_id: UUID | None = None
+    email_agent_scope: EmailAgentScope = "members"
     inbound_enabled: bool = False
     forward_to: list[str] | None = None
     webhook_url: str | None = None

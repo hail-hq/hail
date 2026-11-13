@@ -74,10 +74,66 @@ def _answer(fields: dict[str, str], name: str) -> str:
 # New applications describe their actual consent journey. Never append claims
 # about consent, disclosures or confirmation that the applicant did not supply.
 _OPT_IN_MAX = 1024
-_COUNTRIES = (
-    FieldOption(key="US", label="United States"),
-    FieldOption(key="CA", label="Canada"),
+# Carriers file at most 20 characters (Telnyx `ein`).
+_TAX_NUMBER_MAX = 20
+# US EINs and Canadian Business Numbers are nine digits.
+NINE_DIGIT_COUNTRIES = frozenset({"US", "CA"})
+
+
+# Countries whose VAT number the carrier registry matches automatically
+# (Telnyx "10DLC Unverified Brand"). Every other country outside the US and
+# Canada files its company registration number.
+VAT_COUNTRIES = frozenset(
+    {
+        "AE",
+        "AU",
+        "BY",
+        "HR",
+        "HU",
+        "IE",
+        "IS",
+        "IT",
+        "LT",
+        "LU",
+        "LV",
+        "MT",
+        "MY",
+        "NL",
+        "NO",
+        "NZ",
+        "PL",
+        "PT",
+        "RO",
+        "SA",
+        "SE",
+        "SG",
+        "SI",
+        "SK",
+        "TW",
+    }
 )
+# The VAT prefix to strip, per country: the ISO code before a digit, unless
+# listed. Greece uses EL. An Austrian number keeps its U ("ATU12345678" files
+# as "U12345678").
+_VAT_PREFIXES = {"GR": r"(EL|GR)(?=[0-9])", "AT": r"AT(?=U[0-9])"}
+
+
+def tax_number(value: str | None, country: str | None) -> str:
+    """The business tax number as carriers file it: letters and digits,
+    uppercase, without the VAT prefix of the issuing country.
+    "NL 1234.56.789.B01" from the Netherlands files as "123456789B01". A full Canadian
+    Business Number files as its first 9 digits."""
+    text = re.sub(r"[^0-9A-Za-z]", "", value or "").upper()
+    code = (country or "").strip().upper()
+    if code == "CA":
+        full = re.fullmatch(r"([0-9]{9})[A-Z]{2}[0-9]{4}", text)
+        return full.group(1) if full else text
+    if code in NINE_DIGIT_COUNTRIES or not re.fullmatch(r"[A-Z]{2}", code):
+        return text
+    prefix = _VAT_PREFIXES.get(code, rf"{code}(?=[0-9])")
+    return re.sub(rf"^{prefix}", "", text)
+
+
 _ELIGIBILITY_FIELDS = (
     FieldSpec(
         name="sender_country",
@@ -89,7 +145,7 @@ _ELIGIBILITY_FIELDS = (
         name="has_tax_id",
         label="Does the sender have a business tax registration number?",
         options=_YES_NO,
-        help="Answer from your actual registration, even if you work alone. US EIN or Canadian Business Number holders use the business route.",
+        help="Answer from your actual registration, even if you work alone. A company with a tax or registration number from any country uses the business route.",
     ),
 )
 
@@ -99,14 +155,20 @@ _BUSINESS_FIELDS = (
     FieldSpec(
         name="registration_country",
         label="Country issuing the business tax number",
-        options=_COUNTRIES,
-        help="Only US EIN and Canadian Business Number registrations are currently supported. This may differ from your operating address.",
+        pattern=r"^[A-Z]{2}$",
+        max_length=2,
+        help="Two letters, like US or GB.",
     ),
     FieldSpec(
         name="ein",
-        label="Business tax number (EIN or Canadian BN)",
-        pattern=r"^\d{2}-?\d{7}$",
-        help="Nine digits: US EIN for a US registration, or Canadian Business Number for a Canadian registration.",
+        label="Business tax number",
+        pattern=r"^[0-9A-Za-z][0-9A-Za-z .\-/]*$",
+        max_length=30,
+        help=(
+            "US: your EIN. Canada: your Business Number. "
+            f"These countries use their VAT or GST number: {', '.join(sorted(VAT_COUNTRIES))}. "
+            "Other countries, such as GB, DE and FR, use their company registration number."
+        ),
     ),
     FieldSpec(
         name="industry",
@@ -248,7 +310,10 @@ def _method_spec(method: str, name: str) -> FieldSpec:
 
 _CAMPAIGN_FIELDS = (
     FieldSpec(
-        name="program_name", label="Public sender or program name", max_length=100
+        name="program_name",
+        label="Program name",
+        max_length=100,
+        help="The name people see in your texts. Each sample must include it.",
     ),
     FieldSpec(
         name="campaign_description",
@@ -271,13 +336,13 @@ _CAMPAIGN_FIELDS = (
                 label=f"Actual sample message {i}",
                 max_length=_SAMPLE_MAX,
                 required=i <= 2,
-                help="At least 20 characters. Include the public sender name and actual opt-out instructions. Cover every selected purpose.",
+                help='At least 20 characters, with your public sender name. One sample needs the opt-out, like "Reply STOP to opt out."',
             ),
             FieldSpec(
                 name=f"sample_{i}_type",
                 label=f"Purpose of sample {i}",
                 options=_TEXT_TYPES,
-                required=i <= 2,
+                required=False,
             ),
         )
     ),
@@ -542,6 +607,19 @@ def _is_public_https_url(value: str) -> bool:
         return False
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"[\W_]", "", text).casefold()
+
+
+def _names_sender(name: str, text: str) -> bool:
+    """True when ``text`` names the sender ``name``. Case, spaces and dots
+    do not matter: "Acme Tech", "acme.tech" and "AcmeTech" all match."""
+    compact = _compact(name)
+    if not compact:
+        return name.strip().casefold() in text.casefold()
+    return compact in _compact(text)
+
+
 def _application_problems(
     fields: dict[str, str], subject_type: SubjectType
 ) -> list[Problem]:
@@ -570,17 +648,28 @@ def _application_problems(
     elif val("has_tax_id") == "NO":
         issue(
             "has_tax_id",
-            "The business route requires a supported business tax registration number.",
+            "The business route needs a business tax or registration number.",
         )
-    if (
-        subject_type == "business"
-        and val("ein")
-        and not re.fullmatch(r"[0-9]{2}-?[0-9]{7}", val("ein"))
-    ):
-        issue(
-            "ein",
-            "Enter the nine-digit US EIN or Canadian Business Number for the selected registration country.",
-        )
+    issuer = val("registration_country")
+    if subject_type == "business" and issuer and not re.fullmatch(r"[A-Z]{2}", issuer):
+        issue("registration_country", "Use a two-letter uppercase country code.")
+    if subject_type == "business" and val("ein"):
+        number = tax_number(val("ein"), issuer)
+        if issuer in NINE_DIGIT_COUNTRIES:
+            if not re.fullmatch(r"[0-9]{9}", number):
+                issue(
+                    "ein",
+                    (
+                        "Enter your 9-digit Business Number, or the full 15 characters like 123456789RT0001."
+                        if issuer == "CA"
+                        else "Enter your 9-digit EIN."
+                    ),
+                )
+        elif not (4 <= len(number) <= _TAX_NUMBER_MAX and re.search(r"[0-9]", number)):
+            issue(
+                "ein",
+                f"Use 4 to {_TAX_NUMBER_MAX} letters and digits.",
+            )
     for name in (
         "consent_optional",
         "evidence_redacted",
@@ -650,11 +739,14 @@ def _application_problems(
     confirmation = val("opt_in_message")
     if confirmation:
         missing: list[str] = []
-        if (
-            not val("program_name")
-            or val("program_name").casefold() not in confirmation.casefold()
+        if not val("program_name") or not _names_sender(
+            val("program_name"), confirmation
         ):
-            missing.append("public sender/program name")
+            missing.append(
+                f'program name "{val("program_name")}"'
+                if val("program_name")
+                else "program name"
+            )
         if (
             not val("message_frequency")
             or val("message_frequency").casefold() not in confirmation.casefold()
@@ -693,6 +785,11 @@ def _application_problems(
                 f"Use at least {minimum} characters describing the actual program.",
             )
     covered: set[str] = set()
+    # A sample's purpose is optional. Coverage is checked only when every
+    # sample names one.
+    untyped = 0
+    has_stop = False
+    sender = val("program_name")
     for i in range(1, 6):
         name = f"sample_{i}"
         sample, purpose = val(name), val(name + "_type")
@@ -700,27 +797,24 @@ def _application_problems(
             if text_length(sample) < 20:
                 issue(
                     name,
-                    "Use at least 20 characters with the actual sender and message content.",
+                    "Use at least 20 characters.",
                 )
-            if not purpose or purpose not in purposes:
+            if not purpose:
+                untyped += 1
+            elif purpose not in purposes:
                 issue(
                     name + "_type",
                     "Choose one of your selected messaging purposes for this sample.",
                 )
             else:
                 covered.add(purpose)
-            if (
-                val("program_name")
-                and val("program_name").casefold() not in sample.casefold()
-            ):
+            if sender and not _names_sender(sender, sample):
                 issue(
                     name,
-                    "Include the public sender or program name so recipients can identify you.",
+                    f'Add your program name "{sender}" to this sample, so people know who is texting.',
                 )
-            if not re.search(r"\bSTOP\b", sample, re.IGNORECASE):
-                issue(
-                    name, "Include the actual STOP opt-out instruction in this sample."
-                )
+            if re.search(r"\bSTOP\b", sample, re.IGNORECASE):
+                has_stop = True
             if val("has_links") == "NO" and re.search(
                 r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co)(?:/|\b)",
                 sample,
@@ -741,29 +835,47 @@ def _application_problems(
                 )
         elif purpose:
             issue(name, "Provide the sample for this purpose.")
-    if purposes and set(purposes) - covered:
+    # Carriers ask for the opt-out in at least one sample.
+    if val("sample_1") and not has_stop:
+        issue(
+            "sample_1",
+            'Add the opt-out to at least one sample, like "Reply STOP to opt out."',
+        )
+    if purposes and not untyped and set(purposes) - covered:
         issue(
             "text_types",
             "Provide a sample for every selected purpose: "
             + ", ".join(p for p in purposes if p not in covered)
             + ".",
         )
+    elif untyped and len(set(purposes) - covered) > untyped:
+        # Samples without a purpose cover the kinds the others do not, one each.
+        issue("text_types", "Add one sample for each kind of text you picked.")
     disclosure = val("consent_disclosure")
     if disclosure:
         required = [
-            val("program_name"),
             val("message_frequency"),
             "STOP",
             "HELP",
             val("privacy_policy_url"),
             val("terms_url"),
         ]
-        if any(
-            part and part.casefold() not in disclosure.casefold() for part in required
-        ) or not _MESSAGE_DATA_RATES.search(disclosure):
+        program = val("program_name")
+        if (
+            any(
+                part and part.casefold() not in disclosure.casefold()
+                for part in required
+            )
+            or not _MESSAGE_DATA_RATES.search(disclosure)
+            or (program and not _names_sender(program, disclosure))
+        ):
             issue(
                 "consent_disclosure",
-                "The actual disclosure must identify your program and include your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.",
+                (
+                    f'The disclosure must include your program name "{program}", your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.'
+                    if program
+                    else "The disclosure must include your program name, your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting."
+                ),
             )
     if methods and text_length(_structured_flow(fields)) > _FLOW_MAX:
         issue(

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hail.so/costs/schema/voice.json",
   "title": "Call Rates",
-  "description": "Carrier call rates in USD per minute. Outbound rows are rated by destination prefix; some apply only to calls from certain caller ID prefixes (origination_prefixes: [\"ALL\"] for any caller ID, [\"ROW\"] for caller IDs that no other row of that destination lists). Inbound rows are rated by the type of number that receives the call.",
+  "description": "Carrier call rates in USD per minute. Outbound rows are rated by destination prefix; some apply only to calls from certain caller ID prefixes (origination_prefixes: [\"ALL\"] for any caller ID, [\"ROW\"] for caller IDs that no other row of that destination lists, [\"LOCAL\"] for a caller ID in the same country as the destination). An outbound row may also charge a fixed fee per call (usd_per_call), on top of the per-minute rate. A row with exact_match true applies only when the dialed number equals a listed prefix. Inbound rows are rated by the type of number that receives the call.",
   "type": "object",
   "required": ["version", "license", "rates"],
   "additionalProperties": false,
@@ -27,7 +27,12 @@
     "prefixes": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "pattern": "^(ALL|ROW|[0-9]+)$" }
+      "items": { "type": "string", "pattern": "^(ALL|ROW|LOCAL|[0-9]+)$" }
+    },
+    "digit_prefixes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[0-9]+$" }
     },
     "rate": {
       "type": "object",
@@ -52,9 +57,11 @@
         "line_type": {
           "enum": ["landline", "mobile", "toll_free", "special", "other"]
         },
-        "destination_prefixes": { "$ref": "#/$defs/prefixes" },
+        "destination_prefixes": { "$ref": "#/$defs/digit_prefixes" },
         "origination_prefixes": { "$ref": "#/$defs/prefixes" },
         "usd_per_minute": { "$ref": "#/$defs/decimal" },
+        "usd_per_call": { "$ref": "#/$defs/decimal" },
+        "exact_match": { "const": true },
         "last_verified": { "$ref": "#/$defs/date" },
         "last_changed_at": { "$ref": "#/$defs/date" },
         "verification_method": { "enum": ["carrier-sync", "manual-confirmed"] },
@@ -78,7 +85,9 @@
           "anyOf": [
             { "required": ["line_type"] },
             { "required": ["destination_prefixes"] },
-            { "required": ["origination_prefixes"] }
+            { "required": ["origination_prefixes"] },
+            { "required": ["usd_per_call"] },
+            { "required": ["exact_match"] }
           ]
         }
       }

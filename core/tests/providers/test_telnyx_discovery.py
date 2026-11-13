@@ -146,6 +146,82 @@ async def test_area_code_filters_by_national_number_start():
     ]
 
 
+@pytest.mark.parametrize("country", ["US", "CA"])
+async def test_nanp_exact_search_separates_destination_code(country):
+    """A full ten-digit suffix hides inventory; Telnyx needs NDC + subscriber."""
+
+    def handler(request):
+        params = request.url.params
+        if (
+            params.get("filter[national_destination_code]") != "866"
+            or params.get("filter[phone_number][ends_with]") != "5550100"
+        ):
+            return httpx.Response(
+                400,
+                json={
+                    "errors": [
+                        {
+                            "code": "10031",
+                            "detail": "No numbers found for the given filters",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    offer(phone_number="+18665550100"),
+                    offer(phone_number="+18555550100"),
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        quotes = await TelnyxNumberDiscovery("key", client).search(
+            country, "toll_free", ["voice", "sms"], e164="+18665550100"
+        )
+    assert [q.e164 for q in quotes] == ["+18665550100"]
+
+
+@pytest.mark.parametrize("prefix,subscriber_prefix", [("704", None), ("704555", "555")])
+async def test_nanp_area_search_separates_destination_code(prefix, subscriber_prefix):
+    def handler(request):
+        params = request.url.params
+        if (
+            params.get("filter[national_destination_code]") != "704"
+            or params.get("filter[phone_number][starts_with]") != subscriber_prefix
+        ):
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, json={"data": [offer(phone_number="+17045550100")]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        quotes = await TelnyxNumberDiscovery("key", client).search(
+            "US", "local", ["voice"], area_code=prefix
+        )
+    assert [q.e164 for q in quotes] == ["+17045550100"]
+
+
+async def test_area_search_rejects_out_of_area_results_even_without_best_effort_flag():
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "data": [
+                        offer(phone_number="+18558660100"),
+                        offer(phone_number="+18665550100"),
+                    ]
+                },
+            )
+        )
+    ) as client:
+        quotes = await TelnyxNumberDiscovery("key", client).search(
+            "CA", "toll_free", ["voice"], area_code="866"
+        )
+    assert [q.e164 for q in quotes] == ["+18665550100"]
+
+
 async def test_city_and_region_filter_locality_and_state():
     def handler(request):
         assert request.url.params["filter[locality]"] == "Phoenix"

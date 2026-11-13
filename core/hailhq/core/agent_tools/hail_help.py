@@ -26,9 +26,11 @@ async def _execute(_ctx: ToolContext, _args: dict[str, Any]) -> str:
 SPEC = ToolSpec(
     name="hail_settings_help",
     description=(
-        "Get the steps for changing this agent's voice, greeting, language or "
-        "instructions in the Hail console. Call it when the person asks how to "
-        "change or configure any of these. Never say this tool's name aloud."
+        "Get current Hail settings guidance for voice, greeting, language, "
+        "instructions and AI disclosure. Call it before answering whether "
+        "the AI introduction is always required, whether it can be disabled, "
+        "or where to change these settings for a saved agent, workspace or "
+        "one-off call. Never say this tool's name aloud."
     ),
     parameters={"type": "object", "properties": {}, "required": []},
     risk_tier="read_only",

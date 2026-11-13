@@ -126,6 +126,33 @@ async def test_other_org_never_appears(async_session):
     assert await threads.thread_items(async_session, org, agent.id, PERSON) == []
 
 
+async def test_search_reaches_old_history_without_crossing_contact_or_agent(
+    async_session,
+):
+    org = uuid.uuid4()
+    agent = await _agent(async_session, org)
+    other = await _agent(async_session, org, "other")
+    async_session.add_all(
+        [
+            _sms(
+                org,
+                agent.id,
+                inbound=True,
+                body="Old receipt 1221334XY",
+                at=NOW - timedelta(days=40),
+            ),
+            _sms(org, agent.id, inbound=True, body="Other topic"),
+            _sms(org, agent.id, inbound=True, person=OTHER, body="1221334XY private"),
+            _sms(org, other.id, inbound=True, body="1221334XY other agent"),
+        ]
+    )
+    await async_session.commit()
+    items = await threads.thread_items(
+        async_session, org, agent.id, PERSON, query="1221334XY", window=None
+    )
+    assert [item.text for item in items] == ["Old receipt 1221334XY"]
+
+
 async def test_window_and_limit(async_session):
     org = uuid.uuid4()
     agent = await _agent(async_session, org)

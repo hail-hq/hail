@@ -7,6 +7,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
@@ -43,6 +44,7 @@ def test_registry_names_and_tiers():
         "list_contacts",
         "send_sms",
         "send_email",
+        "read_email",
         "thread_history",
         "transfer_call",
     }
@@ -51,6 +53,7 @@ def test_registry_names_and_tiers():
     assert tools["list_contacts"].risk_tier == "read_only"
     assert tools["send_sms"].risk_tier == "outbound_send"
     assert tools["send_email"].risk_tier == "outbound_send"
+    assert tools["read_email"].risk_tier == "read_only"
     assert tools["thread_history"].risk_tier == "read_only"
     assert tools["transfer_call"].risk_tier == "session_control"
 
@@ -490,6 +493,67 @@ async def test_thread_history_pages_with_ids(async_session):
     older_ids = _ids(older)
     assert 1 <= len(older_ids) <= 3
     assert not set(older_ids) & set(ids)
+
+
+@pytest.mark.parametrize("source", ["sms", "voice", "all"])
+@pytest.mark.parametrize("lookup", ["query", "before"])
+async def test_thread_history_tool_retrieves_old_conversations(
+    async_session, source, lookup
+):
+    org, call = await _thread_call(async_session)
+    old_at = datetime.now(timezone.utc) - timedelta(days=40)
+    old_call = Call(
+        organization_id=org,
+        agent_id=call.agent_id,
+        to_number_id=call.to_number_id,
+        from_e164=call.from_e164,
+        to_e164=call.to_e164,
+        direction="inbound",
+        status="completed",
+        end_reason="normal_hangup",
+        provider="twilio",
+        voice_config={},
+        created_at=old_at,
+    )
+    async_session.add(old_call)
+    await async_session.flush()
+    async_session.add(
+        CallEvent(
+            call_id=old_call.id,
+            kind="user_turn",
+            payload={"text": "Receipt OLD-RECEIPT spoken on a prior call"},
+            occurred_at=old_at,
+        )
+    )
+    for sender, body in (
+        (call.from_e164, "Receipt OLD-RECEIPT sent in an earlier text"),
+        ("+14155550199", "OLD-RECEIPT private to another caller"),
+    ):
+        async_session.add(
+            Sms(
+                organization_id=org,
+                agent_id=call.agent_id,
+                provider="twilio",
+                from_e164=sender,
+                to_e164=call.to_e164,
+                direction="inbound",
+                status="received",
+                body=body,
+                requested_at=old_at,
+            )
+        )
+    await async_session.commit()
+    tool = {t.name: t for t in all_tools()}["thread_history"]
+    ctx = _ctx(call_id=call.id, organization_id=org)
+    recent = await tool.execute(ctx, {})
+    assert "OLD-RECEIPT" not in recent
+    argument = "OLD-RECEIPT" if lookup == "query" else _ids(recent)[0]
+
+    result = await tool.execute(ctx, {"source": source, lookup: argument})
+
+    assert ("sent in an earlier text" in result) == (source in ("sms", "all"))
+    assert ("spoken on a prior call" in result) == (source in ("voice", "all"))
+    assert "private to another caller" not in result
 
 
 async def test_thread_history_withheld_caller(async_session):

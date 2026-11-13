@@ -1243,6 +1243,29 @@ def _verification_provider(provider: str) -> Any:
     return plugin
 
 
+# Paper categories that ask for an address.
+_ADDRESS_ITEMS = {
+    "proof_of_address",
+    "address_in_country",
+    "address_in_area",
+    "address_any_country",
+}
+
+
+def _union_address(lists: list[list[Any]]) -> list[Any]:
+    """The union of the lists, where "an address in any country" stays only
+    when every list that asks for an address says so. The DID group a buyer
+    gets is not known before the purchase, so one group that needs a local
+    address is enough to not promise "any country"."""
+    asking = [
+        items
+        for items in lists
+        if any(i in _ADDRESS_ITEMS for i in items if isinstance(i, str))
+    ]
+    drop = any("address_any_country" not in items for items in asking)
+    return [i for i in _union(lists) if not (drop and i == "address_any_country")]
+
+
 def _union(lists: list[list[Any]]) -> list[Any]:
     """Every item of every list once: known categories in the fixed catalog
     order, then ``{other}`` items in the order they appear."""
@@ -1315,7 +1338,9 @@ def _requirements_block(
             continue
         block[subject] = {
             "accepted": True,
-            "items": _union([classify(r, provider, rules=rules) for r in found]),
+            "items": _union_address(
+                [classify(r, provider, rules=rules) for r in found]
+            ),
         }
     return block
 

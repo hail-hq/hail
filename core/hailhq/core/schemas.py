@@ -9,6 +9,7 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
+from hailhq.core.file_uploads import VERIFICATION_FILE_TYPES, valid_content_type
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
@@ -972,6 +973,10 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer texts on numbers that route texts to this agent.",
     )
+    email_enabled: bool = Field(
+        default=True,
+        description="Answer email on addresses that route email to this agent.",
+    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1045,6 +1050,9 @@ class AgentUpdate(BaseModel):
     sms_enabled: bool | None = Field(
         default=None, description="Whether the agent answers texts."
     )
+    email_enabled: bool | None = Field(
+        default=None, description="Whether the agent answers email."
+    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1089,6 +1097,9 @@ class AgentResponse(BaseModel):
     )
     voice_enabled: bool = Field(description="Whether the agent answers calls.")
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
+    email_enabled: bool = Field(
+        default=True, description="Whether the agent answers email."
+    )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
         default_factory=list, description="People the agent may hand a live call to."
@@ -1231,6 +1242,7 @@ def _normalize_domain(addr: str) -> str:
 
 
 EmailDomainKind = Literal["hail_mail", "custom"]
+EmailAgentScope = Literal["members", "anyone"]
 EmailDomainVerificationStatus = Literal["pending", "verified", "failed"]
 
 
@@ -1374,7 +1386,15 @@ MAX_FORWARD_TARGETS = 10
 
 # Email.metadata keys the queue uses internally; POST /emails rejects them.
 RESERVED_EMAIL_METADATA_KEYS = frozenset(
-    {"forwarded_from", "forward_headers", "system_kind"}
+    {
+        "forwarded_from",
+        "forward_headers",
+        "system_kind",
+        # An agent's reply bookkeeping: a forged key could pose as a prior reply.
+        "reply_to_email_id",
+        "inbound_email_id",
+        "thread_sender",
+    }
 )
 
 
@@ -1386,6 +1406,10 @@ class EmailDomainPatch(BaseModel):
     * Hail-mail addressing — the user/org prefix pair (only valid on
       ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
       to PATCH these on a custom row).
+    * Send switch — ``sends_enabled`` (only valid on ``kind='custom'``
+      rows; the handler returns 422 otherwise). ``false`` stops the
+      domain from sending at all: skipped by sender selection, explicit
+      ``from`` refused.
     * Inbound action — ``inbound_enabled`` + ``forward_to`` + the optional
       ``forward_rate_per_hour`` cap. These apply to either kind, but this
       milestone routes inbound only to ``hail_mail`` rows; custom-domain
@@ -1428,6 +1452,34 @@ class EmailDomainPatch(BaseModel):
         default=None,
         description="Cap on forwarded messages per hour. Omit to leave unchanged.",
     )
+    sends_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: skipped by default sender selection and a "
+            "send naming it explicitly returns 422. Only allowed on custom "
+            "rows; Omit to leave unchanged."
+        ),
+    )
+    email_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The agent that answers mail to this address. The agent must be "
+            "live and answer email. A custom domain must be verified with "
+            "inbound and sending on. Null stops agent replies. Omit to leave unchanged."
+        ),
+    )
+    email_agent_scope: EmailAgentScope | None = Field(
+        default=None,
+        description=(
+            "Who the agent answers. 'members': verified members of the "
+            "organization whose mail passes DMARC. 'anyone': every sender whose "
+            "mail passes DMARC and the spam and header rules; such a sender can "
+            "make the agent use its tools. Mail without a DMARC pass gets no "
+            "reply. Omit to leave unchanged, except that a new agent starts at "
+            "'members'."
+        ),
+    )
 
     @field_validator("local_prefix_user", "local_prefix_org")
     @classmethod
@@ -1468,11 +1520,14 @@ class EmailDomainPatch(BaseModel):
             and self.inbound_enabled is None
             and self.forward_to is None
             and self.forward_rate_per_hour is None
+            and self.sends_enabled is None
+            and "email_agent_id" not in self.model_fields_set
+            and self.email_agent_scope is None
         ):
             raise ValueError(
                 "at least one of local_prefix_user, local_prefix_org, "
-                "inbound_enabled, forward_to, "
-                "or forward_rate_per_hour must be set"
+                "inbound_enabled, forward_to, forward_rate_per_hour, "
+                "sends_enabled, email_agent_id, or email_agent_scope must be set"
             )
         return self
 
@@ -1522,6 +1577,15 @@ class EmailDomainResponse(BaseModel):
         default=False,
         description="Whether this domain accepts and forwards inbound mail.",
     )
+    sends_enabled: bool = Field(
+        default=True,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: it is skipped by default sender selection "
+            "and a send that names it explicitly returns 422. Always true "
+            "for hail_mail rows."
+        ),
+    )
     forward_to: list[str] | None = Field(
         default=None,
         description="Email addresses inbound mail is forwarded to, if inbound is enabled.",
@@ -1529,6 +1593,14 @@ class EmailDomainResponse(BaseModel):
     forward_rate_per_hour: int | None = Field(
         default=None,
         description="Configured cap on forwarded messages per hour, if set.",
+    )
+    email_agent_id: UUID | None = Field(
+        default=None,
+        description="The agent that answers mail to this address. Null when none does.",
+    )
+    email_agent_scope: EmailAgentScope = Field(
+        default="members",
+        description="Who the agent answers: 'members' or 'anyone'.",
     )
     created_at: datetime = Field(
         description="When this domain was added, ISO 8601 timestamp."
@@ -1771,8 +1843,9 @@ class EmailCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the email and echoed back on "
             "reads. Not interpreted by Hail. The keys 'forwarded_from', "
-            "'forward_headers' and 'system_kind' are reserved for Hail's own "
-            "queue bookkeeping and are rejected."
+            "'forward_headers', 'system_kind', 'reply_to_email_id', "
+            "'inbound_email_id' and 'thread_sender' are reserved for Hail's own "
+            "bookkeeping and are rejected."
         ),
     )
     attachment_ids: list[UUID] | None = Field(
@@ -2132,6 +2205,121 @@ class EmailAttachmentUploadResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FileUploadCreate(BaseModel):
+    """Body of ``POST /uploads``: what the file is for, and its name and type."""
+
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description=(
+            "What the file is for. `email_attachment`: the id works in "
+            "`POST /v1/emails` `attachment_ids`. `verification_document`: the "
+            "id works as the `upload.<slot>` part of `POST /v1/verifications` "
+            "and `POST /v1/verifications/check`."
+        )
+    )
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The file's name, 1 to 255 chars, no control characters.",
+    )
+    content_type: str = Field(
+        description=(
+            "MIME type, `type/subtype` with no parameters. A "
+            "`verification_document` takes `image/jpeg`, `image/png` or "
+            "`application/pdf` only. This type is stored; the PUT request's "
+            "own `Content-Type` header is not used."
+        )
+    )
+
+    @field_validator("filename")
+    @classmethod
+    def _filename_printable(cls, v: str) -> str:
+        # The name goes into a MIME header of the email; CR or LF there
+        # would start a new header.
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("filename must not contain control characters")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_shape(cls, v: str) -> str:
+        if not valid_content_type(v):
+            raise ValueError(
+                "content_type must be a MIME type like application/pdf, "
+                "with no parameters"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _verification_types(self) -> "FileUploadCreate":
+        if (
+            self.purpose == "verification_document"
+            and self.content_type not in VERIFICATION_FILE_TYPES
+        ):
+            raise ValueError(
+                "a verification_document must be image/jpeg, image/png or "
+                "application/pdf"
+            )
+        return self
+
+
+class FileUploadLinkResponse(BaseModel):
+    """Returned by ``POST /uploads``: a one-time link to send the bytes to."""
+
+    id: UUID = Field(description="The upload's id.")
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description="What the file is for."
+    )
+    upload_url: str = Field(
+        description=(
+            "Send the raw file bytes here with `PUT`. No Authorization "
+            "header: the `token` in the URL is the only credential. Works "
+            "once, until `expires_at`. Treat it like a password."
+        )
+    )
+    method: Literal["PUT"] = Field(description="The HTTP method for `upload_url`.")
+    content_type: str = Field(description="The type the file is stored with.")
+    max_bytes: int = Field(description="The largest file the link takes, in bytes.")
+    expires_at: datetime = Field(description="When the link stops working.")
+
+
+class FileUploadResponse(BaseModel):
+    """Returned by ``PUT /uploads/{id}``: what Hail stored."""
+
+    id: UUID = Field(description="The upload's id.")
+    purpose: Literal["email_attachment", "verification_document"] = Field(
+        description="What the file is for."
+    )
+    filename: str = Field(description="The name given when the link was made.")
+    content_type: str = Field(description="The type given when the link was made.")
+    size_bytes: int = Field(description="Bytes stored. Compare with the local file.")
+    sha256: str = Field(
+        description="sha256 of the bytes stored, hex. Compare with the local file."
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VerificationCheckFile(BaseModel):
+    """One file a verification check read."""
+
+    slot: str = Field(description="The document slot.")
+    upload_id: UUID | None = Field(
+        description="The upload used for the slot, or null for a `file.<slot>` part."
+    )
+    size_bytes: int = Field(description="Size of the file in bytes.")
+    sha256: str = Field(description="sha256 of the file, hex.")
+
+
+class VerificationCheckResponse(BaseModel):
+    """Returned by ``POST /verifications/check`` when every local check passes."""
+
+    ok: Literal[True] = Field(description="Always true: a failed check is a 4xx.")
+    files: list[VerificationCheckFile] = Field(
+        description="The files the check read, one per slot."
+    )
+    note: str = Field(description="What the check does not cover.")
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = Field(description="Plain-text body, if any.")
     body_html: str | None = Field(description="HTML body, if any.")
@@ -2146,11 +2334,23 @@ class EmailResponse(EmailSummary):
     )
     in_reply_to: str | None = Field(
         default=None,
-        description="RFC 5322 In-Reply-To header. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 In-Reply-To header. Set on inbound emails and agent replies; null on other outbound rows.",
     )
     references_ids: list[str] | None = Field(
         default=None,
-        description="RFC 5322 References header, split into ids. Inbound emails only; null on outbound rows.",
+        description="RFC 5322 References header, split into ids. Set on inbound emails and agent replies; null on other outbound rows.",
+    )
+    agent_id: UUID | None = Field(
+        default=None,
+        description="The agent this email belongs to: the address's agent on inbound rows, the writer on outbound rows.",
+    )
+    agent_reply_state: str | None = Field(
+        default=None,
+        description=(
+            "Inbound rows routed to an agent: 'pending', 'processing', 'done', "
+            "'skipped', or 'failed'. A skipped row names why in "
+            "metadata.agent_skip_reason."
+        ),
     )
     spam_verdict: str | None = Field(
         default=None,
@@ -2814,5 +3014,19 @@ class VerificationResponse(BaseModel):
             "step, filing the campaign, has a carrier fee your balance does "
             "not cover. Nothing is filed until it does. Add credit; Hail "
             "goes on at its next check."
+        ),
+    )
+    credit_needed_cents: int | None = Field(
+        default=None,
+        description=(
+            "The credit this registration still needs before Hail files its "
+            "campaign, in US cents; null when `waiting_for_credit` is false. "
+            "Per registration, not a running total: the first waiting "
+            "registration shows the carrier's campaign fee less the credit "
+            "left after the registrations already covered (more when the "
+            "balance is short), each later one its whole fee. Add the sum "
+            "over every registration with `waiting_for_credit` true, and "
+            "one top-up lets them all go. It follows the balance, so read it "
+            "again before you pay."
         ),
     )

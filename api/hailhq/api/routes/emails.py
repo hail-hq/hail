@@ -7,7 +7,6 @@ GET /emails/suppressions - the org's suppressed addresses.
 DELETE /emails/suppressions/{address} - remove one suppressed address.
 
 From-address resolution:
-
   explicit ``from`` → the org's one verified custom domain → its hail-mail
   address → freshly minted hail-mail address (if HAIL_MAIL_BASE_DOMAIN is set)
 
@@ -74,16 +73,19 @@ from hailhq.core.email_attachment_limits import (
     MAX_EMAIL_ATTACHMENT_BYTES,
 )
 from hailhq.core.email_delivery_events import record_sent_event
+from hailhq.core.email_mime import reference_ids
 from hailhq.core.email_sender import from_address_for
+from hailhq.core.file_uploads import EMAIL_ATTACHMENTS_PREFIX, store_upload
 from hailhq.core.models import (
     Email,
     EmailAttachment,
-    EmailAttachmentUpload,
     EmailDomain,
     EmailEvent,
+    FileUpload,
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import ProviderAttachment
+from hailhq.core.providers.email.ses import SES_SEND_BUDGET_SECONDS
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     EmailAttachmentResponse,
@@ -137,7 +139,9 @@ async def resolve_sender(
 
     1. Explicit ``from``: look up by full address (hail-mail row's
        ``domain`` is the full address; custom row's ``domain`` is the
-       parent so we match by suffix).
+       parent so we match by suffix). A row switched off
+       (``sends_enabled = false``) matches but is refused with a
+       targeted 422, not the generic "not a verified sender".
     2. No ``from``: a verified custom domain wins over the hail-mail
        address (``verified_senders``). Exactly one candidate: that one.
     3. No ``from``, several candidates: 422 listing them. Picking one for
@@ -179,6 +183,13 @@ async def resolve_sender(
         )
         sd = (await db.execute(stmt)).scalar_one_or_none()
         if sd is not None:
+            if not sd.sends_enabled:
+                raise unprocessable(
+                    f"sender domain {dom!r} is blocked from sending "
+                    "(sends_enabled=false); re-enable it with PATCH "
+                    "/email-domains/{id} or pass another verified from address",
+                    loc=["body", "from"],
+                )
             return sd
 
         raise unprocessable(
@@ -214,6 +225,25 @@ async def resolve_sender(
             loc=["body", "from"],
         )
 
+    return await resolve_hail_mail_sender(db, organization_id)
+
+
+async def resolve_hail_mail_sender(
+    db: AsyncSession, organization_id: UUID
+) -> EmailDomain:
+    """The generated workspace inbox, independent of custom sending domains."""
+    existing = (
+        await db.execute(
+            select(EmailDomain).where(
+                EmailDomain.organization_id == organization_id,
+                EmailDomain.kind == "hail_mail",
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.verification_status != "verified":
+            raise HTTPException(503, "Your generated workspace inbox is not ready.")
+        return existing
     # Last resort: mint a hail-mail row. The default prefixes are derived
     # per-org from the organization id, so each tenant auto-mints its OWN
     # distinct address instead of colliding on one deployment-wide default. Either
@@ -291,26 +321,70 @@ async def _write_usage_event(
 # --------------------------------------------------------------------------- #
 
 
+def _send_headers(email: Email, extra: dict[str, str] | None) -> dict[str, str] | None:
+    """Headers for the wire. An agent's mail threads in the sender's client and
+    marks itself automatic, so another agent does not answer it."""
+    headers = dict(extra or {})
+    references = reference_ids(email)
+    if email.in_reply_to in references:
+        headers["In-Reply-To"] = email.in_reply_to
+    if references:
+        headers["References"] = " ".join(references)
+    meta = email.metadata_ or {}
+    if meta.get("reply_to_email_id"):
+        headers["Auto-Submitted"] = "auto-replied"
+    elif meta.get("inbound_email_id"):
+        headers["Auto-Submitted"] = "auto-generated"
+    return headers or None
+
+
 async def deliver_email(
     db: AsyncSession,
     email_provider: EmailProvider,
     email: Email,
-    attachment_rows: list[EmailAttachmentUpload] | None = None,
+    attachment_rows: list[FileUpload | EmailAttachment] | None = None,
+    *,
+    billable: bool = True,
+    message_type: Literal["marketing", "informational"] = "informational",
+    claimed_at: datetime | None = None,
+    at_most_once: bool = False,
 ) -> str | None:
     """Wire-send one queued Email row and reconcile its status.
 
     Shared by POST /emails and the internal agent-send route (spec:
     docs/superpowers/specs/2026-07-11-voicebot-agent-tools-design.md).
-    Mints the one-click unsubscribe header (single-recipient sends only),
+    Mints one-click unsubscribe headers for single-recipient marketing sends,
     sends the stored body exactly as authored (with ``attachment_rows``
     payloads when the caller resolved any), and writes sent/failed back. Bills the flat 1¢ usage
     event on success. Returns None on success or the exception class name
     on transport failure — the caller owns HTTP semantics (502 + audit
     for the public route, a spoken sentence for the agent route). Never
     raises for provider errors.
+
+    ``claimed_at`` is the row's ``requested_at`` when this send claimed it. The
+    outcome is written only while that claim holds and the row is queued. Agent
+    sends default to the stored claim time and recheck it before calling SES.
     """
+    if at_most_once and claimed_at is None:
+        claimed_at = email.requested_at
+    owned = (
+        (Email.id == email.id,)
+        + ((Email.requested_at == claimed_at,) if claimed_at is not None else ())
+        + ((Email.status == "queued",) if at_most_once else ())
+    )
+    # Include storage preparation in the provider's budget. The claim's age
+    # counts too, so a delayed request cannot start a fresh full-length send.
+    budget = None
+    if at_most_once:
+        age = (
+            (datetime.now(timezone.utc) - claimed_at).total_seconds()
+            if claimed_at is not None
+            else 0
+        )
+        budget = max(0, SES_SEND_BUDGET_SECONDS - age)
     attachment_rows = attachment_rows or []
-    # One-click unsubscribe (RFC 8058) only when the send has exactly one
+    # List headers mark bulk mail to receiving agents, so informational mail
+    # must not carry them. One-click unsubscribe (RFC 8058) also needs one
     # recipient (to + cc + bcc, deduped). The headers are the same for every
     # copy of the message and the token names one address, so with 2 or more
     # recipients a cc or bcc pressing the button would suppress someone else.
@@ -323,7 +397,7 @@ async def deliver_email(
         ]
     }
     unsubscribe_headers: dict[str, str] | None = None
-    if len(recipients) == 1:
+    if message_type == "marketing" and len(recipients) == 1:
         unsubscribe_url = build_unsubscribe_url(
             email.to_addresses[0], email.organization_id
         )
@@ -331,59 +405,113 @@ async def deliver_email(
             "List-Unsubscribe": f"<{unsubscribe_url}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+
     provider_attachments: list[ProviderAttachment] = []
     try:
-        if attachment_rows:
-            # Fetching payloads inside this try: a concurrently-deleted S3
-            # object (e.g. a GC-worker race) fails the send cleanly via the
-            # except block below rather than raising unhandled — which would
-            # otherwise leave the Email row stuck at 'queued' and, with an
-            # explicit Idempotency-Key, that key stuck at the in-flight
-            # sentinel for its full TTL.
-            s3 = get_s3_mail()
-            # Independent objects — fetch concurrently so caller latency
-            # is max(fetch) instead of sum(fetch) across attachments.
-            payloads = await asyncio.gather(
-                *(s3.fetch_raw(row.s3_key) for row in attachment_rows)
-            )
-            provider_attachments = [
-                ProviderAttachment(
-                    filename=row.filename,
-                    content_type=row.content_type,
-                    payload=payload,
+        async with asyncio.timeout(budget):
+            if attachment_rows:
+                # Fetching payloads inside this try: a concurrently-deleted S3
+                # object (e.g. a GC-worker race) fails the send cleanly via the
+                # except block below rather than raising unhandled — which would
+                # otherwise leave the Email row stuck at 'queued' and, with an
+                # explicit Idempotency-Key, that key stuck at the in-flight
+                # sentinel for its full TTL.
+                s3 = get_s3_mail()
+                # Independent objects — fetch concurrently so caller latency
+                # is max(fetch) instead of sum(fetch) across attachments.
+                payloads = await asyncio.gather(
+                    *(
+                        s3.fetch_raw(row.s3_key, max_bytes=MAX_EMAIL_ATTACHMENT_BYTES)
+                        for row in attachment_rows
+                    )
                 )
-                for row, payload in zip(attachment_rows, payloads)
-            ]
-        result = await email_provider.send_email(
-            from_address=email.from_address,
-            from_name=email.from_name,
-            to_addresses=email.to_addresses,
-            subject=email.subject,
-            body_text=email.body_text,
-            body_html=email.body_html,
-            cc=email.cc_addresses,
-            bcc=email.bcc_addresses,
-            reply_to=email.reply_to,
-            headers=unsubscribe_headers,
-            attachments=provider_attachments or None,
-            organization_id=email.organization_id,
-        )
+                if (
+                    sum(len(raw) for raw in payloads)
+                    + len((email.body_text or "").encode())
+                    + len((email.body_html or "").encode())
+                    > MAX_EMAIL_ATTACHMENT_BYTES
+                ):
+                    raise ValueError("Email attachments exceed the message size limit")
+                # Received objects expire under the inbound lifecycle. Track a
+                # retained outbound copy using the existing upload/GC contract,
+                # before sending. Failed or interrupted sends leave unused uploads
+                # for the normal sweeper; successful sends mark them used below.
+
+                retained = []
+                for row, payload in zip(attachment_rows, payloads):
+                    if isinstance(row, EmailAttachment) and not row.s3_key.startswith(
+                        EMAIL_ATTACHMENTS_PREFIX
+                    ):
+                        upload = FileUpload(
+                            organization_id=email.organization_id,
+                            purpose="email_attachment",
+                            filename=row.filename,
+                            content_type=row.content_type,
+                        )
+                        await store_upload(db, s3, upload, payload)
+                        retained.append(upload)
+                    else:
+                        retained.append(row)
+                attachment_rows = retained
+                provider_attachments = [
+                    ProviderAttachment(
+                        filename=row.filename,
+                        content_type=row.content_type,
+                        payload=payload,
+                    )
+                    for row, payload in zip(attachment_rows, payloads)
+                ]
+            if at_most_once and claimed_at is not None:
+                # Preparation can outlive a claim. Check before the irreversible
+                # provider call, not just when saving its result afterward.
+                claim = await db.execute(
+                    update(Email)
+                    .where(*owned)
+                    .values(status="queued")
+                    .execution_options(synchronize_session=False)
+                )
+                await db.commit()
+                if not claim.rowcount:
+                    return "SendClaimLost"
+            result = await email_provider.send_email(
+                from_address=email.from_address,
+                from_name=email.from_name,
+                to_addresses=email.to_addresses,
+                subject=email.subject,
+                body_text=email.body_text,
+                body_html=email.body_html,
+                cc=email.cc_addresses,
+                bcc=email.bcc_addresses,
+                reply_to=email.reply_to,
+                headers=_send_headers(email, unsubscribe_headers),
+                attachments=provider_attachments or None,
+                organization_id=email.organization_id,
+                at_most_once=at_most_once,
+            )
     except Exception as exc:
+        if isinstance(exc, TimeoutError):
+            # Cancellation may have interrupted a database operation during
+            # preparation. Recover the session before recording the failure.
+            await db.rollback()
+            await db.refresh(email)
         logger.warning(
             "ses send_email failed for email_id=%s",
             email.id,
             exc_info=True,
         )
         now = datetime.now(timezone.utc)
-        await db.execute(
+        written = await db.execute(
             update(Email)
-            .where(Email.id == email.id)
+            .where(*owned)
             .values(
                 status="failed",
                 end_reason=type(exc).__name__,
                 failed_at=now,
             )
         )
+        if not written.rowcount:  # type: ignore[attr-defined]
+            await db.commit()
+            return type(exc).__name__
         await fanout_email_event(
             db,
             organization_id=email.organization_id,
@@ -411,15 +539,19 @@ async def deliver_email(
         return type(exc).__name__
 
     now = datetime.now(timezone.utc)
-    await db.execute(
+    written = await db.execute(
         update(Email)
-        .where(Email.id == email.id)
+        .where(*owned)
         .values(
             status="sent",
             provider_message_id=result.provider_message_id,
             sent_at=now,
         )
     )
+    if not written.rowcount:  # type: ignore[attr-defined]
+        await db.commit()
+        logger.warning("email_id=%s lost its send claim", email.id)
+        return None
     record_sent_event(
         db, email_id=email.id, organization_id=email.organization_id, occurred_at=now
     )
@@ -437,10 +569,14 @@ async def deliver_email(
                 s3_key=row.s3_key,
             )
         )
-        if row.first_used_at is None:
-            row.first_used_at = now
+        if isinstance(row, FileUpload) and row.first_used_at is None:
+            # The database clock, like every other upload time.
+            row.first_used_at = func.statement_timestamp()
     await db.commit()
     await db.refresh(email)
+
+    if not billable:
+        return None
 
     # Flat 1¢ per send regardless of recipient count.
     await _write_usage_event(
@@ -549,11 +685,15 @@ async def create_email(
     )
     await require_agent_send_allowed(db, principal, "email", agent_recipients, idem)
 
-    attachment_rows: list[EmailAttachmentUpload] = []
+    attachment_rows: list[FileUpload] = []
     if body.attachment_ids:
-        stmt = select(EmailAttachmentUpload).where(
-            EmailAttachmentUpload.id.in_(body.attachment_ids),
-            EmailAttachmentUpload.organization_id == principal.organization_id,
+        # Only uploaded email attachments: a link not used yet, or a
+        # verification document, is "not found" like any unknown id.
+        stmt = select(FileUpload).where(
+            FileUpload.id.in_(body.attachment_ids),
+            FileUpload.organization_id == principal.organization_id,
+            FileUpload.purpose == "email_attachment",
+            FileUpload.uploaded_at.is_not(None),
         )
         attachment_rows = list((await db.execute(stmt)).scalars().all())
         found_ids = {row.id for row in attachment_rows}
@@ -638,7 +778,9 @@ async def create_email(
     # Provider send — best-effort with status reconciliation. Synchronous
     # in v1: callers get back ``sent`` or ``failed`` on the response, no
     # background polling needed for the happy path.
-    err = await deliver_email(db, email_provider, email, attachment_rows)
+    err = await deliver_email(
+        db, email_provider, email, attachment_rows, message_type=body.message_type
+    )
     if err is not None:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(

@@ -757,6 +757,7 @@ async def get_call(
     final outcome of a call placed with POST /v1/calls.
     """
     stmt = select(Call).where(
+        Call.transport == "phone",
         Call.id == call_id,
         Call.organization_id == principal.organization_id,
     )
@@ -792,7 +793,9 @@ async def list_calls(
     a null next_cursor means there are no more results. Filter by status or
     destination number (to) to narrow the list.
     """
-    stmt = select(Call).where(Call.organization_id == principal.organization_id)
+    stmt = select(Call).where(
+        Call.transport == "phone", Call.organization_id == principal.organization_id
+    )
     if status is not None:
         stmt = stmt.where(Call.status == status)
     if to is not None:

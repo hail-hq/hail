@@ -5,11 +5,13 @@ are shared across orgs that have no provisioned number of their own.
 ``reserved_call_id`` is the single source of truth for "this number is in
 use right now" — there is no separate enum or boolean.
 
-Two callers exercise these helpers:
+The call API, browser session API and voice workers use these helpers:
 
 * :mod:`hailhq.api.routes.calls` calls :func:`claim_pool_number` when an
   org has no active number, and calls :func:`release_pool_reservation`
   from its dispatch-failure handler so a failed call doesn't leak a slot.
+* Browser sessions claim an SMS-capable row after creating the Call and
+  release it in :func:`hailhq.core.browser_voice.finish_browser_call`.
 * :mod:`hailhq.voicebot.agent` calls :func:`release_pool_reservation`
   from its ``finalize_call`` path the moment a call reaches a terminal
   status.
@@ -36,7 +38,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 CALL_META_FROM_POOL = "from_pool"
 
 
-async def claim_pool_number(session: AsyncSession) -> PhoneNumber | None:
+async def claim_pool_number(
+    session: AsyncSession,
+    *,
+    capability: str | None = None,
+    exclude_ids: tuple[uuid.UUID, ...] = (),
+    preserve_voice_capacity: bool = False,
+) -> PhoneNumber | None:
     """Lock one available pool number — returns the row without yet
     binding it to a call.
 
@@ -77,7 +85,40 @@ async def claim_pool_number(session: AsyncSession) -> PhoneNumber | None:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    return (await session.execute(stmt)).scalar_one_or_none()
+    if capability is not None:
+        stmt = stmt.where(PhoneNumber.capabilities.any(capability))
+    if exclude_ids:
+        stmt = stmt.where(PhoneNumber.id.not_in(exclude_ids))
+    while True:
+        number = (await session.execute(stmt)).scalar_one_or_none()
+        if number is None:
+            return None
+        if (
+            number is not None
+            and preserve_voice_capacity
+            and "voice" in number.capabilities
+        ):
+            # Keep a claimable voice number on this carrier. Locking the spare
+            # makes concurrent browser claims conservative instead of oversubscribing it.
+            spare = (
+                await session.execute(
+                    select(PhoneNumber.id)
+                    .where(
+                        PhoneNumber.is_pool.is_(True),
+                        PhoneNumber.provisioning_state == "active",
+                        PhoneNumber.reserved_call_id.is_(None),
+                        PhoneNumber.provider == number.provider,
+                        PhoneNumber.capabilities.any("voice"),
+                        PhoneNumber.id != number.id,
+                    )
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if spare is None:
+                stmt = stmt.where(PhoneNumber.id != number.id)
+                continue
+        return number
 
 
 async def release_pool_reservation(
@@ -153,7 +194,9 @@ async def sweep_pool_reservations(
                 WHERE c.id = pn.reserved_call_id
                   AND c.max_duration_seconds IS NOT NULL
                   AND (
-                    (now() > c.requested_at
+                    (now() > CASE WHEN c.transport = 'browser'
+                                  THEN COALESCE(c.answered_at, c.requested_at)
+                                  ELSE c.requested_at END
                              + make_interval(secs => (
                                  c.max_duration_seconds + :grace_s
                                )::int)

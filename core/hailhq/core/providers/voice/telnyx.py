@@ -2,6 +2,7 @@
 and call costs."""
 
 import logging
+import re
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -18,6 +19,7 @@ from hailhq.core.providers.telnyx import (
 )
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
+    CarrierRequestError,
     LegCost,
     LegRef,
     OrderState,
@@ -105,13 +107,22 @@ class TelnyxNumberDiscovery:
             "filter[best_effort]": "false",
         }
         if e164:
-            params["filter[phone_number][ends_with]"] = (
-                phonenumbers.national_significant_number(phonenumbers.parse(e164, None))
+            national = phonenumbers.national_significant_number(
+                phonenumbers.parse(e164, None)
             )
-        if area_code:
-            # The digits after the country code: works in every country,
-            # unlike national_destination_code.
-            params["filter[phone_number][starts_with]"] = area_code
+            if country_code in ("US", "CA") and len(national) == 10:
+                params["filter[national_destination_code]"] = national[:3]
+                national = national[3:]
+            params["filter[phone_number][ends_with]"] = national
+        elif area_code:
+            if country_code in ("US", "CA") and len(area_code) >= 3:
+                # Telnyx applies number patterns to the subscriber digits
+                # when a national destination code is selected.
+                params["filter[national_destination_code]"] = area_code[:3]
+                if len(area_code) > 3:
+                    params["filter[phone_number][starts_with]"] = area_code[3:]
+            else:
+                params["filter[phone_number][starts_with]"] = area_code
         if city:
             params["filter[locality]"] = city
         if region:
@@ -139,6 +150,10 @@ class TelnyxNumberDiscovery:
         quotes = []
         for item in data["data"]:
             if e164 and item["phone_number"] != e164:
+                continue
+            if area_code and not phonenumbers.national_significant_number(
+                phonenumbers.parse(item["phone_number"], None)
+            ).startswith(area_code):
                 continue
             available = {feature["name"] for feature in item.get("features", [])}
             if item.get("best_effort") or not requested <= available:
@@ -333,10 +348,38 @@ async def place_number_order(
     }
     if "voice" in capabilities and settings.telnyx_connection_id:
         payload["connection_id"] = settings.telnyx_connection_id
-    order = (await TelnyxClient().request("POST", "/number_orders", json=payload))[
-        "data"
-    ]
+    try:
+        order = (await TelnyxClient().request("POST", "/number_orders", json=payload))[
+            "data"
+        ]
+    except httpx.HTTPStatusError as exc:
+        raise _order_rejection(exc) from None
     return order["id"]
+
+
+def _order_rejection(exc: httpx.HTTPStatusError) -> CarrierRequestError:
+    """Keep support references, never applicant data or raw response bodies."""
+    try:
+        body = exc.response.json()
+    except ValueError:
+        body = None
+    errors = body.get("errors") if isinstance(body, dict) else None
+    codes = []
+    for error in errors[:10] if isinstance(errors, list) else []:
+        code = error.get("code") if isinstance(error, dict) else None
+        if (
+            type(code) in (str, int)
+            and re.fullmatch(r"[0-9]{1,10}", str(code))
+            and str(code) not in codes
+        ):
+            codes.append(str(code))
+    try:
+        request_id = str(UUID(exc.response.headers.get("x-request-id", "")))
+    except ValueError:
+        request_id = None
+    return CarrierRequestError(
+        exc.response.status_code, codes=tuple(codes), request_id=request_id
+    )
 
 
 async def telnyx_order_outcome(

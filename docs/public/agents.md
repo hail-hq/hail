@@ -158,6 +158,51 @@ the text up, it is skipped before the model runs, with
 `metadata.skipped_reason: "insufficient_funds"`. If credits run out while the
 model writes, the text is skipped without that key.
 
+## Answer email with an agent
+
+```bash
+hail email domain route <domain-id> --agent <agent-id>
+```
+
+The same call over the API is `PATCH /v1/email-domains/{id}` with `email_agent_id`.
+Send `null` to stop replies. The agent must be `live` with `email_enabled: true`.
+
+`email_agent_scope` says who the agent answers:
+
+- `members` (default): verified members of the organization.
+- `anyone`: every sender. A stranger can then make the agent use its tools, so choose this
+  only for an agent that is safe to reach from the internet.
+
+A new agent on an address starts at `members` unless the call names a scope.
+
+Under both, the mail must pass DMARC (`dmarc_verdict: PASS`) with one well-formed `From`
+address, because anyone can write a `From` header. Other mail gets no reply, so a sender on a
+domain with no DMARC policy gets none.
+
+A hail-mail address always receives mail, so the route is its only switch. A custom domain must
+be verified with inbound and sending on.
+
+What happens on inbound mail:
+
+1. Hail stores the mail and sends `email.received` as before.
+2. The agent answers once, to the `From` address, in the same thread. A hail-mail reply comes
+   from the address itself, and a custom-domain reply from `noreply@<domain>`. The agent reads
+   its instructions and the last 20 proven messages of the thread.
+3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
+   addresses. Marketing mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
+   list mail. Informational mail does not. For one sender in any 24 hours, the agent sends at most 20 messages, counting
+   replies and tool sends.
+4. With no credit, the mail is stored and the agent stays quiet. The row carries
+   `suppressed_reasons: ["insufficient_funds"]`.
+
+Inbound rows carry `agent_reply_state` (`pending`, `processing`, `done`, `skipped`, `failed`).
+A skipped row names why in `metadata.agent_skip_reason`. Replies bill as outbound email and
+carry `agent_id`.
+
+An agent answering email can use `list_contacts`, `send_email`, and `send_sms`, unless its
+`tools` list leaves them out. Each send names a person in the directory, and each email allows
+at most 3 sends.
+
 ## Threads
 
 A caller texts an order number to the agent's SMS number, then calls the agent.
@@ -170,8 +215,11 @@ call ends, or when the stale-call sweep closes the call. The reply age limit
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Prompts carry no history. Both agents read it with the `thread_history` tool:
-  `source` is `sms` (texts), `voice` (call turns) or `all`; `before` pages back
-  over the last 7 days; `item_id` returns one full message. The voice prompt
+  `source` is `sms` (texts), `voice` (call turns) or `all`.
+  `query` searches all stored history for this agent and caller, including older conversations.
+  `before` pages through older results; `item_id` returns one full message.
+  Without a query or cursor, the tool starts with recent messages. This is not a retention limit.
+  The voice prompt
   gets one line telling the agent to use the tool when the call has it; the
   text prompt always has it. Why: history in the prompt also held the agent's
   own past "I don't have that" lines, and the model repeated them.

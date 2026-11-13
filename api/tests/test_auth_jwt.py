@@ -525,3 +525,19 @@ async def test_jwt_path_jwks_unreachable_returns_503(
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
         resp = await client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 503
+
+
+async def test_jwks_preview_access_header_is_opt_in(monkeypatch):
+    monkeypatch.setattr(auth.settings, "hail_auth_vercel_protection_bypass", "")
+    async with auth.JWKSCache._default_client() as client:
+        assert "x-vercel-protection-bypass" not in client.headers
+
+
+async def test_jwks_preview_access_header_keeps_token_out_of_url(monkeypatch):
+    monkeypatch.setattr(
+        auth.settings, "hail_auth_vercel_protection_bypass", "test-preview-access"
+    )
+    async with auth.JWKSCache._default_client() as client:
+        assert client.headers["x-vercel-protection-bypass"] == "test-preview-access"
+    cache = auth.JWKSCache(_JWKS_URL)
+    assert cache._url == _JWKS_URL
