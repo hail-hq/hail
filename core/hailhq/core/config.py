@@ -231,6 +231,11 @@ class Settings(BaseSettings):
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
+    # True when DATABASE_URL reaches a transaction-mode pooler (PgBouncer
+    # pool_mode=transaction, a hosted pooler's transaction port). Such a
+    # pooler keeps no prepared statements, so the drivers stop naming and
+    # caching them.
+    database_transaction_pooler: bool = False
     s3_endpoint: str = ""
     s3_bucket: str = "hail-assets"
     s3_access_key: str = ""

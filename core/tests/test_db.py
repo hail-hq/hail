@@ -109,3 +109,14 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await holder.rollback()
         assert await core_db.try_org_lock(other, org) is True
         await other.rollback()
+
+
+def test_engine_options_change_only_for_a_transaction_pooler(monkeypatch):
+    from hailhq.core import db
+
+    monkeypatch.setattr(db.settings, "database_transaction_pooler", False)
+    assert db.engine_options() == {}
+    monkeypatch.setattr(db.settings, "database_transaction_pooler", True)
+    assert db.engine_options() == {
+        "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    }

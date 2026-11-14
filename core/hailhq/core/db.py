@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -94,10 +95,28 @@ def to_sync_url(url: str) -> str:
     return _rewrite_scheme(url, "postgresql+psycopg://")
 
 
+def engine_options() -> dict[str, Any]:
+    """Extra ``create_async_engine`` arguments for ``DATABASE_URL``.
+
+    A transaction-mode pooler sends each transaction to any backend and keeps
+    no prepared statements. asyncpg then prepares only unnamed statements
+    (``statement_cache_size=0``), and SQLAlchemy re-prepares each statement
+    instead of reusing one from an earlier transaction
+    (``prepared_statement_cache_size=0``).
+    """
+    if not settings.database_transaction_pooler:
+        return {}
+    return {
+        "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    }
+
+
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
+        _engine = create_async_engine(
+            to_async_url(settings.database_url), **engine_options()
+        )
         if telemetry_enabled():
             # Tracing must never take the database down: the instrumentation
             # refused SQLAlchemy 2.1 and failed every request.

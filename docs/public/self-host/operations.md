@@ -301,6 +301,16 @@ docker compose up -d
 
 The migration `0001_initial.py` issues `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. If a hosted provider gates extensions, allow `pgcrypto` on it.
 
+### Transaction-mode poolers
+
+A transaction-mode pooler (PgBouncer `pool_mode = transaction`, or a hosted pooler's transaction port) lets many clients share a few database connections. It keeps no prepared statements, so tell Hail when `DATABASE_URL` points at one:
+
+```dotenv
+DATABASE_TRANSACTION_POOLER=true
+```
+
+The API, voice jobs, and text worker then run without named or cached prepared statements. Migrations need no change: they pass through a transaction-mode pooler as they are. Leave the setting unset for direct Postgres and session-mode poolers.
+
 ## Releases
 
 Tag conventions:
