@@ -65,17 +65,20 @@ async def on_approved_registration(
     return found is not None
 
 
+# A US or Canadian toll-free number at a carrier Hail cannot verify for
+# toll-free texting: refused here, rather than blocked by the carrier later.
+TOLLFREE_UNVERIFIABLE_MESSAGE = "This toll-free number cannot text the US or Canada. Ask support to move texting to a number that can."
+
+
 async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
     if from_number.number_type == "toll_free":
         from hailhq.core.telephony_catalog import tollfree_sms_unverifiable
 
-        if from_number.country_code not in {"US", "CA"} or tollfree_sms_unverifiable(
-            from_number.provider, from_number.country_code, "toll_free"
-        ):
-            # Other carriers keep their carrier-side gate. Territory toll-free
-            # numbers are not on the 10DLC registry, so that gate never applies.
+        if from_number.country_code not in {"US", "CA"}:
+            # Territory toll-free numbers are not on the 10DLC registry, so
+            # that gate never applies.
             return None
         try:
             destination = phonenumbers.region_code_for_number(
@@ -85,6 +88,11 @@ async def us_registration_block(
             destination = None
         if not (is_us(to_e164) or destination == "CA"):
             return None
+        if tollfree_sms_unverifiable(
+            from_number.provider, from_number.country_code, "toll_free"
+        ):
+            # Hail cannot verify it, so the carrier would block the text.
+            return TOLLFREE_UNVERIFIABLE_MESSAGE
         if await on_approved_registration(db, organization_id, from_number):
             return None
         if (

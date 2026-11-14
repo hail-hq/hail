@@ -36,3 +36,27 @@ async def test_unregistered_domestic_sender_is_blocked(country):
         country_code=country, number_type="local", sms_registration_id=None
     )
     assert await us_registration_block(None, uuid.uuid4(), number, "+12125550123")
+
+
+async def test_unverifiable_tollfree_is_refused_only_to_the_us_and_canada():
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from hailhq.core.sms_registration_gate import (
+        TOLLFREE_UNVERIFIABLE_MESSAGE,
+        us_registration_block,
+    )
+
+    number = SimpleNamespace(
+        number_type="toll_free", country_code="US", provider="telnyx"
+    )
+    org = uuid4()
+    assert (
+        await us_registration_block(None, org, number, "+14155550100")
+        == TOLLFREE_UNVERIFIABLE_MESSAGE
+    )
+    assert (
+        await us_registration_block(None, org, number, "+16135550100")
+        == TOLLFREE_UNVERIFIABLE_MESSAGE
+    )
+    assert await us_registration_block(None, org, number, "+447700900123") is None
