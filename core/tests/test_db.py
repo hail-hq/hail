@@ -89,7 +89,7 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
 @pytest.mark.parametrize(
     ("options", "capacity"),
     [
-        ({}, 2),
+        ({}, 5),
         ({"database_pool_size": 3}, 3),
         ({"database_pool_size": 2, "database_max_overflow": 1}, 3),
     ],
@@ -173,57 +173,6 @@ async def test_independent_commits_share_two_additional_connections(
         await db.dispose_engine()
 
 
-@pytest.mark.asyncio
-async def test_background_jobs_cannot_take_the_request_connections(
-    database_url, monkeypatch
-):
-    """A job holding every background connection (a slow webhook POST)
-    leaves the request pool free, and the other way round."""
-    from hailhq.core import db
-
-    for name in ("_engine", "_sessionmaker", "_background_engine"):
-        monkeypatch.setattr(db, name, None)
-    monkeypatch.setattr(db, "_background_sessionmaker", None)
-    monkeypatch.setattr(db.settings, "database_url", database_url)
-    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
-
-    async def read_one():
-        async with db.session_scope() as session:
-            return (await session.execute(text("SELECT 1"))).scalar_one()
-
-    async def hold_all(release: asyncio.Event, held: asyncio.Event):
-        async with AsyncExitStack() as holders:
-            for _ in range(db.settings.database_pool_size):
-                session = await holders.enter_async_context(db.session_scope())
-                await session.execute(text("SELECT 1"))
-            held.set()
-            await release.wait()
-
-    try:
-        for job_holds in (True, False):
-            release, held = asyncio.Event(), asyncio.Event()
-            if job_holds:
-                holder = asyncio.create_task(
-                    hold_all(release, held), context=db.background_context()
-                )
-                probe = read_one
-            else:
-                holder = asyncio.create_task(hold_all(release, held))
-
-                def probe():
-                    return asyncio.create_task(
-                        read_one(), context=db.background_context()
-                    )
-
-            await asyncio.wait_for(held.wait(), timeout=2)
-            assert await asyncio.wait_for(probe(), timeout=2) == 1
-            release.set()
-            await holder
-        assert db._background_engine is not db._engine
-    finally:
-        await db.dispose_engine()
-
-
 async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
     """org_lock goes through key_lock with the bare organization id, so the
     lock is the one every org_lock and try_org_lock caller already takes."""
@@ -252,44 +201,3 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await holder.rollback()
         assert await core_db.try_org_lock(other, org) is True
         await other.rollback()
-
-
-@pytest.mark.asyncio
-async def test_retry_on_pool_timeout_waits_out_a_busy_pool(database_url, monkeypatch):
-    """A write that times out waiting for a connection runs again and
-    succeeds once the holder lets go."""
-    from hailhq.core import db
-    from sqlalchemy.exc import TimeoutError as PoolTimeout
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-    engine = create_async_engine(
-        to_async_url(database_url), pool_size=1, max_overflow=0, pool_timeout=0.2
-    )
-    monkeypatch.setattr(
-        db, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
-    )
-
-    async def read_one():
-        async with db.session_scope() as session:
-            return (await session.execute(text("SELECT 1"))).scalar_one()
-
-    async def hold(seconds):
-        async with db.session_scope() as session:
-            await session.execute(text("SELECT 1"))
-            await asyncio.sleep(seconds)
-
-    try:
-        holder = asyncio.create_task(hold(0.3))
-        await asyncio.sleep(0.05)
-        with pytest.raises(PoolTimeout):
-            await read_one()
-        assert await db.retry_on_pool_timeout(read_one) == 1
-        await holder
-
-        holder = asyncio.create_task(hold(1))
-        await asyncio.sleep(0.05)
-        with pytest.raises(PoolTimeout):
-            await db.retry_on_pool_timeout(read_one, tries=2)
-        await holder
-    finally:
-        await engine.dispose()

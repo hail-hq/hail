@@ -548,11 +548,9 @@ async def finish_reply(
             Email.agent_reply_attempts == attempt,
         )
     result = await db.execute(stmt.values(agent_reply_state=state))
-    # One transaction for the state and the skip reason: a pool timeout on a
-    # second checkout cannot leave the state committed without its reason.
+    await db.commit()
     if reason is not None and result.rowcount:  # type: ignore[attr-defined]
         await stamp_skip(db, email.id, reason)
-    await db.commit()
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
 

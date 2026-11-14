@@ -23,7 +23,7 @@ import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.email_run import email_run_tools
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
-from hailhq.core.db import retry_on_pool_timeout, session_scope
+from hailhq.core.db import session_scope
 from hailhq.core.email_agent import (
     MAX_REPLY_CHARS,
     ClaimedEmailReply,
@@ -216,22 +216,16 @@ async def _settle(
     reason: str | None = None,
     delay: timedelta | None = None,
 ) -> str:
-    async def write() -> str:
-        async with session_scope() as db:
-            if retry:
-                persisted = await retry_reply(db, claimed, delay=delay)
-                return {"pending": "retry", "failed": "failed"}.get(
-                    persisted, "superseded"
-                )
-            if state is not None:
-                settled = await finish_reply(
-                    db, claimed.email, state, attempt=claimed.attempt, reason=reason
-                )
-                return state if settled else "superseded"
-        return "superseded"
-
-    # A busy pool must not leave the email claimed until the claim expires.
-    return await retry_on_pool_timeout(write)
+    async with session_scope() as db:
+        if retry:
+            persisted = await retry_reply(db, claimed, delay=delay)
+            return {"pending": "retry", "failed": "failed"}.get(persisted, "superseded")
+        if state is not None:
+            settled = await finish_reply(
+                db, claimed.email, state, attempt=claimed.attempt, reason=reason
+            )
+            return state if settled else "superseded"
+    return "superseded"
 
 
 async def reply_once(api: AgentApiClient) -> bool:
@@ -289,8 +283,7 @@ async def _reply_claimed(
             report.finish(await _settle(*args, **kwargs))
 
         try:
-            # Read-only, so a busy pool retries it instead of spending an attempt.
-            prepared = await retry_on_pool_timeout(lambda: _prepare(claimed))
+            prepared = await _prepare(claimed)
             if isinstance(prepared, str):
                 logger.info("email_id=%s not answered: %s", email.id, prepared)
                 await settle(claimed, "skipped", reason=prepared)

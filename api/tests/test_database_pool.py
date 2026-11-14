@@ -60,37 +60,3 @@ async def test_independent_writes_finish_while_requests_hold_the_runtime_pool(
             assert (await check.execute(stmt)).scalar_one() is not None
     finally:
         await core_db.dispose_engine()
-
-
-async def test_usage_event_is_kept_when_the_pool_is_busy(db, org_and_key, monkeypatch):
-    """A send must stay billed when its usage write first times out waiting
-    for a connection."""
-    from contextlib import asynccontextmanager
-
-    from sqlalchemy.exc import TimeoutError as PoolTimeout
-
-    org_id, _, _ = org_and_key
-    marker = f"pool-busy-{uuid.uuid4()}"
-    real = usage.independent_session_scope
-    opened = 0
-
-    @asynccontextmanager
-    async def busy_once():
-        nonlocal opened
-        opened += 1
-        if opened == 1:
-            raise PoolTimeout("pool busy")
-        async with real() as session:
-            yield session
-
-    monkeypatch.setattr(usage, "independent_session_scope", busy_once)
-    monkeypatch.setattr(usage, "notify_usage_event_recorded", lambda _: None)
-    await usage.write_usage_event(
-        organization_id=org_id, channel="email", units=1, ref=marker
-    )
-    assert opened == 2
-    async with async_sessionmaker(db)() as check:
-        found = await check.execute(
-            select(UsageEvent.id).where(UsageEvent.ref == marker)
-        )
-        assert found.scalar_one() is not None

@@ -234,7 +234,7 @@ class Settings(BaseSettings):
     # Per-process limits. Session poolers share a small connection budget
     # across the API, voice jobs, background workers, and other clients.
     # At least 2: inbound call setup holds two sessions at once.
-    database_pool_size: int = Field(default=2, ge=2)
+    database_pool_size: int = Field(default=5, ge=2)
     database_max_overflow: int = Field(default=0, ge=0)
     s3_endpoint: str = ""
     s3_bucket: str = "hail-assets"

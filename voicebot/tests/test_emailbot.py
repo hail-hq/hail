@@ -1061,28 +1061,3 @@ async def test_expanded_tool_workflow_can_finish_after_old_three_round_budget(
         "/internal/agent/reply-email",
         {"email_id": str(claimed.email.id), "body": "The searched file is attached."},
     )
-
-
-async def test_settle_retries_when_the_pool_is_busy(monkeypatch):
-    """A pool timeout must not leave the reply claimed until the claim
-    expires: the write runs again once a connection frees up."""
-    from contextlib import asynccontextmanager
-
-    from sqlalchemy.exc import TimeoutError as PoolTimeout
-
-    opened = 0
-
-    @asynccontextmanager
-    async def session():
-        nonlocal opened
-        opened += 1
-        if opened == 1:
-            raise PoolTimeout("pool busy")
-        yield object()
-
-    retried = AsyncMock(return_value="pending")
-    monkeypatch.setattr(emailbot, "session_scope", session)
-    monkeypatch.setattr(emailbot, "retry_reply", retried)
-    assert await emailbot._settle(object(), None, retry=True) == "retry"
-    assert opened == 2
-    retried.assert_awaited_once()
