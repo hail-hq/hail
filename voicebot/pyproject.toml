@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hailhq-core",
-    "asyncpg>=0.30",
+    "asyncpg>=0.31",
     "sqlalchemy[asyncio]>=2.0",
     "livekit==1.1.20",
     "livekit-agents~=1.8.8",

@@ -1111,7 +1111,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
-    { name = "asyncpg", specifier = ">=0.30" },
+    { name = "asyncpg", specifier = ">=0.31" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "greenlet", specifier = ">=3.0" },
     { name = "hailhq-core", editable = "core" },
@@ -1268,7 +1268,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asyncpg", specifier = ">=0.30" },
+    { name = "asyncpg", specifier = ">=0.31" },
     { name = "hailhq-core", editable = "core" },
     { name = "livekit", specifier = "==1.1.20" },
     { name = "livekit-agents", specifier = "~=1.8.8" },

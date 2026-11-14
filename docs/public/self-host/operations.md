@@ -309,7 +309,7 @@ A transaction-mode pooler (PgBouncer `pool_mode = transaction`, or a hosted pool
 DATABASE_TRANSACTION_POOLER=true
 ```
 
-The API, voice jobs, and text worker then run without named or cached prepared statements. Migrations need no change: they pass through a transaction-mode pooler as they are. Leave the setting unset for direct Postgres and session-mode poolers.
+The API, voice jobs, text worker, and migrations then run without named or cached prepared statements. Keep it `false` for direct Postgres and session-mode poolers.
 
 ## Releases
 

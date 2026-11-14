@@ -111,12 +111,30 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await other.rollback()
 
 
-def test_engine_options_change_only_for_a_transaction_pooler(monkeypatch):
+async def test_a_transaction_pooler_gets_no_named_statements(
+    database_url, monkeypatch
+) -> None:
+    """A transaction-mode pooler keeps no prepared statements, so with the
+    setting on the engine names none. Postgres lists named statements in
+    ``pg_prepared_statements`` and never lists unnamed ones."""
     from hailhq.core import db
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def named_statements() -> list[str]:
+        engine = create_async_engine(to_async_url(database_url), **db.engine_options())
+        try:
+            async with engine.connect() as conn:
+                for n in range(3):
+                    await conn.execute(text("SELECT CAST(:n AS integer)"), {"n": n})
+                rows = await conn.execute(
+                    text("SELECT name FROM pg_prepared_statements")
+                )
+                return [name for (name,) in rows]
+        finally:
+            await engine.dispose()
 
     monkeypatch.setattr(db.settings, "database_transaction_pooler", False)
-    assert db.engine_options() == {}
+    assert await named_statements()
     monkeypatch.setattr(db.settings, "database_transaction_pooler", True)
-    assert db.engine_options() == {
-        "connect_args": {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
-    }
+    assert await named_statements() == []

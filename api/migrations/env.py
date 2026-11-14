@@ -2,6 +2,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from hailhq.core.config import settings
 from hailhq.core.db import to_sync_url
 from sqlalchemy import engine_from_config, pool
 
@@ -38,6 +39,12 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # psycopg names a statement once it runs 5 times on a connection
+        # (alembic's version update, per-row backfills). A transaction-mode
+        # pooler keeps no prepared statements, so prepare none.
+        connect_args=(
+            {"prepare_threshold": None} if settings.database_transaction_pooler else {}
+        ),
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
