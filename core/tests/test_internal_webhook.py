@@ -194,3 +194,21 @@ async def test_tollfree_capability_requires_explicit_free_support(
         == "https://hail.so/api/internal/sms-registrations/capabilities"
     )
     assert session.calls[0][1]["data"] == b"{}"
+
+
+async def test_tollfree_capability_is_open_on_self_hosted_install(monkeypatch):
+    # No website: every org on the install files toll-free, with no call out.
+    session = _FakeSession(response=_FakeResponse(500, {}))
+    _install(monkeypatch, session)
+    monkeypatch.setattr(internal_webhook.settings, "hail_base_url", "")
+    assert await internal_webhook.tollfree_verification_supported() is True
+    assert session.calls == []
+
+
+async def test_tollfree_capability_fails_closed_without_secret(monkeypatch):
+    session = _FakeSession(response=_FakeResponse(200, {}))
+    _install(monkeypatch, session)
+    monkeypatch.setattr(internal_webhook.settings, "hail_base_url", "https://hail.so")
+    monkeypatch.setattr(internal_webhook.settings, "hail_internal_secret", "")
+    assert await internal_webhook.tollfree_verification_supported() is False
+    assert session.calls == []

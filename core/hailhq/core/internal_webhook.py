@@ -214,6 +214,10 @@ async def tollfree_verification_supported() -> bool:
     No cache: a rollback to an old rater must stop new filings immediately.
     Old websites lack the endpoint or marker. Neither permits a carrier write.
     """
+    if not settings.hail_base_url:
+        # Self-hosted install with no website: there is no Hail billing to
+        # guard, for any organization on it.
+        return True
     parts = _signed_body({})
     if parts is None:
         return False

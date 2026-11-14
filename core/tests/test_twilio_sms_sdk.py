@@ -240,38 +240,7 @@ async def test_tollfree_approval_does_not_cache_no():
     ],
 )
 async def test_legacy_tollfree_requires_exact_current_owned_resource(change, approved):
-    from hailhq.core.providers.sms.twilio import TwilioSmsProvider
-
-    provider, http = sdk_provider()
-    account = provider.account_sid
-
-    def request(method, uri, **kwargs):
-        http.calls.append((method, uri, kwargs))
-        if "IncomingPhoneNumbers/" in uri:
-            payload = {
-                "sid": "PN1",
-                "account_sid": account,
-                "phone_number": "+18005550100",
-            }
-        else:
-            payload = {
-                "verifications": [
-                    {
-                        "sid": "HH1",
-                        "account_sid": account,
-                        "tollfree_phone_number_sid": "PN1",
-                        "status": "TWILIO_APPROVED",
-                        **change,
-                    }
-                ],
-                "meta": {"key": "verifications"},
-            }
-        return Response(200, json.dumps(payload))
-
-    http.request = request
-    sms = TwilioSmsProvider(
-        account_sid=account, auth_token="test", client=provider._client
-    )
+    sms, http = _tollfree_sms([{"status": "TWILIO_APPROVED", **change}])
     assert (
         await sms.tollfree_approved(provider_resource_id="PN1", e164="+18005550100")
         is approved

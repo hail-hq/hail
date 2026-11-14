@@ -290,8 +290,8 @@ manual Twilio approvals continue through a read-only check: the current incoming
 phone resource must match the owned SID, E.164 number and authenticated account.
 Every TFV record read must match the same SID/account, and the newest one must be
 `TWILIO_APPROVED`. An error, timeout or mismatch fails closed. A "yes" is kept
-for 10 minutes in each API process, so a revoked approval stops sends within
-10 minutes. A "no" is not kept. This check writes no provider or
+for 10 minutes in each API process, so a revoked approval, or a number moved
+out of the Twilio account, stops sends within 10 minutes. A "no" is not kept. This check writes no provider or
 Hail registration and stores no guessed customer identity. Other carriers keep
 their existing carrier-side checks until Hail supports their TFV API.
 

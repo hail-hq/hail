@@ -140,29 +140,13 @@ def test_tollfree_never_calls_legacy_website_fee_rater(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "supported,registration_kind,base_url",
-    [
-        (False, "toll_free", "https://hail.example"),
-        (True, "toll_free", "https://hail.example"),
-        (True, "", "https://hail.example"),
-        # Self-hosted (no website): every org files, not only the shared one.
-        (False, "toll_free", ""),
-    ],
+    "supported,registration_kind",
+    [(False, "toll_free"), (True, "toll_free"), (True, "")],
 )
 async def test_tollfree_submit_is_free_attaches_only_target_and_keeps_number_id(
-    client,
-    async_session,
-    org_and_key,
-    monkeypatch,
-    supported,
-    registration_kind,
-    base_url,
+    client, async_session, org_and_key, monkeypatch, supported, registration_kind
 ):
     import json
-
-    from hailhq.core.config import settings
-
-    monkeypatch.setattr(settings, "hail_base_url", base_url)
 
     from hailhq.api.main import app
     from hailhq.core.providers.verification.base import DraftResult, ProviderStatus
@@ -248,7 +232,7 @@ async def test_tollfree_submit_is_free_attaches_only_target_and_keeps_number_id(
             },
             files={"documents": (None, "{}")},
         )
-        if (not supported and base_url) or not registration_kind:
+        if not supported or not registration_kind:
             assert response.status_code == (
                 503 if not supported else 422
             ), response.text

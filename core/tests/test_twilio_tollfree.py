@@ -117,6 +117,15 @@ async def test_tollfree_preflight_stops_unsupported_or_incomplete_answers(
     assert http.calls == []
 
 
+async def test_tollfree_preflight_reports_each_field_once():
+    # The shared form and the TFV form both check the website link.
+    p, _ = sdk_provider()
+    problems = p.validate_application(
+        {**TF_FIELDS, "website": "http://example.com"}, ADDRESS, "business"
+    )
+    assert [x.field for x in problems].count("website") == 1
+
+
 async def test_editable_tollfree_rejection_is_repaired_on_same_request():
     p, http = sdk_provider()
     status = "TWILIO_REJECTED"

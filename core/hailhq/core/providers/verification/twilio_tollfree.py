@@ -155,8 +155,12 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
     result = SmsRegistrationProvider.validate_application(
         provider, fields, address, subject_type
     )
+    # The shared checks may already report a field, in their own words.
+    reported = {p.field for p in result}
     for spec in requirements(provider, "US", subject_type).fields:
         value = fields.get(spec.name, "").strip()
+        if spec.name in reported:
+            continue
         if spec.required and not value:
             result.append(Problem(field=spec.name, message="This is required."))
         elif value and spec.options:
@@ -184,7 +188,6 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
                         message="Provide a public link to redacted evidence for this consent method.",
                     )
                 )
-    # The shared checks above may already report the same field.
     return list({(p.field, p.message): p for p in result}.values())
 
 

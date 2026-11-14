@@ -35,8 +35,6 @@ _NUMBER_ALREADY_IN_SERVICE = 21710
 _TOLLFREE_APPROVED_TTL_SECONDS = 600
 # (account SID, number SID, E.164) -> monotonic time the "yes" expires.
 _tollfree_approved_until: dict[tuple[str, str, str], float] = {}
-# Twilio TFV records read per number; the newest one decides.
-_TOLLFREE_RECORDS_READ = 20
 
 
 class TwilioSmsProvider(SmsProvider):
@@ -82,8 +80,9 @@ class TwilioSmsProvider(SmsProvider):
             ):
                 return False
             records = self._client.messaging.v1.tollfree_verifications.list(
+                # Every page: the list order is not documented, and the
+                # newest record decides.
                 tollfree_phone_number_sid=provider_resource_id,
-                limit=_TOLLFREE_RECORDS_READ,
             )
             if not records or any(
                 r.tollfree_phone_number_sid != provider_resource_id
@@ -106,9 +105,11 @@ class TwilioSmsProvider(SmsProvider):
             )
             return False
         if approved:
-            _tollfree_approved_until[key] = (
-                time.monotonic() + _TOLLFREE_APPROVED_TTL_SECONDS
-            )
+            now = time.monotonic()
+            # Drop expired entries so numbers no longer texted do not pile up.
+            for stale in [k for k, t in _tollfree_approved_until.items() if t <= now]:
+                del _tollfree_approved_until[stale]
+            _tollfree_approved_until[key] = now + _TOLLFREE_APPROVED_TTL_SECONDS
         else:
             _tollfree_approved_until.pop(key, None)
         return approved
