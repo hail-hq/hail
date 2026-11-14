@@ -1027,7 +1027,7 @@ async def test_unapproved_registration_does_not_count(
     assert resp.status_code == 422, resp.text
 
 
-async def test_toll_free_and_non_us_are_not_gated(
+async def test_unverified_tollfree_is_gated_and_non_us_longcode_is_not(
     client, async_session, org_and_key, sms_mock
 ) -> None:
     org_id, _, key = org_and_key
@@ -1040,7 +1040,8 @@ async def test_toll_free_and_non_us_are_not_gated(
     )
     headers = {"Authorization": f"Bearer {key}"}
     resp = await client.post("/sms", json=_us_text(), headers=headers)
-    assert resp.status_code == 201, resp.text
+    assert resp.status_code == 422, resp.text
+    assert "Toll-free" in resp.text
     # Long code to a non-US destination is not gated either.
     await _seed_dedicated_number(
         async_session, org_id, e164="+14155556666", register_sms=False

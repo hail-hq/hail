@@ -253,3 +253,43 @@ registration does not verify toll-free messaging.
 ## Known gaps
 
 - `VerificationResponse.provider` returns the carrier name to the customer. It predates the "never name a carrier" rule and has not been changed.
+
+## Toll-free texting verification
+
+Use `purpose=sms`, `number_type=toll_free`, the number's `country_code` (`US` or
+`CA`), and its owned `number_id`. Read `/v1/verifications/requirements` first.
+Each verification covers exactly one number. Migration `0078` links that number
+on the existing `carrier_verifications` table and permits separate live requests
+for separate toll-free numbers. This path currently supports Twilio only.
+
+Toll-free verification is free. It creates no 10DLC brand, campaign, OTP or fee.
+The API does not notify the 10DLC fee rater. Before a Cloud filing, it checks the
+website's signed `POST /api/internal/sms-registrations/capabilities` response for
+`{"toll_free":{"supported":true,"filing_cents":0,"monthly_cents":0}}`.
+An old, unavailable or malformed website response stops filing before any carrier
+write or verification row. Self-hosted installs with no website need no handshake.
+Deploy Hail first, then the website's free-TFV billing guards and UI. New filings
+stay unavailable during that gap. Keep those guards when rolling back a website
+that already has toll-free verification rows.
+
+Submit the end business's real identity, contact, address and public business
+website or social page. Supply clear message purposes, branded samples, exact
+opt-in steps, separate optional consent and public redacted evidence for every
+selected method. Verbal consent needs a script document. Marketing needs written
+consent. Dedicated privacy and terms URLs are always filed. Hail never fetches
+these arbitrary evidence URLs. Public email domains are not rejected locally.
+
+A lost create response is recovered by the owned carrier number and a hash of
+the exact submitted answers. Existing unmatched carrier requests require support.
+Editable rejections keep the same row in `submitted` / `needs_information`.
+`PATCH /v1/verifications/{id}/application` checks the original sender, confirms
+that the carrier still permits edits, and updates the same carrier request.
+The send gate blocks US and Canadian recipients until this exact number has an
+approved verification. Another number's approval never unlocks it.
+
+Official guidance checked November 14, 2026:
+[approval guidance](https://www.twilio.com/en-us/blog/insights/best-practices/improving-your-chances-of-toll-free-verification-approval),
+[API onboarding](https://www.twilio.com/docs/messaging/compliance/toll-free/api-onboarding),
+[verification API](https://www.twilio.com/docs/messaging/api/tollfree-verification-resource).
+The SDK regression tests use the pinned real SDK with an offline HTTP recorder.
+No live provider filing, message, charge or refund is part of local validation.

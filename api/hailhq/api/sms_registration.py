@@ -60,6 +60,25 @@ async def registered_numbers(
     and including the oldest one the carrier has not refused for this
     registration, so a refused number does not block the next one. Callers
     stop at the first number that attaches."""
+    if row.number_type == "toll_free":
+        return list(
+            (
+                await db.execute(
+                    select(PhoneNumber).where(
+                        PhoneNumber.id == row.number_id,
+                        PhoneNumber.organization_id == row.organization_id,
+                        PhoneNumber.provider == row.provider,
+                        PhoneNumber.number_type == "toll_free",
+                        PhoneNumber.country_code == row.country_code,
+                        PhoneNumber.provisioning_state == "active",
+                        PhoneNumber.provider_resource_id.is_not(None),
+                        PhoneNumber.capabilities.any("sms"),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     numbers = (
         (
             await db.execute(
@@ -395,6 +414,7 @@ async def approved_registration(
                 CarrierVerification.organization_id == organization_id,
                 CarrierVerification.provider == provider,
                 CarrierVerification.purpose == "sms",
+                CarrierVerification.number_type == "local",
                 CarrierVerification.state == "approved",
             )
             # carrier_verifications_sms_live_uniq allows one live row per

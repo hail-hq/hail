@@ -3579,7 +3579,7 @@ async def test_one_credit_files_one_campaign(
             provider_refs={"brand_sid": f"BN-{number_type}"},
             requirements_version="1",
         )
-        for number_type in ("local", "toll_free")
+        for number_type in ("local", "national")
     ]
     async_session.add_all(rows)
     await async_session.commit()
@@ -3630,7 +3630,7 @@ async def test_credit_needed_adds_up_to_one_top_up(
             provider_refs={"brand_sid": f"BN-{number_type}"},
             requirements_version="1",
         )
-        for number_type in ("local", "toll_free")
+        for number_type in ("local", "national")
     ]
     async_session.add_all(rows)
     await async_session.commit()
@@ -3686,7 +3686,7 @@ async def test_credit_needed_counts_the_rows_covered_after_a_waiting_one(
         )
         for subject, number_type, hours in (
             ("business", "local", 2),
-            ("person", "toll_free", 1),
+            ("person", "national", 1),
         )
     ]
     async_session.add_all(rows)
@@ -3772,7 +3772,7 @@ async def test_the_oldest_registration_gets_the_credit_first(
             requirements_version="1",
             created_at=now - timedelta(days=age),
         )
-        for number_type, age in (("local", 3), ("toll_free", 2))
+        for number_type, age in (("local", 3), ("national", 2))
     )
     async_session.add_all([older, newer])
     await async_session.commit()
@@ -3808,7 +3808,7 @@ async def test_a_campaign_time_that_is_not_a_time_does_not_fail_the_check(
             provider="fake",
             purpose="sms",
             country_code="US",
-            number_type="toll_free",
+            number_type="national",
             subject_type="business",
             state="cancelled",
             # No submission owed, so only the bad time is in play.
@@ -3840,7 +3840,7 @@ async def test_an_uncharged_campaign_in_any_iso_form_counts(
             provider="fake",
             purpose="sms",
             country_code="US",
-            number_type="toll_free",
+            number_type="national",
             subject_type="business",
             state="cancelled",
             provider_refs={
@@ -3886,7 +3886,7 @@ async def test_a_campaign_in_flight_keeps_its_credit_when_the_order_flips(
         )
         for number_type, age, extra in (
             ("local", 3, {"needs_information": True}),
-            ("toll_free", 2, {}),
+            ("national", 2, {}),
         )
     )
     async_session.add_all([older, newer])
@@ -3990,7 +3990,7 @@ async def test_a_poll_that_files_nothing_gives_up_its_claim(
         )
         for number_type, age, extra in (
             ("local", 3, {"needs_information": True}),
-            ("toll_free", 2, {}),
+            ("national", 2, {}),
         )
     )
     async_session.add_all([older, newer])
@@ -4200,7 +4200,7 @@ async def test_a_claim_older_than_its_time_holds_nothing(
             provider="fake",
             purpose="sms",
             country_code="US",
-            number_type="toll_free",
+            number_type="national",
             subject_type="business",
             state="submitted",
             provider_refs={

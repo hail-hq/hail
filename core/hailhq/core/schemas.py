@@ -2919,6 +2919,10 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(description="Unique identifier for this verification.")
+    number_id: UUID | None = Field(
+        default=None,
+        description="The owned number covered by toll-free SMS verification. Null for organization-wide registrations.",
+    )
     country_code: str = Field(description="ISO alpha-2 country code.")
     number_type: str = Field(
         description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
@@ -2935,7 +2939,7 @@ class VerificationResponse(BaseModel):
     purpose: str = Field(
         description=(
             "'number': permission to buy a number in this country. "
-            "'sms': registration to text US numbers from a US number."
+            "'sms': US local texting registration or per-number US/Canada toll-free texting verification."
         )
     )
     state: str = Field(

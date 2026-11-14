@@ -1,0 +1,133 @@
+"""Exercise the pinned SDK object tree and request arguments, offline."""
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+
+from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
+from .test_twilio_sms_registration import ADDRESS, FIELDS, FakeSms
+from twilio.http.http_client import HttpClient
+from twilio.http.response import Response
+from twilio.rest import Client
+
+
+class RecordingHttp(HttpClient):
+    def __init__(self):
+        super().__init__(logging.getLogger(__name__), False)
+        self.calls = []
+        self.brand_status = "PENDING"
+        self.identity_status = "UNVERIFIED"
+
+    def request(self, method, uri, **kwargs):
+        self.calls.append((method, uri, kwargs))
+        payload = {"sid": "IT1"}
+        if "CustomerProfiles" in uri:
+            payload = {
+                "sid": "BU1",
+                "status": "compliant",
+                "results": [],
+                "customer_profiles_entity_assignments": [],
+            }
+        elif "TrustProducts" in uri:
+            payload = {"sid": "BU2", "status": "compliant", "results": []}
+        elif "Addresses" in uri:
+            payload = {"sid": "AD1"}
+        elif "SupportingDocuments" in uri:
+            payload = {"sid": "RD1"}
+        elif "BrandRegistrations" in uri:
+            payload = {
+                "sid": "BN1",
+                "status": self.brand_status,
+                "identity_status": self.identity_status,
+                "customer_profile_bundle_sid": "BU1",
+            }
+        elif "/Compliance/Usa2p" in uri:
+            payload = {
+                "sid": "QE1",
+                "us_app_to_person": [],
+                "meta": {"key": "us_app_to_person"},
+            }
+        elif "IncomingPhoneNumbers" in uri:
+            payload = {"incoming_phone_numbers": []}
+        return Response(200, json.dumps(payload))
+
+
+def sdk_provider():
+    http = RecordingHttp()
+    client = Client("AC" + "0" * 32, "test", http_client=http)
+    provider = TwilioSmsRegistrationProvider(
+        account_sid=client.account_sid,
+        auth_token="test",
+        client=client,
+        primary_profile_sid="BU0",
+        sms_provider=FakeSms(),
+    )
+    return provider, http
+
+
+async def test_pinned_sdk_builds_brand_and_polls_it():
+    provider, http = sdk_provider()
+    req = await provider.requirements("US", "local", "business")
+    draft = await provider.create_draft(
+        organization_id="org",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=FIELDS,
+        address=ADDRESS,
+        documents={},
+    )
+    assert not draft.problems
+    assert draft.refs["brand_sid"] == "BN1"
+    assert (await provider.status(draft.refs)).state == "pending"
+    http.brand_status = "APPROVED"
+    assert (await provider.status(draft.refs)).state == "pending"
+    brand_calls = [
+        (method, uri) for method, uri, _ in http.calls if "/BrandRegistrations" in uri
+    ]
+    assert brand_calls == [
+        ("POST", "https://messaging.twilio.com/v1/a2p/BrandRegistrations"),
+        ("GET", "https://messaging.twilio.com/v1/a2p/BrandRegistrations/BN1"),
+        ("GET", "https://messaging.twilio.com/v1/a2p/BrandRegistrations/BN1"),
+    ]
+    assert any(
+        "/Compliance/Usa2p" in uri and method == "POST" for method, uri, _ in http.calls
+    )
+
+
+async def test_pinned_sdk_resends_person_otp_and_reads_identity():
+    provider, http = sdk_provider()
+    http.brand_status = "APPROVED"
+    refs = {
+        "brand_sid": "BN1",
+        "profile_sid": "BU1",
+        "subject_type": "person",
+        "otp_sent_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+    }
+    assert (await provider.status(refs)).state == "pending"
+    assert any("/SmsOtp" in uri for _, uri, _ in http.calls)
+    assert await provider.application_identity(refs, "person") is None
+
+
+async def test_coding_failure_has_safe_diagnostics(caplog):
+    from hailhq.core.providers.verification.base import VerificationProviderError
+    import pytest
+
+    provider, _ = sdk_provider()
+
+    def broken(*args):
+        raise AttributeError("secret=do-not-log contact=private@customer.com")
+
+    provider._build = broken
+    req = await provider.requirements("US", "local", "business")
+    with pytest.raises(VerificationProviderError):
+        await provider.create_draft(
+            organization_id="org",
+            contact_email="ops@hail.so",
+            requirements=req,
+            fields=FIELDS,
+            address=ADDRESS,
+            documents={},
+        )
+    assert "exception=AttributeError" in caplog.text
+    assert "do-not-log" not in caplog.text
+    assert "private@customer.com" not in caplog.text

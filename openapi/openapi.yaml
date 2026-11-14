@@ -5143,12 +5143,14 @@ paths:
                 format: uuid
               - type: "null"
             description:
-              "For purpose=sms: id of one of your US numbers. The carrier
-              is read from it. Needed when your US numbers are with more than one carrier."
+              "For purpose=sms: id of an owned US local or US/Canadian toll-free
+              number. Required for toll-free verification. The carrier is read from
+              it. Needed when your US numbers are with more than one carrier."
             title: Number Id
           description:
-            "For purpose=sms: id of one of your US numbers. The carrier is
-            read from it. Needed when your US numbers are with more than one carrier."
+            "For purpose=sms: id of an owned US local or US/Canadian toll-free
+            number. Required for toll-free verification. The carrier is read from it.
+            Needed when your US numbers are with more than one carrier."
         - name: authorization
           in: header
           required: false
@@ -5266,7 +5268,8 @@ paths:
 
         Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
 
-        in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+        in the US; use US/local for 10DLC, or US/CA and toll_free with number_id for
+        free per-number toll-free verification; 10DLC fees
 
         are charged from credit per step, when the details are submitted and when
 
@@ -10044,8 +10047,8 @@ components:
             - type: "null"
           title: Number Id
           description:
-            Owned US local number selecting the carrier, required when
-            ambiguous.
+            Owned US local or US/Canadian toll-free number. Required for
+            toll-free verification or when the carrier is ambiguous.
         fields:
           additionalProperties:
             type: string
@@ -10499,6 +10502,15 @@ components:
           format: uuid
           title: Id
           description: Unique identifier for this verification.
+        number_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Number Id
+          description:
+            The owned number covered by toll-free SMS verification. Null
+            for organization-wide registrations.
         country_code:
           type: string
           title: Country Code
@@ -10525,7 +10537,8 @@ components:
           title: Purpose
           description:
             "'number': permission to buy a number in this country. 'sms':
-            registration to text US numbers from a US number."
+            US local texting registration or per-number US/Canada toll-free texting
+            verification."
         state:
           type: string
           title: State
