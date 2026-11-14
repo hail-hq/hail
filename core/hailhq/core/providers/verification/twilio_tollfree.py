@@ -66,6 +66,7 @@ _VOLUMES = {
         "10,000,000+",
     )
 }
+_VOLUME_OPTIONS = tuple(FieldOption(key=k, label=v) for k, v in _VOLUMES.items())
 _AUTHORITIES = tuple(
     FieldOption(key=value, label=value)
     for key, value in vars(
@@ -117,7 +118,7 @@ def requirements(provider, country_code, subject_type) -> Requirements:
             FieldSpec(
                 name="message_volume",
                 label="Estimated texts per month",
-                options=tuple(FieldOption(key=k, label=v) for k, v in _VOLUMES.items()),
+                options=_VOLUME_OPTIONS,
             ),
             FieldSpec(
                 name="doing_business_as",
@@ -179,10 +180,11 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
             result.append(
                 Problem(field=spec.name, message="Enter a full public https:// link.")
             )
+    reported = {p.field for p in result}
     for method in picked(fields.get("consent_methods")):
         if method in _METHODS:
             evidence = _METHODS[method][1]
-            if not fields.get(evidence, "").strip():
+            if evidence not in reported and not fields.get(evidence, "").strip():
                 result.append(
                     Problem(
                         field=evidence,

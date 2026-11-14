@@ -211,6 +211,9 @@ def notify_verification_decided(verification_id: str) -> None:
 async def tollfree_verification_supported() -> bool:
     """Fail closed until the website's free TFV billing guards are deployed.
 
+    A self-hosted install (no ``HAIL_BASE_URL``) has no Hail billing, so it
+    always returns True.
+
     No cache: a rollback to an old rater must stop new filings immediately.
     Old websites lack the endpoint or marker. Neither permits a carrier write.
     """

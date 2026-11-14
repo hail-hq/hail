@@ -128,6 +128,17 @@ async def test_tollfree_preflight_reports_each_field_once():
     assert [x.field for x in problems].count("website") == 1
 
 
+async def test_tollfree_preflight_reports_missing_evidence_once():
+    # The shared form and the TFV form both require the evidence link.
+    p, _ = sdk_provider()
+    problems = p.validate_application(
+        {**TF_FIELDS, "consent_methods": "WEBSITE", "website_evidence_url": ""},
+        ADDRESS,
+        "business",
+    )
+    assert [x.field for x in problems].count("website_evidence_url") == 1
+
+
 async def test_editable_tollfree_rejection_is_repaired_on_same_request():
     p, http = sdk_provider()
     status = "TWILIO_REJECTED"
