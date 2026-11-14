@@ -8,6 +8,7 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -24,8 +25,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+logger = logging.getLogger(__name__)
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_independent_engine: AsyncEngine | None = None
+_independent_sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 _SCHEME_ALIASES = (
@@ -94,24 +99,50 @@ def to_sync_url(url: str) -> str:
     return _rewrite_scheme(url, "postgresql+psycopg://")
 
 
+def _create_session_pool(
+    size: int, overflow: int
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    engine = create_async_engine(
+        to_async_url(settings.database_url), pool_size=size, max_overflow=overflow
+    )
+    if telemetry_enabled():
+        # Unsupported tracing must never take the database down.
+        instrument("SQLAlchemy", logfire.instrument_sqlalchemy, engine=engine)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
 def _ensure_initialized() -> async_sessionmaker[AsyncSession]:
     global _engine, _sessionmaker
     if _sessionmaker is None:
-        _engine = create_async_engine(to_async_url(settings.database_url))
-        if telemetry_enabled():
-            # Tracing must never take the database down: the instrumentation
-            # refused SQLAlchemy 2.1 and failed every request.
-            instrument("SQLAlchemy", logfire.instrument_sqlalchemy, engine=_engine)
-        _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
+        _engine, _sessionmaker = _create_session_pool(
+            settings.database_pool_size, settings.database_max_overflow
+        )
     return _sessionmaker
 
 
+def _ensure_independent_initialized() -> async_sessionmaker[AsyncSession]:
+    global _independent_engine, _independent_sessionmaker
+    if _independent_sessionmaker is None:
+        # Audit, usage, and idempotency commits can run while a request holds
+        # a transaction. Separate slots prevent nested-checkout starvation.
+        _independent_engine, _independent_sessionmaker = _create_session_pool(2, 0)
+    return _independent_sessionmaker
+
+
 async def dispose_engine() -> None:
-    global _engine, _sessionmaker
-    if _engine is not None:
-        await _engine.dispose()
+    global _engine, _sessionmaker, _independent_engine, _independent_sessionmaker
+    engines = (_engine, _independent_engine)
+    # Reset first: a failed dispose must not keep later pools or stale globals.
     _engine = None
     _sessionmaker = None
+    _independent_engine = None
+    _independent_sessionmaker = None
+    for engine in engines:
+        if engine is not None:
+            try:
+                await engine.dispose()
+            except Exception:
+                logger.warning("database pool dispose failed", exc_info=True)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -124,6 +155,18 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
     async with _ensure_initialized()() as session:
+        yield session
+
+
+@asynccontextmanager
+async def independent_session_scope() -> AsyncIterator[AsyncSession]:
+    """Short independent commits that must not wait for a request's slot.
+
+    Never nest this scope inside another independent scope. Its two slots
+    are reserved for audit, usage, and idempotency writes, without network
+    work.
+    """
+    async with _ensure_independent_initialized()() as session:
         yield session
 
 

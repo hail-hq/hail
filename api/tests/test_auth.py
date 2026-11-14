@@ -14,10 +14,12 @@ verify:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -27,7 +29,8 @@ from hailhq.api.auth import hash_key
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.db import get_session
 from hailhq.core.models import ApiKey
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 def test_hash_key_format() -> None:
@@ -197,6 +200,67 @@ async def test_last_request_is_throttled(
 
     assert first is not None
     assert second == first
+
+
+@pytest.mark.parametrize("pool_size", [1, 2])
+async def test_api_key_auth_finishes_with_all_runtime_connections_in_use(
+    db, database_url, org_and_key, monkeypatch, pool_size
+):
+    from hailhq.api.deps import _principal_from_apikey_table
+    from hailhq.core import db as core_db
+
+    org_id, original, plain = org_and_key
+    keys = [(org_id, original.id, plain)]
+    seed_factory = async_sessionmaker(db, expire_on_commit=False)
+    async with seed_factory() as seed:
+        for index in range(1, pool_size):
+            plain = f"hl_live_auth_pool_{uuid.uuid4().hex}"
+            key = ApiKey(
+                id=uuid.uuid4(),
+                name=f"Auth pool {index}",
+                start=plain[:14],
+                reference_id=original.reference_id,
+                prefix="hl_live_",
+                key=hash_key(plain),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            seed.add(key)
+            await seed.commit()
+            keys.append((org_id, key.id, plain))
+
+    monkeypatch.setattr(core_db, "_engine", None)
+    monkeypatch.setattr(core_db, "_sessionmaker", None)
+    monkeypatch.setattr(core_db.settings, "database_url", database_url)
+    monkeypatch.setattr(core_db.settings, "database_pool_size", pool_size)
+    monkeypatch.setattr(core_db.settings, "database_max_overflow", 0)
+    monkeypatch.setattr(core_db, "telemetry_enabled", lambda: False)
+    factory = core_db._ensure_initialized()
+    try:
+        async with AsyncExitStack() as requests:
+            sessions = []
+            for _ in keys:
+                session = await requests.enter_async_context(factory())
+                # Each concurrent request already holds a read transaction.
+                await session.execute(text("SELECT 1"))
+                sessions.append(session)
+            principals = await asyncio.wait_for(
+                asyncio.gather(
+                    *(
+                        _principal_from_apikey_table(plain, session)
+                        for (_, _, plain), session in zip(keys, sessions, strict=True)
+                    )
+                ),
+                timeout=2,
+            )
+        assert [p.organization_id for p in principals] == [k[0] for k in keys]
+        async with seed_factory() as check:
+            for _, key_id, _ in keys:
+                key = await check.get(ApiKey, key_id)
+                assert key.last_request is not None
+                assert key.request_count == 1
+    finally:
+        await core_db.dispose_engine()
 
 
 async def test_wrong_scheme_returns_401(client: httpx.AsyncClient) -> None:

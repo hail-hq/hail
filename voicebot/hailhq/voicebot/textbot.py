@@ -28,7 +28,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
-from hailhq.core.db import session_scope
+from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
     identity_scope,
@@ -277,7 +277,14 @@ async def run_forever(stop: threading.Event | None = None) -> None:
             *(_email_poll_loop(api, stop) for _ in range(n)),
         )
     finally:
-        await api.aclose()
+        try:
+            await api.aclose()
+        finally:
+            if DRAIN_FLAG.exists():
+                # A draining voicebot runs up to an hour more for its live
+                # calls (in child processes with their own engines). The
+                # pollers have stopped, so return this process's connections.
+                await dispose_engine()
 
 
 def start_thread() -> threading.Thread | None:

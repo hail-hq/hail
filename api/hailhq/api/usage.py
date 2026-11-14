@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from hailhq.core.db import session_scope
+from hailhq.core.db import independent_session_scope
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.models import UsageEvent
 
@@ -29,7 +29,7 @@ async def write_usage_event(
     ref: str,
 ) -> None:
     try:
-        async with session_scope() as session:
+        async with independent_session_scope() as session:
             usage = UsageEvent(
                 organization_id=organization_id,
                 channel=channel,

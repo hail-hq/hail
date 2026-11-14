@@ -301,6 +301,34 @@ docker compose up -d
 
 The migration `0001_initial.py` issues `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. If a hosted provider gates extensions, allow `pgcrypto` on it.
 
+### Database connection budget
+
+The defaults are below. Set either key in `.env` to change it:
+
+```dotenv
+DATABASE_POOL_SIZE=5
+DATABASE_MAX_OVERFLOW=0
+```
+
+Each API process and voice job owns a pool. The text worker also uses a pool.
+Each pool can open `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW` connections.
+At the limit, work waits for a returned connection. The wait times out after 30 seconds.
+Idle pools keep up to `DATABASE_POOL_SIZE` connections until disposal.
+
+Audit, usage, and idempotency writes share a separate pool with two connections per process.
+They must commit independently while request transactions remain open.
+Their reserved slots prevent request traffic from starving those commits.
+With the defaults, an API process can use seven connections: five for requests and background jobs, and two for independent writes.
+Other processes open only the pools they use.
+
+Count every process when budgeting a shared session pooler.
+Leave room for the website, migrations, operator tools, and overlapping deployments.
+A session pooler accepts only as many clients as its pool size, so the sum must stay below it.
+The default reduces that risk. It does not enforce a global connection limit.
+Keep `DATABASE_POOL_SIZE` at 2 or more and `DATABASE_MAX_OVERFLOW` nonnegative.
+SQLAlchemy treats zero pool size and negative overflow as unlimited, so Hail rejects them.
+Inbound call setup holds two sessions at once, so Hail also rejects a pool size of 1.
+
 ## Releases
 
 Tag conventions:

@@ -1,7 +1,7 @@
 """Shared audit-log writer.
 
 Used by every mutating route (calls, emails, email-domains). The write
-runs in its own session (``session_scope()``) so a logging failure can
+runs in its own session (``independent_session_scope()``) so a logging failure can
 never roll back the user-facing operation — the audit trail is a
 best-effort safety net, never a correctness guarantee.
 
@@ -28,7 +28,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.db import session_scope
+from hailhq.core.db import independent_session_scope
 from hailhq.core.models import AuditLog
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ async def write_audit_log(
 ) -> None:
     """Append an ``audit_log`` row in a fresh session. Never re-raises."""
     try:
-        async with session_scope() as session:
+        async with independent_session_scope() as session:
             session.add(
                 AuditLog(
                     organization_id=organization_id,

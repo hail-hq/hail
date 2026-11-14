@@ -208,16 +208,15 @@ class WebhookWorker:
                 if row.email_domain_id:
                     headers["X-Hail-Email-Domain"] = str(row.email_domain_id)
 
-                try:
-                    status, resp_body = await self._http_post(target_url, body, headers)
-                except Exception as exc:  # pragma: no cover
-                    await self._record_failure(
-                        session, row, None, str(exc)[:RESPONSE_BODY_CAP]
-                    )
-                    return
+            # The session above has ended, so a slow customer server holds no
+            # pooled connection. The claim's deferral keeps the row ours.
+            try:
+                status, resp_body = await self._http_post(target_url, body, headers)
+            except Exception as exc:  # pragma: no cover
+                status, resp_body = None, str(exc)[:RESPONSE_BODY_CAP]
 
-                ok = 200 <= status < 300
-                if ok:
+            async with self._session_factory() as session:
+                if status is not None and 200 <= status < 300:
                     await self._record_success(session, row, status, resp_body)
                 else:
                     await self._record_failure(
