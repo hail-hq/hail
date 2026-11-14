@@ -68,6 +68,8 @@ async def on_approved_registration(
 async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
+    if from_number.number_type == "toll_free" and from_number.provider != "twilio":
+        return None  # Other carriers retain their existing carrier-side gate.
     if from_number.number_type == "toll_free" and from_number.country_code in {
         "US",
         "CA",
@@ -82,6 +84,22 @@ async def us_registration_block(
             return None
         if await on_approved_registration(db, organization_id, from_number):
             return None
+        if (
+            from_number.organization_id == organization_id
+            and from_number.provisioning_state == "active"
+            and from_number.provider_resource_id
+        ):
+            from hailhq.core.carrier_routing import sms_route
+
+            try:
+                provider = sms_route(from_number.provider)
+                if await provider.tollfree_approved(
+                    provider_resource_id=from_number.provider_resource_id,
+                    e164=from_number.e164,
+                ):
+                    return None
+            except Exception:
+                pass  # No positive proof: keep the send blocked.
         return "Toll-free texting to the US and Canada needs verification for this number. Open Numbers in the console and choose Register for texting."
     if from_number.country_code not in US_SMS_COUNTRY_CODES or not is_us(to_e164):
         return None

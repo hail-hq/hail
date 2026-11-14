@@ -216,7 +216,7 @@ registration does not verify toll-free messaging.
 
   CLI: `hail numbers confirm-sms <verification-id> --code 482913`.
 
-- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. Without it the Twilio SMS registration plug-in is off: `purpose=sms` with Twilio returns 404.
+- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. It is required for local 10DLC registration. Toll-free verification and read-only approval checks need the Twilio credentials but do not use this local setting.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
 
@@ -285,7 +285,13 @@ Editable rejections keep the same row in `submitted` / `needs_information`.
 `PATCH /v1/verifications/{id}/application` checks the original sender, confirms
 that the carrier still permits edits, and updates the same carrier request.
 The send gate blocks US and Canadian recipients until this exact number has an
-approved verification. Another number's approval never unlocks it.
+approved verification. Another number's approval never unlocks it. Existing
+manual Twilio approvals continue through a read-only check: the current incoming
+phone resource must match the owned SID, E.164 number and authenticated account.
+Its sole TFV record must match the same SID/account and be `TWILIO_APPROVED`.
+An error, timeout or mismatch fails closed. This check writes no provider or
+Hail registration and stores no guessed customer identity. Other carriers keep
+their existing carrier-side checks until Hail supports their TFV API.
 
 Official guidance checked November 14, 2026:
 [approval guidance](https://www.twilio.com/en-us/blog/insights/best-practices/improving-your-chances-of-toll-free-verification-approval),

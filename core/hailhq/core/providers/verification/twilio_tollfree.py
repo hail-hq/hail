@@ -14,8 +14,8 @@ from hailhq.core.providers.verification.base import (
     Problem,
     ProviderStatus,
     Requirements,
-    VerificationProviderError,
     SmsRegistrationProvider,
+    VerificationProviderError,
 )
 from hailhq.core.providers.verification.sms_form import (
     _is_public_https_url,

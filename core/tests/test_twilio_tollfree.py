@@ -1,9 +1,11 @@
+import json
+
 import pytest
 from hailhq.core.providers.verification.base import VerificationProviderError
+from twilio.http.response import Response
+
 from .test_twilio_sms_registration import ADDRESS, FIELDS
 from .test_twilio_sms_sdk import sdk_provider
-from twilio.http.response import Response
-import json
 
 TF_FIELDS = {
     **FIELDS,
@@ -178,16 +180,16 @@ async def test_lost_tollfree_create_response_is_recovered_without_second_submiss
 
     http.request = request
     req = await p.requirements("US", "toll_free", "business")
-    kwargs = dict(
-        organization_id="org",
-        contact_email="ops@hail.so",
-        requirements=req,
-        fields=TF_FIELDS,
-        address=ADDRESS,
-        documents={},
-        provider_resource_id="PN1",
-        e164="+18005550100",
-    )
+    kwargs = {
+        "organization_id": "org",
+        "contact_email": "ops@hail.so",
+        "requirements": req,
+        "fields": TF_FIELDS,
+        "address": ADDRESS,
+        "documents": {},
+        "provider_resource_id": "PN1",
+        "e164": "+18005550100",
+    }
     with pytest.raises(VerificationProviderError):
         await p.create_draft(**kwargs)
     recovered = await p.create_draft(**kwargs)
@@ -235,3 +237,14 @@ async def test_lost_amendment_response_recovers_matching_saved_carrier_answers()
         await p.amend_filed_application(refs, fields, ADDRESS, "business")
     await p.amend_filed_application(refs, fields, ADDRESS, "business")
     assert sum(method == "POST" for method, _, _ in http.calls) == 1
+
+
+def test_verification_codes_use_the_current_official_tollfree_category():
+    # https://www.twilio.com/docs/messaging/compliance/toll-free/api-onboarding
+    # Current TFV documentation names TWO_FACTOR_AUTHENTICATION, not 2FA.
+    from hailhq.core.providers.verification import twilio_tollfree
+
+    data = twilio_tollfree.payload(
+        {**TF_FIELDS, "text_types": "2FA"}, ADDRESS, "business", "ops@hail.so", "PN1"
+    )
+    assert data["use_case_categories"] == ["TWO_FACTOR_AUTHENTICATION"]

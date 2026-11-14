@@ -147,8 +147,10 @@ async def test_tollfree_submit_is_free_attaches_only_target_and_keeps_number_id(
     client, async_session, org_and_key, monkeypatch, supported, registration_kind
 ):
     import json
+
     from hailhq.api.main import app
     from hailhq.core.providers.verification.base import DraftResult, ProviderStatus
+
     from .test_verifications_api import FakeSmsCarrier
 
     class TollfreeCarrier(FakeSmsCarrier):
@@ -279,3 +281,39 @@ async def test_tollfree_submit_is_free_attaches_only_target_and_keeps_number_id(
         assert not notify.called
     finally:
         app.dependency_overrides.pop(routes.get_verification_registry, None)
+
+
+@pytest.mark.parametrize("approved", [False, True])
+async def test_manual_tollfree_approval_keeps_existing_sender_working(
+    client, async_session, org_and_key, sms_mock, monkeypatch, approved
+):
+    from hailhq.core import carrier_routing
+
+    from .test_sms_api import _seed_dedicated_number, _us_text
+
+    org_id, _, key = org_and_key
+    await _seed_dedicated_number(
+        async_session,
+        org_id,
+        e164="+18005550100",
+        number_type="toll_free",
+        register_sms=False,
+    )
+    lookup = AsyncMock(return_value=approved)
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        carrier_routing,
+        "sms_route",
+        lambda provider: SimpleNamespace(tollfree_approved=lookup),
+    )
+    response = await client.post(
+        "/sms", json=_us_text(), headers={"Authorization": f"Bearer {key}"}
+    )
+    assert response.status_code == (201 if approved else 422), response.text
+    lookup.assert_awaited_once()
+    assert lookup.await_args.kwargs["e164"] == "+18005550100"
+    if approved:
+        sms_mock.send_sms.assert_awaited_once()
+    else:
+        sms_mock.send_sms.assert_not_awaited()

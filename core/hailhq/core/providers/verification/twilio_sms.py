@@ -14,6 +14,7 @@ import requests
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
+from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
@@ -25,7 +26,6 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.forms import display_name
-from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     sms_requirements,
@@ -103,10 +103,6 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         self._primary_profile_sid = (
             primary_profile_sid or settings.twilio_primary_profile_sid
         )
-        if not self._primary_profile_sid:
-            raise ValueError(
-                "TwilioSmsRegistrationProvider needs TWILIO_PRIMARY_PROFILE_SID"
-            )
         self.account_sid = account_sid or settings.twilio_account_sid
         token = auth_token or settings.twilio_auth_token
         if client is None:
@@ -132,6 +128,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         if number_type != "local" or country_code != "US":
             raise ValueError(
                 "SMS registration supports US local and US/CA toll-free numbers"
+            )
+        if not self._primary_profile_sid:
+            raise ValueError(
+                "TwilioSmsRegistrationProvider needs TWILIO_PRIMARY_PROFILE_SID for 10DLC"
             )
         return sms_requirements(self, subject_type)
 
@@ -176,6 +176,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 provider_resource_id,
                 e164,
                 organization_id,
+            )
+        if not self._primary_profile_sid:
+            raise VerificationProviderError(
+                "Local texting registration is not configured."
             )
         if fields.get("registration_kind") == "toll_free":
             return DraftResult(

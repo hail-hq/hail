@@ -51,6 +51,43 @@ class TwilioSmsProvider(SmsProvider):
             client = TwilioClient(self.account_sid, token)
         self._client = client
 
+    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+        """Preserve existing manual approvals without importing identity or filing.
+
+        Both the current owned phone and the sole TFV request must match this
+        account and exact SID. An old approval for another/released number
+        never authorizes this sender. No cache can outlive a revocation.
+        """
+
+        def read():
+            phone = self._client.incoming_phone_numbers(provider_resource_id).fetch()
+            if (
+                phone.sid != provider_resource_id
+                or phone.phone_number != e164
+                or phone.account_sid != self.account_sid
+            ):
+                return False
+            records = self._client.messaging.v1.tollfree_verifications.list(
+                tollfree_phone_number_sid=provider_resource_id, limit=2
+            )
+            return (
+                len(records) == 1
+                and records[0].tollfree_phone_number_sid == provider_resource_id
+                and records[0].account_sid == self.account_sid
+                and records[0].status == "TWILIO_APPROVED"
+            )
+
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(read), timeout=5)
+        except Exception as exc:
+            logger.warning(
+                "Toll-free approval lookup failed: exception=%s status=%s code=%s",
+                type(exc).__name__,
+                exc.status if isinstance(exc, TwilioRestException) else None,
+                exc.code if isinstance(exc, TwilioRestException) else None,
+            )
+            return False
+
     async def send_sms(
         self,
         from_e164: str,
@@ -238,6 +275,11 @@ class LazyTwilioSmsProvider(SmsProvider):
         if self._inner is None:
             self._inner = TwilioSmsProvider()
         return self._inner
+
+    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+        return await self._provider().tollfree_approved(
+            provider_resource_id=provider_resource_id, e164=e164
+        )
 
     async def send_sms(
         self,

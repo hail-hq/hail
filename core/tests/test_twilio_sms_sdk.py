@@ -4,11 +4,13 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
-from .test_twilio_sms_registration import ADDRESS, FIELDS, FakeSms
 from twilio.http.http_client import HttpClient
 from twilio.http.response import Response
 from twilio.rest import Client
+
+from .test_twilio_sms_registration import ADDRESS, FIELDS, FakeSms
 
 
 class RecordingHttp(HttpClient):
@@ -109,8 +111,8 @@ async def test_pinned_sdk_resends_person_otp_and_reads_identity():
 
 
 async def test_coding_failure_has_safe_diagnostics(caplog):
-    from hailhq.core.providers.verification.base import VerificationProviderError
     import pytest
+    from hailhq.core.providers.verification.base import VerificationProviderError
 
     provider, _ = sdk_provider()
 
@@ -131,3 +133,52 @@ async def test_coding_failure_has_safe_diagnostics(caplog):
     assert "exception=AttributeError" in caplog.text
     assert "do-not-log" not in caplog.text
     assert "private@customer.com" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "change,approved",
+    [
+        ({}, True),
+        ({"tollfree_phone_number_sid": "PN-other"}, False),
+        ({"account_sid": "AC-other"}, False),
+        ({"status": "PENDING_REVIEW"}, False),
+    ],
+)
+async def test_legacy_tollfree_requires_exact_current_owned_resource(change, approved):
+    from hailhq.core.providers.sms.twilio import TwilioSmsProvider
+
+    provider, http = sdk_provider()
+    account = provider.account_sid
+
+    def request(method, uri, **kwargs):
+        http.calls.append((method, uri, kwargs))
+        if "IncomingPhoneNumbers/" in uri:
+            payload = {
+                "sid": "PN1",
+                "account_sid": account,
+                "phone_number": "+18005550100",
+            }
+        else:
+            payload = {
+                "verifications": [
+                    {
+                        "sid": "HH1",
+                        "account_sid": account,
+                        "tollfree_phone_number_sid": "PN1",
+                        "status": "TWILIO_APPROVED",
+                        **change,
+                    }
+                ],
+                "meta": {"key": "verifications"},
+            }
+        return Response(200, json.dumps(payload))
+
+    http.request = request
+    sms = TwilioSmsProvider(
+        account_sid=account, auth_token="test", client=provider._client
+    )
+    assert (
+        await sms.tollfree_approved(provider_resource_id="PN1", e164="+18005550100")
+        is approved
+    )
+    assert all(method == "GET" for method, _, _ in http.calls)

@@ -8,8 +8,8 @@ The old SMS unique index excludes toll-free; a separate partial unique index
 allows one live verification per toll-free number, regardless of country.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0078"
