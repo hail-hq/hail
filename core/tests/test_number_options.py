@@ -500,6 +500,7 @@ def test_toll_free_sms_options_only_from_carriers_hail_can_verify(catalog):
     assert one(sms, "local").monthly_cents == 110
     # Calls only: every carrier competes.
     voice = one(number_options("US", {}, ["voice"]), "toll_free")
-    assert voice.monthly_cents == 110 and voice.more_options == 1
+    # No SMS fee: it can never text, and a calls-only quote prices calls only.
+    assert voice.monthly_cents == 100 and voice.more_options == 1
     # The cheaper Telnyx number can never text the US: it shows calls only.
     assert voice.capabilities == ["voice"]

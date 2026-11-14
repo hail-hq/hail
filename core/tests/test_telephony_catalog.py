@@ -329,3 +329,8 @@ def test_toll_free_sms_only_where_hail_can_verify_it():
     assert effective_capabilities(tf, "telnyx", "CA", "toll_free") == ["voice"]
     assert effective_capabilities(tf, "telnyx", "US", "local") == ["voice", "sms"]
     assert effective_capabilities(tf, "telnyx", "GB", "toll_free") == ["voice", "sms"]
+
+
+def test_toll_free_mms_follows_sms_hail_can_verify():
+    caps = telephony_catalog.capabilities("US", "toll_free", "telnyx")
+    assert caps == {"voice": True, "sms": False, "mms": False}

@@ -69,12 +69,11 @@ async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
     if from_number.number_type == "toll_free":
-        from hailhq.core.carrier_routing import CARRIERS
+        from hailhq.core.telephony_catalog import tollfree_sms_unverifiable
 
-        tf_carrier = CARRIERS.get(from_number.provider)
-        if not (
-            tf_carrier and tf_carrier.toll_free_sms_verification
-        ) or from_number.country_code not in {"US", "CA"}:
+        if from_number.country_code not in {"US", "CA"} or tollfree_sms_unverifiable(
+            from_number.provider, from_number.country_code, "toll_free"
+        ):
             # Other carriers keep their carrier-side gate. Territory toll-free
             # numbers are not on the 10DLC registry, so that gate never applies.
             return None

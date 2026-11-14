@@ -206,12 +206,8 @@ def _candidates(
                 if needs
                 else None
             )
-            # Priced on what the carrier sells and bills, so the price matches
-            # the live quote. ``caps`` may leave out SMS Hail cannot verify.
             monthly = telephony_catalog.monthly_price(
-                provider,
-                cents(row["usd_per_month"]),
-                telephony_catalog.effective_capabilities(row, provider),
+                provider, cents(row["usd_per_month"]), caps
             )["monthly_cents"]
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])

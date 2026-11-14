@@ -116,8 +116,12 @@ def capabilities(
         caps = effective_capabilities(row, name, country_code, number_type)
         if not caps and not _sms_route_exists(name):
             continue  # an SMS-only number Hail cannot use at this carrier
-        # No SMS route also means no MMS.
-        mms = bool(row.get("mms")) and _sms_route_exists(name)
+        # No SMS route, or toll-free SMS Hail cannot verify, means no MMS.
+        mms = (
+            bool(row.get("mms"))
+            and _sms_route_exists(name)
+            and not tollfree_sms_unverifiable(name, country_code, number_type)
+        )
         return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 
