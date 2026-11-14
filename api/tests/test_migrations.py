@@ -761,3 +761,18 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert rows == [(agent, contact)]
         assert _column_data_type(conn, "agent_handover_contacts", "user_id") is None
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
+
+
+POOLER_URL = os.environ.get("HAIL_TEST_TRANSACTION_POOLER_URL")
+
+
+@pytest.mark.skipif(not POOLER_URL, reason="HAIL_TEST_TRANSACTION_POOLER_URL is unset")
+def test_upgrade_head_through_a_transaction_pooler(monkeypatch) -> None:
+    """Production can migrate through a pooler's transaction port. CI runs
+    this against PgBouncer in transaction mode on an empty database."""
+    monkeypatch.setenv("DATABASE_TRANSACTION_POOLER", "true")
+    _seed_website_owned_tables(POOLER_URL)
+    _run_alembic(POOLER_URL, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(POOLER_URL))) as conn:
+        version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+    assert version

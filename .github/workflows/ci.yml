@@ -57,17 +57,54 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
 
+  # Production can reach Postgres through a transaction-mode pooler. This job
+  # runs the app's queries and every migration through one: PgBouncer with
+  # prepared-statement tracking off, like a hosted shared pooler.
+  transaction-pooler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hail
+          POSTGRES_PASSWORD: hail
+          POSTGRES_DB: hail
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hail"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      HAIL_TEST_TRANSACTION_POOLER_URL: postgresql://hail:hail@127.0.0.1:6432/hail
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --frozen --all-packages --all-extras
+      - name: Start PgBouncer in transaction mode
+        run: scripts/ci/start-transaction-pooler.sh
+      - name: Queries through the pooler
+        working-directory: core
+        run: uv run --frozen pytest tests/test_transaction_pooler.py -v
+      - name: Migrations through the pooler
+        working-directory: api
+        run: uv run --frozen pytest tests/test_migrations.py -v -k transaction_pooler
+
   # Preserve the existing required check while the suites run in parallel.
   test:
     if: ${{ always() }}
-    needs: python-tests
+    needs: [python-tests, transaction-pooler]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every Python suite to pass
         env:
-          RESULT: ${{ needs.python-tests.result }}
-        run: test "$RESULT" = success
+          SUITES: ${{ needs.python-tests.result }}
+          POOLER: ${{ needs.transaction-pooler.result }}
+        run: test "$SUITES" = success && test "$POOLER" = success
 
   go:
     runs-on: ubuntu-latest
