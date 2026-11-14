@@ -124,3 +124,30 @@ def test_by_request_toll_free_sms_skips_carriers_hail_cannot_verify(
         assert asked.provider == "telnyx"
     finally:
         telephony_catalog._load.cache_clear()
+
+
+async def test_calls_only_toll_free_offer_never_shows_sms_hail_cannot_verify(
+    monkeypatch,
+):
+    from hailhq.core.carrier_offer import CarrierOffer
+
+    def offer(provider: str) -> CarrierOffer:
+        return CarrierOffer(
+            provider=provider,
+            e164="+18005550100",
+            country_code="US",
+            number_type="toll_free",
+            capabilities=["voice", "sms"],
+            monthly_cents=110,
+            setup_cents=100,
+            readiness="ready",
+        )
+
+    calls = _stub_carriers(monkeypatch)
+    calls["twilio"].return_value = [offer("twilio")]
+    calls["telnyx"].return_value = [offer("telnyx")]
+    offers, _ = await number_offers.discover_offers(
+        uuid4(), "US", "toll_free", ["voice"]
+    )
+    caps = {o.provider: o.capabilities for o in offers}
+    assert caps == {"twilio": ["voice", "sms"], "telnyx": ["voice"]}

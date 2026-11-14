@@ -184,7 +184,9 @@ def _candidates(
             # Same as /quotes: no verification provider, no by-request row.
             if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
-            caps = telephony_catalog.effective_capabilities(row, provider)
+            caps = telephony_catalog.effective_capabilities(
+                row, provider, country_code, row["number_type"]
+            )
             # By-request rows: the /quotes rule (needs voice plus all asked).
             ok = (
                 by_request_quotable(caps, capabilities)
@@ -204,8 +206,12 @@ def _candidates(
                 if needs
                 else None
             )
+            # Priced on what the carrier sells and bills, so the price matches
+            # the live quote. ``caps`` may leave out SMS Hail cannot verify.
             monthly = telephony_catalog.monthly_price(
-                provider, cents(row["usd_per_month"]), caps
+                provider,
+                cents(row["usd_per_month"]),
+                telephony_catalog.effective_capabilities(row, provider),
             )["monthly_cents"]
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])

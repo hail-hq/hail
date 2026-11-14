@@ -18,6 +18,7 @@ __all__ = [
     "by_request_row",
     "capabilities",
     "effective_capabilities",
+    "tollfree_sms_unverifiable",
     "monthly_price",
     "requirements",
     "rows",
@@ -53,16 +54,40 @@ def _sms_route_exists(provider: str) -> bool:
     return provider not in CARRIERS or CARRIERS[provider].sms_route is not None
 
 
-def effective_capabilities(row: dict, provider: str) -> list[str]:
+def tollfree_sms_unverifiable(
+    provider: str, country_code: str | None, number_type: str | None
+) -> bool:
+    """True for a US/CA toll-free number at a carrier Hail cannot verify
+    toll-free texting with: it can never text the US or Canada."""
+    if country_code not in {"US", "CA"} or number_type != "toll_free":
+        return False
+    # Imported here: carrier_routing imports the carrier adapters.
+    from hailhq.core.carrier_routing import CARRIERS
+
+    entry = CARRIERS.get(provider)
+    return not (entry and entry.toll_free_sms_verification)
+
+
+def effective_capabilities(
+    row: dict,
+    provider: str,
+    country_code: str | None = None,
+    number_type: str | None = None,
+) -> list[str]:
     """What Hail can deliver on this catalog row: ``voice`` and/or ``sms``.
     Hail routes no SMS through a carrier whose ``sms_route`` is None. Its
     catalog row may list SMS, because the carrier sells it; Hail cannot
     deliver it, so it is never promised. An SMS-only row at such a carrier
-    gives an empty list."""
+    gives an empty list. A US/CA toll-free row at a carrier Hail cannot verify
+    for toll-free texting never promises SMS either."""
     caps = []
     if row.get("voice"):
         caps.append("voice")
-    if row.get("sms") and _sms_route_exists(provider):
+    if (
+        row.get("sms")
+        and _sms_route_exists(provider)
+        and not tollfree_sms_unverifiable(provider, country_code, number_type)
+    ):
         caps.append("sms")
     return caps
 
@@ -88,7 +113,7 @@ def capabilities(
         # orders a by_request number by hand.
         if row.get("receive_only") or row.get("by_request"):
             continue
-        caps = effective_capabilities(row, name)
+        caps = effective_capabilities(row, name, country_code, number_type)
         if not caps and not _sms_route_exists(name):
             continue  # an SMS-only number Hail cannot use at this carrier
         # No SMS route also means no MMS.

@@ -32,11 +32,8 @@ def toll_free_sms_ok(
     """False for a US/CA toll-free number asked for SMS from a carrier Hail
     cannot verify toll-free texting with: that number could never text, so
     it is not offered. Calls-only searches keep every carrier."""
-    return (
-        country not in {"US", "CA"}
-        or kind != "toll_free"
-        or "sms" not in capabilities
-        or carrier(provider).toll_free_sms_verification
+    return "sms" not in capabilities or not telephony_catalog.tollfree_sms_unverifiable(
+        provider, country, kind
     )
 
 
@@ -117,6 +114,15 @@ async def discover_offers(
                 "Carrier discovery failed: provider=%s", provider, exc_info=result
             )
             unavailable.append(provider)
+        elif telephony_catalog.tollfree_sms_unverifiable(provider, country, kind):
+            # The carrier sells SMS on it, but Hail cannot verify it for
+            # toll-free texting: never show it as able to text.
+            offers.extend(
+                o.model_copy(
+                    update={"capabilities": [c for c in o.capabilities if c != "sms"]}
+                )
+                for o in result
+            )
         else:
             offers.extend(result)
     return rank_offers(offers), unavailable
@@ -151,7 +157,7 @@ def by_request_offers(
         row = telephony_catalog.by_request_row(country, kind, name)
         if row is None:
             continue
-        has = telephony_catalog.effective_capabilities(row, name)
+        has = telephony_catalog.effective_capabilities(row, name, country, kind)
         if not by_request_quotable(has, capabilities):
             continue
         needs = bool(row.get("verification_required"))

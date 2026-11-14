@@ -318,3 +318,14 @@ def test_capabilities_are_booleans_for_null_flags(tmp_path, monkeypatch):
         }
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_toll_free_sms_only_where_hail_can_verify_it():
+    from hailhq.core.telephony_catalog import effective_capabilities
+
+    tf = {"voice": True, "sms": True}
+    assert effective_capabilities(tf, "twilio", "US", "toll_free") == ["voice", "sms"]
+    assert effective_capabilities(tf, "telnyx", "US", "toll_free") == ["voice"]
+    assert effective_capabilities(tf, "telnyx", "CA", "toll_free") == ["voice"]
+    assert effective_capabilities(tf, "telnyx", "US", "local") == ["voice", "sms"]
+    assert effective_capabilities(tf, "telnyx", "GB", "toll_free") == ["voice", "sms"]
