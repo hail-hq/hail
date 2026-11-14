@@ -9,6 +9,8 @@ dependencies = [
     "hailhq-core",
     "asyncpg>=0.30",
     "sqlalchemy[asyncio]>=2.0",
+    # google-auth needs post-quantum TLS support from grpcio 1.83 (April 2027).
+    "grpcio>=1.83",
     "livekit==1.1.20",
     "livekit-agents~=1.8.8",
     "livekit-plugins-openai~=1.8.8",
