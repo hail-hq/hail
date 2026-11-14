@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from contextlib import AsyncExitStack
 from urllib.parse import parse_qs, urlsplit
 
@@ -156,17 +157,25 @@ async def test_independent_commits_share_two_additional_connections(
 
 @pytest.mark.asyncio
 async def test_background_jobs_cannot_take_the_request_connections(fresh_db_pools):
-    """A job holding every background connection (a slow webhook POST)
+    """A job holding every background connection (a slow carrier call)
     leaves the request pool free, and the other way round."""
     from hailhq.core import db
+
+    capacity = db.settings.database_pool_size + db.settings.database_max_overflow
+
+    def pool_context(background: bool) -> contextvars.Context:
+        return db.background_context() if background else contextvars.copy_context()
 
     async def read_one():
         async with db.session_scope() as session:
             return (await session.execute(text("SELECT 1"))).scalar_one()
 
+    def read_in(background: bool) -> asyncio.Task:
+        return asyncio.create_task(read_one(), context=pool_context(background))
+
     async def hold_all(release: asyncio.Event, held: asyncio.Event):
         async with AsyncExitStack() as holders:
-            for _ in range(db.settings.database_pool_size):
+            for _ in range(capacity):
                 session = await holders.enter_async_context(db.session_scope())
                 await session.execute(text("SELECT 1"))
             held.set()
@@ -174,22 +183,18 @@ async def test_background_jobs_cannot_take_the_request_connections(fresh_db_pool
 
     for job_holds in (True, False):
         release, held = asyncio.Event(), asyncio.Event()
-        if job_holds:
-            holder = asyncio.create_task(
-                hold_all(release, held), context=db.background_context()
-            )
-            probe = read_one
-        else:
-            holder = asyncio.create_task(hold_all(release, held))
-
-            def probe():
-                return asyncio.create_task(read_one(), context=db.background_context())
-
-        await asyncio.wait_for(held.wait(), timeout=2)
-        assert await asyncio.wait_for(probe(), timeout=2) == 1
-        release.set()
-        await holder
-    assert db._background_engine is not db._engine
+        holder = asyncio.create_task(
+            hold_all(release, held), context=pool_context(job_holds)
+        )
+        try:
+            await asyncio.wait_for(held.wait(), timeout=2)
+            # The holder's own pool is full, so one more read there waits.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(read_in(job_holds), timeout=0.5)
+            assert await asyncio.wait_for(read_in(not job_holds), timeout=2) == 1
+        finally:
+            release.set()
+            await holder
 
 
 async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:

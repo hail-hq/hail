@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from functools import partial
 
@@ -217,7 +217,7 @@ def _check_sender_id_sms_carrier() -> None:
         )
 
 
-def _background_task(coro, name: str) -> asyncio.Task:
+def _background_task(coro: Coroutine[object, object, None], name: str) -> asyncio.Task:
     """Start a background job on the background database pool, so its
     sessions never take the connections that requests need."""
     return asyncio.create_task(coro, name=name, context=background_context())

@@ -231,7 +231,8 @@ class Settings(BaseSettings):
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
-    # Per-process limits. Session poolers share a small connection budget
+    # Per-pool limits. The API opens one pool for requests and one for
+    # background jobs. Session poolers share a small connection budget
     # across the API, voice jobs, background workers, and other clients.
     # At least 2: inbound call setup holds two sessions at once.
     database_pool_size: int = Field(default=5, ge=2)

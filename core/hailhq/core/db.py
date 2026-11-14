@@ -148,7 +148,7 @@ def _ensure_background_initialized() -> async_sessionmaker[AsyncSession]:
 def background_context() -> contextvars.Context:
     """A context for a background-job task. ``session_scope`` inside it, and
     in tasks it starts, uses the background pool. Jobs that hold a session
-    through a slow outside call (a webhook POST, an email send) then cannot
+    through a slow outside call (a carrier call, an email send) then cannot
     take the connections that requests need."""
     context = contextvars.copy_context()
     context.run(_in_background.set, True)

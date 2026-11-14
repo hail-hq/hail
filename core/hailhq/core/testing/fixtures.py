@@ -129,15 +129,21 @@ async def db(
 
 @pytest.fixture()
 async def fresh_db_pools(
-    database_url: str, monkeypatch: pytest.MonkeyPatch
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> AsyncIterator[None]:
     """Empty production pools on the test database, disposed afterwards.
 
     Pool settings start at their code defaults, so an ambient
-    ``DATABASE_POOL_SIZE`` cannot change a test. Request it after ``db``
-    when a test uses both: it replaces the sessionmakers ``db`` installs.
+    ``DATABASE_POOL_SIZE`` cannot change a test. When a test also uses
+    ``db``, it starts first, so these pools replace the sessionmakers it
+    installs whatever the argument order.
     """
     from hailhq.core.config import Settings
+
+    if "db" in request.fixturenames:
+        request.getfixturevalue("db")
 
     for name in (
         "_engine",
@@ -173,9 +179,8 @@ async def async_session(
     Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
     and the independent and background sessionmakers, so production
     ``session_scope()`` and ``independent_session_scope()`` callers (audit,
-    usage, idempotency,
-    voicebot event writes) talk to the test database without any FastAPI
-    dep override.
+    usage, idempotency, voicebot event writes) talk to the test database
+    without any FastAPI dep override.
 
     The ``db`` fixture handles the schema setup and sessionmaker patch.
     """
