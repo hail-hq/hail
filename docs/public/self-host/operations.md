@@ -200,7 +200,8 @@ Schema lives in `api/migrations/versions/`. Alembic config: `api/alembic.ini`. T
 ```bash
 # Apply all pending
 docker compose run --rm api alembic upgrade head
-# OR host-side (needs DATABASE_URL exported):
+# OR host-side (needs DATABASE_URL exported, and DATABASE_TRANSACTION_POOLER
+# when it is set in .env: alembic runs from api/ and does not read the root .env):
 cd api && uv run alembic upgrade head
 
 # Author a new migration (hand-written raw SQL via op.execute)

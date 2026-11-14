@@ -22,7 +22,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.asyncio
 async def test_many_sessions_share_pooler_backends(monkeypatch):
     from hailhq.core import db
 
