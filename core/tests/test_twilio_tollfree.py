@@ -10,7 +10,7 @@ from .test_twilio_sms_sdk import sdk_provider
 TF_FIELDS = {
     **FIELDS,
     "registration_kind": "toll_free",
-    "message_volume": "1,000",
+    "message_volume": "1000",
     "business_registration_authority": "EIN",
 }
 
@@ -78,6 +78,8 @@ async def test_tollfree_sdk_files_end_customer_evidence_and_polls_one_number():
     assert data["BusinessName"] == "Acme Inc"
     assert data["BusinessContactEmail"] == FIELDS["rep_email"]
     assert data["TollfreePhoneNumberSid"] == "PN1"
+    # The option key has no comma; Twilio gets its own enum text.
+    assert data["MessageVolume"] == "1,000"
     assert data["OptInImageUrls"] == [FIELDS["website_evidence_url"]]
     assert data["PrivacyPolicyUrl"] == FIELDS["privacy_policy_url"]
     assert data["TermsAndConditionsUrl"] == FIELDS["terms_url"]
@@ -92,7 +94,7 @@ async def test_tollfree_sdk_files_end_customer_evidence_and_polls_one_number():
 @pytest.mark.parametrize(
     "changes,field",
     [
-        ({"message_volume": "1000"}, "message_volume"),
+        ({"message_volume": "1,000"}, "message_volume"),
         (
             {"consent_methods": "VERBAL", "verbal_evidence_url": ""},
             "verbal_evidence_url",

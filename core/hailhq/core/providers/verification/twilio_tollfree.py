@@ -48,9 +48,10 @@ _CATEGORIES = {
     "PUBLIC_SERVICE_ANNOUNCEMENT": "PUBLIC_SERVICE_ANNOUNCEMENT",
 }
 # Twilio's MessageVolume enum (TFV API docs, checked 2026-11-14). The SDK
-# types it as a plain string, so Hail keeps the list here.
-_VOLUMES = tuple(
-    FieldOption(key=v, label=v)
+# types it as a plain string, so Hail keeps the list here. Keys hold no
+# commas: clients split option values on commas.
+_VOLUMES = {
+    v.replace(",", "").replace("+", "_plus"): v
     for v in (
         "10",
         "100",
@@ -64,7 +65,7 @@ _VOLUMES = tuple(
         "5,000,000",
         "10,000,000+",
     )
-)
+}
 _AUTHORITIES = tuple(
     FieldOption(key=value, label=value)
     for key, value in vars(
@@ -116,7 +117,7 @@ def requirements(provider, country_code, subject_type) -> Requirements:
             FieldSpec(
                 name="message_volume",
                 label="Estimated texts per month",
-                options=_VOLUMES,
+                options=tuple(FieldOption(key=k, label=v) for k, v in _VOLUMES.items()),
             ),
             FieldSpec(
                 name="doing_business_as",
@@ -230,7 +231,7 @@ def payload(fields, address, subject_type, contact_email, provider_resource_id):
         # The API accepts one enum. Every selected method is documented in
         # additional_information and has its own evidence URL.
         "opt_in_type": _METHODS[methods[0]][0],
-        "message_volume": fields["message_volume"],
+        "message_volume": _VOLUMES[fields["message_volume"]],
         "tollfree_phone_number_sid": provider_resource_id,
         "additional_information": text.message_flow,
         "privacy_policy_url": text.privacy_policy_url,
