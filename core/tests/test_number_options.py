@@ -240,7 +240,7 @@ def test_voice_filter_prices_calls_only(catalog):
     assert o.capabilities == ["voice", "sms"]
     # A calls-only search pays no SMS fee, at any carrier: both cost 8.00.
     v = one(number_options("AU", {}, capabilities=["voice"]), "mobile", "person")
-    assert "voice" in v.capabilities and v.monthly_cents == 800
+    assert v.capabilities == ["voice"] and v.monthly_cents == 800
 
 
 def test_person_and_business_share_one_union(catalog):
@@ -514,5 +514,5 @@ def test_filtered_options_price_only_the_asked_jobs(catalog):
     voice = one(number_options("US", {}, ["voice"]), "local")
     both = one(number_options("US", {}, ["voice", "sms"]), "local")
     every = one(number_options("US", {}), "local")
-    assert voice.monthly_cents == 100
+    assert voice.monthly_cents == 100 and voice.capabilities == ["voice"]
     assert both.monthly_cents == every.monthly_cents == 110
