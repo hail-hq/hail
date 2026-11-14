@@ -20,7 +20,7 @@ from hailhq.core.carrier_offer import (
     TypeOptions,
     cents,
 )
-from hailhq.core.number_offers import PROVIDERS, by_request_quotable
+from hailhq.core.number_offers import PROVIDERS, by_request_quotable, toll_free_sms_ok
 from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.schemas import Capability
 
@@ -184,16 +184,23 @@ def _candidates(
             # Same as /quotes: no verification provider, no by-request row.
             if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
-            caps = telephony_catalog.effective_capabilities(row, provider)
+            caps = telephony_catalog.effective_capabilities(
+                row, provider, country_code, row["number_type"]
+            )
             # By-request rows: the /quotes rule (needs voice plus all asked).
             ok = (
                 by_request_quotable(caps, capabilities)
                 if by_request
                 else all(c in caps for c in capabilities)
             )
-            if not caps or not ok:
-                continue
             nt = row["number_type"]
+            # Same as /quotes: no SMS toll-free number Hail cannot verify.
+            if (
+                not caps
+                or not ok
+                or not toll_free_sms_ok(provider, country_code, nt, capabilities)
+            ):
+                continue
             block = (
                 telephony_catalog.requirements(country_code, nt, provider)
                 if needs

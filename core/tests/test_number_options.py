@@ -483,3 +483,24 @@ def test_union_counts_buy_options_only_when_any_buy(catalog):
     )
     o = one(number_options("AU", {}), "mobile", "person")
     assert o.how == "buy" and o.monthly_cents == 500
+
+
+def test_toll_free_sms_options_only_from_carriers_hail_can_verify(catalog):
+    # Same rule as /quotes: Hail verifies US/CA toll-free texting with Twilio
+    # only, so a cheaper Telnyx toll-free number is not offered for SMS.
+    tf = {"sms": True}
+    catalog(
+        twilio=[row("US", "toll_free", "2.15", **tf), row("US", "local", "1.15", **tf)],
+        telnyx=[row("US", "toll_free", "1.00", **tf), row("US", "local", "1.00", **tf)],
+    )
+    sms = number_options("US", {}, ["sms"])
+    o = one(sms, "toll_free")
+    assert o.monthly_cents == 225 and o.more_options == 0
+    # Local numbers keep every carrier.
+    assert one(sms, "local").monthly_cents == 110
+    # Calls only: every carrier competes.
+    voice = one(number_options("US", {}, ["voice"]), "toll_free")
+    # No SMS fee: it can never text, and a calls-only quote prices calls only.
+    assert voice.monthly_cents == 100 and voice.more_options == 1
+    # The cheaper Telnyx number can never text the US: it shows calls only.
+    assert voice.capabilities == ["voice"]
