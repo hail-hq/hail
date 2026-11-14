@@ -26,6 +26,7 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
+    IDEMPOTENCY_CONFLICT_RESPONSES,
     IdempotencyContext,
     cache_failure,
     idempotency_dep,
@@ -209,6 +210,7 @@ async def _cleanup_partial_livekit(
             RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
         ),
         **FUNDS_RESPONSES,
+        **IDEMPOTENCY_CONFLICT_RESPONSES,
     },
 )
 async def create_call(

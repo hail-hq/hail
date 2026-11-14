@@ -389,6 +389,16 @@ paths:
                 type: integer
         "402":
           description: insufficient credits; top up at https://hail.so/console/billing
+        "409":
+          description:
+            Idempotency conflict. With a Retry-After header, the first
+            request with this key is still running, so retry after that many seconds.
+            Without it, the key was reused with a different request body.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -921,6 +931,16 @@ paths:
                 type: integer
         "402":
           description: insufficient credits; top up at https://hail.so/console/billing
+        "409":
+          description:
+            Idempotency conflict. With a Retry-After header, the first
+            request with this key is still running, so retry after that many seconds.
+            Without it, the key was reused with a different request body.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "502":
           description:
             "Email send failed: the provider rejected the send. The email
@@ -2329,7 +2349,15 @@ paths:
             expected_total_cents differs from the quoted total, or the carrier rejected
             or failed the order. In the last case the credit hold is refunded and
             the detail gives the reason. Also returned when the quote's number was
-            released since it was bought.
+            released since it was bought. Idempotency conflict. With a Retry-After
+            header, the first request with this key is still running, so retry after
+            that many seconds. Without it, the key was reused with a different request
+            body.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "503":
           description:
             The carrier lookup or number price is unavailable, or no inventory
@@ -3668,6 +3696,16 @@ paths:
                 type: integer
         "402":
           description: insufficient credits; top up at https://hail.so/console/billing
+        "409":
+          description:
+            Idempotency conflict. With a Retry-After header, the first
+            request with this key is still running, so retry after that many seconds.
+            Without it, the key was reused with a different request body.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
