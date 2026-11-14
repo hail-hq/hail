@@ -515,6 +515,7 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
     result = await tools.submit_verification(**_kwargs(client))
     assert set(result) == {
         "id",
+        "number_id",
         "country_code",
         "number_type",
         "subject_type",
@@ -2066,3 +2067,42 @@ async def test_a_form_with_no_file_part_is_still_multipart(client: HailClient) -
     )
     assert "error" not in result, result
     assert captured["parts"]["purpose"]["body"] == b"sms"
+
+
+@respx.mock
+async def test_tollfree_submission_preserves_owned_number_and_type(
+    client: HailClient,
+) -> None:
+    number_id = str(uuid4())
+    captured = {}
+
+    def handler(request):
+        captured.update(_parse_multipart(request))
+        return httpx.Response(
+            201,
+            json=_verification(
+                country_code="CA",
+                number_type="toll_free",
+                number_id=number_id,
+                purpose="sms",
+            ),
+        )
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=handler)
+    result = await tools.submit_verification(
+        **_kwargs(
+            client,
+            country_code="CA",
+            number_type="toll_free",
+            number_id=number_id,
+            purpose="sms",
+            fields={"registration_kind": "toll_free"},
+            documents={},
+            files=[],
+        )
+    )
+    assert result["number_id"] == number_id
+    assert result["number_type"] == "toll_free"
+    assert captured["number_id"]["body"] == number_id.encode()
+    assert captured["country_code"]["body"] == b"CA"
+    assert captured["number_type"]["body"] == b"toll_free"
