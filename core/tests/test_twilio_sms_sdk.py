@@ -135,6 +135,101 @@ async def test_coding_failure_has_safe_diagnostics(caplog):
     assert "private@customer.com" not in caplog.text
 
 
+@pytest.fixture(autouse=True)
+def _no_tollfree_cache():
+    from hailhq.core.providers.sms import twilio
+
+    twilio._tollfree_approved_until.clear()
+    yield
+    twilio._tollfree_approved_until.clear()
+
+
+def _tollfree_sms(records):
+    """A Twilio SMS provider whose number PN1 has these TFV records."""
+    from hailhq.core.providers.sms.twilio import TwilioSmsProvider
+
+    provider, http = sdk_provider()
+    account = provider.account_sid
+
+    def request(method, uri, **kwargs):
+        http.calls.append((method, uri, kwargs))
+        if "IncomingPhoneNumbers/" in uri:
+            payload = {
+                "sid": "PN1",
+                "account_sid": account,
+                "phone_number": "+18005550100",
+            }
+        else:
+            payload = {
+                "verifications": [
+                    {
+                        "sid": f"HH{i}",
+                        "account_sid": account,
+                        "tollfree_phone_number_sid": "PN1",
+                        **record,
+                    }
+                    for i, record in enumerate(records)
+                ],
+                "meta": {"key": "verifications"},
+            }
+        return Response(200, json.dumps(payload))
+
+    http.request = request
+    return (
+        TwilioSmsProvider(
+            account_sid=account, auth_token="test", client=provider._client
+        ),
+        http,
+    )
+
+
+@pytest.mark.parametrize(
+    "records,approved",
+    [
+        # Rejected once, approved later: the newest record decides.
+        (
+            [
+                {"status": "TWILIO_APPROVED", "date_created": "2026-11-02T00:00:00Z"},
+                {"status": "TWILIO_REJECTED", "date_created": "2026-11-01T00:00:00Z"},
+            ],
+            True,
+        ),
+        (
+            [
+                {"status": "TWILIO_REJECTED", "date_created": "2026-11-02T00:00:00Z"},
+                {"status": "TWILIO_APPROVED", "date_created": "2026-11-01T00:00:00Z"},
+            ],
+            False,
+        ),
+        ([], False),
+    ],
+)
+async def test_tollfree_approval_uses_newest_record(records, approved):
+    sms, _ = _tollfree_sms(records)
+    assert (
+        await sms.tollfree_approved(provider_resource_id="PN1", e164="+18005550100")
+        is approved
+    )
+
+
+async def test_tollfree_approval_caches_yes_only():
+    sms, http = _tollfree_sms([{"status": "TWILIO_APPROVED"}])
+    for _ in range(3):
+        assert await sms.tollfree_approved(
+            provider_resource_id="PN1", e164="+18005550100"
+        )
+    assert len(http.calls) == 2  # One phone fetch and one record list.
+
+
+async def test_tollfree_approval_does_not_cache_no():
+    sms, http = _tollfree_sms([{"status": "PENDING_REVIEW"}])
+    for _ in range(2):
+        assert not await sms.tollfree_approved(
+            provider_resource_id="PN1", e164="+18005550100"
+        )
+    assert len(http.calls) == 4
+
+
 @pytest.mark.parametrize(
     "change,approved",
     [

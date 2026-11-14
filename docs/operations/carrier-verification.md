@@ -288,8 +288,10 @@ The send gate blocks US and Canadian recipients until this exact number has an
 approved verification. Another number's approval never unlocks it. Existing
 manual Twilio approvals continue through a read-only check: the current incoming
 phone resource must match the owned SID, E.164 number and authenticated account.
-Its sole TFV record must match the same SID/account and be `TWILIO_APPROVED`.
-An error, timeout or mismatch fails closed. This check writes no provider or
+Every TFV record read must match the same SID/account, and the newest one must be
+`TWILIO_APPROVED`. An error, timeout or mismatch fails closed. A "yes" is kept
+for 10 minutes in each API process, so a revoked approval stops sends within
+10 minutes. A "no" is not kept. This check writes no provider or
 Hail registration and stores no guessed customer identity. Other carriers keep
 their existing carrier-side checks until Hail supports their TFV API.
 

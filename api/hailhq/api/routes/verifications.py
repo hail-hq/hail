@@ -2037,11 +2037,9 @@ async def _prepare_submission(
     draft_kwargs: dict = {}
     if sub.purpose == "sms" and sub.number_type == "toll_free":
         # Free TFV rows must never reach an older website's 10DLC sweep.
-        # Self-hosted installs without a website have no Hail billing.
-        self_hosted = (
-            principal.organization_id == SELF_HOSTED_ORG_ID
-            and not settings.hail_base_url
-        )
+        # Self-hosted installs without a website have no Hail billing, for
+        # every organization on them.
+        self_hosted = not settings.hail_base_url
         if not self_hosted and not await tollfree_verification_supported():
             raise HTTPException(
                 status_code=503,
