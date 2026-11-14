@@ -93,10 +93,12 @@ async def us_registration_block(
 
             try:
                 provider = sms_route(from_number.provider)
-                if await provider.tollfree_approved(
-                    provider_resource_id=from_number.provider_resource_id,
-                    e164=from_number.e164,
-                ):
+                if (
+                    await provider.tollfree_approved(
+                        provider_resource_id=from_number.provider_resource_id,
+                        e164=from_number.e164,
+                    )
+                ) is True:
                     return None
             except Exception:
                 pass  # No positive proof: keep the send blocked.

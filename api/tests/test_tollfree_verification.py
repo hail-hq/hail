@@ -283,7 +283,7 @@ async def test_tollfree_submit_is_free_attaches_only_target_and_keeps_number_id(
         app.dependency_overrides.pop(routes.get_verification_registry, None)
 
 
-@pytest.mark.parametrize("approved", [False, True])
+@pytest.mark.parametrize("approved", [False, True, "unknown"])
 async def test_manual_tollfree_approval_keeps_existing_sender_working(
     client, async_session, org_and_key, sms_mock, monkeypatch, approved
 ):
@@ -310,10 +310,58 @@ async def test_manual_tollfree_approval_keeps_existing_sender_working(
     response = await client.post(
         "/sms", json=_us_text(), headers={"Authorization": f"Bearer {key}"}
     )
-    assert response.status_code == (201 if approved else 422), response.text
+    assert response.status_code == (201 if approved is True else 422), response.text
     lookup.assert_awaited_once()
     assert lookup.await_args.kwargs["e164"] == "+18005550100"
-    if approved:
+    if approved is True:
         sms_mock.send_sms.assert_awaited_once()
     else:
         sms_mock.send_sms.assert_not_awaited()
+
+
+async def test_local_preview_with_missing_primary_profile_returns_controlled_error(
+    client, async_session, org_and_key, monkeypatch
+):
+    from hailhq.api.main import app
+    from hailhq.core.config import settings
+    from hailhq.core.providers.verification.twilio_sms import (
+        TwilioSmsRegistrationProvider,
+    )
+    from twilio.rest import Client
+
+    org_id, _, key = org_and_key
+    number = PhoneNumber(
+        organization_id=org_id,
+        provider="twilio",
+        provider_resource_id="PN1",
+        e164="+12125550100",
+        country_code="US",
+        number_type="local",
+        capabilities=["sms"],
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.commit()
+    monkeypatch.setattr(settings, "twilio_primary_profile_sid", "")
+    provider = TwilioSmsRegistrationProvider(
+        account_sid="AC" + "0" * 32,
+        auth_token="offline",
+        client=Client("AC" + "0" * 32, "offline"),
+    )
+    app.dependency_overrides[routes.get_verification_registry] = (
+        lambda: lambda name, purpose="number": provider
+    )
+    try:
+        response = await client.post(
+            "/verifications/sms/preview",
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "subject_type": "business",
+                "number_id": str(number.id),
+                "fields": {},
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert "carrier unavailable" in response.text
+    finally:
+        app.dependency_overrides.pop(routes.get_verification_registry, None)

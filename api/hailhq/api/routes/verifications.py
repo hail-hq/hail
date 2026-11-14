@@ -1647,8 +1647,8 @@ async def preview_sms_application(
     )
     number_type = number.number_type if number else "local"
     country_code = number.country_code if number_type == "toll_free" else "US"
-    requirements = await provider.requirements(
-        country_code, number_type, body.subject_type
+    requirements = await _requirements(
+        provider, country_code, number_type, body.subject_type, where="body"
     )
     if (number_type == "toll_free") != (
         body.fields.get("registration_kind") == "toll_free"
@@ -3081,8 +3081,8 @@ async def amend_sms_application(
             status_code=409,
             detail="This registration is not waiting for application information. Keep its existing filing and contact support for changes.",
         )
-    requirements = await provider.requirements(
-        row.country_code, row.number_type, row.subject_type
+    requirements = await _requirements(
+        provider, row.country_code, row.number_type, row.subject_type, where="body"
     )
     problems = length_problems(requirements, body.fields, {})
     problems.extend(
