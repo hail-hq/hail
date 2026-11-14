@@ -111,6 +111,11 @@ async def db(
             "_independent_sessionmaker",
             async_sessionmaker(engine, expire_on_commit=False),
         )
+        monkeypatch.setattr(
+            core_db,
+            "_background_sessionmaker",
+            async_sessionmaker(engine, expire_on_commit=False),
+        )
 
         yield engine
     finally:
@@ -120,6 +125,37 @@ async def db(
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
         await engine.dispose()
+
+
+@pytest.fixture()
+async def fresh_db_pools(
+    database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[None]:
+    """Empty production pools on the test database, disposed afterwards.
+
+    Pool settings start at their code defaults, so an ambient
+    ``DATABASE_POOL_SIZE`` cannot change a test. Request it after ``db``
+    when a test uses both: it replaces the sessionmakers ``db`` installs.
+    """
+    from hailhq.core.config import Settings
+
+    for name in (
+        "_engine",
+        "_sessionmaker",
+        "_independent_engine",
+        "_independent_sessionmaker",
+        "_background_engine",
+        "_background_sessionmaker",
+    ):
+        monkeypatch.setattr(core_db, name, None)
+    monkeypatch.setattr(core_db.settings, "database_url", database_url)
+    for name in ("database_pool_size", "database_max_overflow"):
+        monkeypatch.setattr(core_db.settings, name, Settings.model_fields[name].default)
+    monkeypatch.setattr(core_db, "telemetry_enabled", lambda: False)
+    try:
+        yield
+    finally:
+        await core_db.dispose_engine()
 
 
 @pytest.fixture()
@@ -135,8 +171,9 @@ async def async_session(
     """A per-test ``AsyncSession`` against empty tables.
 
     Also installs the test sessionmaker as ``hailhq.core.db._sessionmaker``
-    and ``_independent_sessionmaker``, so production ``session_scope()`` and
-    ``independent_session_scope()`` callers (audit, usage, idempotency,
+    and the independent and background sessionmakers, so production
+    ``session_scope()`` and ``independent_session_scope()`` callers (audit,
+    usage, idempotency,
     voicebot event writes) talk to the test database without any FastAPI
     dep override.
 

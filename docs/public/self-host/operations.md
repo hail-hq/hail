@@ -315,10 +315,13 @@ Each pool can open `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW` connections.
 At the limit, work waits for a returned connection. The wait times out after 30 seconds.
 Idle pools keep up to `DATABASE_POOL_SIZE` connections until disposal.
 
+The API's background jobs (webhook delivery, email forwarding, carrier syncs) use a second pool of the same size.
+A job that waits on a slow outside call then cannot take the connections that requests need.
+
 Audit, usage, and idempotency writes share a separate pool with two connections per process.
 They must commit independently while request transactions remain open.
 Their reserved slots prevent request traffic from starving those commits.
-With the defaults, an API process can use seven connections: five for requests and background jobs, and two for independent writes.
+With the defaults, an API process can use twelve connections: five for requests, five for background jobs, and two for independent writes.
 Other processes open only the pools they use.
 
 Count every process when budgeting a shared session pooler.

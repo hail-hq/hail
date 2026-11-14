@@ -95,35 +95,28 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     ],
 )
 async def test_runtime_pool_waits_instead_of_exceeding_its_connection_limit(
-    database_url, monkeypatch, options, capacity
+    fresh_db_pools, monkeypatch, options, capacity
 ):
     from hailhq.core import db
 
-    monkeypatch.setattr(db, "_engine", None)
-    monkeypatch.setattr(db, "_sessionmaker", None)
-    monkeypatch.setattr(db.settings, "database_url", database_url)
     for name, value in options.items():
         monkeypatch.setattr(db.settings, name, value)
-    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
     factory = db._ensure_initialized()
 
     async def read_one():
         async with factory() as session:
             return (await session.execute(text("SELECT 1"))).scalar_one()
 
-    try:
-        async with AsyncExitStack() as holders:
-            for _ in range(capacity):
-                session = await holders.enter_async_context(factory())
-                await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2)
-            # All runtime slots are in use. Extra work must wait rather
-            # than exceed this process's share of the session pooler.
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(read_one(), timeout=0.5)
-        # A canceled waiter must not poison the pool or retain a slot.
-        assert await asyncio.wait_for(read_one(), timeout=2) == 1
-    finally:
-        await db.dispose_engine()
+    async with AsyncExitStack() as holders:
+        for _ in range(capacity):
+            session = await holders.enter_async_context(factory())
+            await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2)
+        # All runtime slots are in use. Extra work must wait rather
+        # than exceed this process's share of the session pooler.
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(read_one(), timeout=0.5)
+    # A canceled waiter must not poison the pool or retain a slot.
+    assert await asyncio.wait_for(read_one(), timeout=2) == 1
 
 
 @pytest.mark.parametrize(
@@ -144,33 +137,59 @@ def test_runtime_pool_rejects_unlimited_connection_settings(options):
 
 @pytest.mark.asyncio
 async def test_independent_commits_share_two_additional_connections(
-    database_url, monkeypatch
+    fresh_db_pools,
 ):
     from hailhq.core import db
-
-    monkeypatch.setattr(db, "_engine", None)
-    monkeypatch.setattr(db, "_sessionmaker", None)
-    monkeypatch.setattr(db, "_independent_engine", None)
-    monkeypatch.setattr(db, "_independent_sessionmaker", None)
-    monkeypatch.setattr(db.settings, "database_url", database_url)
-    monkeypatch.setattr(db, "telemetry_enabled", lambda: False)
 
     async def read_one():
         async with db.independent_session_scope() as session:
             return (await session.execute(text("SELECT 1"))).scalar_one()
 
-    try:
+    async with AsyncExitStack() as holders:
+        for _ in range(2):
+            session = await holders.enter_async_context(db.independent_session_scope())
+            await session.execute(text("SELECT 1"))
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(read_one(), timeout=0.5)
+    assert await asyncio.wait_for(read_one(), timeout=2) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_jobs_cannot_take_the_request_connections(fresh_db_pools):
+    """A job holding every background connection (a slow webhook POST)
+    leaves the request pool free, and the other way round."""
+    from hailhq.core import db
+
+    async def read_one():
+        async with db.session_scope() as session:
+            return (await session.execute(text("SELECT 1"))).scalar_one()
+
+    async def hold_all(release: asyncio.Event, held: asyncio.Event):
         async with AsyncExitStack() as holders:
-            for _ in range(2):
-                session = await holders.enter_async_context(
-                    db.independent_session_scope()
-                )
+            for _ in range(db.settings.database_pool_size):
+                session = await holders.enter_async_context(db.session_scope())
                 await session.execute(text("SELECT 1"))
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(read_one(), timeout=0.5)
-        assert await asyncio.wait_for(read_one(), timeout=2) == 1
-    finally:
-        await db.dispose_engine()
+            held.set()
+            await release.wait()
+
+    for job_holds in (True, False):
+        release, held = asyncio.Event(), asyncio.Event()
+        if job_holds:
+            holder = asyncio.create_task(
+                hold_all(release, held), context=db.background_context()
+            )
+            probe = read_one
+        else:
+            holder = asyncio.create_task(hold_all(release, held))
+
+            def probe():
+                return asyncio.create_task(read_one(), context=db.background_context())
+
+        await asyncio.wait_for(held.wait(), timeout=2)
+        assert await asyncio.wait_for(probe(), timeout=2) == 1
+        release.set()
+        await holder
+    assert db._background_engine is not db._engine
 
 
 async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:

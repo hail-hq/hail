@@ -8,6 +8,7 @@ tests that override ``get_session`` and never touch the real engine.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -31,6 +32,12 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 _independent_engine: AsyncEngine | None = None
 _independent_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_background_engine: AsyncEngine | None = None
+_background_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+# True inside background-job tasks (see ``background_context``).
+_in_background: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "hail_db_in_background", default=False
+)
 
 
 _SCHEME_ALIASES = (
@@ -129,14 +136,36 @@ def _ensure_independent_initialized() -> async_sessionmaker[AsyncSession]:
     return _independent_sessionmaker
 
 
+def _ensure_background_initialized() -> async_sessionmaker[AsyncSession]:
+    global _background_engine, _background_sessionmaker
+    if _background_sessionmaker is None:
+        _background_engine, _background_sessionmaker = _create_session_pool(
+            settings.database_pool_size, settings.database_max_overflow
+        )
+    return _background_sessionmaker
+
+
+def background_context() -> contextvars.Context:
+    """A context for a background-job task. ``session_scope`` inside it, and
+    in tasks it starts, uses the background pool. Jobs that hold a session
+    through a slow outside call (a webhook POST, an email send) then cannot
+    take the connections that requests need."""
+    context = contextvars.copy_context()
+    context.run(_in_background.set, True)
+    return context
+
+
 async def dispose_engine() -> None:
     global _engine, _sessionmaker, _independent_engine, _independent_sessionmaker
-    engines = (_engine, _independent_engine)
+    global _background_engine, _background_sessionmaker
+    engines = (_engine, _independent_engine, _background_engine)
     # Reset first: a failed dispose must not keep later pools or stale globals.
     _engine = None
     _sessionmaker = None
     _independent_engine = None
     _independent_sessionmaker = None
+    _background_engine = None
+    _background_sessionmaker = None
     for engine in engines:
         if engine is not None:
             try:
@@ -154,7 +183,12 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Open a fresh ``AsyncSession`` outside any FastAPI request scope."""
-    async with _ensure_initialized()() as session:
+    factory = (
+        _ensure_background_initialized()
+        if _in_background.get()
+        else _ensure_initialized()
+    )
+    async with factory() as session:
         yield session
 
 

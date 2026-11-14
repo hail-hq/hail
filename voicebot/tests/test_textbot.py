@@ -594,20 +594,13 @@ def _no_api(monkeypatch, aclose=None) -> None:
 
 
 async def test_run_forever_frees_the_pool_when_draining(
-    database_url, monkeypatch, tmp_path
+    fresh_db_pools, monkeypatch, tmp_path
 ) -> None:
     """The old voicebot keeps running for its live calls after a deploy, so
     its text worker must give its database connections back when it drains."""
-    from hailhq.core.config import settings
-
     flag = tmp_path / "hail-draining"
     flag.touch()
     monkeypatch.setattr(textbot, "DRAIN_FLAG", flag)
-    monkeypatch.setattr(settings, "database_url", database_url)
-    for name in ("_engine", "_sessionmaker", "_independent_engine"):
-        monkeypatch.setattr(core_db, name, None)
-    monkeypatch.setattr(core_db, "_independent_sessionmaker", None)
-    monkeypatch.setattr(core_db, "telemetry_enabled", lambda: False)
     core_db._ensure_initialized()
     _no_api(monkeypatch)
     await asyncio.wait_for(textbot.run_forever(), timeout=2)

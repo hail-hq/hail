@@ -58,7 +58,7 @@ from hailhq.core.billing import has_funds
 from hailhq.core.call_legs import fetch_leg_costs
 from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
-from hailhq.core.db import dispose_engine, session_scope
+from hailhq.core.db import background_context, dispose_engine, session_scope
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.http_post import httpx_post
@@ -217,18 +217,22 @@ def _check_sender_id_sms_carrier() -> None:
         )
 
 
+def _background_task(coro, name: str) -> asyncio.Task:
+    """Start a background job on the background database pool, so its
+    sessions never take the connections that requests need."""
+    return asyncio.create_task(coro, name=name, context=background_context())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start backstop sweepers + webhook worker on boot; tear them down on shutdown."""
     _check_sender_id_sms_carrier()
-    sweeper_task = asyncio.create_task(
-        _backstop_sweeper_loop(), name="backstop-sweeper"
-    )
-    order_reconciler_task = asyncio.create_task(
+    sweeper_task = _background_task(_backstop_sweeper_loop(), name="backstop-sweeper")
+    order_reconciler_task = _background_task(
         _order_reconciler_loop(), name="number-order-reconciler"
     )
-    sms_setup_task = asyncio.create_task(_sms_setup_loop(), name="sms-setup")
-    leg_cost_task = asyncio.create_task(_leg_cost_loop(), name="leg-costs")
+    sms_setup_task = _background_task(_sms_setup_loop(), name="sms-setup")
+    leg_cost_task = _background_task(_leg_cost_loop(), name="leg-costs")
 
     webhook_worker: WebhookWorker | None = None
     webhook_task: asyncio.Task | None = None
@@ -250,7 +254,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             ),
             decrypt=cipher.decrypt,
         )
-        webhook_task = asyncio.create_task(
+        webhook_task = _background_task(
             webhook_worker.run_forever(), name="webhook-worker"
         )
 
@@ -268,7 +272,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             # Re-check credit at send: the balance can reach zero after ingest.
             funds_check=has_funds,
         )
-        forward_task = asyncio.create_task(
+        forward_task = _background_task(
             forward_worker.run_forever(), name="outbound-forward-worker"
         )
 
@@ -279,7 +283,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             session_factory=session_scope,
             s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
         )
-        attachment_gc_task = asyncio.create_task(
+        attachment_gc_task = _background_task(
             attachment_gc_worker.run_forever(), name="email-attachment-gc-worker"
         )
 
@@ -291,7 +295,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             provider_factory=SesEmailProvider,
             poll_interval=settings.hail_domain_verify_poll_seconds,
         )
-        verify_task = asyncio.create_task(
+        verify_task = _background_task(
             verify_worker.run_forever(), name="domain-verification-worker"
         )
 
@@ -302,9 +306,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             session_factory=session_scope,
             poll_interval=settings.hail_abuse_monitor_poll_seconds,
         )
-        abuse_task = asyncio.create_task(
-            abuse_worker.run_forever(), name="abuse-monitor"
-        )
+        abuse_task = _background_task(abuse_worker.run_forever(), name="abuse-monitor")
 
     verification_worker: VerificationWorker | None = None
     verification_task: asyncio.Task | None = None
@@ -313,7 +315,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             session_factory=session_scope,
             poll_interval=settings.hail_verification_poll_seconds,
         )
-        verification_task = asyncio.create_task(
+        verification_task = _background_task(
             verification_worker.run_forever(), name="verification-worker"
         )
 
