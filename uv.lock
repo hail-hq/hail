@@ -1038,16 +1038,16 @@ wheels = [
 
 [[package]]
 name = "grpcio-status"
-version = "1.80.0"
+version = "1.85.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "googleapis-common-protos" },
     { name = "grpcio" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/ed/105f619bdd00cb47a49aa2feea6232ea2bbb04199d52a22cc6a7d603b5cb/grpcio_status-1.80.0.tar.gz", hash = "sha256:df73802a4c89a3ea88aa2aff971e886fccce162bc2e6511408b3d67a144381cd", size = 13901, upload-time = "2026-03-30T08:54:34.784Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/16/0a161d0016f6e318ebf217780a91e007a67d9d244a06f79caeef689f5f02/grpcio_status-1.85.1.tar.gz", hash = "sha256:3f6ba6090d794b7148b23f03355addd56bee2b78174a12784c4d9b4e28c8928e", size = 13982, upload-time = "2026-10-30T16:05:25.631Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/80/58cd2dfc19a07d022abe44bde7c365627f6c7cb6f692ada6c65ca437d09a/grpcio_status-1.80.0-py3-none-any.whl", hash = "sha256:4b56990363af50dbf2c2ebb80f1967185c07d87aa25aa2bea45ddb75fc181dbe", size = 14638, upload-time = "2026-03-30T08:54:01.569Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/e9/5e34e2543b586ffddf90721ab242e7b662c063484ee3978bf61ca90d7579/grpcio_status-1.85.1-py3-none-any.whl", hash = "sha256:ef84cb262c7a05fd7c27e61bb70c9f63bce4484ce8b3366585a381fed738fcb0", size = 14640, upload-time = "2026-10-30T16:05:11.252Z" },
 ]
 
 [[package]]
@@ -1127,7 +1127,7 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "limits", specifier = ">=3" },
-    { name = "logfire", extras = ["fastapi"], specifier = ">=5.3.0" },
+    { name = "logfire", extras = ["fastapi"], specifier = ">=5.6.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -1184,7 +1184,7 @@ requires-dist = [
     { name = "didww", specifier = ">=3.1" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "livekit-api", specifier = ">=1.1" },
-    { name = "logfire", extras = ["aiohttp-client", "httpx", "requests", "sqlalchemy"], specifier = ">=5.3.0" },
+    { name = "logfire", extras = ["aiohttp-client", "httpx", "requests", "sqlalchemy"], specifier = ">=5.6.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "phonenumbers", specifier = ">=9.0.39" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
@@ -1232,7 +1232,7 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'" },
-    { name = "logfire", extras = ["starlette"], specifier = ">=5.3.0" },
+    { name = "logfire", extras = ["starlette"], specifier = ">=5.6.0" },
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -1249,6 +1249,7 @@ version = "0.1.0"
 source = { editable = "voicebot" }
 dependencies = [
     { name = "asyncpg" },
+    { name = "grpcio" },
     { name = "hailhq-core" },
     { name = "livekit" },
     { name = "livekit-agents" },
@@ -1279,6 +1280,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "grpcio", specifier = ">=1.83" },
     { name = "hailhq-core", editable = "core" },
     { name = "livekit", specifier = "==1.1.20" },
     { name = "livekit-agents", specifier = "~=1.8.8" },
