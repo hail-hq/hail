@@ -69,10 +69,12 @@ async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
     if from_number.number_type == "toll_free":
-        if from_number.provider != "twilio" or from_number.country_code not in {
-            "US",
-            "CA",
-        }:
+        from hailhq.core.carrier_routing import CARRIERS
+
+        tf_carrier = CARRIERS.get(from_number.provider)
+        if not (
+            tf_carrier and tf_carrier.toll_free_sms_verification
+        ) or from_number.country_code not in {"US", "CA"}:
             # Other carriers keep their carrier-side gate. Territory toll-free
             # numbers are not on the 10DLC registry, so that gate never applies.
             return None

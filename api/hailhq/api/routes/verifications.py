@@ -302,9 +302,9 @@ async def _sms_provider_name(
                 "country_code and number_type must match the selected number.",
                 loc=[where, "number_id"],
             )
-        if (
-            number.number_type == "toll_free"
-            and not carrier_routing.carrier(number.provider).toll_free_sms_verification
+        tf_carrier = carrier_routing.CARRIERS.get(number.provider)
+        if number.number_type == "toll_free" and not (
+            tf_carrier and tf_carrier.toll_free_sms_verification
         ):
             raise unprocessable(
                 "Toll-free texting verification is not available for this number. Contact support.",
