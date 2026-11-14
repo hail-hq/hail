@@ -18,11 +18,11 @@ __all__ = [
     "by_request_row",
     "capabilities",
     "effective_capabilities",
-    "tollfree_sms_unverifiable",
     "monthly_price",
     "requirements",
     "rows",
     "sells_in",
+    "tollfree_sms_unverifiable",
 ]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
