@@ -204,7 +204,7 @@ async def test_last_request_is_throttled(
 
 @pytest.mark.parametrize("pool_size", [1, 2])
 async def test_api_key_auth_finishes_with_all_runtime_connections_in_use(
-    db, database_url, org_and_key, monkeypatch, pool_size
+    db, org_and_key, monkeypatch, pool_size, fresh_db_pools
 ):
     from hailhq.api.deps import _principal_from_apikey_table
     from hailhq.core import db as core_db
@@ -229,38 +229,30 @@ async def test_api_key_auth_finishes_with_all_runtime_connections_in_use(
             await seed.commit()
             keys.append((org_id, key.id, plain))
 
-    monkeypatch.setattr(core_db, "_engine", None)
-    monkeypatch.setattr(core_db, "_sessionmaker", None)
-    monkeypatch.setattr(core_db.settings, "database_url", database_url)
     monkeypatch.setattr(core_db.settings, "database_pool_size", pool_size)
-    monkeypatch.setattr(core_db.settings, "database_max_overflow", 0)
-    monkeypatch.setattr(core_db, "telemetry_enabled", lambda: False)
     factory = core_db._ensure_initialized()
-    try:
-        async with AsyncExitStack() as requests:
-            sessions = []
-            for _ in keys:
-                session = await requests.enter_async_context(factory())
-                # Each concurrent request already holds a read transaction.
-                await session.execute(text("SELECT 1"))
-                sessions.append(session)
-            principals = await asyncio.wait_for(
-                asyncio.gather(
-                    *(
-                        _principal_from_apikey_table(plain, session)
-                        for (_, _, plain), session in zip(keys, sessions, strict=True)
-                    )
-                ),
-                timeout=2,
-            )
-        assert [p.organization_id for p in principals] == [k[0] for k in keys]
-        async with seed_factory() as check:
-            for _, key_id, _ in keys:
-                key = await check.get(ApiKey, key_id)
-                assert key.last_request is not None
-                assert key.request_count == 1
-    finally:
-        await core_db.dispose_engine()
+    async with AsyncExitStack() as requests:
+        sessions = []
+        for _ in keys:
+            session = await requests.enter_async_context(factory())
+            # Each concurrent request already holds a read transaction.
+            await session.execute(text("SELECT 1"))
+            sessions.append(session)
+        principals = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    _principal_from_apikey_table(plain, session)
+                    for (_, _, plain), session in zip(keys, sessions, strict=True)
+                )
+            ),
+            timeout=2,
+        )
+    assert [p.organization_id for p in principals] == [k[0] for k in keys]
+    async with seed_factory() as check:
+        for _, key_id, _ in keys:
+            key = await check.get(ApiKey, key_id)
+            assert key.last_request is not None
+            assert key.request_count == 1
 
 
 async def test_wrong_scheme_returns_401(client: httpx.AsyncClient) -> None:
