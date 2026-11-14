@@ -75,6 +75,10 @@ class SmsProvider(ABC):
         that does not need one ignores it.
         """
 
+    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+        """Read-only proof of approval for this exact, currently owned number."""
+        return False
+
     @abstractmethod
     async def ensure_messaging_service(
         self, organization_id: UUID, existing_sid: str | None

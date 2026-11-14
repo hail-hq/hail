@@ -817,14 +817,21 @@ async def test_detach_business_number_stays_in_the_org_service() -> None:
     assert p._client.calls == []
 
 
-def test_needs_the_primary_profile_sid(monkeypatch) -> None:
+async def test_primary_profile_is_required_only_for_local_registration(
+    monkeypatch,
+) -> None:
     from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "twilio_primary_profile_sid", "")
+    p = TwilioSmsRegistrationProvider(
+        account_sid="AC1", auth_token="t", client=Recorder(_ok_responses())
+    )
+    assert (
+        await p.requirements("US", "toll_free", "business")
+    ).number_type == "toll_free"
     with pytest.raises(ValueError, match="TWILIO_PRIMARY_PROFILE_SID"):
-        TwilioSmsRegistrationProvider(
-            account_sid="AC1", auth_token="t", client=Recorder(_ok_responses())
-        )
+        await p.requirements("US", "local", "business")
+    assert p._client.calls == []
 
 
 async def test_business_draft_assigns_the_primary_profile() -> None:

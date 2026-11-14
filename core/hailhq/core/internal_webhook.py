@@ -206,3 +206,49 @@ def notify_verification_decided(verification_id: str) -> None:
     that made the change. The website reads the row and skips one that is
     not approved or rejected."""
     _fire("/api/internal/verifications/decided", {"verification_id": verification_id})
+
+
+async def tollfree_verification_supported() -> bool:
+    """Fail closed until the website's free TFV billing guards are deployed.
+
+    A self-hosted install (no ``HAIL_BASE_URL``) has no Hail billing, so it
+    always returns True.
+
+    No cache: a rollback to an old rater must stop new filings immediately.
+    Old websites lack the endpoint or marker. Neither permits a carrier write.
+    """
+    if not settings.hail_base_url:
+        # Self-hosted install with no website: there is no Hail billing to
+        # guard, for any organization on it.
+        return True
+    parts = _signed_body({})
+    if parts is None:
+        return False
+    body, headers = parts
+    try:
+        async with _get_session().post(
+            join_url(
+                settings.hail_base_url, "api/internal/sms-registrations/capabilities"
+            ),
+            data=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=_TIMEOUT_SECONDS),
+        ) as response:
+            if response.status != 200:
+                return False
+            payload = await response.json()
+    except Exception as exc:
+        logger.warning(
+            "[internal_webhook] TFV capability lookup failed: exception=%s",
+            type(exc).__name__,
+        )
+        return False
+    tf = payload.get("toll_free") if isinstance(payload, dict) else None
+    return (
+        isinstance(tf, dict)
+        and tf.get("supported") is True
+        and type(tf.get("filing_cents")) is int
+        and tf["filing_cents"] == 0
+        and type(tf.get("monthly_cents")) is int
+        and tf["monthly_cents"] == 0
+    )

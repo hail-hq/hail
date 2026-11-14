@@ -216,7 +216,7 @@ registration does not verify toll-free messaging.
 
   CLI: `hail numbers confirm-sms <verification-id> --code 482913`.
 
-- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. Without it the Twilio SMS registration plug-in is off: `purpose=sms` with Twilio returns 404.
+- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. It is required for local 10DLC registration. Toll-free verification and read-only approval checks need the Twilio credentials but do not use this local setting.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
 
@@ -253,3 +253,51 @@ registration does not verify toll-free messaging.
 ## Known gaps
 
 - `VerificationResponse.provider` returns the carrier name to the customer. It predates the "never name a carrier" rule and has not been changed.
+
+## Toll-free texting verification
+
+Use `purpose=sms`, `number_type=toll_free`, the number's `country_code` (`US` or
+`CA`), and its owned `number_id`. Read `/v1/verifications/requirements` first.
+Each verification covers exactly one number. `carrier_verifications.number_id`
+links that number and permits separate live requests for separate toll-free
+numbers. This path currently supports Twilio only.
+
+Toll-free verification is free. It creates no 10DLC brand, campaign, OTP or fee.
+The API does not notify the 10DLC fee rater. Before a Cloud filing, it checks the
+website's signed `POST /api/internal/sms-registrations/capabilities` response for
+`{"toll_free":{"supported":true,"filing_cents":0,"monthly_cents":0}}`.
+An old, unavailable or malformed website response stops filing before any carrier
+write or verification row. Self-hosted installs with no website need no handshake.
+Deploy Hail first, then the website's free-TFV billing guards and UI. New filings
+stay unavailable during that gap. Keep those guards when rolling back a website
+that already has toll-free verification rows.
+
+Submit the end business's real identity, contact, address and public business
+website or social page. Supply clear message purposes, branded samples, exact
+opt-in steps, separate optional consent and public redacted evidence for every
+selected method. Verbal consent needs a script document. Marketing needs written
+consent. Dedicated privacy and terms URLs are always filed. Hail never fetches
+these arbitrary evidence URLs. Public email domains are not rejected locally.
+
+A lost create response is recovered by the owned carrier number and a hash of
+the exact submitted answers. Existing unmatched carrier requests return a 422 on `number_id` that names support.
+Editable rejections keep the same row in `submitted` / `needs_information`.
+`PATCH /v1/verifications/{id}/application` checks the original sender, confirms
+that the carrier still permits edits, and updates the same carrier request.
+The send gate blocks US and Canadian recipients until this exact number has an
+approved verification. Another number's approval never unlocks it. Existing
+manual Twilio approvals continue through a read-only check: the current incoming
+phone resource must match the owned SID, E.164 number and authenticated account.
+Every TFV record read must match the same SID/account, and the newest one must be
+`TWILIO_APPROVED`. An error, timeout or mismatch fails closed. A "yes" is kept
+for 10 minutes in each API process, so a revoked approval, or a number moved
+out of the Twilio account, stops sends within 10 minutes. A "no" is not kept. This check writes no provider or
+Hail registration and stores no guessed customer identity. Other carriers keep
+their existing carrier-side checks until Hail supports their TFV API.
+
+Official guidance checked November 14, 2026:
+[approval guidance](https://www.twilio.com/en-us/blog/insights/best-practices/improving-your-chances-of-toll-free-verification-approval),
+[API onboarding](https://www.twilio.com/docs/messaging/compliance/toll-free/api-onboarding),
+[verification API](https://www.twilio.com/docs/messaging/api/tollfree-verification-resource).
+The SDK regression tests use the pinned real SDK with an offline HTTP recorder.
+No live provider filing, message, charge or refund is part of local validation.

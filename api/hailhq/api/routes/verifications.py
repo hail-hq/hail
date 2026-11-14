@@ -64,6 +64,7 @@ from hailhq.core.file_uploads import (
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
     rate_sms_registration,
+    tollfree_verification_supported,
 )
 from hailhq.core.models import (
     AccountCredit,
@@ -209,11 +210,35 @@ async def _quote_offer(
     return offer
 
 
+async def _sms_number(
+    db: AsyncSession, organization_id: UUID, number_id: UUID
+) -> PhoneNumber:
+    number = (
+        await db.execute(
+            select(PhoneNumber).where(
+                PhoneNumber.id == number_id,
+                PhoneNumber.organization_id == organization_id,
+                PhoneNumber.provisioning_state == "active",
+                PhoneNumber.capabilities.any("sms"),
+            )
+        )
+    ).scalar_one_or_none()
+    if number is None or not (
+        (number.country_code in US_SMS_COUNTRY_CODES and number.number_type == "local")
+        or (number.country_code in {"US", "CA"} and number.number_type == "toll_free")
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Number not found among your active US local or US/Canadian toll-free numbers that can text",
+        )
+    return number
+
+
 async def _sms_carriers(
     db: AsyncSession, organization_id: UUID, number_id: UUID | None
 ) -> list[str]:
-    """The carriers behind the org's active US long codes that can text, or
-    the one behind ``number_id`` (404 when it is not such a number)."""
+    if number_id is not None:
+        return [(await _sms_number(db, organization_id, number_id)).provider]
     query = select(PhoneNumber.provider).where(
         PhoneNumber.organization_id == organization_id,
         PhoneNumber.provisioning_state == "active",
@@ -221,17 +246,6 @@ async def _sms_carriers(
         PhoneNumber.number_type == "local",
         PhoneNumber.capabilities.any("sms"),
     )
-    if number_id is not None:
-        carrier = (
-            await db.execute(query.where(PhoneNumber.id == number_id))
-        ).scalar_one_or_none()
-        if carrier is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Number not found among your active US local numbers "
-                "that can text",
-            )
-        return [carrier]
     return list((await db.execute(query.distinct())).scalars().all())
 
 
@@ -247,11 +261,48 @@ def _one_carrier(carriers: list[str], where: str) -> str:
 
 
 async def _sms_provider_name(
-    db: AsyncSession, organization_id: UUID, number_id: UUID | None, where: str
+    db: AsyncSession,
+    organization_id: UUID,
+    number_id: UUID | None,
+    where: str,
+    *,
+    country_code: str | None = None,
+    number_type: str | None = None,
 ) -> str:
     """The carrier for an SMS registration: the carrier of the number passed
     as ``number_id``, else the carrier of the org's active US long codes that
     can text."""
+    if number_type is not None and not (
+        (country_code == "US" and number_type == "local")
+        or (country_code in {"US", "CA"} and number_type == "toll_free")
+    ):
+        raise unprocessable(
+            "SMS registration supports US local and US/Canadian toll-free numbers.",
+            loc=[where, "country_code"],
+        )
+    if number_type == "toll_free" and number_id is None:
+        raise unprocessable(
+            "Choose the toll-free number to verify with number_id.",
+            loc=[where, "number_id"],
+        )
+    if number_id is not None:
+        number = await _sms_number(db, organization_id, number_id)
+        expected_country = (
+            "US" if number.number_type == "local" else number.country_code
+        )
+        if (country_code is not None and country_code != expected_country) or (
+            number_type is not None and number_type != number.number_type
+        ):
+            raise unprocessable(
+                "country_code and number_type must match the selected number.",
+                loc=[where, "number_id"],
+            )
+        if number.number_type == "toll_free" and number.provider != "twilio":
+            raise unprocessable(
+                "Toll-free texting verification is not available for this number. Contact support.",
+                loc=[where, "number_id"],
+            )
+        return number.provider
     carriers = await _sms_carriers(db, organization_id, number_id)
     if not carriers:
         raise unprocessable(
@@ -396,6 +447,7 @@ async def _uncharged_sms_steps(
         select(CarrierVerification.provider, CarrierVerification.subject_type).where(
             CarrierVerification.organization_id == organization_id,
             CarrierVerification.purpose == "sms",
+            CarrierVerification.number_type != "toll_free",
             *happened,
             ~select(AccountCredit.id)
             .where(
@@ -743,7 +795,11 @@ async def _drop_reservation(
 def _billed_sms(row: CarrierVerification | Row) -> bool:
     """A US texting registration of an organization that pays for it: the
     self-hosted organization (the shared key's) is not billed."""
-    return row.purpose == "sms" and row.organization_id != SELF_HOSTED_ORG_ID
+    return (
+        row.purpose == "sms"
+        and row.number_type != "toll_free"
+        and row.organization_id != SELF_HOSTED_ORG_ID
+    )
 
 
 def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
@@ -794,6 +850,7 @@ _GATE_COLUMNS = (
     CarrierVerification.state,
     CarrierVerification.provider,
     CarrierVerification.subject_type,
+    CarrierVerification.number_type,
     CarrierVerification.provider_refs,
     CarrierVerification.created_at,
 )
@@ -1055,7 +1112,7 @@ def _notify_billing(rows: list[CarrierVerification]) -> None:
     steps). Call it after every commit that changes a row's state or refs;
     the rater is idempotent."""
     for row in rows:
-        if row.purpose == "sms":
+        if row.purpose == "sms" and row.number_type != "toll_free":
             notify_sms_registration_changed(str(row.id))
 
 
@@ -1087,7 +1144,11 @@ async def _rate_before_wipe(
     Commits first (True when it did), which ends any row lock. Never call
     it while holding the organization's lock (``org_lock``): the rater
     takes the same lock."""
-    if row.purpose != "sms" or not _campaign_filed(provider, row.provider_refs):
+    if (
+        row.purpose != "sms"
+        or row.number_type == "toll_free"
+        or not _campaign_filed(provider, row.provider_refs)
+    ):
         return False
     # Saved with the stamp, so the rater reads a campaign filed just now.
     _stamp_campaign_filed(provider, row.provider_refs)
@@ -1434,7 +1495,7 @@ async def get_requirements(
     number_id: Annotated[
         UUID | None,
         Query(
-            description="For purpose=sms: id of one of your US numbers. The "
+            description="For purpose=sms: id of an owned US local or US/Canadian toll-free number. Required for toll-free verification. The "
             "carrier is read from it. Needed when your US numbers are with "
             "more than one carrier."
         ),
@@ -1459,7 +1520,12 @@ async def get_requirements(
         )
     if purpose == "sms":
         name = await _sms_provider_name(
-            db, principal.organization_id, number_id, "query"
+            db,
+            principal.organization_id,
+            number_id,
+            "query",
+            country_code=country_code.upper(),
+            number_type=number_type,
         )
     elif quote_id is not None:
         name = (
@@ -1547,7 +1613,7 @@ class SmsPreviewRequest(BaseModel):
     )
     number_id: UUID | None = Field(
         default=None,
-        description="Owned US local number selecting the carrier, required when ambiguous.",
+        description="Owned US local or US/Canadian toll-free number. Required for toll-free verification or when the carrier is ambiguous.",
     )
     fields: dict[str, str] = Field(description="Current registration form answers.")
     address: Address | None = Field(
@@ -1574,12 +1640,29 @@ async def preview_sms_application(
     provider = _provider_or_404(registry, provider_name, "sms")
     if not isinstance(provider, SmsRegistrationProvider):
         raise HTTPException(status_code=404, detail="SMS registration is unavailable.")
-    requirements = await provider.requirements("US", "local", body.subject_type)
+    number = (
+        await _sms_number(db, principal.organization_id, body.number_id)
+        if body.number_id
+        else None
+    )
+    number_type = number.number_type if number else "local"
+    country_code = number.country_code if number_type == "toll_free" else "US"
+    requirements = await _requirements(
+        provider, country_code, number_type, body.subject_type, where="body"
+    )
+    if (number_type == "toll_free") != (
+        body.fields.get("registration_kind") == "toll_free"
+    ):
+        raise unprocessable(
+            "Use the registration form for the selected number type.",
+            loc=["body", "fields", "registration_kind"],
+        )
     problems = length_problems(requirements, body.fields, {})
     problems.extend(
         provider.validate_application(body.fields, body.address, body.subject_type)
     )
-    problems.extend(await _sms_mobile_problems(db, body.subject_type, body.fields))
+    if number_type != "toll_free":
+        problems.extend(await _sms_mobile_problems(db, body.subject_type, body.fields))
     if problems:
         raise _problems_422(problems, principal.organization_id, provider_name)
     response.headers["Cache-Control"] = "no-store"
@@ -1737,10 +1820,14 @@ async def _prepare_submission(
     if sub.purpose not in PURPOSES:
         raise unprocessable("unknown purpose", loc=["body", "purpose"])
     if sub.purpose == "sms" and (
-        sub.country_code != "US" or sub.number_type != "local"
+        not (
+            (sub.country_code == "US" and sub.number_type == "local")
+            or (sub.country_code in {"US", "CA"} and sub.number_type == "toll_free")
+        )
     ):
         raise unprocessable(
-            "SMS registration is for US local numbers", loc=["body", "country_code"]
+            "SMS registration supports US local and US/Canadian toll-free numbers",
+            loc=["body", "country_code"],
         )
 
     if sub.purpose == "sms" and sub.quote_id is not None:
@@ -1754,7 +1841,12 @@ async def _prepare_submission(
     offer: dict = {}
     if sub.purpose == "sms":
         provider_name = await _sms_provider_name(
-            db, principal.organization_id, sub.number_id, "body"
+            db,
+            principal.organization_id,
+            sub.number_id,
+            "body",
+            country_code=sub.country_code,
+            number_type=sub.number_type,
         )
     elif sub.quote_id is not None:
         offer = await _quote_offer(
@@ -1793,6 +1885,14 @@ async def _prepare_submission(
     requirements = await _requirements(
         provider, sub.country_code, sub.number_type, sub.subject_type, where="body"
     )
+    if sub.purpose == "sms" and (
+        (sub.number_type == "toll_free")
+        != (sub.fields.get("registration_kind") == "toll_free")
+    ):
+        raise unprocessable(
+            "Use the registration form for the selected number type.",
+            loc=["body", "fields", "registration_kind"],
+        )
     if not requirements.required:
         raise unprocessable(
             "this number does not need verification", loc=["body", "number_type"]
@@ -1819,6 +1919,8 @@ async def _prepare_submission(
         CarrierVerification.number_type == sub.number_type,
         CarrierVerification.state.in_(_LIVE_STATES),
     )
+    if sub.purpose == "sms" and sub.number_type == "toll_free":
+        live = live.where(CarrierVerification.number_id == sub.number_id)
     if sub.purpose == "number":
         live = live.where(
             CarrierVerification.subject_type == sub.subject_type,
@@ -1925,7 +2027,7 @@ async def _prepare_submission(
             option=value.option, fields=value.fields, file=file
         )
 
-    if sub.purpose == "sms":
+    if sub.purpose == "sms" and sub.number_type != "toll_free":
         mobile_problems = await _sms_mobile_problems(db, sub.subject_type, sub.fields)
         if mobile_problems:
             raise _problems_422(
@@ -1933,7 +2035,18 @@ async def _prepare_submission(
             )
 
     draft_kwargs: dict = {}
-    if sub.purpose == "sms":
+    if sub.purpose == "sms" and sub.number_type == "toll_free":
+        # Free TFV rows must never reach an older website's 10DLC sweep.
+        if not await tollfree_verification_supported():
+            raise HTTPException(
+                status_code=503,
+                detail="Toll-free texting verification is temporarily unavailable. Try again later.",
+            )
+        number = await _sms_number(db, principal.organization_id, sub.number_id)
+        draft_kwargs.update(
+            provider_resource_id=number.provider_resource_id, e164=number.e164
+        )
+    if sub.purpose == "sms" and sub.number_type != "toll_free":
         # Hail Cloud charges each step of the filing from prepaid credit (the
         # website prices it; this repo holds no prices). The carrier's own
         # cost is the floor the balance must cover before anything is filed.
@@ -2017,7 +2130,7 @@ async def create_verification(
     """Submit your details and documents (multipart/form-data).
 
     Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
-    in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+    in the US; use US/local for 10DLC, or US/CA and toll_free with number_id for free per-number toll-free verification; 10DLC fees
     are charged from credit per step, when the details are submitted and when
     the carriers start their review, and 402 means there is not enough credit
     to file, also when a kept brand cannot be reused and the credit does not
@@ -2125,6 +2238,11 @@ async def create_verification(
         purpose=prepared.sub.purpose,
         country_code=prepared.sub.country_code,
         number_type=prepared.sub.number_type,
+        number_id=(
+            prepared.sub.number_id
+            if prepared.sub.number_type == "toll_free" and prepared.sub.purpose == "sms"
+            else None
+        ),
         subject_type=prepared.sub.subject_type,
         subject_name=prepared.subject_name,
         state="awaiting_review",
@@ -2569,7 +2687,11 @@ async def _reject_row(
     and is tried again next tick; the sweeper never dies on carrier trouble.
     """
     state, changed_at = row.state, row.updated_at
-    rate = row.purpose == "sms" and _campaign_filed(provider, row.provider_refs)
+    rate = (
+        row.purpose == "sms"
+        and row.number_type != "toll_free"
+        and _campaign_filed(provider, row.provider_refs)
+    )
     if rate or get_history(row, "provider_refs").has_changes():
         # Saved before the discard: the ids the plug-in call wrote (a filed
         # campaign is billed) must survive a failed discard, or a restart
@@ -2948,18 +3070,21 @@ async def amend_sms_application(
     if (
         row.state != "submitted"
         or not refs.get("needs_information")
-        or provider.campaign_filed(refs)
+        or (row.number_type != "toll_free" and provider.campaign_filed(refs))
     ):
         raise HTTPException(
             status_code=409,
             detail="This registration is not waiting for application information. Keep its existing filing and contact support for changes.",
         )
-    requirements = await provider.requirements("US", "local", row.subject_type)
+    requirements = await _requirements(
+        provider, row.country_code, row.number_type, row.subject_type, where="body"
+    )
     problems = length_problems(requirements, body.fields, {})
     problems.extend(
         provider.validate_application(body.fields, body.address, row.subject_type)
     )
-    problems.extend(await _sms_mobile_problems(db, row.subject_type, body.fields))
+    if row.number_type != "toll_free":
+        problems.extend(await _sms_mobile_problems(db, row.subject_type, body.fields))
     if problems:
         raise _problems_422(problems, row.organization_id, row.provider)
     original = refs.get("application")
@@ -2977,7 +3102,7 @@ async def amend_sms_application(
             )
         # A previous create may have succeeded while its response was lost.
         # Recover it under the same lock before permitting campaign edits.
-        if await provider.recover_campaign(refs):
+        if row.number_type != "toll_free" and await provider.recover_campaign(refs):
             _stamp_campaign_filed(provider, refs)
             flag_modified(row, "provider_refs")
             await db.commit()
@@ -2988,7 +3113,20 @@ async def amend_sms_application(
             )
     except VerificationProviderError as exc:
         raise _carrier_unavailable() from exc
-    refs["campaign"] = asdict(campaign_text(body.fields, row.subject_type))
+    if row.number_type == "toll_free":
+        if body.fields.get("registration_kind") != "toll_free":
+            raise unprocessable(
+                "Use the toll-free registration form.",
+                loc=["body", "fields", "registration_kind"],
+            )
+        try:
+            await provider.amend_filed_application(
+                refs, body.fields, body.address, row.subject_type
+            )
+        except VerificationProviderError as exc:
+            raise _carrier_unavailable() from exc
+    else:
+        refs["campaign"] = asdict(campaign_text(body.fields, row.subject_type))
     refs["application"] = _application_record(
         row.subject_type, requirements, body.fields, body.address
     )

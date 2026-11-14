@@ -521,6 +521,14 @@ class SmsRegistrationProvider(VerificationProvider):
         """
         return None
 
+    async def amend_filed_application(
+        self, refs, fields, address, subject_type
+    ) -> None:
+        """Resubmit a free per-number verification when the carrier permits it."""
+        raise VerificationProviderError(
+            "This registration does not accept changes. Contact support."
+        )
+
     async def recover_campaign(self, refs: dict) -> bool:
         """Read-only discovery of a previously filed campaign; never create one."""
         raise VerificationProviderError(

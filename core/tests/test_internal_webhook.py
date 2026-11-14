@@ -156,3 +156,59 @@ async def test_stale_name_survives_a_failed_refresh(monkeypatch, configured):
 
     assert await fetch_organization_name("org-123") == "Acme Corp"
     assert len(session.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "payload,allowed",
+    [
+        ({}, False),
+        ({"toll_free": {"supported": True}}, False),
+        (
+            {"toll_free": {"supported": True, "filing_cents": 1, "monthly_cents": 0}},
+            False,
+        ),
+        (
+            {
+                "toll_free": {
+                    "supported": True,
+                    "filing_cents": False,
+                    "monthly_cents": 0,
+                }
+            },
+            False,
+        ),
+        (
+            {"toll_free": {"supported": True, "filing_cents": 0, "monthly_cents": 0}},
+            True,
+        ),
+    ],
+)
+async def test_tollfree_capability_requires_explicit_free_support(
+    monkeypatch, configured, payload, allowed
+):
+    session = _FakeSession(response=_FakeResponse(200, payload))
+    _install(monkeypatch, session)
+    assert await internal_webhook.tollfree_verification_supported() is allowed
+    assert (
+        session.calls[0][0]
+        == "https://hail.so/api/internal/sms-registrations/capabilities"
+    )
+    assert session.calls[0][1]["data"] == b"{}"
+
+
+async def test_tollfree_capability_is_open_on_self_hosted_install(monkeypatch):
+    # No website: every org on the install files toll-free, with no call out.
+    session = _FakeSession(response=_FakeResponse(500, {}))
+    _install(monkeypatch, session)
+    monkeypatch.setattr(internal_webhook.settings, "hail_base_url", "")
+    assert await internal_webhook.tollfree_verification_supported() is True
+    assert session.calls == []
+
+
+async def test_tollfree_capability_fails_closed_without_secret(monkeypatch):
+    session = _FakeSession(response=_FakeResponse(200, {}))
+    _install(monkeypatch, session)
+    monkeypatch.setattr(internal_webhook.settings, "hail_base_url", "https://hail.so")
+    monkeypatch.setattr(internal_webhook.settings, "hail_internal_secret", "")
+    assert await internal_webhook.tollfree_verification_supported() is False
+    assert session.calls == []

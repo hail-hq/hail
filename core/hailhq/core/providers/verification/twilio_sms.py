@@ -14,6 +14,7 @@ import requests
 from hailhq.core.config import settings
 from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
+from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
@@ -61,6 +62,17 @@ _OTP_RESEND_AFTER = timedelta(hours=24)
 _TWILIO_ERRORS = (TwilioException, requests.RequestException)
 
 
+def _log_failure(operation: str, exc: Exception) -> None:
+    """Keep support diagnostics without request bodies, contacts or secrets."""
+    logger.error(
+        "SMS verification failed: operation=%s exception=%s status=%s code=%s",
+        operation,
+        type(exc).__name__,
+        exc.status if isinstance(exc, TwilioRestException) else None,
+        exc.code if isinstance(exc, TwilioRestException) else None,
+    )
+
+
 class _NotCompliant(TwilioRestException):
     """A Trust Hub evaluation found a detail of the form not compliant: a
     definite refusal of the customer's answers, whatever its wording."""
@@ -91,10 +103,6 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         self._primary_profile_sid = (
             primary_profile_sid or settings.twilio_primary_profile_sid
         )
-        if not self._primary_profile_sid:
-            raise ValueError(
-                "TwilioSmsRegistrationProvider needs TWILIO_PRIMARY_PROFILE_SID"
-            )
         self.account_sid = account_sid or settings.twilio_account_sid
         token = auth_token or settings.twilio_auth_token
         if client is None:
@@ -115,7 +123,22 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def requirements(
         self, country_code, number_type, subject_type
     ) -> Requirements:
+        if number_type == "toll_free" and country_code in {"US", "CA"}:
+            return twilio_tollfree.requirements(self, country_code, subject_type)
+        if number_type != "local" or country_code != "US":
+            raise ValueError(
+                "SMS registration supports US local and US/CA toll-free numbers"
+            )
+        if not self._primary_profile_sid:
+            raise ValueError(
+                "TwilioSmsRegistrationProvider needs TWILIO_PRIMARY_PROFILE_SID for 10DLC"
+            )
         return sms_requirements(self, subject_type)
+
+    def validate_application(self, fields, address, subject_type):
+        if fields.get("registration_kind") == "toll_free":
+            return twilio_tollfree.problems(self, fields, address, subject_type)
+        return super().validate_application(fields, address, subject_type)
 
     # -- draft ---------------------------------------------------------------
 
@@ -140,8 +163,34 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         address,
         documents,
         messaging_service_sid=None,
+        provider_resource_id=None,
+        e164=None,
     ) -> DraftResult:
         subject_type = requirements.subject_type
+        if requirements.number_type == "toll_free":
+            return await self._create_tollfree_draft(
+                requirements,
+                fields,
+                address,
+                contact_email,
+                provider_resource_id,
+                e164,
+                organization_id,
+            )
+        if not self._primary_profile_sid:
+            raise VerificationProviderError(
+                "Local texting registration is not configured."
+            )
+        if fields.get("registration_kind") == "toll_free":
+            return DraftResult(
+                refs={},
+                problems=[
+                    Problem(
+                        field="registration_kind",
+                        message="Use the form for this number type.",
+                    )
+                ],
+            )
         problems = self.validate_application(fields, address, subject_type)
         mobile = fields.get("mobile_phone_number")
         if (
@@ -179,6 +228,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 subject_type,
             )
         except Exception as exc:
+            _log_failure("draft", exc)
             await self.discard(refs)
             if isinstance(exc, TwilioRestException):
                 logger.warning(
@@ -195,6 +245,68 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     )
             raise VerificationProviderError("Twilio request failed") from exc
         return DraftResult(refs=refs)
+
+    async def _create_tollfree_draft(
+        self,
+        requirements,
+        fields,
+        address,
+        contact_email,
+        provider_resource_id,
+        e164,
+        organization_id,
+    ):
+        problems = twilio_tollfree.problems(
+            self, fields, address, requirements.subject_type
+        )
+        if not provider_resource_id or not e164:
+            problems.append(
+                Problem(field="number_id", message="Choose your toll-free number.")
+            )
+        if problems:
+            return DraftResult(refs={}, problems=problems)
+        try:
+            record = await asyncio.to_thread(
+                twilio_tollfree.create,
+                self._client,
+                organization_id,
+                twilio_tollfree.payload(
+                    fields,
+                    address,
+                    requirements.subject_type,
+                    contact_email,
+                    provider_resource_id,
+                ),
+            )
+        except VerificationProviderError as exc:
+            # The number already has a carrier request Hail cannot recover.
+            # Say so: retrying the same filing can never succeed.
+            return DraftResult(
+                refs={}, problems=[Problem(field="number_id", message=str(exc))]
+            )
+        except Exception as exc:
+            _log_failure("tollfree_create", exc)
+            if isinstance(exc, TwilioRestException) and application_validation_error(
+                exc.status, exc.msg
+            ):
+                return DraftResult(
+                    refs={},
+                    problems=[
+                        Problem(field="", message=campaign_repair_reason(exc.msg))
+                    ],
+                )
+            raise VerificationProviderError(
+                "Texting registration is unavailable. Try again."
+            ) from exc
+        return DraftResult(
+            refs={
+                "registration_kind": "toll_free",
+                "tollfree_verification_sid": record.sid,
+                "provider_resource_id": provider_resource_id,
+                "e164": e164,
+                "subject_type": requirements.subject_type,
+            }
+        )
 
     def _build(
         self,
@@ -338,7 +450,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         }
         if person:
             brand_kwargs["brand_type"] = "SOLE_PROPRIETOR"
-        brand = self._client.messaging.v1.a2p.brand_registrations.create(**brand_kwargs)
+        brand = self._client.messaging.v1.brand_registrations.create(**brand_kwargs)
         # A person's code is texted by Twilio when the brand is approved.
         refs["brand_sid"] = brand.sid
 
@@ -355,12 +467,13 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         try:
             return await asyncio.to_thread(self._status, refs, may_file_campaign)
         except _TWILIO_ERRORS as exc:
+            _log_failure("provider_request", exc)
             raise VerificationProviderError("Twilio request failed") from exc
 
     def _status(self, refs, may_file_campaign: bool = True) -> ProviderStatus:
-        brand = self._client.messaging.v1.a2p.brand_registrations(
-            refs["brand_sid"]
-        ).fetch()
+        if refs.get("registration_kind") == "toll_free":
+            return twilio_tollfree.status(self._client, refs)
+        brand = self._client.messaging.v1.brand_registrations(refs["brand_sid"]).fetch()
         if brand.status in ("FAILED", "SUSPENDED"):
             return ProviderStatus(
                 state="rejected",
@@ -468,7 +581,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def application_identity(self, refs, subject_type) -> dict | None:
         def read():
-            brand = self._client.messaging.v1.a2p.brand_registrations(
+            brand = self._client.messaging.v1.brand_registrations(
                 refs["brand_sid"]
             ).fetch()
             if brand.status != "APPROVED" or (
@@ -558,7 +671,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError(
                 "Sender identity lookup unavailable"
             ) from exc
-        except (KeyError, AttributeError, TypeError):
+        except (KeyError, AttributeError, TypeError) as exc:
+            _log_failure("application_identity", exc)
             return None
         except Exception as exc:
             # A transport error (the SDK lets requests' exceptions through).
@@ -567,6 +681,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             ) from exc
 
     def confirmation(self, refs) -> str | None:
+        if refs.get("registration_kind") == "toll_free":
+            return None
         # The person answers the carrier's text; there is no code to enter.
         # Twilio texts only once the brand is approved (otp_sent_at).
         if (
@@ -589,7 +705,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return
         if now - datetime.fromisoformat(sent) < _OTP_RESEND_AFTER:
             return
-        self._client.messaging.v1.a2p.brand_registrations(
+        self._client.messaging.v1.brand_registrations(
             refs["brand_sid"]
         ).brand_registration_otps.create()
         refs["otp_sent_at"] = now.isoformat()
@@ -631,12 +747,22 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         try:
             return await asyncio.to_thread(run)
         except _TWILIO_ERRORS as exc:
+            _log_failure("provider_request", exc)
             raise VerificationProviderError("Twilio request failed") from exc
 
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
         """Put the number in the campaign's messaging service (moved from
         another service when it sits in one). A person's service holds only
         their one number: another number already in it is refused."""
+        if refs.get("registration_kind") == "toll_free":
+            if (
+                refs.get("provider_resource_id") != provider_resource_id
+                or refs.get("e164") != e164
+            ):
+                raise VerificationProviderError(
+                    "This registration covers a different number."
+                )
+            return
         service = refs["messaging_service_sid"]
         if refs.get("subject_type") == "person":
             try:
@@ -683,7 +809,48 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return False
         return True
 
+    def step(self, refs):
+        if refs.get("registration_kind") == "toll_free" and refs.get(
+            "needs_information"
+        ):
+            return "needs_information"
+        return super().step(refs)
+
+    async def amend_filed_application(self, refs, fields, address, subject_type):
+        if refs.get("registration_kind") != "toll_free":
+            return await super().amend_filed_application(
+                refs, fields, address, subject_type
+            )
+        try:
+            await asyncio.to_thread(
+                twilio_tollfree.amend, self._client, refs, fields, address, subject_type
+            )
+        except _TWILIO_ERRORS as exc:
+            _log_failure("tollfree_amend", exc)
+            raise VerificationProviderError(
+                "Could not update registration. Try again."
+            ) from exc
+
+    def campaign_filed(self, refs):
+        return bool(
+            (refs or {}).get("tollfree_verification_sid")
+        ) or super().campaign_filed(refs)
+
     async def discard(self, refs) -> None:
+        if refs.get("registration_kind") == "toll_free":
+            try:
+                await asyncio.to_thread(
+                    self._client.messaging.v1.tollfree_verifications(
+                        refs["tollfree_verification_sid"]
+                    ).delete
+                )
+            except TwilioRestException as exc:
+                if exc.status != 404:
+                    _log_failure("tollfree_discard", exc)
+                    raise VerificationProviderError(
+                        "Could not cancel registration. Try again."
+                    ) from exc
+            return
         # A brand cannot be deleted through the API; it is left behind.
         ms = refs.get("messaging_service_sid")
         client = self._client

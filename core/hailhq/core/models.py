@@ -2162,6 +2162,17 @@ class CarrierVerification(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
+    # TFV covers one owned number; 10DLC remains organization-wide.
+    number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "phone_numbers.id",
+            name="carrier_verifications_number_id_fkey",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
     number_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -2235,7 +2246,10 @@ class CarrierVerification(Base):
                 "AND subject_name IS NULL"
             ),
         ),
-        # One live SMS registration.
+        CheckConstraint(
+            "purpose != 'sms' OR number_type != 'toll_free' OR number_id IS NOT NULL",
+            name="carrier_verifications_tollfree_number_check",
+        ),
         Index(
             "carrier_verifications_sms_live_uniq",
             "organization_id",
@@ -2244,7 +2258,15 @@ class CarrierVerification(Base):
             "number_type",
             unique=True,
             postgresql_where=text(
-                "purpose = 'sms' AND state NOT IN ('cancelled','rejected')"
+                "purpose = 'sms' AND number_type != 'toll_free' AND state NOT IN ('cancelled','rejected')"
+            ),
+        ),
+        Index(
+            "carrier_verifications_tollfree_live_uniq",
+            "number_id",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'sms' AND number_type = 'toll_free' AND state NOT IN ('cancelled','rejected')"
             ),
         ),
         Index("carrier_verifications_org_idx", "organization_id"),

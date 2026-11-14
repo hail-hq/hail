@@ -51,7 +51,14 @@ async def on_approved_registration(
     found = (
         await db.execute(
             approved_registration_ids(organization_id).where(
-                CarrierVerification.id == number.sms_registration_id
+                CarrierVerification.id == number.sms_registration_id,
+                CarrierVerification.provider == number.provider,
+                CarrierVerification.number_type == number.number_type,
+                *(
+                    (CarrierVerification.number_id == number.id,)
+                    if number.number_type == "toll_free"
+                    else ()
+                ),
             )
         )
     ).scalar_one_or_none()
@@ -61,9 +68,44 @@ async def on_approved_registration(
 async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
-    if from_number.country_code not in US_SMS_COUNTRY_CODES or not is_us(to_e164):
-        return None  # a Canadian long code, or a text to outside the US
     if from_number.number_type == "toll_free":
+        if from_number.provider != "twilio" or from_number.country_code not in {
+            "US",
+            "CA",
+        }:
+            # Other carriers keep their carrier-side gate. Territory toll-free
+            # numbers are not on the 10DLC registry, so that gate never applies.
+            return None
+        try:
+            destination = phonenumbers.region_code_for_number(
+                phonenumbers.parse(to_e164)
+            )
+        except phonenumbers.NumberParseException:
+            destination = None
+        if not (is_us(to_e164) or destination == "CA"):
+            return None
+        if await on_approved_registration(db, organization_id, from_number):
+            return None
+        if (
+            from_number.organization_id == organization_id
+            and from_number.provisioning_state == "active"
+            and from_number.provider_resource_id
+        ):
+            from hailhq.core.carrier_routing import sms_route
+
+            try:
+                provider = sms_route(from_number.provider)
+                if (
+                    await provider.tollfree_approved(
+                        provider_resource_id=from_number.provider_resource_id,
+                        e164=from_number.e164,
+                    )
+                ) is True:
+                    return None
+            except Exception:
+                pass  # No positive proof: keep the send blocked.
+        return "Toll-free texting to the US and Canada needs verification for this number. Open Numbers in the console and choose Register for texting."
+    if from_number.country_code not in US_SMS_COUNTRY_CODES or not is_us(to_e164):
         return None
     if await on_approved_registration(db, organization_id, from_number):
         return None

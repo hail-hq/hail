@@ -2823,11 +2823,14 @@ def register_tools(
         The response's ``subject_types`` identifies the types the carrier accepts.
         For number registration, ``quote_id`` is required and selects the exact offer's form.
 
-        US SMS registration uses ``purpose="sms"``, country ``US`` and type ``local``.
-        ``number_id`` identifies an existing workspace US number when required by the carrier.
+        US local SMS registration uses ``purpose="sms"``, country ``US`` and type ``local``.
+        Toll-free verification uses ``purpose="sms"``, the number's country ``US`` or ``CA``,
+        type ``toll_free`` and its owned ``number_id``. Each number needs its own verification.
+        ``number_id`` identifies an existing workspace number.
         Applicant country and business tax status determine the registration route.
         The personal route is available to US or Canadian applicants without a business tax number.
-        SMS fees apply at submission, carrier review and monthly after approval.
+        Local 10DLC fees apply at submission, carrier review and monthly after approval.
+        Toll-free verification is free and sends no identity confirmation code.
 
         Returns ``required``, ``fields``, ``documents`` and ``address_required``.
         ``required=false`` means a registration submission is unnecessary and would fail.
@@ -2951,7 +2954,10 @@ def register_tools(
         The balance must cover the offer's setup fee plus first month; otherwise nothing is sent.
         That amount is reserved during review and pays for a later purchase using this registration.
         It is returned after rejection, cancellation or 30 days without purchase following approval.
-        ``purpose="sms"`` registers a US number for outbound US texting and charges carrier filing fees.
+        ``purpose="sms"`` registers US local numbers for US texting with carrier filing fees.
+        For free toll-free verification, use type ``toll_free``, country ``US`` or ``CA``
+        and the same owned ``number_id`` as the requirements response.
+        Toll-free requests need ``registration_kind=toll_free`` among the current form fields.
         The same ``number_id`` identifies the sender when it was required for the form.
         SMS campaign text requires user review and approval before submission.
 
@@ -3110,7 +3116,7 @@ def register_tools(
         address: _JsonObjectOrNone = None,
         number_id: str | None = None,
     ) -> dict[str, Any]:
-        """Preview the campaign text for a US SMS registration without filing or charging.
+        """Preview local or toll-free SMS registration text without filing or charging.
 
         ``subject_type``, ``fields``, ``address`` and ``number_id`` describe the proposed application.
         The response contains the description, consent flow and samples for user review before submission.
