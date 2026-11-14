@@ -47,6 +47,24 @@ _CATEGORIES = {
     "HIGHER_EDUCATION": "HIGHER_EDUCATION",
     "PUBLIC_SERVICE_ANNOUNCEMENT": "PUBLIC_SERVICE_ANNOUNCEMENT",
 }
+# Twilio's MessageVolume enum (TFV API docs, checked 2026-11-14). The SDK
+# types it as a plain string, so Hail keeps the list here.
+_VOLUMES = tuple(
+    FieldOption(key=v, label=v)
+    for v in (
+        "10",
+        "100",
+        "1,000",
+        "10,000",
+        "100,000",
+        "250,000",
+        "500,000",
+        "750,000",
+        "1,000,000",
+        "5,000,000",
+        "10,000,000+",
+    )
+)
 _AUTHORITIES = tuple(
     FieldOption(key=value, label=value)
     for key, value in vars(
@@ -98,8 +116,7 @@ def requirements(provider, country_code, subject_type) -> Requirements:
             FieldSpec(
                 name="message_volume",
                 label="Estimated texts per month",
-                pattern=r"^[1-9][0-9]{0,8}$",
-                max_length=9,
+                options=_VOLUMES,
             ),
             FieldSpec(
                 name="doing_business_as",
@@ -150,11 +167,7 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
             result.append(
                 Problem(
                     field=spec.name,
-                    message=(
-                        "Enter a positive whole number of texts."
-                        if spec.name == "message_volume"
-                        else "Check the format of this answer."
-                    ),
+                    message="Check the format of this answer.",
                 )
             )
         elif value and spec.kind == "url" and not _is_public_https_url(value):

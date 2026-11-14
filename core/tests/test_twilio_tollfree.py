@@ -10,7 +10,7 @@ from .test_twilio_sms_sdk import sdk_provider
 TF_FIELDS = {
     **FIELDS,
     "registration_kind": "toll_free",
-    "message_volume": "1000",
+    "message_volume": "1,000",
     "business_registration_authority": "EIN",
 }
 
@@ -92,7 +92,7 @@ async def test_tollfree_sdk_files_end_customer_evidence_and_polls_one_number():
 @pytest.mark.parametrize(
     "changes,field",
     [
-        ({"message_volume": "-1"}, "message_volume"),
+        ({"message_volume": "1000"}, "message_volume"),
         (
             {"consent_methods": "VERBAL", "verbal_evidence_url": ""},
             "verbal_evidence_url",
