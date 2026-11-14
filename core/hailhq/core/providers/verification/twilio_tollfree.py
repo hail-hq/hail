@@ -149,7 +149,12 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
         elif value and spec.pattern and not re.fullmatch(spec.pattern, value):
             result.append(
                 Problem(
-                    field=spec.name, message="Enter a positive whole number of texts."
+                    field=spec.name,
+                    message=(
+                        "Enter a positive whole number of texts."
+                        if spec.name == "message_volume"
+                        else "Check the format of this answer."
+                    ),
                 )
             )
         elif value and spec.kind == "url" and not _is_public_https_url(value):
@@ -166,7 +171,8 @@ def problems(provider, fields, address, subject_type) -> list[Problem]:
                         message="Provide a public link to redacted evidence for this consent method.",
                     )
                 )
-    return result
+    # The shared checks above may already report the same field.
+    return list({(p.field, p.message): p for p in result}.values())
 
 
 def payload(fields, address, subject_type, contact_email, provider_resource_id):

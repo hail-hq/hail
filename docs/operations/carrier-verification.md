@@ -258,9 +258,9 @@ registration does not verify toll-free messaging.
 
 Use `purpose=sms`, `number_type=toll_free`, the number's `country_code` (`US` or
 `CA`), and its owned `number_id`. Read `/v1/verifications/requirements` first.
-Each verification covers exactly one number. Migration `0078` links that number
-on the existing `carrier_verifications` table and permits separate live requests
-for separate toll-free numbers. This path currently supports Twilio only.
+Each verification covers exactly one number. `carrier_verifications.number_id`
+links that number and permits separate live requests for separate toll-free
+numbers. This path currently supports Twilio only.
 
 Toll-free verification is free. It creates no 10DLC brand, campaign, OTP or fee.
 The API does not notify the 10DLC fee rater. Before a Cloud filing, it checks the
@@ -280,7 +280,7 @@ consent. Dedicated privacy and terms URLs are always filed. Hail never fetches
 these arbitrary evidence URLs. Public email domains are not rejected locally.
 
 A lost create response is recovered by the owned carrier number and a hash of
-the exact submitted answers. Existing unmatched carrier requests require support.
+the exact submitted answers. Existing unmatched carrier requests return a 422 on `number_id` that names support.
 Editable rejections keep the same row in `submitted` / `needs_information`.
 `PATCH /v1/verifications/{id}/application` checks the original sender, confirms
 that the carrier still permits edits, and updates the same carrier request.

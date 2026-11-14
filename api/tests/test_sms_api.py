@@ -1054,6 +1054,27 @@ async def test_unverified_tollfree_is_gated_and_non_us_longcode_is_not(
     assert resp.status_code == 201, resp.text
 
 
+async def test_territory_tollfree_is_not_gated_as_10dlc(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    # A toll-free number is never on the 10DLC registry.
+    org_id, _, key = org_and_key
+    await _seed_dedicated_number(
+        async_session,
+        org_id,
+        e164="+18005550101",
+        number_type="toll_free",
+        country_code="PR",
+        register_sms=False,
+    )
+    resp = await client.post(
+        "/sms",
+        json=_us_text(**{"from": "+18005550101"}),
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
 async def test_us_long_code_to_canada_is_not_gated(
     client, async_session, org_and_key, sms_mock
 ) -> None:

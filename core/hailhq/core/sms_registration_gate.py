@@ -68,12 +68,14 @@ async def on_approved_registration(
 async def us_registration_block(
     db: AsyncSession, organization_id: UUID, from_number: PhoneNumber, to_e164: str
 ) -> str | None:
-    if from_number.number_type == "toll_free" and from_number.provider != "twilio":
-        return None  # Other carriers retain their existing carrier-side gate.
-    if from_number.number_type == "toll_free" and from_number.country_code in {
-        "US",
-        "CA",
-    }:
+    if from_number.number_type == "toll_free":
+        if from_number.provider != "twilio" or from_number.country_code not in {
+            "US",
+            "CA",
+        }:
+            # Other carriers keep their carrier-side gate. Territory toll-free
+            # numbers are not on the 10DLC registry, so that gate never applies.
+            return None
         try:
             destination = phonenumbers.region_code_for_number(
                 phonenumbers.parse(to_e164)

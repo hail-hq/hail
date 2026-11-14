@@ -278,6 +278,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                     provider_resource_id,
                 ),
             )
+        except VerificationProviderError as exc:
+            # The number already has a carrier request Hail cannot recover.
+            # Say so: retrying the same filing can never succeed.
+            return DraftResult(
+                refs={}, problems=[Problem(field="number_id", message=str(exc))]
+            )
         except Exception as exc:
             _log_failure("tollfree_create", exc)
             if isinstance(exc, TwilioRestException) and application_validation_error(
