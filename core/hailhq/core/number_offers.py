@@ -19,10 +19,25 @@ __all__ = [
     "by_request_offers",
     "discover_offers",
     "rank_offers",
+    "toll_free_sms_ok",
 ]
 
 # Every carrier, in the order ``CARRIERS`` lists them.
 PROVIDERS = tuple(CARRIERS)
+
+
+def toll_free_sms_ok(
+    provider: str, country: str, kind: str, capabilities: list[str]
+) -> bool:
+    """False for a US/CA toll-free number asked for SMS from a carrier Hail
+    cannot verify toll-free texting with: that number could never text, so
+    it is not offered. Calls-only searches keep every carrier."""
+    return (
+        country not in {"US", "CA"}
+        or kind != "toll_free"
+        or "sms" not in capabilities
+        or carrier(provider).toll_free_sms_verification
+    )
 
 
 def rank_offers(
@@ -70,7 +85,11 @@ async def discover_offers(
     """Live offers from ``providers`` (every carrier by default) and the
     carriers whose lookup failed. ``approvals`` is the org's approved Hail
     verifications per carrier (``approved_handles``)."""
-    asked = [p for p in PROVIDERS if p in providers]
+    asked = [
+        p
+        for p in PROVIDERS
+        if p in providers and toll_free_sms_ok(p, country, kind, capabilities)
+    ]
     approvals = approvals or {}
     results = await asyncio.gather(
         *(
@@ -125,7 +144,9 @@ def by_request_offers(
     marks it ready when the org already has an approved verification."""
     out: list[CarrierOffer] = []
     for name in PROVIDERS:
-        if name not in configured:
+        if name not in configured or not toll_free_sms_ok(
+            name, country, kind, capabilities
+        ):
             continue
         row = telephony_catalog.by_request_row(country, kind, name)
         if row is None:

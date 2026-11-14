@@ -169,6 +169,9 @@ class Carrier:
     revoke_registration: (
         Callable[[CarrierOffer, UUID], Awaitable[str | None]] | None
     ) = None
+    # True when Hail can file a US/CA toll-free texting verification with
+    # this carrier. Without it, a toll-free number there can never text.
+    toll_free_sms_verification: bool = False
 
 
 # Listed in offer order: the first carrier wins a tie on price.
@@ -186,6 +189,7 @@ CARRIERS: dict[str, Carrier] = {
         attach_inbound=twilio.attach_inbound_number,
         detach_inbound=twilio.detach_inbound_number,
         leg_costs=twilio.leg_costs,
+        toll_free_sms_verification=True,
     ),
     TELNYX: Carrier(
         _telnyx_voice,

@@ -2856,7 +2856,11 @@ paths:
 
         messaging registration requirements. `provider` is ignored: Hail compares
 
-        every carrier.
+        every carrier. A US or Canada `toll_free` search that asks for `sms`
+
+        returns only carriers whose toll-free numbers Hail can register for
+
+        texting.
 
 
         A number support orders by hand comes back as an offer with

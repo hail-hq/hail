@@ -50,7 +50,12 @@ from hailhq.api.sms_registration import (
     reconcile_approved_registrations,
 )
 from hailhq.api.superadmin import require_superadmin
-from hailhq.core import sms_registration_fees, sms_setup, verification_hold
+from hailhq.core import (
+    carrier_routing,
+    sms_registration_fees,
+    sms_setup,
+    verification_hold,
+)
 from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
@@ -297,7 +302,10 @@ async def _sms_provider_name(
                 "country_code and number_type must match the selected number.",
                 loc=[where, "number_id"],
             )
-        if number.number_type == "toll_free" and number.provider != "twilio":
+        if (
+            number.number_type == "toll_free"
+            and not carrier_routing.carrier(number.provider).toll_free_sms_verification
+        ):
             raise unprocessable(
                 "Toll-free texting verification is not available for this number. Contact support.",
                 loc=[where, "number_id"],
