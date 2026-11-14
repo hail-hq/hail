@@ -4,7 +4,11 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from hailhq.core.sms_registration_gate import is_us, us_registration_block
+from hailhq.core.sms_registration_gate import (
+    TOLLFREE_UNVERIFIABLE_MESSAGE,
+    is_us,
+    us_registration_block,
+)
 
 
 @pytest.mark.parametrize(
@@ -39,18 +43,10 @@ async def test_unregistered_domestic_sender_is_blocked(country):
 
 
 async def test_unverifiable_tollfree_is_refused_only_to_the_us_and_canada():
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from hailhq.core.sms_registration_gate import (
-        TOLLFREE_UNVERIFIABLE_MESSAGE,
-        us_registration_block,
-    )
-
     number = SimpleNamespace(
         number_type="toll_free", country_code="US", provider="telnyx"
     )
-    org = uuid4()
+    org = uuid.uuid4()
     assert (
         await us_registration_block(None, org, number, "+14155550100")
         == TOLLFREE_UNVERIFIABLE_MESSAGE

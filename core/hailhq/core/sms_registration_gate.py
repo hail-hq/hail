@@ -67,7 +67,10 @@ async def on_approved_registration(
 
 # A US or Canadian toll-free number at a carrier Hail cannot verify for
 # toll-free texting: refused here, rather than blocked by the carrier later.
-TOLLFREE_UNVERIFIABLE_MESSAGE = "This toll-free number cannot text the US or Canada. Ask support to move texting to a number that can."
+TOLLFREE_UNVERIFIABLE_MESSAGE = (
+    "This toll-free number cannot text the US or Canada. Ask support to move "
+    "texting to a number that can."
+)
 
 
 async def us_registration_block(
