@@ -11,6 +11,7 @@ export type SiteHeaderActive =
   | "pricing"
   | "docs"
   | "blog"
+  | "contact"
   | null;
 
 const RESOURCES = [
@@ -259,6 +260,14 @@ export function SiteHeader({
             className={navLinkClass(current === "pricing")}
           >
             Pricing
+          </a>
+          {/* Only in the phone menu. The desktop bar keeps Contact in the footer. */}
+          <a
+            href={siteHref("/contact")}
+            aria-current={current === "contact" ? "true" : undefined}
+            className={`${navLinkClass(current === "contact")} ${styles.menuOnly}`}
+          >
+            Contact
           </a>
           <a
             className={`${styles.navLink} ${styles.menuSignIn}`}
