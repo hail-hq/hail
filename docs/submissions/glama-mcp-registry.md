@@ -9,6 +9,12 @@ status: n/a
 
 # Glama MCP Registry
 
+**Connector ownership, 2026-11-15:** Use DNS TXT verification. The owner chose to
+remove `https://mcp.hail.so/.well-known/glama.json` from the MCP app while
+reclaiming ownership. The repository's root `glama.json` is separate and stays
+in place for the GitHub repository listing. The older file-verification notes
+below describe the previous setup.
+
 > **Abandoned 2026-07-07.** The `/mcp/servers` listing's Build & Release check requires wrapping the server with `mcp-proxy` as a stdio child process — structurally incompatible with Hail's deliberately remote-only HTTP MCP server (confirmed via direct reproduction: `mcp-proxy` waits 60s for a stdio JSON-RPC handshake that a Streamable HTTP server never sends). The `/mcp/connectors` route (verify via `/.well-known/glama.json`, shipped in PR #5 + #6) was the correct alternative, but this is no longer being pursued — deprioritized in favor of higher-value remaining targets. `glama.json` (PR #4) and the `/.well-known/glama.json` route (PR #5, #6) are harmless, already-merged additions; no need to revert them.
 
 ## TODO
