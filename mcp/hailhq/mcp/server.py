@@ -41,6 +41,7 @@ from hailhq.core.telemetry import (
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.core.urls import join_url
+from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
@@ -129,6 +130,8 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
+    # Before streamable_http_app(): instrument() wraps the app factory.
+    analytics = instrument_analytics(mcp_app)
 
     # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
     # turn on its localhost-only Host check (see tests/test_server.py).
@@ -182,6 +185,8 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             try:
                 yield
             finally:
+                if analytics:
+                    await analytics.flush()
                 await asyncio.to_thread(flush_telemetry)
 
     # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
