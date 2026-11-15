@@ -993,7 +993,7 @@ async def test_requirements_tool_requires_subject_type(monkeypatch) -> None:
         for t in await srv.mcp_app.list_tools()
         if t.name == "get_verification_requirements"
     )
-    assert "subject_type" in tool.inputSchema["required"]
+    assert "subject_type" in tool.input_schema["required"]
 
 
 @respx.mock
@@ -1013,8 +1013,8 @@ async def test_attestation_schema_is_still_boolean(monkeypatch) -> None:
     tool = next(
         t for t in await srv.mcp_app.list_tools() if t.name == "submit_verification"
     )
-    assert tool.inputSchema["properties"]["attest_authorized"]["type"] == "boolean"
-    assert "attest_authorized" in tool.inputSchema["required"]
+    assert tool.input_schema["properties"]["attest_authorized"]["type"] == "boolean"
+    assert "attest_authorized" in tool.input_schema["required"]
 
 
 # --------------------------------------------------------------------------- #

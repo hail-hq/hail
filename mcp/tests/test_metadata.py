@@ -28,3 +28,14 @@ def test_website_url_follows_site_setting(monkeypatch) -> None:
     assert metadata.website_url() == "https://x.test/mcp"
     monkeypatch.setattr("hailhq.core.config.settings.hail_base_url", "")
     assert metadata.website_url() is None
+
+
+def test_identity_fits_client_limit() -> None:
+    assert metadata.TITLE
+    assert 0 < len(metadata.DESCRIPTION.encode()) <= CLIENT_LIMIT_BYTES
+
+
+def test_server_version_is_the_service_package_version() -> None:
+    from importlib.metadata import version
+
+    assert metadata.server_version() == version("hailhq-mcp")

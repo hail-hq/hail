@@ -7,6 +7,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - MCP: the server now sends usage instructions, a website link and a vector icon when a client connects. Every tool input has a description.
+- MCP: the server runs on MCP SDK 2. It answers `server/discover` (protocol 2026-07-28) and sends a title and description. Older clients keep connecting with `initialize`.
 - Upload links: `POST /v1/uploads` returns a one-time URL to `PUT` a file to with no key, for email attachments and verification documents. `POST /v1/verifications/check` checks a verification form without filing it. MCP: `create_file_upload` and `check_verification`.
 - US texting: a registration that waits for credit now says how much it needs in `credit_needed_cents`. The sum over the waiting registrations is one top-up for all.
 - US texting registration: upload a consent screenshot with `POST /v1/verifications/sms/evidence`, use the public link it returns, and delete it with `DELETE` on that link. Verbal consent no longer needs a screenshot link.

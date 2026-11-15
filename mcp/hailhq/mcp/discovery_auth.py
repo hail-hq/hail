@@ -1,19 +1,20 @@
 """Lets an unauthenticated MCP client discover Hail's capabilities.
 
-FastMCP's AuthenticationMiddleware gates the entire Streamable HTTP
+MCPServer's AuthenticationMiddleware gates the entire Streamable HTTP
 endpoint — every JSON-RPC method, not just tool calls. That's correct for
 tools/call (a real action against a real account) but means an agent
 evaluating whether to bother authenticating at all can't even see what
 tools exist, matching the "properly scoped, upgrade to public tool
 listing" gap an external audit flagged.
 
-This middleware runs BEFORE FastMCP's own auth middleware (see server.py's
-middleware ordering) and, for exactly three JSON-RPC methods —
-"initialize", "tools/list" and "notifications/initialized" — injects a
-synthetic, non-functional bearer token if the request has none.
+This middleware runs BEFORE MCPServer's own auth middleware (see server.py's
+middleware ordering) and, for exactly four JSON-RPC methods —
+"initialize", "server/discover", "tools/list" and
+"notifications/initialized" — injects a synthetic, non-functional bearer
+token if the request has none.
 auth.PassThroughVerifier accepts any non-empty token string as "valid" (real validation is the downstream
 API's job, and these methods never call the downstream API), so
-FastMCP's auth layer then lets the request through.
+MCPServer's auth layer then lets the request through.
 
 Every other method (tools/call, resources/*, other notifications/*, ping, ...)
 is untouched: no header is injected, so a request with no real bearer
@@ -25,11 +26,16 @@ entries, not a one-line addition.
 _ANON_INIT_MAX_PER_WINDOW below) — unlike tools/list, a real initialize
 call creates a permanent, stateful MCP session, so unrestricted anonymous
 initialize is a resource-exhaustion vector, not just an information leak.
-"tools/list" and "notifications/initialized" are only safelisted when they carry
-an Mcp-Session-Id header (see _SESSION_REQUIRED_METHODS): a session-less POST
-makes the SDK create a session before it answers 400. Every MCP client sends
+"server/discover", "tools/list" and "notifications/initialized" are only
+safelisted when they carry an Mcp-Session-Id header or a 2026-07-28 (or later)
+MCP-Protocol-Version header (see _SESSION_REQUIRED_METHODS): a session-less
+POST on an older protocol makes the SDK create a session before it answers
+400, while a newer-protocol POST is one self-contained exchange that creates
+no session. Every MCP client on an older protocol sends
 notifications/initialized right after initialize, so it must pass anonymously
-or the SDK client fails in connect().
+or the SDK client fails in connect(). "server/discover" is how a 2026-07-28
+client learns the server's name, title and capabilities, the way older
+clients use "initialize".
 """
 
 from __future__ import annotations
@@ -40,27 +46,32 @@ import time
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
+
 _DISCOVERY_METHODS = frozenset(
-    {"initialize", "tools/list", "notifications/initialized"}
+    {"initialize", "server/discover", "tools/list", "notifications/initialized"}
 )
 
-# Safelisted methods that only make sense inside an existing session. The SDK's
-# session manager mints (and never reaps) a new transport for ANY POST that
-# lacks an Mcp-Session-Id header, before it answers 400 — so a session-less
-# tools/list or notifications/initialized would create a permanent session
-# while bypassing the initialize cap below. Without the header it falls
-# through to FastMCP's auth middleware and 401s, exactly as before this file
-# existed.
-_SESSION_REQUIRED_METHODS = frozenset({"tools/list", "notifications/initialized"})
+# Safelisted methods that must not open a session. On an older protocol the
+# SDK's session manager mints a new transport for ANY POST that lacks an
+# Mcp-Session-Id header, before it answers 400 — so a session-less tools/list,
+# server/discover or notifications/initialized would create a session while
+# bypassing the initialize cap below. These pass only with that header, or on
+# the newer protocol (_opens_no_session), whose requests never create a
+# session. Otherwise they fall through to MCPServer's auth middleware and
+# 401, exactly as before this file existed.
+_SESSION_REQUIRED_METHODS = frozenset(
+    {"server/discover", "tools/list", "notifications/initialized"}
+)
 
 # 64 KiB — comfortably above any real initialize/tools/list payload (both are
 # small JSON-RPC envelopes; neither carries bulk data), and small enough to
 # bound worst-case memory for this pre-auth body peek. Before this middleware
-# existed, FastMCP's auth layer 401'd before ever reading the body, so an
+# existed, MCPServer's auth layer 401'd before ever reading the body, so an
 # unbounded buffer here would be a new, unauthenticated DoS surface. Once a
 # request's body exceeds this, it cannot be a legitimate discovery request —
 # stop buffering and fall through with no header injected, so it hits
-# FastMCP's real auth middleware unmodified and 401s like any other
+# MCPServer's real auth middleware unmodified and 401s like any other
 # non-safelisted request today.
 _MAX_PEEK_BYTES = 64 * 1024
 
@@ -72,7 +83,7 @@ _MAX_PEEK_BYTES = 64 * 1024
 # small JSON-RPC envelope arriving in one or two chunks.
 _MAX_PEEK_SECONDS = 5.0
 
-# Anonymous "initialize" rate cap. FastMCP's session manager (this SDK
+# Anonymous "initialize" rate cap. MCPServer's session manager (this SDK
 # version) has no idle timeout — session_idle_timeout defaults to None and
 # is never passed — so sessions are reaped only on explicit DELETE, crash,
 # or restart. A real "initialize" call through this safelist creates a
@@ -97,6 +108,24 @@ _ANON_INIT_MAX_PER_WINDOW = 20
 _ANON_INIT_PRUNE_THRESHOLD = 1024
 
 _anon_init_counts: dict[str, tuple[int, float]] = {}
+
+
+def _header(scope: Scope, name: bytes) -> bytes | None:
+    return next((v for k, v in scope.get("headers", []) if k.lower() == name), None)
+
+
+def _opens_no_session(scope: Scope) -> bool:
+    """True when the SDK serves this POST as one exchange with no session.
+
+    Mirrors the SDK session manager's routing: a request whose
+    MCP-Protocol-Version header names anything but an initialize-handshake
+    version goes to the 2026-07-28 single-exchange handler.
+    """
+    version = _header(scope, b"mcp-protocol-version")
+    return (
+        version is not None
+        and version.decode("latin-1") not in HANDSHAKE_PROTOCOL_VERSIONS
+    )
 
 
 def _remote_ip(scope: Scope) -> str:
@@ -132,7 +161,7 @@ def _reset_anon_init_rate_state_for_tests() -> None:
 
 class DiscoveryAuthMiddleware:
     """Pure ASGI middleware (not BaseHTTPMiddleware) so it can inspect and
-    replay the request body without interfering with FastMCP's own
+    replay the request body without interfering with MCPServer's own
     body-consuming logic downstream — BaseHTTPMiddleware's buffering has
     known interactions with streaming bodies that this avoids."""
 
@@ -186,7 +215,7 @@ class DiscoveryAuthMiddleware:
             # Replay the buffered body messages first; once exhausted,
             # delegate to the REAL upstream receive() rather than
             # fabricating {"type": "http.disconnect"}. Downstream (e.g.
-            # sse_starlette's EventSourceResponse, used by FastMCP's
+            # sse_starlette's EventSourceResponse, used by MCPServer's
             # streamable HTTP transport) has its own disconnect-watcher
             # task that calls receive() past body-consumption expecting
             # it to reflect real connection state. A fabricated disconnect
@@ -207,15 +236,17 @@ class DiscoveryAuthMiddleware:
                 # over-long integer literal raises a plain ValueError and a
                 # deeply nested body raises RecursionError. None of these may
                 # turn an unauthenticated request into a 500 — fall through
-                # to FastMCP's auth so it 401s as before.
+                # to MCPServer's auth so it 401s as before.
                 payload = {}
             raw_method = payload.get("method") if isinstance(payload, dict) else None
             # A list/dict "method" is unhashable and would raise TypeError in
             # the frozenset membership test below.
             method = raw_method if isinstance(raw_method, str) else None
 
-        if method in _SESSION_REQUIRED_METHODS and not any(
-            k.lower() == b"mcp-session-id" for k, _ in scope.get("headers", [])
+        if (
+            method in _SESSION_REQUIRED_METHODS
+            and _header(scope, b"mcp-session-id") is None
+            and not _opens_no_session(scope)
         ):
             method = None
         cap_exceeded = method == "initialize" and _anon_init_cap_exceeded(
@@ -226,7 +257,7 @@ class DiscoveryAuthMiddleware:
             new_headers.append((b"authorization", b"Bearer anonymous-discovery"))
             scope = {**scope, "headers": new_headers}
         # cap_exceeded (or method not in the safelist): no header injected,
-        # falls through to FastMCP's real auth middleware unmodified — same
+        # falls through to MCPServer's real auth middleware unmodified — same
         # established pattern as the oversized-body case above (no bespoke
         # response shape invented here).
 

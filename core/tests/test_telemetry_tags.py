@@ -185,6 +185,8 @@ def test_inbound_masks_the_sender_and_keeps_the_hail_number():
         ("MCP server handle request: prompts/list", {}),
         ("MCP server handle request: resources/list", {}),
         ("MCP server handle request: resources/templates/list", {}),
+        ("ping", {"mcp.method.name": "ping"}),
+        ("tools/list", {"mcp.method.name": "tools/list"}),
         ("GET /", {"http.route": "/"}),
         (
             "GET /.well-known/oauth-protected-resource",
@@ -214,6 +216,10 @@ def test_mcp_tool_calls_and_other_services_are_exported():
                 "MCP server handle request: tools/call",
                 **{"mcp.tool.name": "place_call", "hail.channel": "mcp"},
             ),
+            _span(
+                "tools/call place_call",
+                **{"mcp.method.name": "tools/call", "hail.channel": "mcp"},
+            ),
             # A failed POST stays: it is where a 401 shows.
             _span("POST /", **{"http.route": "/", "http.status_code": 401}),
             _span("DELETE /", **{"http.route": "/", "http.status_code": 404}),
@@ -222,6 +228,7 @@ def test_mcp_tool_calls_and_other_services_are_exported():
     )
     assert [s.name for s in kept] == [
         "MCP server handle request: tools/call",
+        "tools/call place_call",
         "POST /",
         "DELETE /",
     ]

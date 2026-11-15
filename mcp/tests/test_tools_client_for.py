@@ -1,7 +1,7 @@
 """Tests for the per-tool-call HailClient helper.
 
 In oauth-rs mode the helper builds a fresh HailClient from the bearer
-on FastMCP's request context, hands it to the tool, and closes it on
+on MCPServer's request context, hands it to the tool, and closes it on
 exit. In static-key mode the helper yields the shared singleton without
 closing.
 """
@@ -17,8 +17,8 @@ from hailhq.mcp.tools import _client_for
 
 
 def _ctx_with_bearer(bearer: str | None) -> SimpleNamespace:
-    """Minimal FastMCP Context stand-in with the headers attribute the
-    helper reaches into. Real FastMCP injects a richer Context object;
+    """Minimal MCPServer Context stand-in with the headers attribute the
+    helper reaches into. Real MCPServer injects a richer Context object;
     we only depend on ``ctx.request_context.request.headers``."""
     headers = {}
     if bearer is not None:

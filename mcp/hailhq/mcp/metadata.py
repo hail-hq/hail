@@ -1,13 +1,23 @@
-"""Server metadata sent in the MCP ``initialize`` result.
+"""Server metadata sent in the MCP ``initialize`` and ``server/discover`` results.
 
 The remote app (``server.py``) and the stdio entry point (``stdio.py``) both
-use it, so every client sees the same instructions and website.
+use it, so every client sees the same title, description, instructions and
+website.
 """
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from hailhq.core.config import settings
 from hailhq.core.urls import join_url
+
+TITLE = "Hail"
+
+DESCRIPTION = (
+    "Phone numbers, voice calls, text messages and email for AI agents. "
+    "Place and answer calls, send and receive texts and mail, and buy numbers."
+)
 
 # Clients put this text into the agent's context, and some cut it at 2 KB.
 # Keep it short, with the rules that prevent harm or spend first.
@@ -45,3 +55,11 @@ def website_url() -> str | None:
     if not settings.hail_base_url:
         return None
     return join_url(settings.hail_base_url, "mcp")
+
+
+def server_version() -> str:
+    """This service's package version. The SDK sends an empty one otherwise."""
+    try:
+        return version("hailhq-mcp")
+    except PackageNotFoundError:
+        return "0.0.0"

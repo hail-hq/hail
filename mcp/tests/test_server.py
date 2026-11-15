@@ -3,7 +3,7 @@
 Most boot wiring (mode dispatch, 401-with-WWW-Authenticate, protected-
 resource route, SSE removal, healthz) is asserted in
 ``test_server_transport.py``. This module covers one additional regression
-that is not load-bearing for that suite: FastMCP's localhost-DNS-rebinding
+that is not load-bearing for that suite: MCPServer's localhost-DNS-rebinding
 protection 421-ing a proxied public ``Host`` header. Binding the app host
 to ``0.0.0.0`` in ``_build_app()`` tells the SDK this is a public bind,
 which skips the localhost-only guard.
@@ -40,7 +40,7 @@ def _boot(monkeypatch, *, oauth: bool) -> object:
 
 
 def test_streamable_http_accepts_proxied_host(monkeypatch) -> None:
-    # Regression: FastMCP auto-enables DNS-rebinding protection when its
+    # Regression: MCPServer auto-enables DNS-rebinding protection when its
     # configured host is localhost, which 421s a proxied public Host
     # (e.g. mcp.hail.so behind Caddy). Binding the app host to "0.0.0.0"
     # tells the SDK this is a public bind, skipping that localhost-only
