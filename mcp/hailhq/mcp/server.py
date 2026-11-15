@@ -107,6 +107,8 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             issuer_url=settings.hail_auth_url,
             resource_server_url=settings.mcp_resource_url,
             required_scopes=None,  # scope enforcement deferred to Phase 2
+            # The API checks the token's audience; PassThroughVerifier does not.
+            validate_token_resource=False,
         )
         mcp_app: FastMCP = TaggedFastMCP(
             name="hail",

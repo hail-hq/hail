@@ -21,6 +21,9 @@ needs consent_source.
 - acquire_number charges the workspace at once. Call quote_numbers, show the \
 user the price, and buy only after they agree.
 - release_number and delete_agent cannot be undone. Ask the user first.
+- submit_verification files with the carrier and cannot be undone. A number \
+registration holds the setup fee and first month; US texting has carrier fees. \
+Show the user the details and file only after they agree.
 - To retry a send or a purchase, pass the idempotency_key it returned, so the \
 retry does not send or buy twice.
 
