@@ -130,8 +130,6 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
-    # Before streamable_http_app(): instrument() wraps the app factory.
-    analytics = instrument_analytics(mcp_app)
 
     # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
     # turn on its localhost-only Host check (see tests/test_server.py).
@@ -140,6 +138,11 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # all memory; past it, new sessions get 503. Idle sessions close after the
     # SDK's 30-minute timeout.
     http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
+    # After streamable_http_app() on purpose: instrument() would otherwise add
+    # PostHog's session-minting middleware, which buffers request bodies and
+    # sets Mcp-Session-Id on initialize responses the transport left without
+    # one. This server keeps its own sessions; tool calls are still captured.
+    analytics = instrument_analytics(mcp_app)
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -185,9 +188,10 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             try:
                 yield
             finally:
-                await asyncio.to_thread(flush_telemetry)
-                if analytics:
-                    await analytics.flush()
+                await asyncio.gather(
+                    asyncio.to_thread(flush_telemetry),
+                    analytics.flush() if analytics else asyncio.sleep(0),
+                )
 
     # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*

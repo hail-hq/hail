@@ -59,15 +59,19 @@ class Analytics:
 
     async def flush(self) -> None:
         """Bounded: ``Posthog.shutdown()`` waits with no limit while PostHog is down."""
-        try:
-            await asyncio.wait_for(self._handle.flush(), _FLUSH_SECONDS)
-            await asyncio.to_thread(self._client.flush, _FLUSH_SECONDS)
-        except Exception:  # analytics must never break shutdown
-            logger.warning("PostHog MCP analytics flush failed", exc_info=True)
+        steps = (
+            self._handle.flush,
+            lambda: asyncio.to_thread(self._client.flush, _FLUSH_SECONDS),
+        )
+        for step in steps:
+            try:
+                await asyncio.wait_for(step(), _FLUSH_SECONDS)
+            except Exception:  # analytics must never break shutdown
+                logger.warning("PostHog MCP analytics flush failed", exc_info=True)
 
 
 def instrument_analytics(server: Any) -> Analytics | None:
-    """Instrument ``server`` before its HTTP app is built. ``None`` when off."""
+    """Instrument ``server`` for tool-call analytics. ``None`` when off."""
     token = settings.mcp_posthog_project_token
     if not token:
         return None

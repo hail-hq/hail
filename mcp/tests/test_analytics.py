@@ -83,6 +83,8 @@ async def _session(
     import hailhq.mcp.server as srv
 
     srv = importlib.reload(srv)
+    stack = [m.cls.__name__ for m in srv.app.user_middleware]
+    assert "PostHogMcpStatelessSessionMiddleware" not in stack
     seen: list = []
     async with srv.app.router.lifespan_context(srv.app):
         transport = httpx.ASGITransport(app=srv.app)

@@ -193,6 +193,16 @@ If both are set, boot fails with `ambiguous MCP auth config`. If neither is set,
 
 The MCP service does not validate JWT signatures. `hail/api` is the single source of JWT-validation truth (`HAIL_AUTH_URL`, `HAIL_AUTH_AUDIENCES`). MCP forwards the bearer on the outbound call. The API validates the token and resolves the org.
 
+### MCP analytics
+
+Optional. Set `MCP_POSTHOG_PROJECT_TOKEN` to a PostHog project token, then restart the `mcp` service. The HTTP MCP server sends one `$mcp_tool_call` event per tool call, plus `$mcp_initialize` and `$mcp_tools_list` ([`mcp/hailhq/mcp/analytics.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/analytics.py)).
+
+- Sent: tool name, duration, success or error type, MCP client name and version, protocol version, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`).
+- Never sent: argument values, tool results, error messages. `_KEPT_PROPERTIES` is the allowlist.
+- Tool schemas and results are unchanged. The stdio entry point sends nothing.
+- `MCP_POSTHOG_HOST` sets the ingestion host. The default is `https://eu.i.posthog.com`; use `https://us.i.posthog.com` for a US project.
+- Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.
+
 ## Database migrations
 
 Schema lives in `api/migrations/versions/`. Alembic config: `api/alembic.ini`. The `DATABASE_URL` env var overrides `sqlalchemy.url`.
