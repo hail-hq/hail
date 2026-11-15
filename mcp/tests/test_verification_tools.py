@@ -1447,8 +1447,7 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
 async def test_preview_sms_application_accepts_every_text_version(
     client: HailClient, extra: dict[str, str], version: int
 ) -> None:
-    # Built by the real campaign_text: a version it starts writing that the
-    # MCP does not know fails here.
+    # Built by the real campaign_text, for each version it writes today.
     fields = {
         "text_types": "ACCOUNT_NOTIFICATION",
         "campaign_description": "Account notices for signed-up customers.",
@@ -1727,7 +1726,8 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         httpx.Response(
             200, json={k: v for k, v in _CAMPAIGN_TEXT.items() if k != "opt_in_message"}
         ),
-        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 3}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 0}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": "2"}),
         httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": True}),
         httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2.0}),
         httpx.Response(404, json={"detail": "Not Found"}),

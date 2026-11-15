@@ -114,9 +114,6 @@ class PreviewShapeError(Exception):
 # The preview's reply shape, built once.
 _CAMPAIGN_TEXT = TypeAdapter(CampaignText)
 _CAMPAIGN_KEYS = frozenset(f.name for f in dataclass_fields(CampaignText))
-# The versions campaign_text writes: 2 when the form lists consent methods,
-# else 1. A test builds both from campaign_text, so a new one fails CI here.
-_CAMPAIGN_VERSIONS = frozenset({1, 2})
 
 
 class HailClient:
@@ -664,10 +661,11 @@ class HailClient:
         resp = await self._client.post("/verifications/sms/preview", json=body)
         if not resp.is_success:
             _decode(resp, problems=True)  # raises the API error
-        # The reply must be exactly this MCP's CampaignText, in a version
-        # campaign_text writes: every key, no other key, each of the right
-        # type. Anything else means the API and MCP differ, and the agent must
-        # not show partial text.
+        # The reply must be exactly this MCP's CampaignText: every key, no
+        # other key, each of the right type. The keys are the shape; the
+        # version only says how the consent flow was written (1 or higher, as
+        # the carrier providers read it). Anything else means the API and MCP
+        # differ, and the agent must not show partial text.
         try:
             data = resp.json()
         except ValueError as exc:
@@ -675,7 +673,8 @@ class HailClient:
         if (
             not isinstance(data, dict)
             or set(data) != _CAMPAIGN_KEYS
-            or data.get("schema_version") not in _CAMPAIGN_VERSIONS
+            or type(data.get("schema_version")) is not int
+            or data["schema_version"] < 1
         ):
             raise PreviewShapeError
         try:
