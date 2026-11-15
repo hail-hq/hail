@@ -489,6 +489,19 @@ async def test_openai_apps_challenge_is_public(monkeypatch, oauth):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("oauth", [False, True])
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+async def test_glama_file_claim_is_not_served(monkeypatch, oauth, method):
+    srv = _boot(monkeypatch, oauth=oauth)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://mcp.hail.so"
+    ) as c:
+        resp = await c.request(method, "/.well-known/glama.json")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_healthz_works_in_both_modes(monkeypatch):
     for oauth in (True, False):
         srv = _boot(monkeypatch, oauth=oauth)
