@@ -661,9 +661,11 @@ class HailClient:
         resp = await self._client.post("/verifications/sms/preview", json=body)
         if not resp.is_success:
             _decode(resp, problems=True)  # raises the API error
-        # The reply must be exactly this MCP's CampaignText, version 1: every
-        # key, no other key, each of the right type. Anything else means the
-        # API and MCP differ, and the agent must not show partial text.
+        # The reply must be exactly this MCP's CampaignText: every key, no
+        # other key, each of the right type. The keys are the shape; the
+        # version only says how the consent flow was written (1 or higher, as
+        # the carrier providers read it). Anything else means the API and MCP
+        # differ, and the agent must not show partial text.
         try:
             data = resp.json()
         except ValueError as exc:
@@ -671,7 +673,8 @@ class HailClient:
         if (
             not isinstance(data, dict)
             or set(data) != _CAMPAIGN_KEYS
-            or data.get("schema_version") != 1
+            or type(data.get("schema_version")) is not int
+            or data["schema_version"] < 1
         ):
             raise PreviewShapeError
         try:
