@@ -184,6 +184,11 @@ _NO_FUNDS_FOR_DESTINATION = (
 )
 
 
+def _shorter_limit(a: int, b: int) -> int:
+    """The shorter of two call limits, where 0 means no limit."""
+    return min(a, b) if a > 0 and b > 0 else max(a, b)
+
+
 async def _cap_to_balance(
     db: AsyncSession,
     principal: Principal,
@@ -204,8 +209,11 @@ async def _cap_to_balance(
     )
     if quote is None:
         logger.warning("call price unknown for org %s; default limit", org)
+        # A limit of 0 means none (HAIL_VOICE_MAX_DURATION_SECONDS=0).
         return (
-            min(max_duration_seconds, settings.hail_voice_max_duration_seconds),
+            _shorter_limit(
+                max_duration_seconds, settings.hail_voice_max_duration_seconds
+            ),
             None,
         )
     per_minute, per_call = quote
@@ -224,7 +232,7 @@ async def _cap_to_balance(
             status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
             detail=_NO_FUNDS_FOR_DESTINATION,
         )
-    seconds = min(max_duration_seconds, cap_seconds(minutes))
+    seconds = _shorter_limit(max_duration_seconds, cap_seconds(minutes))
     billed = paid_minutes(seconds)
     return seconds, (per_minute * billed + per_call, hold_until(now, seconds))
 

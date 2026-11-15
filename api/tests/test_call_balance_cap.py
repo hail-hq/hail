@@ -574,3 +574,16 @@ async def test_handover_unknown_price_uses_the_default_limit(
     assert data["ok"] is True
     assert data["max_seconds"] == settings.hail_voice_max_duration_seconds
     assert await _hold(async_session, call.id) is None
+
+
+async def test_no_default_limit_still_caps_to_the_balance(
+    client, async_session, livekit_mock, add_phone_number, quote, monkeypatch
+):
+    # HAIL_VOICE_MAX_DURATION_SECONDS=0 means no limit: the balance cap holds.
+    monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 0)
+    org, key = await _org(async_session, 500, limit=None)
+    await add_phone_number(async_session, org)
+    r = await _call(client, key)
+    assert r.status_code == 201, r.text
+    call = await async_session.get(Call, uuid.UUID(r.json()["id"]))
+    assert call.max_duration_seconds == 710
