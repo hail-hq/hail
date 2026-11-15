@@ -18,7 +18,7 @@ registration:
 
 The allowed pattern, which SignalWire also runs as its "Platform Free
 Trial": Hail is the sender, and trial texts reach only the account owner's
-own verified phone, with a fixed prefix and a daily cap.
+own verified phone, with a fixed prefix and a cap.
 
 ## Goals
 
@@ -55,12 +55,13 @@ own verified phone, with a fixed prefix and a daily cap.
 | Trial number | Hail's existing toll-free number in Hail's own workspace; one verification covers account notices and trial texts | owner |
 | Direction | Outbound only; each text carries a no-reply notice | owner |
 | Send paths | Normal API, MCP, CLI and agent tool sends | owner |
-| Daily cap | 50 outbound trial texts per workspace per rolling 24 hours | owner |
+| Cap | 25 trial texts per workspace, ever. No daily limit, no end date | owner |
+| Why a fixed cap | It runs out, so users register their own business for US texting | owner |
 | Prefix | Every trial text starts with `[Hail trial] ` | owner |
 | Who can be texted | Only the workspace's verified trial phone | owner |
 | Phone proof | Hail texts a 6-digit code from the trial number; the user types it back in the console | builder call |
 | Uniqueness | One verified trial phone per workspace; one workspace per phone | builder call |
-| Trial end | When the workspace has any approved US SMS registration | builder call |
+| Code texts | Verification code texts do not count toward the 25; at most 5 code texts per workspace per day | builder call |
 | Number needed | None. The trial path runs when `from` is omitted or equals the trial number | builder call |
 | Explicit own `from` | A workspace's own unregistered number in `from` keeps today's 422; the message names the trial | builder call |
 | Billing | Normal outbound text price from credits | builder call |
@@ -82,9 +83,9 @@ own verified phone, with a fixed prefix and a daily cap.
    - `api/hailhq/api/routes/internal/agent.py`: agent tool send, send
      during a voice call, handover notice
    The helper allows a trial send when all are true:
-   - the workspace has no approved US SMS registration
    - `to` equals the workspace's verified trial phone
-   - the workspace is under the cap
+   - the workspace has sent fewer than 25 trial texts
+   - `from` is omitted or equals the trial number
    It then sends from the trial number. The body becomes
    `[Hail trial] <body>` plus a short no-reply line. Both count toward
    segment count and body length limits. Otherwise the call site keeps
@@ -96,8 +97,10 @@ own verified phone, with a fixed prefix and a daily cap.
    toll-free numbers (builder: confirm in Twilio docs). After STOP, Twilio
    refuses further texts to that phone. Hail shows that refusal on the
    workspace's text record.
-5. **End.** Once the workspace has an approved US registration, the trial
-   path stops. Sends use the workspace's own registered number.
+5. **End.** The trial ends only when the 25 texts are used. An approved
+   US registration does not end it: a `from`-less send to the verified
+   phone prefers the workspace's own registered number, and does not use a
+   trial text.
 
 ## Toll-free verification
 
@@ -122,6 +125,6 @@ and filing again, so file the combined text once the console step is live.
 - Table shape and migration.
 - The exact 422 wording, the no-reply line and the console copy
   (ASD-STE100).
-- How the console shows the cap and remaining texts.
+- How the console shows the remaining trial texts.
 - Tests: every item in "Anti-goals" gets a test that fails without the
   guard, at every call site in "Send".
