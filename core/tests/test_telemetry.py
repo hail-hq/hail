@@ -175,8 +175,7 @@ spans = memory.get_finished_spans()
 assert any(s.name == "test.operation" for s in spans)
 assert any(s.attributes.get("logfire.msg") == "Setup INFO log" for s in spans)
 assert all(s.resource.attributes["service.name"] == "hail-api" for s in spans)
-# instrument_sqlalchemy refuses the locked SQLAlchemy; the warning logs before identity_scope.
-assert any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
+assert not any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
 inside = [s for s in spans if s.name == "test.operation" or s.attributes.get("logfire.msg") == "Setup INFO log"]
 assert len(inside) == 2
 assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in inside)
@@ -343,3 +342,39 @@ def test_upload_link_token_never_reaches_the_export():
     assert token not in exported.name
     assert exported.attributes["url.full"] == "https://api.example.org/v1/uploads/0b7c"
     assert exported.attributes["http.route"] == "/v1/uploads/{upload_id}"
+
+
+@pytest.mark.parametrize("sql_key", ["db.statement", "db.query.text"])
+def test_sql_export_keeps_operation_and_timing_without_display_or_error_content(
+    sql_key,
+):
+    original = ReadableSpan(
+        "SELECT PRIVATE-SQL-NAME",
+        attributes={
+            sql_key: "SELECT 'PRIVATE-SQL-LITERAL'",
+            "db.query.summary": "PRIVATE-SQL-SUMMARY",
+            "db.query.parameter.value": "PRIVATE-SQL-PARAMETER",
+            "db.statement.parameters": "PRIVATE-SQL-PARAMETER",
+            "db.operation": "SELECT PRIVATE-SQL-NAME",
+            "logfire.msg": "SELECT 'PRIVATE-SQL-LITERAL'",
+            "logfire.msg_template": "SELECT 'PRIVATE-SQL-LITERAL'",
+            "db.system": "postgresql",
+        },
+        status=Status(StatusCode.ERROR, "invalid input: PRIVATE-SQL-PARAMETER"),
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert exported.name == "SELECT"
+    assert exported.attributes == {
+        "db.operation": "SELECT",
+        "db.system": "postgresql",
+        "logfire.msg": "SELECT",
+        "logfire.msg_template": "SELECT",
+    }
+    assert exported.status.status_code == StatusCode.ERROR
+    assert exported.status.description is None
+    assert (exported.start_time, exported.end_time) == (1, 2)
+    assert original.attributes[sql_key] == "SELECT 'PRIVATE-SQL-LITERAL'"

@@ -81,7 +81,7 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
     monkeypatch.setattr(db.logfire, "instrument_sqlalchemy", refuse)
     try:
         assert db._ensure_initialized() is not None
-        assert calls == [{"engine": db._engine}]
+        assert len(calls) == 1
     finally:
         asyncio.run(db._engine.dispose())
 
@@ -225,3 +225,113 @@ async def test_org_lock_takes_the_same_key_as_before(session_factory) -> None:
         await holder.rollback()
         assert await core_db.try_org_lock(other, org) is True
         await other.rollback()
+
+
+@pytest.mark.parametrize("semconv", ["", "database", "database/dup"])
+def test_queries_from_every_pool_export_private_spans(database_url, semconv):
+    """A dependency mismatch or a later pool must not silently lose query spans."""
+    import os
+    import subprocess
+    import sys
+
+    script = """
+import asyncio
+import logfire
+from hailhq.core import db, telemetry
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from opentelemetry.trace import StatusCode
+memory = InMemorySpanExporter()
+telemetry.OTLPSpanExporter = lambda **kwargs: memory
+telemetry.OTLPMetricExporter = lambda **kwargs: None
+telemetry.PeriodicExportingMetricReader = lambda *args, **kwargs: InMemoryMetricReader()
+assert telemetry.configure_telemetry("hail-api")
+
+async def run():
+    try:
+        for generation in range(2):
+            for name, scope in (("request", db.session_scope), ("independent", db.independent_session_scope), ("background", db.session_scope)):
+                async def query():
+                    with telemetry.operation(f"test.{generation}.{name}"):
+                        async with scope() as session:
+                            result = await session.execute(text("SELECT 'PRIVATE-SQL-LITERAL', :value"), {"value": "PRIVATE-SQL-PARAMETER"})
+                            assert result.one() == ("PRIVATE-SQL-LITERAL", "PRIVATE-SQL-PARAMETER")
+                            try:
+                                await session.execute(text("SELECT CAST(:value AS INTEGER)"), {"value": "PRIVATE-SQL-PARAMETER"})
+                            except DBAPIError:
+                                await session.rollback()
+                            else:
+                                raise AssertionError("invalid integer must fail")
+                if name == "background":
+                    await asyncio.create_task(query(), context=db.background_context())
+                else:
+                    await query()
+            await db.dispose_engine()
+    finally:
+        await db.dispose_engine()
+
+asyncio.run(run())
+telemetry.flush_telemetry()
+spans = memory.get_finished_spans()
+queries = [s for s in spans if s.instrumentation_scope.name == "opentelemetry.instrumentation.sqlalchemy" and s.name.startswith("SELECT")]
+assert len(queries) == 12, [(s.name, dict(s.attributes)) for s in spans]
+parents = {s.context.span_id for s in spans if s.name.startswith("test.")}
+assert {s.parent.span_id for s in queries} == parents
+assert all(s.end_time > s.start_time for s in queries)
+assert all(s.attributes.get("db.system", s.attributes.get("db.system.name")) == "postgresql" for s in queries)
+assert sum(s.status.status_code == StatusCode.ERROR for s in queries) == 6
+for span in spans:
+    exported = str((span.name, span.attributes, span.events, span.status.description))
+    assert "PRIVATE-SQL" not in exported, exported
+    assert "db.statement" not in span.attributes
+    assert "db.query.text" not in span.attributes
+    assert not any("parameter" in key for key in span.attributes)
+assert not any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "DATABASE_URL": database_url,
+            "OTEL_SEMCONV_STABILITY_OPT_IN": semconv,
+            "HAIL_LOGFIRE_ENABLED": "true",
+            "HAIL_LOGFIRE_SAMPLE_RATE": "1",
+            "LOGFIRE_TOKEN": "test-only-placeholder",
+            "LOGFIRE_BASE_URL": "https://logfire.example.test",
+        },
+        text=True,
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "changed_package",
+    [
+        "sqlalchemy",
+        "opentelemetry-instrumentation-sqlalchemy",
+        "logfire",
+        "logfire-sdk",
+    ],
+)
+@pytest.mark.filterwarnings("ignore:Instrumentation will have no effect")
+def test_unverified_dependencies_keep_normal_tracing_checks(
+    monkeypatch, changed_package
+):
+    from hailhq.core import db
+
+    original_version = db.version
+    monkeypatch.setattr(
+        db,
+        "version",
+        lambda package: (
+            "999" if package == changed_package else original_version(package)
+        ),
+    )
+    # The real locked instrumentor rejects SQLAlchemy 2.1 when checks run.
+    with pytest.raises(RuntimeError, match="could not instrument SQLAlchemy"):
+        db._instrument_sqlalchemy()

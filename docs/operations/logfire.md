@@ -121,9 +121,23 @@ the discovery spans (`ping`, `tools/list`, `prompts/list`, `resources/list`,
 `POST /` envelopes and `DELETE /` session closes (kept when the status is
 400 or more), and 404s on unknown paths (scanners) are not exported;
 `tools/call` is. Empty SMS claims
-are suppressed. SQL query spans are off: the SQLAlchemy instrumentation does
-not support SQLAlchemy 2.1 yet, and the API logs "SQLAlchemy tracing is off"
-at startup. They return once a release supports it. Sampling applies to
+are suppressed. SQL spans retain operation, timing, parent trace, and error status.
+SQL text and parameters stay private, including copies in display messages and errors.
+
+The lock has SQLAlchemy 2.1.6, Logfire/Logfire SDK 5.6.0, and SQLAlchemy
+instrumentation 0.66b1. A temporary compatibility bridge in
+[`db.py`](../../core/hailhq/core/db.py) enables only that exact combination.
+[Upstream support](https://github.com/open-telemetry/opentelemetry-python-contrib/commit/5e23f93d7cdd01498d6521aa1ebcc53d7e9c82c0)
+widened the range to SQLAlchemy <2.2 without changing the 2.x hooks.
+The latest released instrumentor, 0.66b2, still rejects 2.1 as of 2026-11-15.
+Other versions use normal dependency checks. Unsupported tracing logs
+"SQLAlchemy tracing is off" and leaves the database available.
+Remove the bridge when a released instrumentor supports 2.1. Run
+`cd core && uv run --frozen pytest tests/test_db.py tests/test_telemetry.py`.
+Those tests use real Postgres queries and an offline exporter. They cover all
+three pools, recreated pools, query errors, and old/new database conventions.
+
+Sampling applies to
 traces and logs within them; standalone logs are retained. At 1.0 nothing is
 sampled out. All HTTP export uses the EU endpoint, with five-second network
 and flush timeouts. Shutdown flushes pending telemetry. Existing LiveKit Cloud exporters are

@@ -12,6 +12,7 @@ import contextvars
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import version
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -19,11 +20,11 @@ import logfire
 from hailhq.core.config import settings
 from hailhq.core.telemetry import instrument, telemetry_enabled
 from sqlalchemy import text
+from sqlalchemy.ext import asyncio as sa_asyncio
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,15 +107,41 @@ def to_sync_url(url: str) -> str:
     return _rewrite_scheme(url, "postgresql+psycopg://")
 
 
+def _instrument_sqlalchemy() -> None:
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+    if SQLAlchemyInstrumentor().is_instrumented_by_opentelemetry:
+        return
+    # Temporary compatibility bridge for the exact, integration-tested lock.
+    # Upstream 5e23f93 widens support to <2.2 without changing the 2.x hooks:
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/commit/5e23f93d7cdd01498d6521aa1ebcc53d7e9c82c0
+    # Released 0.66b2 still rejects 2.1. Other versions keep ordinary checks.
+    verified = all(
+        version(package) == expected
+        for package, expected in (
+            ("sqlalchemy", "2.1.6"),
+            ("opentelemetry-instrumentation-sqlalchemy", "0.66b1"),
+            ("logfire", "5.6.0"),
+            ("logfire-sdk", "5.6.0"),
+        )
+    )
+    if verified:
+        logfire.instrument_sqlalchemy(skip_dep_check=True)
+    else:
+        logfire.instrument_sqlalchemy()
+
+
 def _create_session_pool(
     size: int, overflow: int
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(
+    if telemetry_enabled():
+        # Configure creation hooks once, before every lazily created pool.
+        # Engine-specific setup silently ignores later pools in OpenTelemetry.
+        # Unsupported tracing must never take the database down.
+        instrument("SQLAlchemy", _instrument_sqlalchemy)
+    engine = sa_asyncio.create_async_engine(
         to_async_url(settings.database_url), pool_size=size, max_overflow=overflow
     )
-    if telemetry_enabled():
-        # Unsupported tracing must never take the database down.
-        instrument("SQLAlchemy", logfire.instrument_sqlalchemy, engine=engine)
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 

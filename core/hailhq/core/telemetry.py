@@ -99,6 +99,36 @@ def _safe_text(value: str) -> str:
     )
 
 
+# Only fixed operation words can reach SQL span names and display messages.
+_SQL_OPERATIONS = frozenset(
+    [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "WITH",
+        "EXPLAIN",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "TRUNCATE",
+        "BEGIN",
+        "COMMIT",
+        "ROLLBACK",
+        "SET",
+        "SHOW",
+        "PRAGMA",
+        "CONNECT",
+    ]
+)
+
+
+def _sql_operation(value: Any) -> str:
+    words = value.split(maxsplit=1) if isinstance(value, str) else []
+    operation = words[0].upper() if words else ""
+    return operation if operation in _SQL_OPERATIONS else "SQL query"
+
+
 def _safe_attributes(
     attributes: Mapping[str, Any] | None, *, include_content: bool = True
 ) -> dict[str, Any]:
@@ -145,9 +175,13 @@ def _safe_attributes(
             if parts.port:
                 host = f"{host}:{parts.port}"
             value = urlunsplit((parts.scheme, host, parts.path, "", ""))
-        elif key in {"url.query", "http.target", "db.statement", "db.query.text"}:
+        elif key in {"url.query", "http.target", "db.statement"} or key.startswith(
+            ("db.query.", "db.statement.", "db.parameters")
+        ):
             # SQL can contain literals; preserve operation/timing, not query text.
             continue
+        if key in {"db.operation", "db.operation.name"}:
+            value = _sql_operation(value)
         if isinstance(value, str):
             value = _safe_text(value)
         elif isinstance(value, (tuple, list)):
@@ -166,12 +200,34 @@ def private_span(
     # MCP needs operational metadata, not a second copy of tool inputs,
     # results, message bodies or registration documents in diagnostics.
     include_content = resource.attributes.get("service.name") != _MCP_SERVICE
+    source_attributes = span.attributes or {}
+    sql = (
+        "db.statement" in source_attributes
+        or "db.query.text" in source_attributes
+        or (
+            span.instrumentation_scope is not None
+            and span.instrumentation_scope.name
+            == "opentelemetry.instrumentation.sqlalchemy"
+        )
+    )
+    attributes = _safe_attributes(span.attributes, include_content=include_content)
+    name = _safe_text(span.name)
+    if sql:
+        name = _sql_operation(
+            source_attributes.get(
+                "db.operation.name", source_attributes.get("db.operation", span.name)
+            )
+        )
+        # Logfire derives display text from SQL before our exporter runs.
+        for key in ("logfire.msg", "logfire.msg_template"):
+            if key in attributes:
+                attributes[key] = name
     return ReadableSpan(
-        name=_safe_text(span.name),
+        name=name,
         context=span.context,
         parent=span.parent,
         resource=resource,
-        attributes=_safe_attributes(span.attributes, include_content=include_content),
+        attributes=attributes,
         events=[
             Event(
                 _safe_text(e.name),
@@ -194,7 +250,7 @@ def private_span(
             # An exception message can echo tool arguments, so MCP keeps the code only.
             (
                 _safe_text(span.status.description)
-                if include_content and span.status.description
+                if include_content and not sql and span.status.description
                 else None
             ),
         ),
