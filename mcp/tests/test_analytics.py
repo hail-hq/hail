@@ -63,6 +63,10 @@ async def _session(
         "hailhq.core.config.settings.hail_api_key", "" if oauth else "hl_live_test"
     )
     monkeypatch.setattr("hailhq.core.config.settings.mcp_posthog_project_token", token)
+    # A capture that escapes the patch below goes nowhere.
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.mcp_posthog_host", "http://127.0.0.1:9"
+    )
     monkeypatch.setattr(
         "hailhq.core.config.settings.logfire_service_version", "abc1234"
     )

@@ -184,14 +184,16 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with mcp_app.session_manager.run():
-            try:
+        try:
+            async with mcp_app.session_manager.run():
                 yield
-            finally:
-                await asyncio.gather(
-                    asyncio.to_thread(flush_telemetry),
-                    analytics.flush() if analytics else asyncio.sleep(0),
-                )
+        finally:
+            # After the session manager stops, so tool calls that end while
+            # sessions close are flushed too.
+            flushes = [asyncio.to_thread(flush_telemetry)]
+            if analytics:
+                flushes.append(analytics.flush())
+            await asyncio.gather(*flushes)
 
     # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*

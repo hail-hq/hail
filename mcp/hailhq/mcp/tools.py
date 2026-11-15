@@ -1709,10 +1709,17 @@ _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
+def _actor_cache_key(bearer: str) -> str:
+    # Key by token hash so the raw bearer is never held as a dict key.
+    return hashlib.sha256(bearer.encode()).hexdigest()
+
+
 def cached_organization_id(bearer: str) -> str | None:
     """The org ``_actor_for`` already resolved for ``bearer``. Never calls the API."""
-    hit = _actor_cache.get(hashlib.sha256(bearer.encode()).hexdigest())
-    org_id = hit[1].get("organization_id") if hit else None
+    hit = _actor_cache.get(_actor_cache_key(bearer))
+    if not hit or hit[0] <= time.monotonic():
+        return None
+    org_id = hit[1].get("organization_id")
     return str(org_id) if org_id else None
 
 
@@ -1720,8 +1727,7 @@ def cached_organization_id(bearer: str) -> str | None:
 async def _actor_for(client: HailClient, cache_key: str | None = None):
     identity: dict[str, Any] = {}
     if telemetry_enabled():
-        # Key by token hash so the raw bearer is never held as a dict key.
-        key = hashlib.sha256(cache_key.encode()).hexdigest() if cache_key else None
+        key = _actor_cache_key(cache_key) if cache_key else None
         hit = _actor_cache.get(key) if key else None
         if hit and hit[0] > time.monotonic():
             identity = dict(hit[1])

@@ -197,9 +197,9 @@ The MCP service does not validate JWT signatures. `hail/api` is the single sourc
 
 Optional. Set `MCP_POSTHOG_PROJECT_TOKEN` to a PostHog project token, then restart the `mcp` service. The HTTP MCP server sends one `$mcp_tool_call` event per tool call, plus `$mcp_initialize` and `$mcp_tools_list` ([`mcp/hailhq/mcp/analytics.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/analytics.py)).
 
-- Sent: tool name, duration, success or error type, MCP client name and version, protocol version, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`).
-- Never sent: argument values, tool results, error messages. `_KEPT_PROPERTIES` is the allowlist.
-- In oauth-rs mode, the caller's organization id is the `distinct_id` and the `organization` group. It comes from the actor cache that tools fill when Logfire telemetry is on (`HAIL_LOGFIRE_ENABLED=true`), so it adds no API call. With telemetry off, events use the MCP session id.
+- Sent: tool name, argument names (not values), duration, success or error type and status, MCP client name, version and User-Agent, protocol version, the tool name list on `tools/list`, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`). `_KEPT_PROPERTIES` is the full allowlist.
+- Never sent: argument values, tool results, error messages.
+- In oauth-rs mode, the caller's organization id is the `distinct_id` and the `organization` group. It comes from the actor cache that tools fill when Logfire telemetry is on (`HAIL_LOGFIRE_ENABLED=true`), so it adds no API call. Without it (telemetry off, static-key mode, or a caller's first `initialize` and `tools/list` before any tool call), events use the session id. Clients on protocol 2026-07-28 send no session id, so their sessionless events share one session id per process.
 - Tool schemas and results are unchanged. The stdio entry point sends nothing.
 - `MCP_POSTHOG_HOST` sets the ingestion host. The default is `https://eu.i.posthog.com`; use `https://us.i.posthog.com` for a US project.
 - Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.
