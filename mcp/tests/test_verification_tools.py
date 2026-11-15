@@ -1436,21 +1436,28 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
 
 
 @respx.mock
-@pytest.mark.parametrize("methods", ["", "WEBSITE"])
-async def test_preview_sms_application_accepts_every_text_the_api_writes(
-    client: HailClient, methods: str
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"consent_methods": "WEBSITE", "website_url": "https://example.com/join"},
+        {"consent_methods": "KEYWORD", "keyword_keyword": "JOIN"},
+    ],
+)
+async def test_preview_sms_application_accepts_version_2_text(
+    client: HailClient, extra: dict[str, str]
 ) -> None:
     # A form that lists its consent methods compiles to text version 2.
     fields = {
         "text_types": "ACCOUNT_NOTIFICATION",
         "campaign_description": "Account notices for signed-up customers.",
         "opt_in_description": "They tick an unchecked box at sign-up.",
-        "consent_methods": methods,
         "sample_1": "Acme: Your balance is low. Reply STOP to opt out.",
         "privacy_policy_url": "https://example.com/privacy",
         "terms_url": "https://example.com/sms",
+        **extra,
     }
     preview = asdict(campaign_text(fields, "business"))
+    assert preview["schema_version"] == 2
     respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
         return_value=httpx.Response(200, json=preview)
     )
@@ -1720,6 +1727,7 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         ),
         httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 3}),
         httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": True}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2.0}),
         httpx.Response(404, json={"detail": "Not Found"}),
     ],
 )
