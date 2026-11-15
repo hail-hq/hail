@@ -145,6 +145,23 @@ class TelnyxNumberDiscovery:
                 and errors
                 and all(_no_stock(error) for error in errors)
             ):
+                # Keep the transport's HTTP status, but explain this handled
+                # empty result in the same trace. Never retain the carrier's
+                # raw text or the requested phone number/place filters.
+                codes = sorted({str(error["code"]) for error in errors})
+                logger.info(
+                    "Number search returned an expected empty result",
+                    extra={
+                        "number_search_outcome": (
+                            "no_coverage" if "10015" in codes else "no_inventory"
+                        ),
+                        "number_search_country": country_code,
+                        "number_search_type": number_type,
+                        "number_search_capabilities": sorted(requested),
+                        "carrier": "telnyx",
+                        "carrier_error_codes": codes,
+                    },
+                )
                 return []
             raise
         quotes = []
