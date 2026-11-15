@@ -64,6 +64,13 @@ this as required rather than optional.
 
 Based on this assessment, we consider the residual risk of the outbound
 voice-calling activity acceptable to proceed at Hail's current scale.
+Call recording is on by default, so this assessment no longer relies on
+recording being off. For call audio, it relies on these measures: private
+storage, authenticated playback, a 30-day default recording period, and
+controls to turn recording off for a workspace, an agent, or a call.
+Hail does not give callers a recording notice. Developers must give the
+recording notices and get the recording consent that their callers' laws
+require, as the Terms and the DPA state.
 This is reviewed and re-assessed before general availability, before any
 new communication channel launches, whenever a new sub-processor is
 added, on any material change to the voice pipeline, and periodically as
