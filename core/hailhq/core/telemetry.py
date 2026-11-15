@@ -223,11 +223,14 @@ def _is_noise(span: ReadableSpan, *, mcp: bool) -> bool:
         "http.response.status_code", attributes.get("http.status_code")
     )
     if route == "/":
-        # GET / is the open SSE stream. A POST / is one JSON-RPC message (the
-        # tool call runs in its own trace) and DELETE / closes a session, so
-        # only their failures are kept.
+        # GET / is the open SSE stream. A POST / is one JSON-RPC message and
+        # DELETE / closes a session, so only their failures are kept. A POST
+        # that ran a tool is its trace's root (mcp 2 runs the tool in the
+        # request's context), so it stays.
         if span.name == "GET /":
             return True
+        if span.name == "POST /" and "mcp.tool.name" in attributes:
+            return False
         if span.name in {"POST /", "DELETE /"}:
             return isinstance(status, int) and status < 400
     # A 404 with no matched route: a scanner probing paths like /.env.

@@ -109,7 +109,7 @@ from hailhq.core.file_uploads import (
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
-from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
+from hailhq.core.telemetry_identity import identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import (
     HailAPIError,
@@ -1685,8 +1685,10 @@ async def _client_for(
 class TaggedMCPServer(MCPServer):
     """MCPServer that tags each tool call's trace with the tool name.
 
-    The tool call runs under the SDK's "tools/call <tool>" span, which is
-    current here, so that span gets the tags.
+    mcp 2 runs the tool call in the POST request's context, under the SDK's
+    "tools/call <tool>" span. IdentityMiddleware already bound that POST span
+    as the trace root, so both spans get the tags (stdio has no root: only
+    the current span is tagged).
 
     ``subscriptions/listen`` stays off: the tool list never changes while the
     server runs, so 2026-07-28 clients see ``listChanged: false``, the same
@@ -1698,7 +1700,6 @@ class TaggedMCPServer(MCPServer):
         super().__init__(*args, **kwargs)
 
     async def call_tool(self, name, arguments, context=None):
-        bind_root()
         tag_context(channel="mcp", tool=name)
         return await super().call_tool(name, arguments, context)
 

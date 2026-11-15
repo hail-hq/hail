@@ -60,6 +60,17 @@ def website_url() -> str | None:
     return join_url(settings.hail_base_url, "mcp")
 
 
+def server_metadata() -> dict[str, str | None]:
+    """The MCPServer keyword arguments both entry points send."""
+    return {
+        "title": TITLE,
+        "description": DESCRIPTION,
+        "version": server_version(),
+        "instructions": INSTRUCTIONS,
+        "website_url": website_url(),
+    }
+
+
 def server_version() -> str:
     """This service's package version. The SDK sends an empty one otherwise."""
     try:

@@ -7,13 +7,7 @@ import asyncio
 from hailhq.core.telemetry import configure_telemetry, flush_telemetry
 from hailhq.mcp.auth import AuthMode, select_auth_mode
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.metadata import (
-    DESCRIPTION,
-    INSTRUCTIONS,
-    TITLE,
-    server_version,
-    website_url,
-)
+from hailhq.mcp.metadata import server_metadata
 from hailhq.mcp.tools import TaggedMCPServer, register_tools
 
 
@@ -26,14 +20,7 @@ async def serve() -> None:
 
     try:
         async with HailClient() as client:
-            server = TaggedMCPServer(
-                name="hail",
-                title=TITLE,
-                description=DESCRIPTION,
-                instructions=INSTRUCTIONS,
-                website_url=website_url(),
-                version=server_version(),
-            )
+            server = TaggedMCPServer(name="hail", **server_metadata())
             register_tools(server, mode=mode, singleton=client)
             await server.run_stdio_async()
     finally:

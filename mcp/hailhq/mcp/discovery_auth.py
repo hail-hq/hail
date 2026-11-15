@@ -83,12 +83,11 @@ _MAX_PEEK_BYTES = 64 * 1024
 # small JSON-RPC envelope arriving in one or two chunks.
 _MAX_PEEK_SECONDS = 5.0
 
-# Anonymous "initialize" rate cap. MCPServer's session manager (this SDK
-# version) has no idle timeout — session_idle_timeout defaults to None and
-# is never passed — so sessions are reaped only on explicit DELETE, crash,
-# or restart. A real "initialize" call through this safelist creates a
-# real, permanent, stateful session. Without a cap, an unauthenticated
-# caller can loop "initialize" and accumulate unbounded sessions/tasks — a
+# Anonymous "initialize" rate cap. MCPServer's session manager (mcp 2)
+# reaps a session only after 30 idle minutes (server.py turns its session
+# count limit off). A real "initialize" call through this safelist creates
+# a real, stateful session. Without a cap, an unauthenticated caller can
+# loop "initialize" and pile up sessions faster than they expire — a
 # resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that
 # bounds per-request memory, not session count). Not applied to "tools/list" or
 # "notifications/initialized": they are only safelisted when they carry an

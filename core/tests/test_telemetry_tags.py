@@ -220,6 +220,11 @@ def test_mcp_tool_calls_and_other_services_are_exported():
                 "tools/call place_call",
                 **{"mcp.method.name": "tools/call", "hail.channel": "mcp"},
             ),
+            # The POST that ran a tool is the trace root and stays.
+            _span(
+                "POST /",
+                **{"http.route": "/", "http.status_code": 200, "mcp.tool.name": "x"},
+            ),
             # A failed POST stays: it is where a 401 shows.
             _span("POST /", **{"http.route": "/", "http.status_code": 401}),
             _span("DELETE /", **{"http.route": "/", "http.status_code": 404}),
@@ -229,6 +234,7 @@ def test_mcp_tool_calls_and_other_services_are_exported():
     assert [s.name for s in kept] == [
         "MCP server handle request: tools/call",
         "tools/call place_call",
+        "POST /",
         "POST /",
         "DELETE /",
     ]

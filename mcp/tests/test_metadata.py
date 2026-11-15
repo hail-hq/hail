@@ -47,3 +47,11 @@ def test_server_version_is_the_service_package_version() -> None:
     from importlib.metadata import version
 
     assert metadata.server_version() == version("hailhq-mcp")
+
+
+def test_server_version_matches_registry_entry() -> None:
+    import json
+    from pathlib import Path
+
+    server_json = Path(__file__).resolve().parents[1] / "server.json"
+    assert metadata.server_version() == json.loads(server_json.read_text())["version"]

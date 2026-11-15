@@ -46,13 +46,7 @@ from hailhq.core.urls import join_url
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.metadata import (
-    DESCRIPTION,
-    INSTRUCTIONS,
-    TITLE,
-    server_version,
-    website_url,
-)
+from hailhq.mcp.metadata import server_metadata
 from hailhq.mcp.tools import TaggedMCPServer, register_tools
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
@@ -104,11 +98,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
         else None
     )
     metadata = {
-        "title": TITLE,
-        "description": DESCRIPTION,
-        "version": server_version(),
-        "instructions": INSTRUCTIONS,
-        "website_url": website_url(),
+        **server_metadata(),
         "icons": icons,
     }
 
@@ -144,7 +134,12 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
     # turn on its localhost-only Host check (see tests/test_server.py).
-    http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
+    # No session count limit, as with mcp 1.x: a caller with any bearer can
+    # open sessions, so a fixed limit would let one caller lock everyone out
+    # with 503. Idle sessions still close after the SDK's 30-minute timeout.
+    http_app = mcp_app.streamable_http_app(
+        streamable_http_path="/", host="0.0.0.0", max_sessions=None
+    )
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -209,7 +204,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     #
     # DiscoveryAuthMiddleware goes first in the list (= outermost = runs
     # first on the way in), ahead of MCPServer's own auth middleware, so it
-    # can inject a synthetic bearer for the two capability-discovery
+    # can inject a synthetic bearer for the capability-discovery
     # methods before AuthenticationMiddleware reads the headers.
     app = Starlette(
         routes=[

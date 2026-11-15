@@ -1,6 +1,6 @@
 [project]
 name = "hailhq-mcp"
-version = "0.1.0"
+version = "0.1.2"
 description = "Hail MCP service with Streamable HTTP and a stdio entry point, deployed, not published."
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
