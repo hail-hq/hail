@@ -3,7 +3,9 @@
 Off unless ``MCP_POSTHOG_PROJECT_TOKEN`` is set. Events carry tool names,
 timings, outcomes and client names only. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
-every property not on ``_KEPT_PROPERTIES``. Tool schemas and tool results stay
+every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's org id
+becomes ``distinct_id`` and the ``organization`` group, read from the actor
+cache tools already fill (no extra API call). Tool schemas and tool results stay
 unchanged, because the SDK options that inject arguments are turned off.
 Any setup or capture failure logs a warning and the server keeps serving.
 """
@@ -23,6 +25,7 @@ _KEPT_PROPERTIES = frozenset(
     {
         "$session_id",
         "$process_person_profile",
+        "$groups",
         "$mcp_interface",
         "$mcp_source",
         "$mcp_server_name",
@@ -46,9 +49,29 @@ _KEPT_PROPERTIES = frozenset(
 )
 
 
+_ORG_PROPERTY = "hail_organization_id"
+
+
+def _organization(_request: Any, extra: Any) -> dict[str, str] | None:
+    from hailhq.mcp.tools import cached_organization_id
+    from posthog.mcp import get_request_headers
+
+    scheme, _, bearer = (
+        (get_request_headers(extra) or {}).get("authorization") or ""
+    ).partition(" ")
+    if scheme.lower() != "bearer" or not bearer.strip():
+        return None
+    org_id = cached_organization_id(bearer.strip())
+    return {_ORG_PROPERTY: org_id} if org_id else None
+
+
 def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
     properties = event.get("properties") or {}
+    org_id = properties.get(_ORG_PROPERTY)
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
+    if org_id:
+        event["distinct_id"] = org_id
+        event["properties"]["$groups"] = {"organization": org_id}
     return event
 
 
@@ -87,6 +110,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
             capture_model=False,
             enable_exception_autocapture=False,
             before_send=_keep_metadata,
+            event_properties=_organization,
             server_build=settings.logfire_service_version or None,
         )
         return Analytics(client, instrument(server, client, options))

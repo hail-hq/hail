@@ -1709,6 +1709,13 @@ _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
+def cached_organization_id(bearer: str) -> str | None:
+    """The org ``_actor_for`` already resolved for ``bearer``. Never calls the API."""
+    hit = _actor_cache.get(hashlib.sha256(bearer.encode()).hexdigest())
+    org_id = hit[1].get("organization_id") if hit else None
+    return str(org_id) if org_id else None
+
+
 @contextlib.asynccontextmanager
 async def _actor_for(client: HailClient, cache_key: str | None = None):
     identity: dict[str, Any] = {}

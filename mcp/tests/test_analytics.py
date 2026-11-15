@@ -7,8 +7,10 @@ the captured ``$mcp_tool_call`` carries metadata only.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
+import time
 
 import httpx
 import pytest
@@ -19,6 +21,7 @@ _LEGACY = "2025-06-18"
 _MODERN = "2026-07-28"
 _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
+_ORG = "00000000-0000-0000-0000-0000000000aa"
 
 
 def _body(resp: httpx.Response) -> dict:
@@ -78,6 +81,10 @@ async def _session(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
     auth = _AUTH if oauth else {}
+    # What _actor_for caches for this bearer when Logfire telemetry is on.
+    key = hashlib.sha256(b"user.jwt.token").hexdigest()
+    cache = {key: (time.monotonic() + 300, {"organization_id": _ORG})}
+    monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
     call = {"name": "list_number_regions", "arguments": {}}
 
     import hailhq.mcp.server as srv
@@ -151,6 +158,11 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     assert props["$mcp_is_error"] is is_error
     assert props["$mcp_server_build"] == "abc1234"
     assert set(props) <= analytics._KEPT_PROPERTIES
+    if oauth:
+        assert calls[0]["distinct_id"] == _ORG
+        assert props["$groups"] == {"organization": _ORG}
+    else:
+        assert "$groups" not in props
     assert _SECRET not in json.dumps([e for _, e in events], default=str)
 
 

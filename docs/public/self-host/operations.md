@@ -199,6 +199,7 @@ Optional. Set `MCP_POSTHOG_PROJECT_TOKEN` to a PostHog project token, then resta
 
 - Sent: tool name, duration, success or error type, MCP client name and version, protocol version, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`).
 - Never sent: argument values, tool results, error messages. `_KEPT_PROPERTIES` is the allowlist.
+- In oauth-rs mode, the caller's organization id is the `distinct_id` and the `organization` group. It comes from the actor cache that tools fill when Logfire telemetry is on (`HAIL_LOGFIRE_ENABLED=true`), so it adds no API call. With telemetry off, events use the MCP session id.
 - Tool schemas and results are unchanged. The stdio entry point sends nothing.
 - `MCP_POSTHOG_HOST` sets the ingestion host. The default is `https://eu.i.posthog.com`; use `https://us.i.posthog.com` for a US project.
 - Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.
