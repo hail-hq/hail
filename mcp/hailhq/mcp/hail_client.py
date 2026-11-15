@@ -114,6 +114,9 @@ class PreviewShapeError(Exception):
 # The preview's reply shape, built once.
 _CAMPAIGN_TEXT = TypeAdapter(CampaignText)
 _CAMPAIGN_KEYS = frozenset(f.name for f in dataclass_fields(CampaignText))
+# The text versions campaign_text writes: 2 for a form that lists its consent
+# methods (every form the console and this MCP send), 1 for an older form.
+_CAMPAIGN_VERSIONS = frozenset({1, 2})
 
 
 class HailClient:
@@ -661,8 +664,8 @@ class HailClient:
         resp = await self._client.post("/verifications/sms/preview", json=body)
         if not resp.is_success:
             _decode(resp, problems=True)  # raises the API error
-        # The reply must be exactly this MCP's CampaignText, version 1: every
-        # key, no other key, each of the right type. Anything else means the
+        # The reply must be exactly this MCP's CampaignText, in a version it
+        # knows: every key, no other key, each of the right type. Anything else means the
         # API and MCP differ, and the agent must not show partial text.
         try:
             data = resp.json()
@@ -671,7 +674,7 @@ class HailClient:
         if (
             not isinstance(data, dict)
             or set(data) != _CAMPAIGN_KEYS
-            or data.get("schema_version") != 1
+            or data.get("schema_version") not in _CAMPAIGN_VERSIONS
         ):
             raise PreviewShapeError
         try:

@@ -10,11 +10,13 @@ from __future__ import annotations
 import base64
 import json
 import re
+from dataclasses import asdict
 from uuid import uuid4
 
 import httpx
 import pytest
 import respx
+from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
 
@@ -1434,6 +1436,31 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
 
 
 @respx.mock
+@pytest.mark.parametrize("methods", ["", "WEBSITE"])
+async def test_preview_sms_application_accepts_every_text_the_api_writes(
+    client: HailClient, methods: str
+) -> None:
+    # A form that lists its consent methods compiles to text version 2.
+    fields = {
+        "text_types": "ACCOUNT_NOTIFICATION",
+        "campaign_description": "Account notices for signed-up customers.",
+        "opt_in_description": "They tick an unchecked box at sign-up.",
+        "consent_methods": methods,
+        "sample_1": "Acme: Your balance is low. Reply STOP to opt out.",
+        "privacy_policy_url": "https://example.com/privacy",
+        "terms_url": "https://example.com/sms",
+    }
+    preview = asdict(campaign_text(fields, "business"))
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(200, json=preview)
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="business", fields=fields
+    )
+    assert result == preview
+
+
+@respx.mock
 @pytest.mark.parametrize(
     "over",
     [
@@ -1691,7 +1718,8 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         httpx.Response(
             200, json={k: v for k, v in _CAMPAIGN_TEXT.items() if k != "opt_in_message"}
         ),
-        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 3}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": True}),
         httpx.Response(404, json={"detail": "Not Found"}),
     ],
 )
