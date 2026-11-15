@@ -504,6 +504,14 @@ async def test_glama_file_claim_is_not_served(monkeypatch, oauth, method):
     assert resp.status_code == 404
 
 
+def test_open_sessions_are_capped(monkeypatch):
+    """A caller with any bearer can open sessions, so the count stays capped."""
+    from mcp.server.streamable_http_manager import DEFAULT_MAX_SESSIONS
+
+    srv = _boot(monkeypatch, oauth=True)
+    assert srv.mcp_app.session_manager.max_sessions == DEFAULT_MAX_SESSIONS == 10_000
+
+
 @pytest.mark.asyncio
 async def test_healthz_works_in_both_modes(monkeypatch):
     for oauth in (True, False):

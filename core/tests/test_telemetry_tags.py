@@ -188,6 +188,11 @@ def test_inbound_masks_the_sender_and_keeps_the_hail_number():
             "resources/templates/list",
             {"mcp.method.name": "resources/templates/list"},
         ),
+        (
+            "notifications/initialized",
+            {"mcp.method.name": "notifications/initialized"},
+        ),
+        ("server/discover", {"mcp.method.name": "server/discover"}),
         ("GET /", {"http.route": "/"}),
         (
             "GET /.well-known/oauth-protected-resource",

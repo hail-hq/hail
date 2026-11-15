@@ -84,6 +84,8 @@ _MCP_NOISE_METHODS = frozenset(
         "prompts/list",
         "resources/list",
         "resources/templates/list",
+        "notifications/initialized",
+        "server/discover",
     }
 )
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")

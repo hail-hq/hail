@@ -132,13 +132,11 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
     # turn on its localhost-only Host check (see tests/test_server.py).
-    # No session count limit (mcp 1.30 capped it at 10 000 by default): a
-    # caller with any bearer can open sessions, so a fixed limit would let one
-    # caller lock everyone out with 503. Idle sessions still close after the
+    # The SDK default caps open sessions at 10 000 (as mcp 1.30 did). A caller
+    # with any bearer can open sessions, so the cap keeps a flood from using
+    # all memory; past it, new sessions get 503. Idle sessions close after the
     # SDK's 30-minute timeout.
-    http_app = mcp_app.streamable_http_app(
-        streamable_http_path="/", host="0.0.0.0", max_sessions=None
-    )
+    http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})

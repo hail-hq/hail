@@ -1219,6 +1219,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "httpx" },
+    { name = "httpx2" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1232,6 +1233,7 @@ requires-dist = [
     { name = "hailhq-core", editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'" },
+    { name = "httpx2", marker = "extra == 'dev'" },
     { name = "logfire", extras = ["starlette"], specifier = ">=5.6.0" },
     { name = "mcp", specifier = ">=2.3" },
     { name = "mypy", marker = "extra == 'dev'" },
