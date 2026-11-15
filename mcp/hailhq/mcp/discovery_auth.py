@@ -84,8 +84,8 @@ _MAX_PEEK_BYTES = 64 * 1024
 _MAX_PEEK_SECONDS = 5.0
 
 # Anonymous "initialize" rate cap. MCPServer's session manager (mcp 2)
-# reaps a session only after 30 idle minutes (server.py turns its session
-# count limit off). A real "initialize" call through this safelist creates
+# reaps a session only after 30 idle minutes, and an open GET stream holds
+# it open past that (server.py turns its session count limit off). A real "initialize" call through this safelist creates
 # a real, stateful session. Without a cap, an unauthenticated caller can
 # loop "initialize" and pile up sessions faster than they expire — a
 # resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that

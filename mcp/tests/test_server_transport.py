@@ -382,9 +382,9 @@ async def test_oauth_rs_oversized_body_not_buffered_unbounded(monkeypatch):
 @pytest.mark.asyncio
 async def test_oauth_rs_anon_initialize_capped_per_ip(monkeypatch):
     """Fix: an unauthenticated caller looping "initialize" must not
-    accumulate unbounded MCP sessions (this SDK version's session manager
-    has no idle timeout, so each successful anonymous initialize is a
-    permanent session). Once the per-IP cap
+    accumulate unbounded MCP sessions (server.py turns the SDK's session
+    count limit off, and each successful anonymous initialize holds a
+    session for at least 30 idle minutes). Once the per-IP cap
     (discovery_auth._ANON_INIT_MAX_PER_WINDOW) is exceeded, further
     anonymous initialize calls fall through to MCPServer's real auth
     middleware unmodified (no synthetic bearer injected) — same
