@@ -1,11 +1,10 @@
-"""Limits on the server metadata sent in ``initialize``."""
+"""Limits on the server metadata sent in ``initialize`` and ``tools/list``."""
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-from hailhq.mcp import metadata, tools
+from hailhq.mcp import metadata
 
 # Claude Code cuts each tool description and the instructions at 2 KB.
 CLIENT_LIMIT_BYTES = 2048
@@ -15,12 +14,21 @@ def test_instructions_fit_client_limit() -> None:
     assert len(metadata.INSTRUCTIONS.encode()) <= CLIENT_LIMIT_BYTES
 
 
-def test_instructions_name_only_real_tools() -> None:
-    source = Path(tools.__file__).read_text()
-    registered = set(re.findall(r'name="([a-z_]+)"', source))
+async def test_instructions_name_only_real_tools(tools_by_name) -> None:
     named = set(re.findall(r"\b([a-z]+_[a-z_]+)\b", metadata.INSTRUCTIONS))
     params = {"recipient_consent", "consent_source", "idempotency_key", "next_cursor"}
-    assert named - params <= registered
+    assert named - params <= set(tools_by_name)
+
+
+async def test_tool_descriptions_fit_client_limit(tools_by_name) -> None:
+    for name, tool in tools_by_name.items():
+        assert len((tool.description or "").encode()) <= CLIENT_LIMIT_BYTES, name
+
+
+async def test_every_tool_input_has_a_description(tools_by_name) -> None:
+    for name, tool in tools_by_name.items():
+        for param, schema in tool.input_schema.get("properties", {}).items():
+            assert schema.get("description"), f"{name}.{param}"
 
 
 def test_website_url_follows_site_setting(monkeypatch) -> None:

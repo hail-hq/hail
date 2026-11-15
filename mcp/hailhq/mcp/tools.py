@@ -1782,7 +1782,7 @@ _MESSAGE_TYPE = _d(
     "``informational`` for transactional or service messages, or ``marketing``."
 )
 _PHONE_TO = _d("Recipient phone number in E.164 format, such as ``+14155551234``.")
-_STATUS_TO = _d("Only items sent to this E.164 phone number.")
+_FILTER_TO = _d("Only items sent to this E.164 phone number.")
 _CALL_ID = _d("Call ID, from ``place_call`` or ``list_calls``.")
 _SMS_ID = _d("Text message ID, from ``send_sms`` or ``list_sms``.")
 _EMAIL_ID = _d("Email ID, from ``send_email`` or ``list_emails``.")
@@ -2249,7 +2249,7 @@ def register_tools(
                 "completed, failed, busy, no_answer or canceled."
             ),
         ] = None,
-        to: Annotated[str | None, _STATUS_TO] = None,
+        to: Annotated[str | None, _FILTER_TO] = None,
     ) -> dict[str, Any]:
         """List recent workspace calls, newest first.
 
@@ -2371,7 +2371,7 @@ def register_tools(
                 "undelivered or received."
             ),
         ] = None,
-        to: Annotated[str | None, _STATUS_TO] = None,
+        to: Annotated[str | None, _FILTER_TO] = None,
     ) -> dict[str, Any]:
         """List recent workspace text messages.
 
@@ -2868,7 +2868,8 @@ def register_tools(
         Returns ``offers``, ``recommended_quote_id`` and ``expires_at``.
         Each offer includes ``e164``, ``number_type``, ``capabilities``, ``quote_id``,
         ``monthly_cents``, ``setup_cents``, ``readiness``, ``requirements``,
-        ``subject_types`` and ``verifications``. Prices are USD cents.
+        ``subject_types``, ``verifications``, ``locality`` and ``region``.
+        Prices are USD cents. ``locality`` and ``region`` tell apart cities with the same name.
         Quotes expire after ten minutes. Expired quotes cannot authorize a purchase.
         ``recommended_quote_id`` identifies a ready offer or is null when none is ready.
 
