@@ -44,6 +44,7 @@ import asyncio
 import json
 import time
 
+from opentelemetry import trace
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
@@ -52,6 +53,26 @@ from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
 
 _DISCOVERY_METHODS = frozenset(
     {"initialize", "server/discover", "tools/list", "notifications/initialized"}
+)
+
+# Only protocol names reach telemetry. An arbitrary method string can contain
+# credentials or customer text, so unknown values get a fixed category.
+_OBSERVABLE_METHODS = _DISCOVERY_METHODS | frozenset(
+    {
+        "tools/call",
+        "ping",
+        "resources/list",
+        "resources/read",
+        "resources/subscribe",
+        "resources/unsubscribe",
+        "resources/templates/list",
+        "prompts/list",
+        "prompts/get",
+        "logging/setLevel",
+        "completion/complete",
+        "notifications/cancelled",
+        "notifications/progress",
+    }
 )
 
 # Safelisted methods that must not open a session. On an older protocol the
@@ -171,22 +192,63 @@ class DiscoveryAuthMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
+    async def _forward(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        *,
+        has_auth: bool,
+        method: str = "uninspected",
+        rejection_reason: str = "missing_authorization",
+        discovery: bool = False,
+    ) -> None:
+        span = trace.get_current_span()
+        if span.is_recording():
+            span.set_attributes(
+                {
+                    "mcp.auth.header_present": has_auth,
+                    "mcp.auth.discovery": discovery,
+                    "mcp.request.method": method,
+                }
+            )
+
+        async def observe_send(message):
+            if (
+                message["type"] == "http.response.start"
+                and message["status"] == 401
+                and span.is_recording()
+            ):
+                span.set_attribute("mcp.auth.rejection_reason", rejection_reason)
+            await send(message)
+
+        await self.app(scope, receive, observe_send)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] != "POST":
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         has_auth = any(
             k.lower() == b"authorization" for k, _ in scope.get("headers", [])
         )
-        if has_auth:
-            await self.app(scope, receive, send)
+        if scope["method"] != "POST" or has_auth:
+            await self._forward(
+                scope,
+                receive,
+                send,
+                has_auth=has_auth,
+                rejection_reason=(
+                    "credentials_rejected" if has_auth else "missing_authorization"
+                ),
+            )
             return
 
         body = bytearray()
         more_body = True
         messages = []
         oversized = False
+        peek_failure = None
         deadline = time.monotonic() + _MAX_PEEK_SECONDS
         while more_body:
             remaining = deadline - time.monotonic()
@@ -195,11 +257,13 @@ class DiscoveryAuthMiddleware:
                 # this client's body and let the real auth middleware 401
                 # the request unmodified.
                 oversized = True
+                peek_failure = "body_timeout"
                 break
             try:
                 message = await asyncio.wait_for(receive(), timeout=remaining)
             except asyncio.TimeoutError:
                 oversized = True
+                peek_failure = "body_timeout"
                 break
             messages.append(message)
             body += message.get("body", b"")
@@ -212,6 +276,7 @@ class DiscoveryAuthMiddleware:
                 # still hands it to the downstream app in order, so the
                 # ASGI message stream stays coherent.
                 oversized = True
+                peek_failure = "body_too_large"
                 break
 
         async def replay_receive() -> dict:
@@ -246,22 +311,48 @@ class DiscoveryAuthMiddleware:
             # the frozenset membership test below.
             method = raw_method if isinstance(raw_method, str) else None
 
+        observed_method = "uninspected"
+        if not oversized:
+            if not method:
+                observed_method = "unknown"
+            elif method in _OBSERVABLE_METHODS:
+                observed_method = method
+            else:
+                observed_method = "other"
+        rejection_reason = peek_failure or (
+            "protected_method" if method else "invalid_request"
+        )
+
         if (
             method in _SESSION_REQUIRED_METHODS
             and _header(scope, MCP_SESSION_ID_HEADER) is None
             and not _opens_no_session(scope)
         ):
+            rejection_reason = "missing_session"
             method = None
         cap_exceeded = method == "initialize" and _anon_init_cap_exceeded(
             _remote_ip(scope)
         )
+        discovery = False
+        if cap_exceeded:
+            rejection_reason = "discovery_rate_limited"
         if method in _DISCOVERY_METHODS and not cap_exceeded:
             new_headers = list(scope.get("headers", []))
             new_headers.append((b"authorization", b"Bearer anonymous-discovery"))
             scope = {**scope, "headers": new_headers}
+            discovery = True
+            rejection_reason = "discovery_rejected"
         # cap_exceeded (or method not in the safelist): no header injected,
         # falls through to MCPServer's real auth middleware unmodified — same
         # established pattern as the oversized-body case above (no bespoke
         # response shape invented here).
 
-        await self.app(scope, replay_receive, send)
+        await self._forward(
+            scope,
+            replay_receive,
+            send,
+            has_auth=False,
+            method=observed_method,
+            rejection_reason=rejection_reason,
+            discovery=discovery,
+        )
