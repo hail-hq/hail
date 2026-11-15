@@ -96,3 +96,33 @@ async def test_bad_arguments_name_the_field_and_rule_without_values(
             assert part in text
         assert "SECRET" not in text and "input_value" not in text
         assert "errors.pydantic.dev" not in text
+
+
+async def test_bad_subject_type_or_purpose_keeps_the_ask_the_user_message(
+    monkeypatch,
+) -> None:
+    import importlib
+
+    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+    import hailhq.mcp.server as srv
+
+    srv = importlib.reload(srv)
+    base = {"country_code": "US", "number_type": "local", "quote_id": None}
+    for args, needle in [
+        ({**base, "subject_type": "me"}, "ask the user whether this is for them"),
+        ({**base, "subject_type": "person", "purpose": "x"}, "purpose must be"),
+    ]:
+        result = await srv.mcp_app.call_tool("get_verification_requirements", args)
+        assert needle in str(result)
+    result = await srv.mcp_app.call_tool(
+        "acquire_number",
+        {
+            "quote_id": "00000000-0000-0000-0000-000000000001",
+            "country_code": "US",
+            "number_type": "local",
+            "confirm_total_cents": 100,
+            "subject_type": "me",
+        },
+    )
+    assert "ask the user whether this is for them" in str(result)

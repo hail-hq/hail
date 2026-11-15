@@ -115,6 +115,7 @@ from hailhq.core.schemas import (
     Address,
     AgentCreate,
     AgentStatus,
+    AgentUpdate,
     CallStatus,
     Capability,
     EmailAgentScope,
@@ -863,7 +864,7 @@ def _is_str_map(value: Any) -> bool:
 VerificationPurpose = Literal["number", "sms"]
 _VERIFICATION_PURPOSES = get_args(VerificationPurpose)
 _PURPOSE_ERROR = "purpose must be 'number' or 'sms'"
-_SUBJECT_TYPES = ("person", "business")
+_SUBJECT_TYPES = get_args(SubjectType)
 _SUBJECT_TYPE_ERROR = (
     "subject_type must be 'person' or 'business': ask the user whether this "
     "is for them or for their company"
@@ -874,15 +875,9 @@ _QUOTE_REQUIRED = (
 )
 
 
-# Typed in the JSON schema only. Validation stays ``Any`` so MCPServer never
-# echoes a submitted value; ``_verification_shape_error`` checks the shape.
+# Typed in the JSON schema only. Validation stays ``Any`` so the shape errors
+# come from ``_verification_shape_error``, which never echoes a value.
 _JsonObject = Annotated[Any, WithJsonSchema({"type": "object"})]
-_JsonObjectList = Annotated[
-    Any, WithJsonSchema({"type": "array", "items": {"type": "object"}})
-]
-_JsonObjectOrNone = Annotated[
-    Any, WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "null"}]})
-]
 
 
 def _verification_shape_error(
@@ -1340,8 +1335,8 @@ def _verification_request(
     """Every local check of a verification form. Returns ``(error, form)``:
     an error ending in "Nothing was sent.", or the keyword arguments for
     ``HailClient.submit_verification`` / ``check_verification``. Shape checks
-    live here, not in the tool signature: a typed parameter makes MCPServer
-    echo the offending value in its validation error."""
+    live here, not in the tool signature, so each error names the argument
+    and the rule in its own words and never echoes a value."""
     if subject_type not in _SUBJECT_TYPES:
         return f"{_SUBJECT_TYPE_ERROR}. Nothing was sent.", {}
     if purpose not in _VERIFICATION_PURPOSES:
@@ -1837,6 +1832,14 @@ _SUBJECT_TYPE_OR_NULL = WithJsonSchema(
         ]
     }
 )
+# Schema-only enum: the tool's own check answers a bad value with its
+# "ask the user" message instead of a generic validation error.
+_VERIFICATION_PURPOSE_SCHEMA = WithJsonSchema(
+    {"type": "string", "enum": list(get_args(VerificationPurpose))}
+)
+_SUBJECT_TYPE_SCHEMA = WithJsonSchema(
+    {"type": "string", "enum": list(get_args(SubjectType))}
+)
 _NUMBER_TYPE_SCHEMA = WithJsonSchema(
     {"type": "string", "enum": list(get_args(NumberType))}
 )
@@ -1898,7 +1901,7 @@ _IDEMPOTENCY_KEY = _d(
 )
 _RECIPIENT_CONSENT = _d(
     "Attestation that the recipient lawfully agreed to be contacted, as the "
-    "user confirmed it. Hail does not check it."
+    "user confirmed it. Hail does not check it; only ``true`` is accepted."
 )
 _CONSENT_SOURCE = _d(
     "Where or how consent was obtained, such as ``signup form``. "
@@ -2023,6 +2026,8 @@ _AGENT_EMAIL_ENABLED = _d(
 )
 _AGENT_DURATION_RULES = _rules(AgentCreate, "max_duration_seconds")
 _AGENT_HANDOVER_RULES = _rules(AgentCreate, "handover_max_duration_seconds")
+_AGENT_UPDATE_DURATION_RULES = _rules(AgentUpdate, "max_duration_seconds")
+_AGENT_UPDATE_HANDOVER_RULES = _rules(AgentUpdate, "handover_max_duration_seconds")
 _AGENT_HANDOVER_CONTACTS = _d(
     "Up to ten ``{contact_id, note}`` entries for people a call can be handed "
     "over to. ``contact_id`` is an ID from ``list_contacts``, ``lookup_contact`` "
@@ -2221,6 +2226,7 @@ def register_tools(
         ] = None,
         from_name: Annotated[
             str | None,
+            *_rules(EmailCreate, "from_name"),
             _d("Display name for the From header, such as ``Acme Billing``."),
         ] = None,
         cc: Annotated[
@@ -3149,7 +3155,8 @@ def register_tools(
         ],
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
         subject_type: Annotated[
-            SubjectType | None,
+            str | None,
+            _SUBJECT_TYPE_OR_NULL,
             _d(
                 "Whose approved registration may be used: the user's own "
                 "(``person``) or their company's (``business``). Omitted: either."
@@ -3319,7 +3326,7 @@ def register_tools(
         ctx: Context,
         country_code: Annotated[str, _COUNTRY_CODE],
         number_type: Annotated[NumberType, _NUMBER_TYPE],
-        subject_type: Annotated[SubjectType, _SUBJECT_TYPE],
+        subject_type: Annotated[str, _SUBJECT_TYPE_SCHEMA, _SUBJECT_TYPE],
         quote_id: Annotated[
             str | None,
             _d(
@@ -3329,7 +3336,9 @@ def register_tools(
             ),
         ] = None,
         number_id: Annotated[str | None, _VERIFICATION_NUMBER_ID] = None,
-        purpose: Annotated[VerificationPurpose, _VERIFICATION_PURPOSE] = "number",
+        purpose: Annotated[
+            str, _VERIFICATION_PURPOSE_SCHEMA, _VERIFICATION_PURPOSE
+        ] = "number",
     ) -> dict[str, Any]:
         """Read a carrier's current registration fields, documents, address rules and fees.
 
@@ -3382,9 +3391,8 @@ def register_tools(
         fields: Annotated[_JsonObject, _VERIFICATION_FIELDS],
         documents: Annotated[_JsonObject, _VERIFICATION_DOCUMENTS],
         files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
-        # Required, but checked inside check_verification: a missing
-        # required argument makes MCPServer echo every argument, personal data
-        # included, in its validation error.
+        # Required, but checked inside check_verification, so a missing one
+        # gets the message that tells the model to ask the user.
         subject_type: Annotated[
             str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
         ] = None,
@@ -3445,9 +3453,8 @@ def register_tools(
         documents: Annotated[_JsonObject, _VERIFICATION_DOCUMENTS],
         files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
         attest_authorized: Annotated[StrictBool, _ATTEST_AUTHORIZED],
-        # Required, but checked inside submit_verification: a missing
-        # required argument makes MCPServer echo every argument, personal data
-        # included, in its validation error.
+        # Required, but checked inside submit_verification, so a missing one
+        # gets the message that tells the model to ask the user.
         subject_type: Annotated[
             str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
         ] = None,
@@ -3624,7 +3631,7 @@ def register_tools(
     )
     async def preview_sms_application_tool(
         ctx: Context,
-        subject_type: Annotated[str, _SUBJECT_TYPE],
+        subject_type: Annotated[str, _SUBJECT_TYPE_SCHEMA, _SUBJECT_TYPE],
         fields: Annotated[
             _JsonObject,
             _d(
@@ -3632,7 +3639,7 @@ def register_tools(
                 "``get_verification_requirements`` with purpose ``sms``."
             ),
         ],
-        address: Annotated[_JsonObjectOrNone, _VERIFICATION_ADDRESS] = None,
+        address: Annotated[_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
         number_id: Annotated[
             str | None,
             _d(
@@ -3851,10 +3858,10 @@ def register_tools(
         voice_id: Annotated[str | None, _AGENT_VOICE_ID] = None,
         tools: Annotated[list[str] | None, _AGENT_TOOLS] = None,
         max_duration_seconds: Annotated[
-            int | None, *_AGENT_DURATION_RULES, _AGENT_MAX_DURATION
+            int | None, *_AGENT_UPDATE_DURATION_RULES, _AGENT_MAX_DURATION
         ] = None,
         handover_max_duration_seconds: Annotated[
-            int | None, *_AGENT_HANDOVER_RULES, _AGENT_HANDOVER_MAX
+            int | None, *_AGENT_UPDATE_HANDOVER_RULES, _AGENT_HANDOVER_MAX
         ] = None,
         voice_enabled: Annotated[bool | None, _AGENT_VOICE_ENABLED] = None,
         sms_enabled: Annotated[bool | None, _AGENT_SMS_ENABLED] = None,
