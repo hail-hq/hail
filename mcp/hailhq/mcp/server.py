@@ -4,8 +4,6 @@ The deployable artifact is ``app``. MCPServer serves Streamable HTTP at
 ``/`` (root — the service runs on a dedicated MCP subdomain so the
 endpoint is the bare host URL). ``/healthz`` is mounted on the same
 Starlette parent app so the compose healthcheck stays a one-line probe.
-``/.well-known/glama.json`` is mounted the same way, to verify ownership
-of the Glama MCP connector listing for this domain.
 ``/.well-known/openai-apps-challenge`` serves the OpenAI app ownership token.
 ``/favicon.ico`` and ``/icon.svg`` redirect to the website's current raster
 and vector icons; the ``initialize`` result advertises both.
@@ -176,14 +174,6 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     async def vector_icon(_request: Request) -> Response:
         return await manifest_icon({"image/svg+xml"})
 
-    async def glama_connector_claim(_request: Request) -> Response:
-        return JSONResponse(
-            {
-                "$schema": "https://glama.ai/mcp/schemas/connector.json",
-                "maintainers": [{"email": "r@hail.so"}],
-            }
-        )
-
     async def openai_apps_challenge(_request: Request) -> Response:
         return PlainTextResponse("POAuiIrWlgcsgNoQiGI4OhKFQLOqtQoDpweSKl4fGkY")
 
@@ -211,7 +201,6 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             Route("/healthz", healthz, methods=["GET"]),
             Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/icon.svg", vector_icon, methods=["GET"]),
-            Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
             Route(
                 "/.well-known/openai-apps-challenge",
                 openai_apps_challenge,
