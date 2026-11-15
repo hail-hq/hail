@@ -76,8 +76,8 @@ resource-id shape for ``get_events`` is still checked locally via
 
 The tool functions are kept module-importable so unit tests can
 call them directly with a constructed ``HailClient``; ``register_tools``
-is the FastMCP wiring step. Each registered tool closure accepts a
-FastMCP ``Context`` (auto-injected on dispatch) and uses the
+is the MCPServer wiring step. Each registered tool closure accepts an
+MCPServer ``Context`` (auto-injected on dispatch) and uses the
 ``_client_for`` async context manager to obtain a per-call ``HailClient``
 (oauth-rs mode, built from the inbound bearer) or the shared singleton
 (static-key mode).
@@ -109,7 +109,7 @@ from hailhq.core.file_uploads import (
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.schemas import parse_resource_id
 from hailhq.core.telemetry import telemetry_enabled
-from hailhq.core.telemetry_identity import bind_root, identity_scope, tag_context
+from hailhq.core.telemetry_identity import identity_scope, tag_context
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import (
     HailAPIError,
@@ -119,7 +119,7 @@ from hailhq.mcp.hail_client import (
 )
 from pydantic import Field, StrictBool, ValidationError, WithJsonSchema
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import ToolAnnotations
 
 # --------------------------------------------------------------------------- #
@@ -853,7 +853,7 @@ _QUOTE_REQUIRED = (
 )
 
 
-# Typed in the JSON schema only. Validation stays ``Any`` so FastMCP never
+# Typed in the JSON schema only. Validation stays ``Any`` so MCPServer never
 # echoes a submitted value; ``_verification_shape_error`` checks the shape.
 _JsonObject = Annotated[Any, WithJsonSchema({"type": "object"})]
 _JsonObjectList = Annotated[
@@ -1319,7 +1319,7 @@ def _verification_request(
     """Every local check of a verification form. Returns ``(error, form)``:
     an error ending in "Nothing was sent.", or the keyword arguments for
     ``HailClient.submit_verification`` / ``check_verification``. Shape checks
-    live here, not in the tool signature: a typed parameter makes FastMCP
+    live here, not in the tool signature: a typed parameter makes MCPServer
     echo the offending value in its validation error."""
     if subject_type not in _SUBJECT_TYPES:
         return f"{_SUBJECT_TYPE_ERROR}. Nothing was sent.", {}
@@ -1632,7 +1632,7 @@ async def delete_agent(
 
 
 def _bearer_from_ctx(ctx: Context) -> str:
-    """Extract the Bearer token from FastMCP's request context.
+    """Extract the Bearer token from the MCPServer request context.
 
     The lookup is case-insensitive (Starlette's ``Headers`` already lowercases
     on read, but a plain ``dict`` may not). A missing or malformed header
@@ -1682,17 +1682,26 @@ async def _client_for(
         yield singleton
 
 
-class TaggedFastMCP(FastMCP):
-    """FastMCP that tags each tool call's trace with the tool name.
+class TaggedMCPServer(MCPServer):
+    """MCPServer that tags each tool call's trace with the tool name.
 
-    The tool call runs in the session's task, in its own trace, under the
-    "MCP server handle request: tools/call" span, so that span is the root.
+    mcp 2 runs the tool call in the POST request's context, under the SDK's
+    "tools/call <tool>" span. IdentityMiddleware already bound that POST span
+    as the trace root, so both spans get the tags (stdio has no root: only
+    the current span is tagged).
+
+    ``subscriptions/listen`` stays off: the tool list never changes while the
+    server runs, so 2026-07-28 clients see ``listChanged: false``, the same
+    as older clients do.
     """
 
-    async def call_tool(self, name, arguments):
-        bind_root()
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("subscriptions", False)
+        super().__init__(*args, **kwargs)
+
+    async def call_tool(self, name, arguments, context=None):
         tag_context(channel="mcp", tool=name)
-        return await super().call_tool(name, arguments)
+        return await super().call_tool(name, arguments, context)
 
 
 _ACTOR_TTL_SECONDS = 300
@@ -1871,13 +1880,13 @@ _AGENT_HANDOVER_CONTACTS = _d(
 
 
 # --------------------------------------------------------------------------- #
-# FastMCP registration.
+# MCPServer registration.
 #
 # We register thin wrappers that delegate to the module-level domain
-# functions — FastMCP derives the JSON schema from the *registered*
+# functions — MCPServer derives the JSON schema from the *registered*
 # function's signature, and we want the agent-facing signature to omit
 # the ``client`` argument (it's resolved per-call by ``_client_for``).
-# Each closure takes a ``ctx: Context`` first param (FastMCP auto-injects
+# Each closure takes a ``ctx: Context`` first param (MCPServer auto-injects
 # it) and wraps the delegation in ``async with _client_for(ctx, ...)``.
 # A ``RuntimeError`` from ``_client_for`` (missing/malformed bearer in
 # oauth-rs mode) is caught and surfaced as a structured tool error.
@@ -1885,14 +1894,14 @@ _AGENT_HANDOVER_CONTACTS = _d(
 
 
 def register_tools(
-    mcp_app: FastMCP,
+    mcp_app: MCPServer,
     *,
     mode: AuthMode,
     singleton: HailClient | None,
 ) -> None:
-    """Register the Hail tools on a FastMCP app.
+    """Register the Hail tools on an MCPServer app.
 
-    Tools accept a FastMCP ``Context`` parameter (auto-injected). The
+    Tools accept an MCPServer ``Context`` parameter (auto-injected). The
     ``_client_for`` helper picks the right HailClient for the active mode
     — per-tool-call in oauth-rs, shared singleton in static-key.
     """
@@ -3143,7 +3152,7 @@ def register_tools(
         documents: Annotated[_JsonObject, _VERIFICATION_DOCUMENTS],
         files: Annotated[_JsonObjectList, _VERIFICATION_FILES],
         # Required, but checked inside check_verification: a missing
-        # required argument makes FastMCP echo every argument, personal data
+        # required argument makes MCPServer echo every argument, personal data
         # included, in its validation error.
         subject_type: Annotated[str | None, _SUBJECT_TYPE_REQUIRED] = None,
         address: Annotated[_JsonObjectOrNone, _VERIFICATION_ADDRESS] = None,
@@ -3163,7 +3172,7 @@ def register_tools(
         Returns ``ok``, ``files`` (slot, upload_id, size_bytes, sha256 per file) and
         ``note``; problems come back as ``problems`` with the field named.
         The carrier runs its own checks at submission."""
-        # Untyped on purpose, same as submit_verification: FastMCP's schema
+        # Untyped on purpose, same as submit_verification: MCPServer's schema
         # validation would echo a rejected value into the error.
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3204,7 +3213,7 @@ def register_tools(
         files: Annotated[_JsonObjectList, _VERIFICATION_FILES],
         attest_authorized: Annotated[StrictBool, _ATTEST_AUTHORIZED],
         # Required, but checked inside submit_verification: a missing
-        # required argument makes FastMCP echo every argument, personal data
+        # required argument makes MCPServer echo every argument, personal data
         # included, in its validation error.
         subject_type: Annotated[str | None, _SUBJECT_TYPE_REQUIRED] = None,
         address: Annotated[_JsonObjectOrNone, _VERIFICATION_ADDRESS] = None,
@@ -3236,7 +3245,7 @@ def register_tools(
         A 409 identifies an existing registration; a timeout can leave a submission in progress.
         Carrier field errors include ``problems`` and leave no saved submission."""
         # ``fields``, ``documents``, ``files`` and ``address`` are untyped on
-        # purpose: FastMCP's schema validation echoes a rejected value
+        # purpose: MCPServer's schema validation echoes a rejected value
         # (``input_value=...``) into the error the agent sees. The shape is
         # checked inside ``submit_verification`` with messages that name the
         # argument only.

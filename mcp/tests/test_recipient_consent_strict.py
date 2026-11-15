@@ -1,7 +1,7 @@
 """recipient_consent is a legal attestation: only the JSON boolean true counts.
 
 Tests go through ``srv.mcp_app.call_tool``, the path a real client uses.
-FastMCP validates in pydantic lax mode, so a plain ``bool`` would turn
+MCPServer validates in pydantic lax mode, so a plain ``bool`` would turn
 "true", "yes", 1 and "on" into True.
 """
 
@@ -87,6 +87,6 @@ async def test_false_still_reaches_the_api(monkeypatch, tool) -> None:
 async def test_consent_schema_is_still_boolean(monkeypatch, tool) -> None:
     srv = await _real_server(monkeypatch)
     listed = {t.name: t for t in await srv.mcp_app.list_tools()}
-    prop = listed[tool].inputSchema["properties"]["recipient_consent"]
+    prop = listed[tool].input_schema["properties"]["recipient_consent"]
     assert prop["type"] == "boolean"
-    assert "recipient_consent" in listed[tool].inputSchema["required"]
+    assert "recipient_consent" in listed[tool].input_schema["required"]

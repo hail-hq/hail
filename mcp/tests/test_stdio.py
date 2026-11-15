@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from hailhq.mcp.metadata import INSTRUCTIONS
+from hailhq.mcp.metadata import DESCRIPTION, INSTRUCTIONS, TITLE
 from mcp.client.stdio import stdio_client
 
 from mcp import ClientSession, StdioServerParameters
@@ -41,14 +41,16 @@ async def test_stdio_initializes_pings_and_lists_real_tools(tmp_path: Path) -> N
         ClientSession(read, write) as session,
     ):
         result = await session.initialize()
-        assert result.serverInfo.name == "hail"
+        assert result.server_info.name == "hail"
         assert result.instructions == INSTRUCTIONS
+        assert result.server_info.title == TITLE
+        assert result.server_info.description == DESCRIPTION
         await session.send_ping()
         tools = {tool.name: tool for tool in (await session.list_tools()).tools}
         for name in ["place_call", "send_sms", "send_email", "quote_numbers"]:
             assert name in tools
-        assert "recipient_consent" in tools["send_email"].inputSchema["properties"]
-        assert tools["quote_numbers"].annotations.readOnlyHint is True
+        assert "recipient_consent" in tools["send_email"].input_schema["properties"]
+        assert tools["quote_numbers"].annotations.read_only_hint is True
 
 
 @pytest.mark.parametrize(

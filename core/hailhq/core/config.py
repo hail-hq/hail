@@ -291,7 +291,7 @@ class Settings(BaseSettings):
 
     # MCP service resource identity (cloud), the public URL the MCP
     # serves under (e.g. "https://mcp.hail.so"). Used by the MCP server's
-    # FastMCP AuthSettings as ``resource_server_url`` so the 401's
+    # MCPServer AuthSettings as ``resource_server_url`` so the 401's
     # WWW-Authenticate header points clients at this MCP's own
     # ``.well-known/oauth-protected-resource``. Empty in self-host.
     mcp_resource_url: str = ""
