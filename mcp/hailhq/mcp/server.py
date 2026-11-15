@@ -185,9 +185,9 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             try:
                 yield
             finally:
+                await asyncio.to_thread(flush_telemetry)
                 if analytics:
                     await analytics.flush()
-                await asyncio.to_thread(flush_telemetry)
 
     # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*

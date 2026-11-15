@@ -17,6 +17,7 @@ from typing import Any
 from hailhq.core.config import settings
 
 logger = logging.getLogger(__name__)
+_FLUSH_SECONDS = 2
 
 _KEPT_PROPERTIES = frozenset(
     {
@@ -57,9 +58,10 @@ class Analytics:
         self._handle = handle
 
     async def flush(self) -> None:
+        """Bounded: ``Posthog.shutdown()`` waits with no limit while PostHog is down."""
         try:
-            await self._handle.flush()
-            await asyncio.to_thread(self._client.shutdown)
+            await asyncio.wait_for(self._handle.flush(), _FLUSH_SECONDS)
+            await asyncio.to_thread(self._client.flush, _FLUSH_SECONDS)
         except Exception:  # noqa: BLE001 - analytics must never break shutdown
             logger.warning("PostHog MCP analytics flush failed", exc_info=True)
 

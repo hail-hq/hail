@@ -1,8 +1,8 @@
 """PostHog MCP analytics must not change what agents see or leak content.
 
-Boots the HTTP app with and without a token, runs the same session, and
-checks that ``tools/list`` and a tool result are identical, and that the
-captured ``$mcp_tool_call`` carries metadata only.
+Boots the HTTP app with and without a token, runs the same requests, and
+checks that every response (body and session header) is identical, and that
+the captured ``$mcp_tool_call`` carries metadata only.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ import pytest
 from hailhq.mcp import analytics
 
 _ACCEPT = "application/json, text/event-stream"
+_LEGACY = "2025-06-18"
+_MODERN = "2026-07-28"
 _SECRET = "+14155550123 secret body"
+_AUTH = {"Authorization": "Bearer user.jwt.token"}
 
 
 def _body(resp: httpx.Response) -> dict:
@@ -27,9 +30,35 @@ def _body(resp: httpx.Response) -> dict:
     raise AssertionError(resp.text)
 
 
-async def _session(monkeypatch, token: str) -> tuple[dict, dict, list]:
-    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
-    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+def _modern(method: str, request_id: int, **params) -> tuple[dict, dict]:
+    headers = {"Accept": _ACCEPT, "MCP-Protocol-Version": _MODERN, "Mcp-Method": method}
+    if method == "tools/call":
+        headers["Mcp-Name"] = params["name"]
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": _MODERN,
+        "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    body = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": {**params, "_meta": meta},
+    }
+    return headers, body
+
+
+async def _session(
+    monkeypatch, token: str, *, oauth: bool, protocol: str, fail: bool
+) -> tuple[list, list]:
+    monkeypatch.setattr("hailhq.core.config.settings.mcp_resource_url", "https://m.t")
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.hail_auth_url",
+        "https://hail.test/api/auth" if oauth else "",
+    )
+    monkeypatch.setattr(
+        "hailhq.core.config.settings.hail_api_key", "" if oauth else "hl_live_test"
+    )
     monkeypatch.setattr("hailhq.core.config.settings.mcp_posthog_project_token", token)
     monkeypatch.setattr(
         "hailhq.core.config.settings.logfire_service_version", "abc1234"
@@ -41,80 +70,86 @@ async def _session(monkeypatch, token: str) -> tuple[dict, dict, list]:
     )
 
     async def regions(_self):
+        if fail:
+            raise RuntimeError(_SECRET)
         return {"regions": [], "note": _SECRET}
 
     monkeypatch.setattr(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
+    auth = _AUTH if oauth else {}
+    call = {"name": "list_number_regions", "arguments": {}}
 
     import hailhq.mcp.server as srv
 
     srv = importlib.reload(srv)
+    seen: list = []
     async with srv.app.router.lifespan_context(srv.app):
         transport = httpx.ASGITransport(app=srv.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-            init = await c.post(
-                "/",
-                headers={"Accept": _ACCEPT},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2025-06-18",
-                        "capabilities": {},
-                        "clientInfo": {"name": "analytics-test", "version": "1.0"},
-                    },
-                },
-            )
-            headers = {
-                "Accept": _ACCEPT,
-                "Mcp-Session-Id": init.headers["mcp-session-id"],
-                "Mcp-Protocol-Version": "2025-06-18",
-            }
-            await c.post(
-                "/",
-                headers=headers,
-                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-            )
-            listed = _body(
-                await c.post(
-                    "/",
-                    headers=headers,
-                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-                )
-            )
-            called = _body(
-                await c.post(
-                    "/",
-                    headers=headers,
-                    json={
+
+            async def post(headers: dict, body: dict) -> httpx.Response:
+                resp = await c.post("/", headers={**headers, **auth}, json=body)
+                has_session = "mcp-session-id" in resp.headers
+                seen.append((resp.status_code, has_session, resp.text and _body(resp)))
+                return resp
+
+            if protocol == _MODERN:
+                await post(*_modern("tools/list", 2))
+                await post(*_modern("tools/call", 3, **call))
+            else:
+                init = await post(
+                    {"Accept": _ACCEPT},
+                    {
                         "jsonrpc": "2.0",
-                        "id": 3,
-                        "method": "tools/call",
-                        "params": {"name": "list_number_regions", "arguments": {}},
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": _LEGACY,
+                            "capabilities": {},
+                            "clientInfo": {"name": "analytics-test", "version": "1.0"},
+                        },
                     },
                 )
-            )
-    return listed, called, captured
+                headers = {
+                    "Accept": _ACCEPT,
+                    "Mcp-Session-Id": init.headers["mcp-session-id"],
+                    "Mcp-Protocol-Version": _LEGACY,
+                }
+                await c.post(
+                    "/",
+                    headers={**headers, **auth},
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                await post(headers, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+                await post(
+                    headers,
+                    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": call},
+                )
+    return seen, captured
 
 
 @pytest.mark.asyncio
-async def test_analytics_keeps_tools_and_results_unchanged(monkeypatch):
-    plain_list, plain_call, plain_events = await _session(monkeypatch, "")
-    listed, called, events = await _session(monkeypatch, "phc_test")
+@pytest.mark.parametrize("oauth", [False, True])
+@pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
+@pytest.mark.parametrize("fail", [False, True])
+async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol, fail):
+    kw = {"oauth": oauth, "protocol": protocol, "fail": fail}
+    plain, plain_events = await _session(monkeypatch, "", **kw)
+    seen, events = await _session(monkeypatch, "phc_test", **kw)
 
     assert plain_events == []
-    assert listed == plain_list
-    assert called == plain_call
+    assert seen == plain
+    is_error = seen[-1][2]["result"].get("isError", False)
 
-    calls = [kw for name, kw in events if name == "$mcp_tool_call"]
+    calls = [e for name, e in events if name == "$mcp_tool_call"]
     assert len(calls) == 1
     props = calls[0]["properties"]
     assert props["$mcp_tool_name"] == "list_number_regions"
+    assert props["$mcp_is_error"] is is_error
     assert props["$mcp_server_build"] == "abc1234"
     assert set(props) <= analytics._KEPT_PROPERTIES
-    assert _SECRET not in json.dumps([kw for _, kw in events], default=str)
+    assert _SECRET not in json.dumps([e for _, e in events], default=str)
 
 
 def test_keep_metadata_drops_content():
