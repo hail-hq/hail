@@ -378,3 +378,59 @@ def test_sql_export_keeps_operation_and_timing_without_display_or_error_content(
     assert exported.status.description is None
     assert (exported.start_time, exported.end_time) == (1, 2)
     assert original.attributes[sql_key] == "SELECT 'PRIVATE-SQL-LITERAL'"
+
+
+def test_escaping_sql_exception_keeps_parent_status_without_query_content():
+    import os
+    import subprocess
+    import sys
+
+    script = """
+from hailhq.core import db, telemetry
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+import sqlalchemy
+memory = InMemorySpanExporter()
+telemetry.OTLPSpanExporter = lambda **kwargs: memory
+telemetry.OTLPMetricExporter = lambda **kwargs: None
+telemetry.PeriodicExportingMetricReader = lambda *args, **kwargs: InMemoryMetricReader()
+assert telemetry.configure_telemetry("hail-api")
+db._instrument_sqlalchemy()
+engine = sqlalchemy.create_engine("sqlite://")
+try:
+    with telemetry.operation("test.failed-parent"):
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 'PRIVATE-SQL-LITERAL', :value FROM missing"), {"value": "PRIVATE-SQL-PARAMETER"})
+except DBAPIError:
+    pass
+else:
+    raise AssertionError("missing table must fail")
+finally:
+    engine.dispose()
+telemetry.flush_telemetry()
+spans = memory.get_finished_spans()
+parent = next(s for s in spans if s.name == "test.failed-parent")
+assert parent.status.status_code == StatusCode.ERROR
+assert parent.status.description is None
+assert parent.events[0].attributes["exception.type"] == "sqlalchemy.exc.OperationalError"
+for span in spans:
+    assert "PRIVATE-SQL" not in str((span.name, span.attributes, span.events, span.status.description))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "HAIL_LOGFIRE_ENABLED": "true",
+            "HAIL_LOGFIRE_SAMPLE_RATE": "1",
+            "LOGFIRE_TOKEN": "test-only-placeholder",
+            "LOGFIRE_BASE_URL": "https://logfire.example.test",
+        },
+        text=True,
+        check=False,
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

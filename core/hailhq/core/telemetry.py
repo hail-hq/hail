@@ -210,6 +210,13 @@ def private_span(
             == "opentelemetry.instrumentation.sqlalchemy"
         )
     )
+    # SQLAlchemy includes SQL and bound values in exceptions that escape to
+    # a parent HTTP/operation span, which has no database attributes itself.
+    sql_error = any(
+        isinstance(error_type := (event.attributes or {}).get("exception.type"), str)
+        and error_type.startswith("sqlalchemy.")
+        for event in span.events
+    )
     attributes = _safe_attributes(span.attributes, include_content=include_content)
     name = _safe_text(span.name)
     if sql:
@@ -250,7 +257,10 @@ def private_span(
             # An exception message can echo tool arguments, so MCP keeps the code only.
             (
                 _safe_text(span.status.description)
-                if include_content and not sql and span.status.description
+                if include_content
+                and not sql
+                and not sql_error
+                and span.status.description
                 else None
             ),
         ),

@@ -122,7 +122,7 @@ the discovery spans (`ping`, `tools/list`, `prompts/list`, `resources/list`,
 400 or more), and 404s on unknown paths (scanners) are not exported;
 `tools/call` is. Empty SMS claims
 are suppressed. SQL spans retain operation, timing, parent trace, and error status.
-SQL text and parameters stay private, including copies in display messages and errors.
+SQL text and parameters stay private, including display messages and parent-span errors.
 
 The lock has SQLAlchemy 2.1.6, Logfire/Logfire SDK 5.6.0, and SQLAlchemy
 instrumentation 0.66b1. A temporary compatibility bridge in
