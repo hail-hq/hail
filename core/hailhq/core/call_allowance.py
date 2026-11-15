@@ -104,7 +104,9 @@ _HELD_SQL = text("""
           AND COALESCE(c.ended_at, c.updated_at) > :debit_window
           AND NOT EXISTS (
             SELECT 1 FROM usage_events u
-            JOIN account_credits a ON a.ref = 'usage_event:' || u.id::text
+            JOIN account_credits a
+              ON a.organization_id = :org
+             AND a.ref = 'usage_event:' || u.id::text
             WHERE u.organization_id = :org
               AND u.channel = 'voice'
               AND u.ref LIKE c.id::text || '%'

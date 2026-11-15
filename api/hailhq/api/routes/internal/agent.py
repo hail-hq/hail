@@ -78,6 +78,7 @@ from hailhq.core.compliance_gate import (
     check_sms_allowed,
     normalize_recipient,
 )
+from hailhq.core.config import settings
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session, key_lock, org_lock
 from hailhq.core.directory import resolve_member_emails, resolve_member_phones
@@ -1862,13 +1863,13 @@ async def agent_handover(
 
 async def _handover_cap(
     db: AsyncSession, call: Call, to_e164: str, hail_number: str | None
-) -> int | None:
+) -> int:
     """The handover's time limit from the balance (0: not one minute), and
     the call's hold grown to cover it (hailhq.core.call_allowance). The time
     already talked and the ring are priced as the call alone; the handover
     as both lines plus the agent. The hold never shrinks: if nobody answers,
-    the call runs on under its own limit. None when the price is unknown:
-    the agent's own handover limit applies."""
+    the call runs on under its own limit. When the price is unknown, the
+    default call limit (HAIL_VOICE_MAX_DURATION_SECONDS) and no hold."""
     caller = call.from_e164 if call.direction == "inbound" else hail_number
     main = {
         "direction": call.direction,
@@ -1889,8 +1890,9 @@ async def _handover_cap(
         quote_call_price(org, [main, second], recording),
     )
     if alone is None or both is None:
-        logger.warning("handover price unknown for call %s", call.id)
-        return None
+        # As for a call: the default limit, nothing held.
+        logger.warning("handover price unknown for call %s; default limit", call.id)
+        return settings.hail_voice_max_duration_seconds
     per_minute, per_call = both
     # The agent's own handover limit: the voicebot stops the handover there.
     limit = handover_limit(

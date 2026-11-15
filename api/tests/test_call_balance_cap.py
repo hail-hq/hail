@@ -561,3 +561,16 @@ async def test_handover_counts_its_own_dial(
     )
     assert data["ok"] is True
     assert (await _hold(async_session, call.id)).dials == 1
+
+
+async def test_handover_unknown_price_uses_the_default_limit(
+    client, async_session, add_phone_number, quote, monkeypatch
+):
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
+    quote.price = None
+    data, call = await _handover(
+        client, async_session, add_phone_number, 20, timedelta(seconds=30)
+    )
+    assert data["ok"] is True
+    assert data["max_seconds"] == settings.hail_voice_max_duration_seconds
+    assert await _hold(async_session, call.id) is None
