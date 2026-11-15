@@ -26,7 +26,7 @@ this as required rather than optional.
   → text-to-speech → stored transcript. See our
   [Privacy Policy](https://hail.so/legal/privacy) for the full data-flow
   description and [sub-processor list](https://hail.so/legal/subprocessors).
-- **Call recording**: best-effort recording is on by default. A workspace owner can turn it off. An agent or call setting applies instead of the workspace setting. This collects call audio by default, so re-check the call audio risk in this DPIA.
+- **Call recording**: best-effort recording is on by default, so the Service collects call audio unless recording is off. A workspace owner or admin can turn it off. A per-call setting, then the agent setting, applies before the workspace setting, in either direction.
   Recordings use private storage, authenticated playback and workspace-selected 7-, 30-, or 365-day expiry. Voice output is limited to a fixed set of
   platform-provided voices — Developers cannot supply or select a custom
   or cloned voice, which closes off voice-cloning misuse as a platform
