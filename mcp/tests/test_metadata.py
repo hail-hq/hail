@@ -2,25 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 import re
 
-import pytest
 from hailhq.mcp import metadata
-from mcp.types import Tool
 
 # Claude Code cuts each tool description and the instructions at 2 KB.
 CLIENT_LIMIT_BYTES = 2048
-
-
-@pytest.fixture()
-async def tools_by_name(monkeypatch) -> dict[str, Tool]:
-    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
-    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
-    import hailhq.mcp.server as srv
-
-    srv = importlib.reload(srv)
-    return {t.name: t for t in await srv.mcp_app.list_tools()}
 
 
 def test_instructions_fit_client_limit() -> None:

@@ -6,12 +6,8 @@ with a default (and misleading) hint set.
 
 from __future__ import annotations
 
-import importlib
 import re
 import unicodedata
-
-import pytest
-from mcp.types import Tool
 
 # Read-only tools: never change anything.
 _READ_ONLY = {
@@ -79,17 +75,6 @@ _OPEN_WORLD_WRITES = {
 }
 
 _EXPECTED_COUNT = 44
-
-
-@pytest.fixture()
-async def tools_by_name(monkeypatch) -> dict[str, Tool]:
-    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
-    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
-    import hailhq.mcp.server as srv
-
-    srv = importlib.reload(srv)
-    listed = await srv.mcp_app.list_tools()
-    return {t.name: t for t in listed}
 
 
 async def test_tool_count(tools_by_name) -> None:
