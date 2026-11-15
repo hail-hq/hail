@@ -369,6 +369,9 @@
   .navOpen > :nth-child(6) {
     transition-delay: 350ms;
   }
+  .navOpen > :nth-child(7) {
+    transition-delay: 400ms;
+  }
   .navLink,
   .navLink:hover,
   .navLink.active {
@@ -409,10 +412,15 @@
     line-height: 24px;
   }
 }
-.menuSignIn {
+.menuSignIn,
+.menuOnly {
   display: none;
 }
 @media (max-width: 900px) {
+  /* Links that only the phone menu shows. */
+  .menuOnly.menuOnly {
+    display: flex;
+  }
 }
 @media (max-width: 480px) {
   /* On a phone the bar shows Get started. Sign in moves into the menu. */
