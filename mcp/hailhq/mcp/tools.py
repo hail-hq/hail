@@ -1824,27 +1824,23 @@ _DateTime = Annotated[str, WithJsonSchema({"type": "string", "format": "date-tim
 _UUID_OR_NULL = WithJsonSchema(
     {"anyOf": [{"type": "string", "format": "uuid"}, {"type": "null"}]}
 )
-_SUBJECT_TYPE_OR_NULL = WithJsonSchema(
-    {
-        "anyOf": [
-            {"type": "string", "enum": list(get_args(SubjectType))},
-            {"type": "null"},
-        ]
-    }
-)
 # Schema-only enum: the tool's own check answers a bad value with its
 # "ask the user" message instead of a generic validation error.
-_VERIFICATION_PURPOSE_SCHEMA = WithJsonSchema(
-    {"type": "string", "enum": list(get_args(VerificationPurpose))}
-)
-_SUBJECT_TYPE_SCHEMA = WithJsonSchema(
-    {"type": "string", "enum": list(get_args(SubjectType))}
+_SUBJECT_TYPE_ENUM = {"type": "string", "enum": list(_SUBJECT_TYPES)}
+_SUBJECT_TYPE_SCHEMA = WithJsonSchema(_SUBJECT_TYPE_ENUM)
+_SUBJECT_TYPE_OR_NULL = WithJsonSchema(
+    {"anyOf": [_SUBJECT_TYPE_ENUM, {"type": "null"}]}
 )
 _NUMBER_TYPE_SCHEMA = WithJsonSchema(
     {"type": "string", "enum": list(get_args(NumberType))}
 )
 _PURPOSE_SCHEMA = WithJsonSchema(
     {"type": "string", "enum": list(_VERIFICATION_PURPOSES)}
+)
+# Schema only: the API strips ``from_name`` before its length check, so a
+# validating max_length here would reject a padded name the API accepts.
+_FROM_NAME_SCHEMA = WithJsonSchema(
+    {"anyOf": EmailCreate.model_json_schema()["properties"]["from_name"]["anyOf"]}
 )
 _ADDRESS_SCHEMA = {k: v for k, v in Address.model_json_schema().items() if k != "title"}
 _ADDRESS_OR_NULL = Annotated[
@@ -2226,7 +2222,7 @@ def register_tools(
         ] = None,
         from_name: Annotated[
             str | None,
-            *_rules(EmailCreate, "from_name"),
+            _FROM_NAME_SCHEMA,
             _d("Display name for the From header, such as ``Acme Billing``."),
         ] = None,
         cc: Annotated[
@@ -3336,9 +3332,7 @@ def register_tools(
             ),
         ] = None,
         number_id: Annotated[str | None, _VERIFICATION_NUMBER_ID] = None,
-        purpose: Annotated[
-            str, _VERIFICATION_PURPOSE_SCHEMA, _VERIFICATION_PURPOSE
-        ] = "number",
+        purpose: Annotated[str, _PURPOSE_SCHEMA, _VERIFICATION_PURPOSE] = "number",
     ) -> dict[str, Any]:
         """Read a carrier's current registration fields, documents, address rules and fees.
 

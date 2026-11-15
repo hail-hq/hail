@@ -126,3 +126,7 @@ async def test_bad_subject_type_or_purpose_keeps_the_ask_the_user_message(
         },
     )
     assert "ask the user whether this is for them" in str(result)
+    result = await srv.mcp_app.call_tool(
+        "preview_sms_application", {"subject_type": "me", "fields": {}}
+    )
+    assert "ask the user whether this is for them" in str(result)
