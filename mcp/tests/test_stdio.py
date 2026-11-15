@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from hailhq.mcp.metadata import INSTRUCTIONS
 from mcp.client.stdio import stdio_client
 
 from mcp import ClientSession, StdioServerParameters
@@ -41,6 +42,7 @@ async def test_stdio_initializes_pings_and_lists_real_tools(tmp_path: Path) -> N
     ):
         result = await session.initialize()
         assert result.serverInfo.name == "hail"
+        assert result.instructions == INSTRUCTIONS
         await session.send_ping()
         tools = {tool.name: tool for tool in (await session.list_tools()).tools}
         for name in ["place_call", "send_sms", "send_email", "quote_numbers"]:

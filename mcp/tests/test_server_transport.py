@@ -15,6 +15,7 @@ import httpx
 import pytest
 import respx
 from hailhq.mcp import discovery_auth
+from hailhq.mcp.metadata import INSTRUCTIONS
 
 
 def _boot(
@@ -176,12 +177,14 @@ async def test_self_host_without_website_has_no_external_branding(monkeypatch):
             },
         )
     assert favicon.status_code == 404
-    assert "icons" not in _parse_mcp_body(response)["result"]["serverInfo"]
+    info = _parse_mcp_body(response)["result"]["serverInfo"]
+    assert "icons" not in info
+    assert "websiteUrl" not in info
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("oauth", [False, True])
-async def test_initialize_advertises_stable_icon_endpoint(monkeypatch, oauth):
+async def test_initialize_advertises_icons_website_and_instructions(monkeypatch, oauth):
     srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url="https://mcp.brand.test/")
     async with srv.app.router.lifespan_context(srv.app):
         transport = httpx.ASGITransport(app=srv.app)
@@ -202,8 +205,46 @@ async def test_initialize_advertises_stable_icon_endpoint(monkeypatch, oauth):
             )
 
     assert response.status_code == 200
-    info = _parse_mcp_body(response)["result"]["serverInfo"]
-    assert info["icons"] == [{"src": "https://mcp.brand.test/favicon.ico"}]
+    result = _parse_mcp_body(response)["result"]
+    info = result["serverInfo"]
+    assert info["icons"] == [
+        {"src": "https://mcp.brand.test/favicon.ico"},
+        {
+            "src": "https://mcp.brand.test/icon.svg",
+            "mimeType": "image/svg+xml",
+            "sizes": ["any"],
+        },
+    ]
+    assert info["websiteUrl"] == "https://brand.test/site/mcp"
+    assert result["instructions"] == INSTRUCTIONS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("icons", "status", "location"),
+    [
+        (
+            [
+                {"src": "icon-512.png", "type": "image/png"},
+                {"src": "/brand/hail.svg", "type": "image/svg+xml"},
+            ],
+            307,
+            "https://brand.test/brand/hail.svg",
+        ),
+        ([{"src": "icon-512.png", "type": "image/png"}], 503, None),
+    ],
+)
+@respx.mock
+async def test_vector_icon_redirects_only_to_an_svg(
+    monkeypatch, icons, status, location
+):
+    srv = _boot(monkeypatch, oauth=True)
+    respx.get("https://brand.test/site/site.webmanifest").respond(json={"icons": icons})
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/icon.svg")
+    assert response.status_code == status
+    assert response.headers.get("location") == location
 
 
 @pytest.mark.asyncio
