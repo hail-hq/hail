@@ -1,6 +1,6 @@
 """Optional PostHog MCP analytics for the HTTP server.
 
-Off unless ``MCP_POSTHOG_PROJECT_TOKEN`` is set. Events carry tool names,
+Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
 timings, outcomes and client names only. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's org id
@@ -96,7 +96,7 @@ class Analytics:
 
 def instrument_analytics(server: Any) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
-    token = settings.mcp_posthog_project_token
+    token = settings.next_public_posthog_key
     if not token:
         return None
     try:

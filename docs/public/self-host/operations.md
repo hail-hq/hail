@@ -195,7 +195,7 @@ The MCP service does not validate JWT signatures. `hail/api` is the single sourc
 
 ### MCP analytics
 
-Optional. Set `MCP_POSTHOG_PROJECT_TOKEN` to a PostHog project token, then restart the `mcp` service. The HTTP MCP server sends one `$mcp_tool_call` event per tool call, plus `$mcp_initialize` and `$mcp_tools_list` ([`mcp/hailhq/mcp/analytics.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/analytics.py)).
+Optional. The HTTP MCP server reuses `NEXT_PUBLIC_POSTHOG_KEY`, the PostHog project key of the costs site. When it is set, restart the `mcp` service. The HTTP MCP server sends one `$mcp_tool_call` event per tool call, plus `$mcp_initialize` and `$mcp_tools_list` ([`mcp/hailhq/mcp/analytics.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/analytics.py)).
 
 - Sent: tool name, argument names (not values), duration, success or error type and status, MCP client name, version and User-Agent, protocol version, the tool name list on `tools/list`, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`). `_KEPT_PROPERTIES` is the full allowlist.
 - Never sent: argument values, tool results, error messages.

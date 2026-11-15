@@ -295,8 +295,9 @@ class Settings(BaseSettings):
     # WWW-Authenticate header points clients at this MCP's own
     # ``.well-known/oauth-protected-resource``. Empty in self-host.
     mcp_resource_url: str = ""
-    # Optional PostHog MCP analytics for the HTTP MCP server. Empty disables it.
-    mcp_posthog_project_token: str = ""
+    # Optional PostHog MCP analytics for the HTTP MCP server. Reuses the web
+    # costs site's project key (NEXT_PUBLIC_POSTHOG_KEY). Empty disables it.
+    next_public_posthog_key: str = ""
     mcp_posthog_host: str = "https://eu.i.posthog.com"
 
     # --- Pre-send compliance gate (hailhq.core.compliance_gate) --------- #

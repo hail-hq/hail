@@ -62,7 +62,7 @@ async def _session(
     monkeypatch.setattr(
         "hailhq.core.config.settings.hail_api_key", "" if oauth else "hl_live_test"
     )
-    monkeypatch.setattr("hailhq.core.config.settings.mcp_posthog_project_token", token)
+    monkeypatch.setattr("hailhq.core.config.settings.next_public_posthog_key", token)
     # A capture that escapes the patch below goes nowhere.
     monkeypatch.setattr(
         "hailhq.core.config.settings.mcp_posthog_host", "http://127.0.0.1:9"
