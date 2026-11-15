@@ -206,8 +206,11 @@ def _candidates(
                 if needs
                 else None
             )
+            # Like /quotes: a filter prices and shows only the asked jobs, so
+            # a calls-only search pays no SMS fee. No filter: every job.
+            priced = [c for c in caps if c in capabilities] if capabilities else caps
             monthly = telephony_catalog.monthly_price(
-                provider, cents(row["usd_per_month"]), caps
+                provider, cents(row["usd_per_month"]), priced
             )["monthly_cents"]
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])
@@ -221,7 +224,7 @@ def _candidates(
                     how="by_request" if by_request else "buy",
                     monthly_cents=monthly,
                     setup_cents=setup,
-                    capabilities=caps,
+                    capabilities=priced,
                     paperwork=papers.items,
                     paperwork_known=papers.known,
                     status=status,

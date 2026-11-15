@@ -235,9 +235,10 @@ def test_buy_voice_only_beats_by_request_voice_and_sms(catalog):
     assert o.capabilities == ["voice"] and o.how == "buy"
 
 
-def test_voice_filter_picks_voice_only(catalog):
+def test_voice_filter_prices_calls_only(catalog):
     o = _mixed(catalog, {}, {})
     assert o.capabilities == ["voice", "sms"]
+    # A calls-only search pays no SMS fee, at any carrier: both cost 8.00.
     v = one(number_options("AU", {}, capabilities=["voice"]), "mobile", "person")
     assert v.capabilities == ["voice"] and v.monthly_cents == 800
 
@@ -504,3 +505,14 @@ def test_toll_free_sms_options_only_from_carriers_hail_can_verify(catalog):
     assert voice.monthly_cents == 100 and voice.more_options == 1
     # The cheaper Telnyx number can never text the US: it shows calls only.
     assert voice.capabilities == ["voice"]
+
+
+def test_filtered_options_price_only_the_asked_jobs(catalog):
+    # /quotes prices the asked capabilities; options with the same filter
+    # must show the same price. The SMS fee applies only when SMS is asked.
+    catalog(telnyx=[row("US", "local", "1.00", sms=True)])
+    voice = one(number_options("US", {}, ["voice"]), "local")
+    both = one(number_options("US", {}, ["voice", "sms"]), "local")
+    every = one(number_options("US", {}), "local")
+    assert voice.monthly_cents == 100 and voice.capabilities == ["voice"]
+    assert both.monthly_cents == every.monthly_cents == 110

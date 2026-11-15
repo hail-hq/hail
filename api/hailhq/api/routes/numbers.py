@@ -590,8 +590,10 @@ async def get_number_options(
         Query(
             max_length=2,
             description=(
-                "Optional. Keep only options that do all these jobs. Without "
-                "it, each number type shows its best option in this order: "
+                "Optional. Keep only options that do all these jobs, priced "
+                "and listed for these jobs only, the same as /numbers/quotes. "
+                "Without it, options are priced for every job they do, and "
+                "each number type shows its best option in this order: "
                 "buy now before order by hand, then ready now, then options "
                 "that do every job the type offers (even when a number that "
                 "does fewer jobs costs less), then lower price, then fewer "
