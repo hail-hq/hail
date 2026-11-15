@@ -5,12 +5,12 @@ A 401 count alone does not establish that a customer could not connect.
 
 The discovery middleware adds bounded attributes to the existing HTTP span:
 
-| Attribute | Meaning |
-| --- | --- |
-| `mcp.request.method` | Known protocol method, `other`, `unknown`, or `uninspected` |
-| `mcp.auth.header_present` | Whether the original request carried an Authorization header |
-| `mcp.auth.discovery` | Whether the existing anonymous-discovery rule supplied its synthetic bearer |
-| `mcp.auth.rejection_reason` | Local decision category, set only when the response is 401 |
+| Attribute                   | Meaning                                                                     |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `mcp.request.method`        | Known protocol method, `other`, `unknown`, or `uninspected`                 |
+| `mcp.auth.header_present`   | Whether the original request carried an Authorization header                |
+| `mcp.auth.discovery`        | Whether the existing anonymous-discovery rule supplied its synthetic bearer |
+| `mcp.auth.rejection_reason` | Local decision category, set only when the response is 401                  |
 
 Rejection categories:
 
