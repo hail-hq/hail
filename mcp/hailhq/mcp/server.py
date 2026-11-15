@@ -5,6 +5,8 @@ The deployable artifact is ``app``. FastMCP serves Streamable HTTP at
 endpoint is the bare host URL). ``/healthz`` is mounted on the same
 Starlette parent app so the compose healthcheck stays a one-line probe.
 ``/.well-known/openai-apps-challenge`` serves the OpenAI app ownership token.
+``/favicon.ico`` and ``/icon.svg`` redirect to the website's current raster
+and vector icons; the ``initialize`` result advertises both.
 
 Two boot modes (see ``hailhq.mcp.auth.select_auth_mode``):
 
@@ -42,6 +44,7 @@ from hailhq.core.urls import join_url
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
+from hailhq.mcp.metadata import INSTRUCTIONS, website_url
 from hailhq.mcp.tools import TaggedFastMCP, register_tools
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -69,18 +72,32 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     if mode is AuthMode.OAUTH_RS and not settings.mcp_resource_url:
         raise RuntimeError("oauth-rs mode requires MCP_RESOURCE_URL to be set")
 
-    # The website owns branding. Advertise a stable endpoint and resolve its
-    # current raster icon from the web manifest when a client requests it.
+    # The website owns branding. Advertise stable endpoints and resolve the
+    # current icons from the web manifest when a client requests them. Raster
+    # first: some clients cannot draw SVG. The vector entry's type and size
+    # are safe to state because its route only redirects to an SVG.
     manifest_url = (
         join_url(settings.hail_base_url, "site.webmanifest")
         if settings.hail_base_url
         else None
     )
     icons = (
-        [Icon(src=join_url(settings.mcp_resource_url, "favicon.ico"))]
+        [
+            Icon(src=join_url(settings.mcp_resource_url, "favicon.ico")),
+            Icon(
+                src=join_url(settings.mcp_resource_url, "icon.svg"),
+                mimeType="image/svg+xml",
+                sizes=["any"],
+            ),
+        ]
         if manifest_url and settings.mcp_resource_url
         else None
     )
+    metadata = {
+        "instructions": INSTRUCTIONS,
+        "website_url": website_url(),
+        "icons": icons,
+    }
 
     if mode is AuthMode.OAUTH_RS:
         verifier = PassThroughVerifier(resource_server_url=settings.mcp_resource_url)
@@ -88,10 +105,12 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             issuer_url=settings.hail_auth_url,
             resource_server_url=settings.mcp_resource_url,
             required_scopes=None,  # scope enforcement deferred to Phase 2
+            # The API checks the token's audience; PassThroughVerifier does not.
+            validate_token_resource=False,
         )
         mcp_app: FastMCP = TaggedFastMCP(
             name="hail",
-            icons=icons,
+            **metadata,
             streamable_http_path="/",
             host="0.0.0.0",
             token_verifier=verifier,
@@ -103,7 +122,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     else:
         # static-key: pre-1c shape.
         mcp_app = TaggedFastMCP(
-            name="hail", icons=icons, streamable_http_path="/", host="0.0.0.0"
+            name="hail", **metadata, streamable_http_path="/", host="0.0.0.0"
         )
         singleton = HailClient()
 
@@ -114,7 +133,8 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
-    async def favicon(_request: Request) -> Response:
+    async def manifest_icon(types: set[str]) -> Response:
+        """Redirect to the first manifest icon of one of ``types``."""
         if not manifest_url:
             return Response(status_code=404)
         try:
@@ -124,10 +144,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             manifest = response.json()
             entries = manifest.get("icons", []) if isinstance(manifest, dict) else []
             for icon in entries if isinstance(entries, list) else []:
-                if not isinstance(icon, dict) or icon.get("type") not in {
-                    "image/png",
-                    "image/jpeg",
-                }:
+                if not isinstance(icon, dict) or icon.get("type") not in types:
                     continue
                 src = icon.get("src")
                 if not isinstance(src, str) or not src:
@@ -141,6 +158,12 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         except (httpx.HTTPError, ValueError):
             pass
         return Response(status_code=503)
+
+    async def favicon(_request: Request) -> Response:
+        return await manifest_icon({"image/png", "image/jpeg"})
+
+    async def vector_icon(_request: Request) -> Response:
+        return await manifest_icon({"image/svg+xml"})
 
     async def openai_apps_challenge(_request: Request) -> Response:
         return PlainTextResponse("POAuiIrWlgcsgNoQiGI4OhKFQLOqtQoDpweSKl4fGkY")
@@ -168,6 +191,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/favicon.ico", favicon, methods=["GET"]),
+            Route("/icon.svg", vector_icon, methods=["GET"]),
             Route(
                 "/.well-known/openai-apps-challenge",
                 openai_apps_challenge,
