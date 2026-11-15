@@ -92,6 +92,7 @@ Some changes only work when they ship in a fixed order. Follow these every time.
 
 1. **Monday cost jobs.** They run in a fixed order, each writing its own files. The table and rules are in [costs/README.md](costs/README.md#weekly-jobs-in-order).
 2. **hail before hail-website.** A change that spans both repos merges and deploys in hail first: migrations, API fields, endpoints, `costs/*.json` (hail-website reads them from `main`). Merge the hail-website PR only after the hail deploy finishes. The hail-website code must never call something hail does not serve yet.
+   - Exception: hail code that calls a new hail-website route merges after that route is deployed. Example: the call price quote (`POST /api/internal/voice-rates/quote`) ships in hail-website first, then the hail call balance cap that calls it. In the other order, every billed call and handover falls back to the default limit until the route is live.
 3. **Per-destination call pricing.** The PRs merge in this order, each after the one before is deployed:
    1. hail: carrier call rates in `costs/voice.json` and the weekly sync.
    2. hail: the real carrier cost of each call leg.
