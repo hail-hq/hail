@@ -62,7 +62,7 @@ class Analytics:
         try:
             await asyncio.wait_for(self._handle.flush(), _FLUSH_SECONDS)
             await asyncio.to_thread(self._client.flush, _FLUSH_SECONDS)
-        except Exception:  # noqa: BLE001 - analytics must never break shutdown
+        except Exception:  # analytics must never break shutdown
             logger.warning("PostHog MCP analytics flush failed", exc_info=True)
 
 
@@ -86,6 +86,6 @@ def instrument_analytics(server: Any) -> Analytics | None:
             server_build=settings.logfire_service_version or None,
         )
         return Analytics(client, instrument(server, client, options))
-    except Exception:  # noqa: BLE001 - analytics must never block startup
+    except Exception:  # analytics must never block startup
         logger.warning("PostHog MCP analytics setup failed", exc_info=True)
         return None
