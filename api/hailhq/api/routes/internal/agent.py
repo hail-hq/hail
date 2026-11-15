@@ -1863,7 +1863,7 @@ async def agent_handover(
 
 async def _handover_cap(
     db: AsyncSession, call: Call, to_e164: str, hail_number: str | None
-) -> int:
+) -> int | None:
     """The handover's time limit from the balance (0: not one minute), and
     the call's hold grown to cover it (hailhq.core.call_allowance). The time
     already talked and the ring are priced as the call alone; the handover
@@ -1890,9 +1890,10 @@ async def _handover_cap(
         quote_call_price(org, [main, second], recording),
     )
     if alone is None or both is None:
-        # As for a call: the default limit, nothing held.
+        # As for a call: the default limit, nothing held. A default of 0 means
+        # no limit: the agent's own handover limit applies.
         logger.warning("handover price unknown for call %s; default limit", call.id)
-        return settings.hail_voice_max_duration_seconds
+        return settings.hail_voice_max_duration_seconds or None
     per_minute, per_call = both
     # The agent's own handover limit: the voicebot stops the handover there.
     limit = handover_limit(
