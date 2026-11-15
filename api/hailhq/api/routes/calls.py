@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -24,7 +25,7 @@ from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.consent import enforce_consent, isoformat_or_none
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
-from hailhq.api.funds import FUNDS_RESPONSES, require_funds
+from hailhq.api.funds import BILLING_URL, FUNDS_RESPONSES, require_funds
 from hailhq.api.idempotency import (
     IdempotencyContext,
     cache_failure,
@@ -40,13 +41,25 @@ from hailhq.api.ratelimit import (
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.billing import CALL_META_BILLED
+from hailhq.core.call_allowance import (
+    available_cents,
+    cap_seconds,
+    hold,
+    hold_until,
+    minutes_affordable,
+    paid_minutes,
+)
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
-from hailhq.core.db import get_session
-from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS, handover_targets
-from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.db import get_session, org_lock
+from hailhq.core.handover import handover_limit, handover_targets
+from hailhq.core.internal_webhook import (
+    fetch_organization_name,
+    quote_call_price,
+    quotes_enabled,
+)
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import LiveKitClient, WorkerGaveUp
 from hailhq.core.models import (
@@ -165,6 +178,57 @@ async def close_livekit_singleton() -> None:
         _livekit_singleton = None
 
 
+_NO_FUNDS_FOR_DESTINATION = (
+    "insufficient credits for one minute to this destination; "
+    f"top up at {BILLING_URL}"
+)
+
+
+async def _cap_to_balance(
+    db: AsyncSession,
+    principal: Principal,
+    idem: IdempotencyContext | None,
+    call_metadata: dict,
+    max_duration_seconds: int,
+    *,
+    legs: list[dict[str, str]],
+) -> tuple[int, tuple[Decimal, datetime] | None]:
+    """Shorten the call's time limit to what the balance pays for, and the
+    hold to set aside for it (cents, until; see hailhq.core.call_allowance).
+    Takes the org lock, held until the call row is committed. 402 when the
+    balance does not pay for one minute. When the price is unknown (the
+    quote failed), the limit is at most the default and nothing is held."""
+    org = principal.organization_id
+    quote = await quote_call_price(
+        str(org), legs, bool(call_metadata.get("recording_enabled"))
+    )
+    if quote is None:
+        logger.warning("call price unknown for org %s; default limit", org)
+        return (
+            min(max_duration_seconds, settings.hail_voice_max_duration_seconds),
+            None,
+        )
+    per_minute, per_call = quote
+    await org_lock(db, org)
+    now = datetime.now(timezone.utc)
+    minutes = minutes_affordable(
+        await available_cents(db, org, now=now), per_minute, per_call
+    )
+    if minutes < 1:
+        await db.rollback()
+        # Not cached under the idempotency key: a retry after a top-up must
+        # place the call.
+        if idem is not None:
+            await idem.release()
+        raise HTTPException(
+            status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+            detail=_NO_FUNDS_FOR_DESTINATION,
+        )
+    seconds = min(max_duration_seconds, cap_seconds(minutes))
+    billed = paid_minutes(seconds)
+    return seconds, (per_minute * billed + per_call, hold_until(now, seconds))
+
+
 async def _cleanup_partial_livekit(
     lk: LiveKitClient,
     room_name: str | None,
@@ -208,7 +272,14 @@ async def _cleanup_partial_livekit(
         **merge_rate_limited_responses(
             RATE_LIMITED_RESPONSES, GENERAL_RATE_LIMITED_RESPONSES
         ),
-        **FUNDS_RESPONSES,
+        402: {
+            **FUNDS_RESPONSES[402],
+            "description": FUNDS_RESPONSES[402]["description"]
+            + ". Also returned when the credit left, less what live calls "
+            "have set aside, pays for less than one minute to this "
+            "destination. A call's time limit is cut to the minutes the "
+            "credit pays for.",
+        },
     },
 )
 async def create_call(
@@ -477,6 +548,23 @@ async def create_call(
     ai_disclosure_line = (agent.ai_disclosure_line if agent else None) or (
         org_call_settings.ai_disclosure_line if org_call_settings else None
     )
+    balance_hold = None
+    if call_metadata[CALL_META_BILLED] and quotes_enabled():
+        max_duration_seconds, balance_hold = await _cap_to_balance(
+            db,
+            principal,
+            idem,
+            call_metadata,
+            max_duration_seconds,
+            legs=[
+                {
+                    "direction": "outbound",
+                    "carrier": from_number.provider,
+                    "number_e164": body.to,
+                    "caller_e164": from_number.e164,
+                }
+            ],
+        )
     call = Call(
         organization_id=principal.organization_id,
         agent_id=agent.id if agent else None,
@@ -493,9 +581,12 @@ async def create_call(
         metadata_=call_metadata,
     )
     db.add(call)
-    if pool_number is not None:
+    if pool_number is not None or balance_hold is not None:
         await db.flush()  # materialize call.id so the FK target exists.
+    if pool_number is not None:
         pool_number.reserved_call_id = call.id
+    if balance_hold is not None:
+        await hold(db, call.id, *balance_hold)
 
     await db.commit()
     await db.refresh(call)
@@ -598,10 +689,7 @@ async def create_call(
                 "handover_targets": await handover_targets(
                     db, agent.id if agent else None, call.to_e164
                 ),
-                "handover_max_duration_seconds": (
-                    agent.handover_max_duration_seconds if agent else None
-                )
-                or HANDOVER_DEFAULT_MAX_SECONDS,
+                "handover_max_duration_seconds": handover_limit(agent),
                 "org_name": await org_name_task,
             },
         )

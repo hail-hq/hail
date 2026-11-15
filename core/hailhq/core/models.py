@@ -870,6 +870,31 @@ class Call(Base):
         return value if isinstance(value, str) else "disabled"
 
 
+class CallBalanceHold(Base):
+    """Money a live call sets aside from the balance (migration 0079). One
+    row per call; the amount and the end time only grow. See
+    hailhq.core.call_allowance."""
+
+    __tablename__ = "call_balance_holds"
+
+    call_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), primary_key=True
+    )
+    cents: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
+    hold_until: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # Handover dials approved for the call; each may bill the second line.
+    dials: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
+        CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
+        Index("call_balance_holds_until_idx", "hold_until"),
+    )
+
+
 class CallEvent(Base):
     __tablename__ = "call_events"
 

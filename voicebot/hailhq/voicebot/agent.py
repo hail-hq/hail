@@ -736,20 +736,25 @@ def make_agent_bridge(
         # handover limit counts from now. A cap that already fired
         # (announcing now) is left to finish.
         soft_cap = bridge_state.pop("soft_cap_task", None)
-        if (
-            soft_cap is not None
-            and not soft_cap.done()
-            and not bridge_state.get("soft_cap_fired")
-        ):
-            soft_cap.cancel()
-            await asyncio.gather(soft_cap, return_exceptions=True)
-            if handover_seconds > 0:
+        if not bridge_state.get("soft_cap_fired"):
+            if soft_cap is not None and not soft_cap.done():
+                soft_cap.cancel()
+                await asyncio.gather(soft_cap, return_exceptions=True)
+            # Armed even when the call had no cap of its own: the balance
+            # cap (route.max_seconds) must always apply.
+            limit = handover_seconds
+            if route.max_seconds:
+                # The balance pays for no more than this.
+                limit = (
+                    min(limit, route.max_seconds) if limit > 0 else route.max_seconds
+                )
+            if limit > 0:
                 bridge_state["soft_cap_task"] = asyncio.create_task(
                     soft_cap_announce_and_hangup(
                         ctx,
                         session,
                         call_id,
-                        handover_seconds,
+                        limit,
                         on_fire=on_cap_fired,
                         bridge_state=bridge_state,
                         language=language,

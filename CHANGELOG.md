@@ -63,6 +63,7 @@ Database migrations run on deploy.
 
 ### Changed
 
+- Calls: on Hail's cloud, a call's time limit is cut to the minutes your credit pays for, and `POST /v1/calls` returns 402 when it pays for less than one minute to that destination.
 - Agent texts and emails are no longer limited to 5 per call; each is billed as usual.
 - **Breaking.** A hail-mail user prefix now belongs to one organization (`409` if taken), and mail to `<user>@` or `<user>+<any alias>@` reaches that organization.
 - **Breaking.** An organization holds one hail-mail address, role names such as `admin` cannot be new user prefixes, and an address given up stays out of reach of other organizations.
