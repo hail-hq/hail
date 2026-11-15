@@ -180,13 +180,14 @@ def test_inbound_masks_the_sender_and_keeps_the_hail_number():
 @pytest.mark.parametrize(
     "name, attributes",
     [
-        ("MCP server handle request: ping", {}),
-        ("MCP server handle request: tools/list", {}),
-        ("MCP server handle request: prompts/list", {}),
-        ("MCP server handle request: resources/list", {}),
-        ("MCP server handle request: resources/templates/list", {}),
         ("ping", {"mcp.method.name": "ping"}),
         ("tools/list", {"mcp.method.name": "tools/list"}),
+        ("prompts/list", {"mcp.method.name": "prompts/list"}),
+        ("resources/list", {"mcp.method.name": "resources/list"}),
+        (
+            "resources/templates/list",
+            {"mcp.method.name": "resources/templates/list"},
+        ),
         ("GET /", {"http.route": "/"}),
         (
             "GET /.well-known/oauth-protected-resource",

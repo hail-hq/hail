@@ -211,8 +211,6 @@ def _is_noise(span: ReadableSpan, *, mcp: bool) -> bool:
         return True
     if not mcp:
         return False
-    if span.name.startswith("MCP server handle request: "):
-        return span.name.rsplit(": ", 1)[1] in _MCP_NOISE_METHODS
     # mcp 2 names its own request spans after the method and sets this.
     method = attributes.get("mcp.method.name")
     if isinstance(method, str):

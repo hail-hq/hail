@@ -327,7 +327,7 @@ async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
-    """The safelist is only initialize and tools/list — tools/call must still require
+    """tools/call is not in the discovery safelist and must still require
     auth. No lifespan needed here: like the pre-existing ping/401 test,
     auth is rejected before the request ever reaches MCPServer's
     session-manager-dependent streamable handler."""

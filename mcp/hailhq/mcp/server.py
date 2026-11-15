@@ -101,12 +101,12 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     }
 
     if mode is AuthMode.OAUTH_RS:
-        verifier = PassThroughVerifier(resource_server_url=settings.mcp_resource_url)
         # mcp 1.x parsed this as a plain AnyHttpUrl, which adds "/" to a bare
         # host, so clients have always seen "resource": "https://mcp.hail.so/".
         # mcp 2 keeps the string as given; parse it the old way to publish the
         # same value. The API and the website accept both forms.
         resource_url = str(AnyHttpUrl(settings.mcp_resource_url))
+        verifier = PassThroughVerifier(resource_server_url=resource_url)
         auth_settings = AuthSettings(
             issuer_url=settings.hail_auth_url,
             resource_server_url=resource_url,
@@ -132,9 +132,10 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
     # turn on its localhost-only Host check (see tests/test_server.py).
-    # No session count limit, as with mcp 1.x: a caller with any bearer can
-    # open sessions, so a fixed limit would let one caller lock everyone out
-    # with 503. Idle sessions still close after the SDK's 30-minute timeout.
+    # No session count limit (mcp 1.30 capped it at 10 000 by default): a
+    # caller with any bearer can open sessions, so a fixed limit would let one
+    # caller lock everyone out with 503. Idle sessions still close after the
+    # SDK's 30-minute timeout.
     http_app = mcp_app.streamable_http_app(
         streamable_http_path="/", host="0.0.0.0", max_sessions=None
     )

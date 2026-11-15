@@ -955,7 +955,7 @@ async def test_attestation_is_strict_through_the_real_entry_point(
 async def test_wrong_shapes_through_the_real_entry_point_echo_nothing(
     monkeypatch, override
 ) -> None:
-    # FastMCP's own validation would print ``input_value=...``; the shape
+    # MCPServer's own validation would print ``input_value=...``; the shape
     # check inside the tool must run instead and name the argument only.
     srv = await _real_server(monkeypatch)
     route = respx.route().mock(return_value=httpx.Response(500))

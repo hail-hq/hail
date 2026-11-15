@@ -46,6 +46,8 @@ import time
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
+from mcp.shared.inbound import MCP_PROTOCOL_VERSION_HEADER
 from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
 
 _DISCOVERY_METHODS = frozenset(
@@ -85,14 +87,14 @@ _MAX_PEEK_SECONDS = 5.0
 
 # Anonymous "initialize" rate cap. MCPServer's session manager (mcp 2)
 # reaps a session only after 30 idle minutes, and an open GET stream holds
-# it open past that (server.py turns its session count limit off). A real "initialize" call through this safelist creates
-# a real, stateful session. Without a cap, an unauthenticated caller can
-# loop "initialize" and pile up sessions faster than they expire — a
-# resource-exhaustion vector distinct from _MAX_PEEK_BYTES above (that
-# bounds per-request memory, not session count). Not applied to "tools/list" or
-# "notifications/initialized": they are only safelisted when they carry an
-# Mcp-Session-Id header (_SESSION_REQUIRED_METHODS), so they cannot create a
-# session. The cap only
+# it open past that (server.py turns its session count limit off). A real
+# "initialize" call through this safelist creates a real, stateful session.
+# Without a cap, an unauthenticated caller can loop "initialize" and pile up
+# sessions faster than they expire — a resource-exhaustion vector distinct
+# from _MAX_PEEK_BYTES above (that bounds per-request memory, not session
+# count). Not applied to _SESSION_REQUIRED_METHODS: they are only safelisted
+# with an Mcp-Session-Id header or on the newer protocol, so they cannot
+# create a session. The cap only
 # bounds requests with no Authorization header — PassThroughVerifier accepts
 # any non-empty bearer, so it guards against accidental floods, not against
 # a client that adds a junk Authorization header.
@@ -109,8 +111,10 @@ _ANON_INIT_PRUNE_THRESHOLD = 1024
 _anon_init_counts: dict[str, tuple[int, float]] = {}
 
 
-def _header(scope: Scope, name: bytes) -> bytes | None:
-    return next((v for k, v in scope.get("headers", []) if k.lower() == name), None)
+def _header(scope: Scope, name: str) -> bytes | None:
+    # Exact match on the raw name, as the SDK session manager does.
+    key = name.encode("ascii")
+    return next((v for k, v in scope.get("headers", []) if k == key), None)
 
 
 def _opens_no_session(scope: Scope) -> bool:
@@ -120,7 +124,7 @@ def _opens_no_session(scope: Scope) -> bool:
     MCP-Protocol-Version header names anything but an initialize-handshake
     version goes to the 2026-07-28 single-exchange handler.
     """
-    version = _header(scope, b"mcp-protocol-version")
+    version = _header(scope, MCP_PROTOCOL_VERSION_HEADER)
     return (
         version is not None
         and version.decode("latin-1") not in HANDSHAKE_PROTOCOL_VERSIONS
@@ -244,7 +248,7 @@ class DiscoveryAuthMiddleware:
 
         if (
             method in _SESSION_REQUIRED_METHODS
-            and _header(scope, b"mcp-session-id") is None
+            and _header(scope, MCP_SESSION_ID_HEADER) is None
             and not _opens_no_session(scope)
         ):
             method = None
