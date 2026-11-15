@@ -235,11 +235,11 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
             organization_id=org,
             channel="voice",
             units=60_000,
-            ref=(
-                f"{calls[name][0].id}:recording-v1"
-                if name == "debited"
-                else str(calls[name][0].id)
-            ),
+            # Any ':suffix' after the call id matches, as the rater parses it.
+            ref={
+                "debited": f"{calls[name][0].id}:recording-v1",
+                "unpriced": f"{calls[name][0].id}:some-later-suffix",
+            }.get(name, str(calls[name][0].id)),
             priced_at=now if name in ("debited", "free") else None,
         )
         for name in ("debited", "free", "unpriced", "unpriced_stale")

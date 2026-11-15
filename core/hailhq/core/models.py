@@ -235,7 +235,8 @@ class UsageEvent(Base):
     analytics primitive they can query directly.
 
     ``ref`` formats (the rater's parsing contract):
-      * voice: bare call UUID
+      * voice: bare call UUID, or ``{uuid}:recording-v1`` for a recorded
+               call (``billing.RECORDING_USAGE_REF_SUFFIX``)
       * sms:   ``sms:{uuid}:{tier}`` where tier is us/ca/row
                (rows written before the tiered rates shipped are bare
                ``sms:{uuid}``; the rater must treat those as ``us``)
@@ -271,7 +272,7 @@ class UsageEvent(Base):
         Index(
             "usage_events_voice_ref_idx",
             "organization_id",
-            "ref",
+            text("split_part(ref, ':', 1)"),
             postgresql_where=text("channel = 'voice'"),
         ),
     )

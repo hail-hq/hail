@@ -20,7 +20,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX, get_ledger_cents
+from hailhq.core.billing import get_ledger_cents
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, func, select, text
@@ -101,7 +101,8 @@ def hold_until(now: datetime, seconds: int) -> datetime:
 #   voicebot writes the row with the final status, so a call still without
 #   one (0 ms, or closed by another writer) is not billed.
 # A call in a final status with no end time counts from its last update.
-# The ref match is exact so it uses usage_events_voice_ref_idx.
+# A voice ref is the call id, plus an optional ':<suffix>' (the rater
+# parses it the same way); usage_events_voice_ref_idx serves the match.
 _HELD_SQL = text("""
     SELECT COALESCE(SUM(h.cents), 0)
     FROM call_balance_holds h
@@ -119,7 +120,7 @@ _HELD_SQL = text("""
             FROM usage_events u
             WHERE u.organization_id = :org
               AND u.channel = 'voice'
-              AND u.ref IN (c.id::text, c.id::text || :recording_suffix)
+              AND split_part(u.ref, ':', 1) = c.id::text
           )
             WHEN true THEN h.hold_until > :unpriced_until
             WHEN false THEN false
@@ -148,7 +149,6 @@ async def held_cents(
             "now": now,
             "debit_window": now - timedelta(seconds=HOLD_GRACE_SECONDS),
             "unpriced_until": now - timedelta(days=UNPRICED_HOLD_DAYS),
-            "recording_suffix": RECORDING_USAGE_REF_SUFFIX,
             "terminal": sorted(TERMINAL_CALL_STATUSES),
         },
     )
@@ -182,7 +182,7 @@ async def hold(
     counts one more approved handover dial. Also deletes up to 100 holds a
     day past their end, skipping rows another transaction has locked, so no
     call waits on another's cleanup."""
-    await db.execute(_PRUNE_SQL)
+    await db.execute(_PRUNE_SQL, {"days": UNPRICED_HOLD_DAYS})
     stmt = insert(CallBalanceHold).values(
         call_id=call_id,
         cents=round_up_tenth(cents),
@@ -217,7 +217,7 @@ _PRUNE_SQL = text("""
     DELETE FROM call_balance_holds
     WHERE call_id IN (
       SELECT call_id FROM call_balance_holds
-      WHERE hold_until < now() - interval '1 day'
+      WHERE hold_until < now() - make_interval(days => :days)
       LIMIT 100
       FOR UPDATE SKIP LOCKED
     )
