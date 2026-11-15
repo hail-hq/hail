@@ -772,7 +772,9 @@ async def quote_numbers(
     Recommends a ready offer with the lowest monthly rent, then setup cost.
     Blocked offers sort by verification effort. SMS capability does not waive
     messaging registration requirements. `provider` is ignored: Hail compares
-    every carrier.
+    every carrier. A US or Canada `toll_free` search that asks for `sms`
+    returns only carriers whose toll-free numbers Hail can register for
+    texting.
 
     A number support orders by hand comes back as an offer with
     `by_request: true` and no `e164`, after the offers you can buy. It is never

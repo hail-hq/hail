@@ -1054,6 +1054,29 @@ async def test_unverified_tollfree_is_gated_and_non_us_longcode_is_not(
     assert resp.status_code == 201, resp.text
 
 
+async def test_unverifiable_tollfree_is_refused_to_the_us_and_canada(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    # Hail cannot verify toll-free texting at this carrier: the carrier would
+    # block the text, so Hail refuses it with a clear message.
+    org_id, _, key = org_and_key
+    await _seed_dedicated_number(
+        async_session,
+        org_id,
+        e164="+18005550102",
+        number_type="toll_free",
+        provider="telnyx",
+        register_sms=False,
+    )
+    headers = {"Authorization": f"Bearer {key}"}
+    resp = await client.post(
+        "/sms", json=_us_text(**{"from": "+18005550102"}), headers=headers
+    )
+    assert resp.status_code == 422, resp.text
+    assert "cannot text the US or Canada" in resp.text
+    sms_mock.send_sms.assert_not_awaited()
+
+
 async def test_territory_tollfree_is_not_gated_as_10dlc(
     client, async_session, org_and_key, sms_mock
 ) -> None:

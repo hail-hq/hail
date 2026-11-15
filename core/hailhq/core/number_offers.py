@@ -19,10 +19,22 @@ __all__ = [
     "by_request_offers",
     "discover_offers",
     "rank_offers",
+    "toll_free_sms_ok",
 ]
 
 # Every carrier, in the order ``CARRIERS`` lists them.
 PROVIDERS = tuple(CARRIERS)
+
+
+def toll_free_sms_ok(
+    provider: str, country: str, kind: str, capabilities: list[str]
+) -> bool:
+    """False for a US/CA toll-free number asked for SMS from a carrier Hail
+    cannot verify toll-free texting with: that number could never text, so
+    it is not offered. Calls-only searches keep every carrier."""
+    return "sms" not in capabilities or not telephony_catalog.tollfree_sms_unverifiable(
+        provider, country, kind
+    )
 
 
 def rank_offers(
@@ -70,7 +82,11 @@ async def discover_offers(
     """Live offers from ``providers`` (every carrier by default) and the
     carriers whose lookup failed. ``approvals`` is the org's approved Hail
     verifications per carrier (``approved_handles``)."""
-    asked = [p for p in PROVIDERS if p in providers]
+    asked = [
+        p
+        for p in PROVIDERS
+        if p in providers and toll_free_sms_ok(p, country, kind, capabilities)
+    ]
     approvals = approvals or {}
     results = await asyncio.gather(
         *(
@@ -98,6 +114,15 @@ async def discover_offers(
                 "Carrier discovery failed: provider=%s", provider, exc_info=result
             )
             unavailable.append(provider)
+        elif telephony_catalog.tollfree_sms_unverifiable(provider, country, kind):
+            # The carrier sells SMS on it, but Hail cannot verify it for
+            # toll-free texting: never show it as able to text.
+            offers.extend(
+                o.model_copy(
+                    update={"capabilities": [c for c in o.capabilities if c != "sms"]}
+                )
+                for o in result
+            )
         else:
             offers.extend(result)
     return rank_offers(offers), unavailable
@@ -125,12 +150,14 @@ def by_request_offers(
     marks it ready when the org already has an approved verification."""
     out: list[CarrierOffer] = []
     for name in PROVIDERS:
-        if name not in configured:
+        if name not in configured or not toll_free_sms_ok(
+            name, country, kind, capabilities
+        ):
             continue
         row = telephony_catalog.by_request_row(country, kind, name)
         if row is None:
             continue
-        has = telephony_catalog.effective_capabilities(row, name)
+        has = telephony_catalog.effective_capabilities(row, name, country, kind)
         if not by_request_quotable(has, capabilities):
             continue
         needs = bool(row.get("verification_required"))

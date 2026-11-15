@@ -105,6 +105,37 @@ async def test_tollfree_carrier_route_requires_owned_number_and_matches_type(
     assert exc.value.status_code == 404
 
 
+async def test_tollfree_route_refuses_carrier_without_tollfree_verification(
+    async_session,
+):
+    from fastapi import HTTPException
+
+    org_id = uuid4()
+    number = PhoneNumber(
+        organization_id=org_id,
+        provider="telnyx",
+        provider_resource_id="TX1",
+        e164="+18005550199",
+        country_code="US",
+        number_type="toll_free",
+        capabilities=["voice", "sms"],
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await routes._sms_provider_name(
+            async_session,
+            org_id,
+            number.id,
+            "body",
+            country_code="US",
+            number_type="toll_free",
+        )
+    assert exc.value.status_code == 422
+    assert "not available for this number" in str(exc.value.detail)
+
+
 async def test_tollfree_to_us_and_canada_waits_for_exact_approved_number(async_session):
     org_id = uuid4()
     number = PhoneNumber(
