@@ -1437,16 +1437,18 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
 
 @respx.mock
 @pytest.mark.parametrize(
-    "extra",
+    ("extra", "version"),
     [
-        {"consent_methods": "WEBSITE", "website_url": "https://example.com/join"},
-        {"consent_methods": "KEYWORD", "keyword_keyword": "JOIN"},
+        ({}, 1),
+        ({"consent_methods": "WEBSITE", "website_url": "https://example.com/j"}, 2),
+        ({"consent_methods": "KEYWORD", "keyword_keyword": "JOIN"}, 2),
     ],
 )
-async def test_preview_sms_application_accepts_version_2_text(
-    client: HailClient, extra: dict[str, str]
+async def test_preview_sms_application_accepts_every_text_version(
+    client: HailClient, extra: dict[str, str], version: int
 ) -> None:
-    # A form that lists its consent methods compiles to text version 2.
+    # Built by the real campaign_text: a version it starts writing that the
+    # MCP does not know fails here.
     fields = {
         "text_types": "ACCOUNT_NOTIFICATION",
         "campaign_description": "Account notices for signed-up customers.",
@@ -1457,7 +1459,7 @@ async def test_preview_sms_application_accepts_version_2_text(
         **extra,
     }
     preview = asdict(campaign_text(fields, "business"))
-    assert preview["schema_version"] == 2
+    assert preview["schema_version"] == version
     respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
         return_value=httpx.Response(200, json=preview)
     )

@@ -914,11 +914,6 @@ def _structured_flow(fields: dict[str, str]) -> str:
     return "\n".join(p for p in parts if p)
 
 
-# Every schema_version campaign_text writes: 2 for a form that lists its
-# consent methods, 1 for one that does not. Readers accept exactly these.
-CAMPAIGN_TEXT_VERSIONS = frozenset({1, 2})
-
-
 @dataclass(frozen=True)
 class CampaignText:
     use_case: str
