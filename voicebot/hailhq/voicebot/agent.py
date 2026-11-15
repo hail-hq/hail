@@ -40,6 +40,7 @@ from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
+from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.call_legs import record_call_legs
@@ -2044,7 +2045,7 @@ async def on_call_end(
                 channel="voice",
                 units=duration_ms,
                 ref=(
-                    f"{call_id}:recording-v1"
+                    f"{call_id}{RECORDING_USAGE_REF_SUFFIX}"
                     if (call_metadata or {}).get("recording_enabled")
                     else str(call_id)
                 ),

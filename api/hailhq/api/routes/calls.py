@@ -228,6 +228,19 @@ async def _cap_to_balance(
         # place the call.
         if idem is not None:
             await idem.release()
+        # Logged like the compliance gate's denials, so support can tell
+        # why the call was refused. Written in its own session.
+        actor_user_id, actor_kind = actor_of(principal)
+        await write_audit_log(
+            organization_id=org,
+            api_key_id=principal.api_key_id,
+            action="call.blocked",
+            resource_type="call",
+            resource_id=None,
+            payload={"to": legs[0]["number_e164"], "reason": "insufficient_funds"},
+            actor_user_id=actor_user_id,
+            actor_kind=actor_kind,
+        )
         raise HTTPException(
             status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
             detail=_NO_FUNDS_FOR_DESTINATION,

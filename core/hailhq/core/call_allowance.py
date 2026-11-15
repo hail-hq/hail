@@ -20,7 +20,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from hailhq.core.billing import get_ledger_cents
+from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX, get_ledger_cents
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, func, select, text
@@ -42,8 +42,11 @@ HANDOVER_MIN_SECONDS = 60
 # voicebot test keeps those two within this.
 HANDOVER_PICKUP_SECONDS = 30
 # How long a hold outlives the call's planned end (a stuck call), and how
-# long a billed call's hold waits for its debit after the call ends.
+# long a billed call's hold waits for its usage row after the call ends.
 HOLD_GRACE_SECONDS = 300
+# A billed call whose usage row the rater never prices stops holding this
+# long after hold_until: the age at which _PRUNE_SQL deletes the hold.
+UNPRICED_HOLD_DAYS = 1
 
 
 def round_up_tenth(cents: Decimal) -> Decimal:
@@ -86,31 +89,43 @@ def hold_until(now: datetime, seconds: int) -> datetime:
     return now + timedelta(seconds=seconds + SAFETY_SECONDS + HOLD_GRACE_SECONDS)
 
 
-# A hold counts while it has not expired and either the call is live, or it
-# ended within the grace as a billable call (the voicebot bills a call that
-# was answered or completed) and its debit is not written yet. A call in a
-# final status with no end time counts from its last update.
+# A hold counts while:
+# - the call is live and the hold has not expired (a stuck call stops at
+#   hold_until);
+# - the call ended billable (the voicebot bills a call that was answered or
+#   completed) and its usage row is not priced yet. The rater writes the
+#   debit and stamps priced_at in one transaction, and stamps a 0-cent row
+#   with no debit. A row it never prices stops counting UNPRICED_HOLD_DAYS
+#   after hold_until;
+# - the call ended billable with no usage row, within the grace. The
+#   voicebot writes the row with the final status, so a call still without
+#   one (0 ms, or closed by another writer) is not billed.
+# A call in a final status with no end time counts from its last update.
+# The ref match is exact so it uses usage_events_voice_ref_idx.
 _HELD_SQL = text("""
     SELECT COALESCE(SUM(h.cents), 0)
     FROM call_balance_holds h
     JOIN calls c ON c.id = h.call_id
     WHERE c.organization_id = :org
-      AND h.hold_until > :now
       AND h.call_id IS DISTINCT FROM :exclude
       AND (
-        (c.ended_at IS NULL AND c.status NOT IN :terminal)
+        (c.ended_at IS NULL AND c.status NOT IN :terminal
+         AND h.hold_until > :now)
         OR (
-          (c.answered_at IS NOT NULL OR c.status = 'completed')
-          AND COALESCE(c.ended_at, c.updated_at) > :debit_window
-          AND NOT EXISTS (
-            SELECT 1 FROM usage_events u
-            JOIN account_credits a
-              ON a.organization_id = :org
-             AND a.ref = 'usage_event:' || u.id::text
+          (c.ended_at IS NOT NULL OR c.status IN :terminal)
+          AND (c.answered_at IS NOT NULL OR c.status = 'completed')
+          AND CASE (
+            SELECT bool_or(u.priced_at IS NULL)
+            FROM usage_events u
             WHERE u.organization_id = :org
               AND u.channel = 'voice'
-              AND u.ref LIKE c.id::text || '%'
+              AND u.ref IN (c.id::text, c.id::text || :recording_suffix)
           )
+            WHEN true THEN h.hold_until > :unpriced_until
+            WHEN false THEN false
+            ELSE h.hold_until > :now
+              AND COALESCE(c.ended_at, c.updated_at) > :debit_window
+          END
         )
       )
 """).bindparams(bindparam("terminal", expanding=True))
@@ -132,6 +147,8 @@ async def held_cents(
             "exclude": exclude,
             "now": now,
             "debit_window": now - timedelta(seconds=HOLD_GRACE_SECONDS),
+            "unpriced_until": now - timedelta(days=UNPRICED_HOLD_DAYS),
+            "recording_suffix": RECORDING_USAGE_REF_SUFFIX,
             "terminal": sorted(TERMINAL_CALL_STATUSES),
         },
     )

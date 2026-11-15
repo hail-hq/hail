@@ -22,6 +22,7 @@ from hailhq.core.models import (
     AccountCredit,
     Agent,
     AgentHandoverContact,
+    AuditLog,
     Call,
     CallBalanceHold,
     Contact,
@@ -171,11 +172,12 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
     }
     ended = {"status": "completed", "end_reason": "normal_hangup"}
     two_min = now - timedelta(minutes=2)
+    hour = now - timedelta(hours=1)
     calls = {
         "live": (Call(**base, status="in_progress"), 10),
         # Expired hold (a stuck call): not counted.
         "expired": (Call(**base, status="in_progress"), -1),
-        # Ended long ago: the debit is in the ledger already.
+        # Ended long ago with no usage row: never billed.
         "old": (
             Call(
                 **base,
@@ -208,6 +210,15 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
             10,
         ),
         "debited": (Call(**base, **ended, answered_at=two_min, ended_at=now), 10),
+        # Priced at 0 cents: no debit row, nothing more to come.
+        "free": (Call(**base, **ended, answered_at=two_min, ended_at=now), 10),
+        # Usage row not priced yet (a slow rater): counts past the grace and
+        # past hold_until, up to a day after it.
+        "unpriced": (Call(**base, **ended, answered_at=hour, ended_at=hour), -60),
+        "unpriced_stale": (
+            Call(**base, **ended, answered_at=hour, ended_at=hour),
+            -2 * 24 * 60,
+        ),
     }
     async_session.add_all([c for c, _ in calls.values()])
     await async_session.flush()
@@ -219,14 +230,21 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
                 hold_until=now + timedelta(minutes=minutes_left),
             )
         )
-    debited = calls["debited"][0]
-    usage = UsageEvent(
-        organization_id=org,
-        channel="voice",
-        units=60_000,
-        ref=f"{debited.id}:recording-v1",
-    )
-    async_session.add(usage)
+    usage = {
+        name: UsageEvent(
+            organization_id=org,
+            channel="voice",
+            units=60_000,
+            ref=(
+                f"{calls[name][0].id}:recording-v1"
+                if name == "debited"
+                else str(calls[name][0].id)
+            ),
+            priced_at=now if name in ("debited", "free") else None,
+        )
+        for name in ("debited", "free", "unpriced", "unpriced_stale")
+    }
+    async_session.add_all(usage.values())
     await async_session.flush()
     async_session.add(
         AccountCredit(
@@ -235,13 +253,13 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
             channel="voice",
             amount_cents=-10,
             source="usage_event_voice_inbound",
-            ref=f"usage_event:{usage.id}",
+            ref=f"usage_event:{usage['debited'].id}",
         )
     )
     await async_session.commit()
-    # 500 less the debit (10), and the live, just-ended, completed and
-    # no-end-time calls.
-    assert await available_cents(async_session, org) == Decimal(90)
+    # 500 less the debit (10), and the live, just-ended, completed,
+    # no-end-time and unpriced calls.
+    assert await available_cents(async_session, org) == Decimal(-10)
 
 
 async def test_unknown_price_falls_back_to_default_limit(
@@ -563,7 +581,7 @@ async def test_handover_counts_its_own_dial(
     assert (await _hold(async_session, call.id)).dials == 1
 
 
-async def test_handover_unknown_price_uses_the_default_limit(
+async def test_handover_unknown_price_uses_the_agent_limit(
     client, async_session, add_phone_number, quote, monkeypatch
 ):
     monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
@@ -572,8 +590,33 @@ async def test_handover_unknown_price_uses_the_default_limit(
         client, async_session, add_phone_number, 20, timedelta(seconds=30)
     )
     assert data["ok"] is True
-    assert data["max_seconds"] == settings.hail_voice_max_duration_seconds
+    # No balance cap: the voicebot applies the agent's own handover limit.
+    assert data["max_seconds"] is None
     assert await _hold(async_session, call.id) is None
+
+
+async def test_no_minute_left_is_logged(
+    client, async_session, livekit_mock, add_phone_number, quote
+):
+    org, key = await _org(async_session, 30)
+    await add_phone_number(async_session, org)
+    r = await _call(client, key)
+    assert r.status_code == 402
+    rows = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(
+                    AuditLog.organization_id == org,
+                    AuditLog.action == "call.blocked",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [row.payload for row in rows] == [
+        {"to": ABROAD, "reason": "insufficient_funds"}
+    ]
 
 
 async def test_no_default_limit_still_caps_to_the_balance(

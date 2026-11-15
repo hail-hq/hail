@@ -267,6 +267,13 @@ class UsageEvent(Base):
             "units >= 0",
             name="usage_events_units_nonneg_check",
         ),
+        # A call's usage row, for the balance hold check (call_allowance).
+        Index(
+            "usage_events_voice_ref_idx",
+            "organization_id",
+            "ref",
+            postgresql_where=text("channel = 'voice'"),
+        ),
     )
 
 
