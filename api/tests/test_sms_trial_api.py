@@ -312,28 +312,24 @@ async def test_start_reports_stop_refusal(
 
 
 @pytest.mark.parametrize(
-    "send,status_code,detail",
+    "send,detail",
     [
         (
             _result(error_code="21610"),
-            422,
             "This phone replied STOP to Hail. Reply START, then try again.",
         ),
         (
             _result(error_code="30006"),
-            422,
             "Hail could not text this phone. Check the number.",
         ),
         (
             _result(status="failed"),
-            422,
             "Hail could not text this phone. Check the number.",
         ),
-        (None, 502, "Hail could not send the code. Try again."),
     ],
-    ids=["stop", "rejected", "failed_status", "exception"],
+    ids=["stop", "rejected", "failed_status"],
 )
-async def test_failed_send_uses_no_budget_and_changes_no_row(
+async def test_refused_send_uses_no_budget_and_changes_no_row(
     jwt_client,
     org_and_key,
     async_session,
@@ -341,24 +337,18 @@ async def test_failed_send_uses_no_budget_and_changes_no_row(
     sms_mock,
     session_factory,
     send,
-    status_code,
     detail,
 ):
+    """The carrier said no: the code never reached the phone."""
     org_id = org_and_key[0]
     await seed_sms_trial(async_session, monkeypatch)
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     before = await _row(session_factory, org_id)
 
-    if send is None:
-
-        async def send(**_kwargs):
-            raise RuntimeError("connection reset")
-
     sms_mock.send_sms.side_effect = send
     resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
-    assert resp.status_code == status_code, resp.text
-    got = _msg(resp) if status_code == 422 else resp.json()["detail"]
-    assert got == detail
+    assert resp.status_code == 422, resp.text
+    assert _msg(resp) == detail
 
     after = await _row(session_factory, org_id)
     assert after.code_hash == before.code_hash
@@ -371,6 +361,38 @@ async def test_failed_send_uses_no_budget_and_changes_no_row(
     sms_mock.send_sms.side_effect = _result()
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     assert len((await _row(session_factory, org_id)).code_send_log) == 2
+
+
+async def test_send_error_counts_toward_the_codes_and_keeps_the_code(
+    jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
+):
+    """A raised send (timeout, connection reset) may still have reached the
+    phone, so it uses one of the 5 codes and that code still works."""
+    org_id = org_and_key[0]
+    await seed_sms_trial(async_session, monkeypatch)
+    sent: list[str] = []
+
+    async def _timeout(**kwargs):
+        sent.append(kwargs["body"])
+        raise RuntimeError("read timeout")
+
+    sms_mock.send_sms.side_effect = _timeout
+    for n in range(1, 6):
+        resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+        assert resp.status_code == 502, resp.text
+        assert resp.json()["detail"] == "Hail could not send the code. Try again."
+        assert len((await _row(session_factory, org_id)).code_send_log) == n
+    audits = await _audit(session_factory, org_id, "sms.trial.code_sent")
+    assert len(audits) == 5 and audits[0].payload == {"phone": PHONE}
+
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 429, resp.text
+    assert len(sent) == 5
+
+    code = re.search(r"code is (\d{6})", sent[-1])[1]
+    resp = await jwt_client.post("/v1/sms/trial/phone/confirm", json={"code": code})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "verified"
 
 
 async def test_start_again_after_verified_sends_nothing(

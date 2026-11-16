@@ -47,6 +47,7 @@ from hailhq.core.sms_trial import (
     start_phone_proof,
     trial_number,
     trial_sender,
+    trial_sender_of,
     trial_texts_used,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,9 +74,10 @@ _CONSOLE_ONLY_RESPONSE: dict = {
 async def _trial_status(db: AsyncSession, organization_id: UUID) -> SmsTrialResponse:
     row = await get_trial_phone(db, organization_id)
     used = await trial_texts_used(db, organization_id)
+    number = await trial_number(db)
     return SmsTrialResponse(
-        configured=await trial_number(db) is not None,
-        available=await trial_sender(db) is not None,
+        configured=number is not None,
+        available=await trial_sender_of(db, number) is not None,
         status=row.status if row is not None else "none",
         phone=row.phone_e164 if row is not None else None,
         pending_phone=row.pending_phone_e164 if row is not None else None,
@@ -140,7 +142,12 @@ async def get_sms_trial(
             },
             GENERAL_RATE_LIMITED_RESPONSES,
         ),
-        502: {"description": "Hail could not send the code. Nothing was changed."},
+        502: {
+            "description": (
+                "Hail could not reach the carrier. The code may still arrive "
+                "and counts toward the 5 codes."
+            )
+        },
     },
 )
 async def start_sms_trial_phone(
@@ -199,6 +206,8 @@ async def start_sms_trial_phone(
     # the phone as stored (canonical), never the request's spelling: the
     # new phone, which may wait beside a verified one.
     phone = issued.phone
+    row_id = issued.row.id
+    send_error: Exception | None = None
     try:
         result = await sms_route(number.provider).send_sms(
             from_e164=number.e164,
@@ -207,24 +216,25 @@ async def start_sms_trial_phone(
             status_callback_url=None,
         )
     except Exception as exc:
-        await db.rollback()
+        # A timeout or a dropped connection may come after the carrier sent
+        # the code, so keep the code and its use of the 5: otherwise a script
+        # gets unlimited code texts while the carrier is slow.
         logger.warning(
             "trial code send failed for organization_id=%s",
             principal.organization_id,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=http_status.HTTP_502_BAD_GATEWAY, detail=_SEND_FAILED
-        ) from exc
-    if result.error_code is not None or result.status.lower() in {
-        "failed",
-        "undelivered",
-    }:
-        await db.rollback()
-        msg = _STOPPED if result.error_code == _STOP_ERROR_CODE else _REJECTED
-        raise unprocessable(msg, loc=["body", "phone"])
+        send_error = exc
+    else:
+        if result.error_code is not None or result.status.lower() in {
+            "failed",
+            "undelivered",
+        }:
+            # The carrier refused: the code never reached the phone.
+            await db.rollback()
+            msg = _STOPPED if result.error_code == _STOP_ERROR_CODE else _REJECTED
+            raise unprocessable(msg, loc=["body", "phone"])
 
-    row_id = issued.row.id
     await db.commit()
 
     actor_user_id, actor_kind = actor_of(principal)
@@ -238,6 +248,10 @@ async def start_sms_trial_phone(
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
+    if send_error is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY, detail=_SEND_FAILED
+        ) from send_error
     return await _trial_status(db, principal.organization_id)
 
 
