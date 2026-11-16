@@ -98,10 +98,10 @@ def hold_until(now: datetime, seconds: int) -> datetime:
 #   a fee (it may have billed the second line), and one more minute covers
 #   carrier legs billed a little longer than the voicebot measured. With no
 #   price stored (a handover ran at a price Hail could not get), the full
-#   hold (LEAST skips the NULL). The
-#   rater writes the debit and stamps priced_at in one transaction, and
-#   stamps a 0-cent row with no debit. A row it never prices stops counting
-#   UNPRICED_HOLD_DAYS after hold_until;
+#   hold (LEAST skips the NULL). The rater writes the debit and stamps
+#   priced_at in one transaction, and stamps a 0-cent row with no debit.
+#   A row it never prices stops counting UNPRICED_HOLD_DAYS after
+#   hold_until;
 # - a call that ended billable with no usage row: the full hold, within the
 #   grace. The voicebot writes the row with the final status, so a call
 #   still without one (0 ms, or closed by another writer) is not billed;
@@ -195,9 +195,10 @@ async def hold(
     column keeps tenths of a cent, so the amount is rounded up. The prices
     (the highest held for the call is kept) set what the hold counts once
     the call ends (_HELD_SQL). None means a price Hail does not know: the
-    full hold counts, and the prices stay None from then on. ``dial`` counts one more approved handover
-    dial. Also deletes up to 100 holds a day past their end, skipping rows
-    another transaction has locked, so no call waits on another's cleanup."""
+    full hold counts, and the prices stay None from then on. ``dial``
+    counts one more approved handover dial. Also deletes up to 100 holds a
+    day past their end, skipping rows another transaction has locked, so no
+    call waits on another's cleanup."""
     await db.execute(_PRUNE_SQL, {"days": UNPRICED_HOLD_DAYS})
     stmt = insert(CallBalanceHold).values(
         call_id=call_id,
@@ -237,12 +238,17 @@ def _kept_price(old, new):
 
 async def forget_price(db: AsyncSession, call_id: uuid.UUID) -> None:
     """Mark the call's hold as run at an unknown price (a handover whose
-    quote failed), so the full hold counts after the call ends. No-op when
-    the call holds nothing."""
+    quote failed), so the full hold counts after the call ends, and count
+    the approved dial, so a later handover's hold covers it. No-op when the
+    call holds nothing."""
     await db.execute(
         update(CallBalanceHold)
         .where(CallBalanceHold.call_id == call_id)
-        .values(cents_per_minute=None, cents_per_call=None)
+        .values(
+            cents_per_minute=None,
+            cents_per_call=None,
+            dials=CallBalanceHold.dials + 1,
+        )
     )
 
 

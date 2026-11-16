@@ -654,10 +654,11 @@ async def test_handover_unknown_price_counts_the_full_hold(
     await async_session.refresh(row)
     # The second line's price is unknown: once the call ends, the full hold
     # counts, and a later priced handover does not bring a price back.
-    assert (row.cents, row.cents_per_minute, row.cents_per_call) == (
+    assert (row.cents, row.cents_per_minute, row.cents_per_call, row.dials) == (
         Decimal(100),
         None,
         None,
+        1,
     )
     await hold(
         async_session,

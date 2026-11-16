@@ -50,7 +50,10 @@ def upgrade() -> None:
           dials      INTEGER NOT NULL DEFAULT 0 CHECK (dials >= 0),
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           CONSTRAINT call_balance_holds_prices_check
-            CHECK (cents_per_minute >= 0 AND cents_per_call >= 0)
+            CHECK (
+              cents_per_minute >= 0 AND cents_per_call >= 0
+              AND (cents_per_minute IS NULL) = (cents_per_call IS NULL)
+            )
         )
         """)
     op.execute("""

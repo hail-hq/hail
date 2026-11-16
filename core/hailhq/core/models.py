@@ -905,7 +905,8 @@ class CallBalanceHold(Base):
         CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
         CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
         CheckConstraint(
-            "cents_per_minute >= 0 AND cents_per_call >= 0",
+            "cents_per_minute >= 0 AND cents_per_call >= 0"
+            " AND (cents_per_minute IS NULL) = (cents_per_call IS NULL)",
             name="call_balance_holds_prices_check",
         ),
         Index("call_balance_holds_until_idx", "hold_until"),

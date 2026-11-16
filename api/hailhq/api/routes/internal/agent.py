@@ -1869,7 +1869,8 @@ async def _handover_cap(
     already talked and the ring are priced as the call alone; the handover
     as both lines plus the agent. The hold never shrinks: if nobody answers,
     the call runs on under its own limit. When the price is unknown, None:
-    the agent's own handover limit applies and nothing is held."""
+    the agent's own handover limit applies, nothing more is held, and the
+    call's full hold counts after it ends."""
     caller = call.from_e164 if call.direction == "inbound" else hail_number
     main = {
         "direction": call.direction,
