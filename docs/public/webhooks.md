@@ -214,9 +214,19 @@ shape comes from the event type. Inbound events use [`build_event_data`](https:/
 }
 ```
 
-`compliance_keyword` is `"STOP"`, `"START"` or `"HELP"` when Hail handled the text
-as that keyword, and `null` otherwise. `START` and `YES` count only from a
-sender who opted out. Skip these texts in a bot, so it does not answer them too.
+`compliance_keyword` is `"STOP"`, `"START"` or `"HELP"` when the text is one of
+these keywords, and `null` otherwise. The same value is in the `received` event
+on `GET /v1/events`.
+
+- `STOP`: `STOP`, `STOPALL`, `UNSUBSCRIBE`, `CANCEL`, `END` or `QUIT`, or a
+  carrier opt-out. Hail suppresses the sender.
+- `START`: `START`, `YES` or `UNSTOP` from a sender who opted out. Hail lifts
+  the suppression. From anyone else, these words are a normal reply (`null`).
+- `HELP`: `HELP` or `INFO`.
+
+Matching ignores case and surrounding spaces ([`sms_ingest.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/sms_ingest.py)).
+The carrier usually answers these keywords itself, so a bot should not answer
+them too.
 
 `raw_url` and each attachment `url` are Hail API endpoints that 302-redirect to a
 presigned S3 URL on access. `email.received.suppressed` carries a trimmed `data`

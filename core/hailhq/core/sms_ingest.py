@@ -413,7 +413,12 @@ async def ingest_inbound_sms(
             sms_id=sms.id,
             organization_id=organization_id,
             kind="received",
-            payload={"from": from_e164, "to": to_e164, "body": body},
+            payload={
+                "from": from_e164,
+                "to": to_e164,
+                "body": body,
+                "compliance_keyword": action,
+            },
         )
     )
     await db.flush()
@@ -428,8 +433,8 @@ async def ingest_inbound_sms(
             "from": from_e164,
             "to": to_e164,
             "body": body,
-            # STOP, START or HELP when Hail handled the text as that keyword,
-            # so integrations that answer texts can skip it. Otherwise null.
+            # STOP, START or HELP when the text is one of those keywords, so
+            # integrations that answer texts can skip it. Otherwise null.
             "compliance_keyword": action,
         },
     )
