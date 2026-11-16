@@ -169,8 +169,18 @@ async def get_trial_phone(
 async def is_verified_trial_phone(
     db: AsyncSession, organization_id: UUID, to: str
 ) -> bool:
-    row = await get_trial_phone(db, organization_id)
-    return row is not None and row.status == "verified" and row.phone_e164 == to
+    """Reads the database, never a row already loaded in this session, so a
+    check under ``org_lock`` sees a switch another transaction committed."""
+    found = await db.execute(
+        select(SmsTrialPhone.id)
+        .where(
+            SmsTrialPhone.organization_id == organization_id,
+            SmsTrialPhone.status == "verified",
+            SmsTrialPhone.phone_e164 == to,
+        )
+        .limit(1)
+    )
+    return found.first() is not None
 
 
 async def start_phone_proof(
@@ -339,6 +349,8 @@ async def claim_trial_send(
     trial key) and commit in this same transaction, with no commit in
     between. The commit releases the lock, so the next claim counts this
     text and the cap of ``SMS_TRIAL_LIMIT`` holds under concurrent sends.
+    The verified phone is checked under the lock too, so a text never goes
+    to a phone the workspace switched away from.
     """
     number = await trial_sender(db)
     if number is None:
@@ -352,6 +364,11 @@ async def claim_trial_send(
     if not await is_verified_trial_phone(db, organization_id, to):
         return None
     await org_lock(db, organization_id)
+    # Again under the lock: start_phone_proof and confirm_phone take the same
+    # lock, so the phone cannot change between this check and the commit.
+    # The check before the lock keeps other sends from waiting on it.
+    if not await is_verified_trial_phone(db, organization_id, to):
+        return None
     if await trial_texts_used(db, organization_id) >= SMS_TRIAL_LIMIT:
         return None
     wrapped = trial_body(body, limit=limit, truncate=truncate)

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from hailhq.core.config import Settings, settings
+from hailhq.core.db import org_lock
 from hailhq.core.models import (
     CarrierVerification,
     Organization,
@@ -563,3 +564,23 @@ async def test_two_concurrent_claims_at_24_send_one(
     assert sum(r is not None for r in results) == 1
     async with session_factory() as fresh:
         assert await trial_texts_used(fresh, org) == 25
+
+
+async def test_claim_checks_the_phone_under_the_lock(
+    async_session, session_factory, monkeypatch
+):
+    """A phone switch that commits while a claim waits on the workspace
+    lock stops that claim: the phone is checked again under the lock."""
+    _, _, org = await _ready(async_session, monkeypatch)
+    await async_session.commit()
+
+    async with session_factory() as holder, session_factory() as claimer:
+        await org_lock(holder, org)
+        claim = asyncio.create_task(_claim(claimer, org))
+        await asyncio.sleep(0.3)
+        assert not claim.done()  # past the first phone check, waiting on the lock
+        row = await get_trial_phone(holder, org)
+        row.status = "pending"
+        await holder.commit()
+        assert await asyncio.wait_for(claim, timeout=10) is None
+        await claimer.rollback()
