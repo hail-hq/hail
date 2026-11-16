@@ -338,7 +338,9 @@ class ProviderStatus(BaseModel):
     ``pending``: submitted and under review."""
 
     state: Literal["draft", "pending", "approved", "rejected"]
-    # Shown to the customer: Hail's own wording.
+    # Shown to the customer and emailed to the workspace owners. Hail's own
+    # wording, which can quote the carrier's text (see rejections.py), so
+    # never log it.
     reason: str | None = None
     # The carrier's own text for a rejection. Kept in the audit log; never
     # logged. ``reason`` may quote it when Hail has no fix of its own

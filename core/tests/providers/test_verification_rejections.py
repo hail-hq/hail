@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hailhq.core.providers.verification.base import DETAILS_REJECTED
 from hailhq.core.providers.verification.rejections import (
+    FIX_AND_START_AGAIN,
     START_AGAIN,
     TWILIO_FIXES,
     customer_reason,
@@ -19,7 +20,7 @@ def test_known_twilio_code_gets_hails_fix() -> None:
 
 def test_unknown_twilio_code_shows_the_carriers_text() -> None:
     assert twilio_reason([(18999, "Something new.")]) == (
-        f"The carrier said: Something new. {START_AGAIN}"
+        f"The carrier said: Something new. {FIX_AND_START_AGAIN}"
     )
 
 

@@ -585,7 +585,7 @@ def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | N
         "; ".join(r for r in attrs.get("reject_reasons") or [] if r),
         attrs.get("reject_comment") or "",
     ]
-    return " - ".join(p.strip() for p in parts if p.strip()) or None
+    return ". ".join(p.strip().rstrip(".") for p in parts if p.strip()) or None
 
 
 async def revoke_registration(

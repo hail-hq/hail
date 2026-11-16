@@ -310,7 +310,7 @@ The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/cor
 
 - **Twilio.** The bundle holds no reason. Each rejected supporting document has `failure_reason` and `errors[].code`, and the newest evaluation lists failed fields. A known code gets Hail's fix (`TWILIO_FIXES`, from Twilio's 18001-18064 error list). Any other code shows Twilio's text after "The carrier said:". Some rejections carry no reason at all; then the generic line stays.
 - **Telnyx.** The requirement group lists each `declined` or `expired` requirement. Hail names it from `GET /requirement_types/{id}`.
-- **DIDWW.** The address verification's `reject_reasons` and `reject_comment` follow "The carrier said:".
+- **DIDWW.** DIDWW rejects the registration when a number is ordered. The order step (`rejected_registration` in `api/hailhq/api/number_orders.py`) puts the address verification's `reject_reasons` and `reject_comment` after "The carrier said:".
 
 The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
 

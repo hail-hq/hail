@@ -105,9 +105,9 @@ async def finish_order(
 ):
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
-    ``reason`` is stored for a failed order and shown to the buyer; it is
-    Hail's own wording, never the carrier's text (``rejected_registration``
-    keeps that as ``carrier_reason`` in the metadata).
+    ``reason`` is stored for a failed order and shown to the buyer. From
+    ``rejected_registration`` it can quote the carrier's text, which can
+    quote personal data: never log it.
     ``keep_setup`` charges the setup fee even on failure:
     the carrier already billed it and does not refund (the number was
     bought, then its registration was rejected or never cleared)."""
@@ -236,9 +236,7 @@ async def rejected_registration(
     # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
     # has no fixes for them, so the customer reads the carrier's words.
     reason = (
-        customer_reason(["The carrier rejected the end-user registration."], [raw])
-        if raw and raw.strip()
-        else REGISTRATION_REJECTED
+        customer_reason([], [raw]) if raw and raw.strip() else REGISTRATION_REJECTED
     )
     verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's

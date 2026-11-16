@@ -692,6 +692,31 @@ async def test_one_lost_document_keeps_the_others_reasons(provider) -> None:
 
 
 @responses.activate
+async def test_fixed_document_and_missing_item(provider) -> None:
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "approved",
+                "failure_reason": "Old reason from an earlier bundle.",
+                "errors": [{"code": 18002}],
+            }
+        },
+        evaluation=[
+            {
+                "passed": False,
+                "requirement_friendly_name": "Proof of Address",
+                "error_code": None,
+                "failure_reason": None,
+                "invalid": [],
+            }
+        ],
+    )
+    status = await provider.status(REFS)
+    assert "Old reason" not in status.reason
+    assert "The carrier said: Proof of Address is missing." in status.reason
+
+
+@responses.activate
 async def test_rejection_without_a_reason_stays_generic(provider) -> None:
     from hailhq.core.providers.verification.base import DETAILS_REJECTED
 

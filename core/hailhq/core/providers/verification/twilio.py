@@ -49,6 +49,15 @@ logger = logging.getLogger(__name__)
 
 _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
+
+def _code(value: object) -> int | None:
+    """A Twilio error code, or None when it is missing or not a number."""
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
 _UPLOAD_URL = (
     "https://numbers-upload.twilio.com/v2/RegulatoryCompliance/SupportingDocuments"
 )
@@ -616,15 +625,7 @@ class TwilioVerificationProvider(VerificationProvider):
         if bundle.status == "twilio-approved":
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
-            try:
-                problems = await asyncio.to_thread(self._rejection_problems, refs)
-            except Exception:  # the reason must never block the rejection
-                logger.warning(
-                    "could not read why Twilio rejected bundle %s",
-                    refs["bundle_sid"],
-                    exc_info=True,
-                )
-                problems = []
+            problems = await self._rejection_problems(refs)
             raw = "; ".join(
                 ": ".join(str(p) for p in (code, text) if p) for code, text in problems
             )
@@ -635,38 +636,69 @@ class TwilioVerificationProvider(VerificationProvider):
             )
         return ProviderStatus(state="pending")
 
-    def _rejection_problems(self, refs: dict) -> list[tuple[int | None, str | None]]:
+    async def _rejection_problems(
+        self, refs: dict
+    ) -> list[tuple[int | None, str | None]]:
         """Why Twilio rejected a bundle, as (error code, Twilio's text) pairs.
         The bundle itself holds no reason: each rejected document has
         ``failure_reason`` and ``errors[].code``, and the newest evaluation
-        lists failed requirements."""
+        lists failed requirements. Never raises: each read that fails is
+        logged and skipped, so the others still count."""
+        reads = [
+            asyncio.to_thread(self._document_problems, sid)
+            for sid in refs.get("document_sids") or []
+        ]
+        reads.append(asyncio.to_thread(self._evaluation_problems, refs["bundle_sid"]))
         found: list[tuple[int | None, str | None]] = []
-        for sid in refs.get("document_sids") or []:
-            try:
-                doc = self._rc.supporting_documents(sid).fetch()
-            except Exception:  # one lost document must not hide the others
-                logger.warning("could not read Twilio document %s", sid, exc_info=True)
+        for result in await asyncio.gather(*reads, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "could not read why Twilio rejected bundle %s: %s",
+                    refs["bundle_sid"],
+                    type(result).__name__,
+                )
                 continue
-            codes = [
-                int(e["code"])
-                for e in doc.errors or []
-                if isinstance(e, dict) and e.get("code")
-            ]
-            if codes:
-                found += [(code, doc.failure_reason) for code in codes]
-            elif doc.failure_reason:
-                found.append((None, doc.failure_reason))
+            found += result
+        return list(dict.fromkeys(found))
+
+    def _document_problems(self, sid: str) -> list[tuple[int | None, str | None]]:
+        doc = self._rc.supporting_documents(sid).fetch()
+        if doc.status not in (None, "rejected"):
+            # A reused document keeps an old reason after it was fixed.
+            return []
+        codes = [
+            code
+            for e in doc.errors or []
+            if isinstance(e, dict) and (code := _code(e.get("code")))
+        ]
+        if codes:
+            return [(code, doc.failure_reason) for code in codes]
+        return [(None, doc.failure_reason)] if doc.failure_reason else []
+
+    def _evaluation_problems(
+        self, bundle_sid: str
+    ) -> list[tuple[int | None, str | None]]:
+        """The failed requirements of the newest evaluation. Hail's own
+        pre-submit evaluation passed (or Hail would not have submitted), so
+        its results add nothing."""
+        evaluations = self._rc.bundles(bundle_sid).evaluations.list()
         # Twilio does not promise an order: take the newest by date.
-        evaluations = self._rc.bundles(refs["bundle_sid"]).evaluations.list(limit=20)
         newest = max(evaluations, key=lambda e: e.date_created or _EPOCH, default=None)
+        found: list[tuple[int | None, str | None]] = []
         for result in (newest.results or []) if newest else []:
             if result.get("passed"):
                 continue
+            before = len(found)
             for item in [result, *(result.get("invalid") or [])]:
-                code, text = item.get("error_code"), item.get("failure_reason")
+                code, text = _code(item.get("error_code")), item.get("failure_reason")
                 if code or text:
-                    found.append((int(code) if code else None, text))
-        return list(dict.fromkeys(found))
+                    found.append((code, text))
+            if len(found) == before and result.get("requirement_friendly_name"):
+                # Failed with no reason: the item is missing.
+                found.append(
+                    (None, f"{result['requirement_friendly_name']} is missing.")
+                )
+        return found
 
     def subject_name(
         self,

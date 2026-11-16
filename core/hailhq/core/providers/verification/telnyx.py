@@ -53,6 +53,11 @@ from hailhq.core.providers.verification.rejections import customer_reason
 
 logger = logging.getLogger(__name__)
 
+
+def _capital(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 _UPLOAD_TIMEOUT_SECONDS = 60
 # Telnyx refuses to submit a group with any value missing, even a rule tagged
@@ -511,25 +516,20 @@ class TelnyxVerificationProvider(VerificationProvider):
             for req, name in zip(failed, names, strict=True):
                 req_status = req["status"]
                 raw.append(f"{name or req['requirement_id']}: {req_status}")
-                if req_status == "expired" and req.get("field_type") == "document":
+                document = req.get("field_type") == "document"
+                item = (
+                    f'"{name}"' if name else ("a document" if document else "a detail")
+                )
+                if req_status == "expired" and document:
                     fixes.append(
-                        f'"{name}" has expired. Upload one that is still valid.'
-                        if name
-                        else "A document has expired. Upload one that is still valid."
+                        f"{_capital(item)} has expired. Upload one that is still valid."
                     )
                 elif req_status == "expired":
-                    fixes.append(
-                        f'"{name}" has expired. Enter it again.'
-                        if name
-                        else "A detail has expired. Enter it again."
-                    )
+                    fixes.append(f"{_capital(item)} has expired. Enter it again.")
                 else:
                     fixes.append(
-                        f'The carrier did not accept "{name}". Check it is '
-                        "correct and matches your other details."
-                        if name
-                        else "The carrier did not accept one of the details. "
-                        "Check each one matches your documents."
+                        f"The carrier did not accept {item}. Check it is correct "
+                        "and matches your other details."
                     )
             if not fixes:
                 fixes.append(

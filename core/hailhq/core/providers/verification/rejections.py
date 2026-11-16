@@ -84,6 +84,7 @@ TWILIO_FIXES: dict[int, str] = {
 _TWILIO_SUMMARY = {18050}
 
 START_AGAIN = "Then start again."
+FIX_AND_START_AGAIN = "Fix that and start again."
 
 
 def _sentence(text: str) -> str:
@@ -102,7 +103,9 @@ def customer_reason(fixes: Iterable[str], carrier_texts: Iterable[str]) -> str:
         parts.append("The carrier said: " + " ".join(said))
     if not parts:
         return DETAILS_REJECTED
-    return " ".join([*parts, START_AGAIN])
+    # After the carrier's words, "Then" would follow no step of ours.
+    end = FIX_AND_START_AGAIN if said else START_AGAIN
+    return " ".join([*parts, end])
 
 
 def twilio_reason(problems: Iterable[tuple[int | None, str | None]]) -> str:
