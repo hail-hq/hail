@@ -1,4 +1,4 @@
-"""0081 adds sms_trial_phones and the sms trial index."""
+"""0081 adds sms_trial_phones; 0082 adds the sms trial index."""
 
 import os
 import subprocess
@@ -45,8 +45,9 @@ def _index_defs(conn: psycopg.Connection, table: str) -> dict[str, str]:
 
 
 def test_sms_trial_phones_round_trip(empty_db: str) -> None:  # noqa: F811
-    """Real alembic, as deploys run it: the sms index is built CONCURRENTLY
-    in an autocommit block, which cannot run inside a transaction."""
+    """Real alembic, as deploys run it: 0082 builds the sms index
+    CONCURRENTLY in an autocommit block, which cannot run inside a
+    transaction."""
     url = _to_libpq_url(to_sync_url(empty_db))
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(url, autocommit=True) as conn:
@@ -69,9 +70,15 @@ def test_sms_trial_phones_round_trip(empty_db: str) -> None:  # noqa: F811
             "sms_trial_phones_pending_phone_e164_check",
         } <= checks
 
-    _run_alembic(empty_db, ["downgrade", "0080"])
+    _run_alembic(empty_db, ["downgrade", "0081"])
     with psycopg.connect(url, autocommit=True) as conn:
         assert "sms_trial_org_idx" not in _index_defs(conn, "sms")
+        assert "sms_trial_phones_code_send_log_idx" in _index_defs(
+            conn, "sms_trial_phones"
+        )
+
+    _run_alembic(empty_db, ["downgrade", "0080"])
+    with psycopg.connect(url, autocommit=True) as conn:
         assert _index_defs(conn, "sms_trial_phones") == {}
 
     _run_alembic(empty_db, ["upgrade", "head"])
@@ -95,11 +102,18 @@ def _offline_sql(revisions: str, *, down: bool = False) -> str:
 
 
 def test_sms_index_is_built_and_dropped_concurrently() -> None:
-    """``sms`` is a hot table: building the index must not block writes."""
-    assert "CREATE INDEX CONCURRENTLY sms_trial_org_idx" in _offline_sql("0080:0081")
+    """``sms`` is a hot table: building the index must not block writes.
+    It has its own revision, so a failed build leaves 0081 applied and the
+    re-run builds only the index."""
+    up = _offline_sql("0081:0082")
+    assert "CREATE INDEX CONCURRENTLY sms_trial_org_idx" in up
+    assert "sms_trial_phones" not in up
     assert "DROP INDEX CONCURRENTLY sms_trial_org_idx" in _offline_sql(
-        "0081:0080", down=True
+        "0082:0081", down=True
     )
+    table = _offline_sql("0080:0081")
+    assert "CREATE TABLE sms_trial_phones" in table
+    assert "sms_trial_org_idx" not in table
 
 
 async def test_one_workspace_per_verified_phone(async_session):
