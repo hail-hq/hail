@@ -129,6 +129,11 @@ from hailhq.core.models import (
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.sms_registration_gate import us_registration_block
+from hailhq.core.sms_trial import (
+    TrialBodyTooLong,
+    claim_trial_send,
+    is_verified_trial_phone,
+)
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
@@ -165,6 +170,7 @@ _SPOKEN_EMAIL_UNCONFIGURED = "Email isn't set up for this account."
 _SPOKEN_SMS_SENT_MEMBER = "Text message sent."
 _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
+_SPOKEN_TRIAL_TOO_LONG_FMT = "Keep trial texts to {n} characters. Nothing was sent."
 # How long a queued reply counts as in flight. After this its delivery is
 # unknown: SES may have accepted it before the API stopped. Never resend it.
 _QUEUED_GRACE = timedelta(seconds=240)
@@ -382,20 +388,45 @@ async def _send_sms_to(
     # Text from the number the caller dialed when it can text; else a text
     # number of this agent (see resolve_sms_number).
     from_number = await resolve_sms_number(db, org, agent_id, dialed, recipient)
-    if from_number is None:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
-
-    block = await us_registration_block(db, org, from_number, recipient)
-    if block is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": block},
-        )
-
-    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    block = (
+        await us_registration_block(db, org, from_number, recipient)
+        if from_number is not None
+        else None
+    )
+    # The agent's own number, kept for the bind audit when the trial number
+    # sends instead: the bind commits with the text.
+    own_number = from_number
+    auto_bound = (
+        from_number is not None
+        and db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    )
+    row_meta = meta
+    if from_number is None or block is not None:
+        # Trial text to the workspace's verified phone. A refused claim keeps
+        # today's answer and is not rolled back: this transaction may hold
+        # the auto-bind and send-cap rows, which a refusal never commits.
+        try:
+            trial = await claim_trial_send(
+                db, org, to=recipient, body=body, limit=SMS_MAX_BODY_CHARS
+            )
+        except TrialBodyTooLong as exc:
+            return AgentSendResponse(
+                ok=False, spoken=_SPOKEN_TRIAL_TOO_LONG_FMT.format(n=exc.max_chars)
+            )
+        if trial is None:
+            if from_number is None:
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+            return await _deny(
+                org,
+                action="agent.sms.blocked",
+                resource_type="sms",
+                spoken=_SPOKEN_NOT_ALLOWED,
+                payload={**meta, "reason": block},
+            )
+        # The claim holds the workspace lock until the commit below.
+        from_number = trial.number
+        body = trial.body
+        row_meta = {**meta, **trial.metadata}
 
     sms = Sms(
         organization_id=org,
@@ -407,7 +438,7 @@ async def _send_sms_to(
         direction="outbound",
         status="queued",
         body=body,
-        metadata_=meta,
+        metadata_=row_meta,
     )
     db.add(sms)
     await db.commit()
@@ -418,9 +449,9 @@ async def _send_sms_to(
             api_key_id=None,
             action="number.route",
             resource_type="phone_number",
-            resource_id=from_number.id,
+            resource_id=own_number.id,
             payload={
-                "e164": from_number.e164,
+                "e164": own_number.e164,
                 "sms_agent_id": str(agent_id),
                 "automatic": True,
                 "source": route_source,
@@ -677,11 +708,19 @@ async def agent_send_sms(
         )
 
     from_number = await sms_sender(db, org, counterpart, call=call)
-    if from_number is None:
+    block = (
+        await us_registration_block(db, org, from_number, counterpart)
+        if from_number is not None
+        else None
+    )
+    # The hail.so demo keeps its own senders. Other conversations may send a
+    # trial text, claimed after the reservation below.
+    use_trial = (from_number is None or block is not None) and not call.metadata_.get(
+        "browser_trial"
+    )
+    if from_number is None and not use_trial:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
-
-    block = await us_registration_block(db, org, from_number, counterpart)
-    if block is not None:
+    if block is not None and not use_trial:
         return await _deny(
             org,
             action="agent.sms.blocked",
@@ -690,7 +729,10 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": block},
         )
 
-    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    auto_bound = (
+        from_number is not None
+        and db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    )
 
     if call.transport == "browser" and not await reserve_browser_preview(
         db,
@@ -709,6 +751,32 @@ async def agent_send_sms(
             spoken="Your three test texts are used, or the conversation has ended. Nothing was sent.",
         )
 
+    own_number = from_number
+    sms_body = body.body
+    trial_meta = {}
+    if use_trial:
+        # The reservation took the same workspace lock and only flushed, so
+        # the lock holds until the insert below commits. A refused claim
+        # keeps today's answer and is not rolled back: nothing commits on
+        # that path, so the flushed reservation is dropped with it.
+        # The body has at most 70 characters, so it always fits.
+        trial = await claim_trial_send(
+            db, org, to=counterpart, body=body.body, limit=SMS_MAX_BODY_CHARS
+        )
+        if trial is None:
+            if from_number is None:
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+            return await _deny(
+                org,
+                action="agent.sms.blocked",
+                resource_type="sms",
+                spoken=_SPOKEN_NOT_ALLOWED,
+                payload={**_meta(body), "reason": block},
+            )
+        from_number = trial.number
+        sms_body = trial.body
+        trial_meta = trial.metadata
+
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -718,7 +786,7 @@ async def agent_send_sms(
         agent_id=call.agent_id,
         direction="outbound",
         status="queued",
-        body=body.body,
+        body=sms_body,
         metadata_={
             **_meta(body),
             **(
@@ -726,6 +794,7 @@ async def agent_send_sms(
                 if call.transport == "browser" and call.metadata_.get("browser_trial")
                 else {}
             ),
+            **trial_meta,
         },
     )
     db.add(sms)
@@ -737,9 +806,9 @@ async def agent_send_sms(
             api_key_id=None,
             action="number.route",
             resource_type="phone_number",
-            resource_id=from_number.id,
+            resource_id=own_number.id,
             payload={
-                "e164": from_number.e164,
+                "e164": own_number.e164,
                 "sms_agent_id": str(call.agent_id),
                 "automatic": True,
                 "source": "in-call send_sms",
@@ -2069,9 +2138,12 @@ async def agent_handover_sms(
         call.to_number_id if call.direction == "inbound" else call.from_number_id
     )
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
-    if from_number is None or "sms" not in from_number.capabilities:
-        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     org = call.organization_id
+    cannot_text = from_number is None or "sms" not in from_number.capabilities
+    # A number that cannot text skips the notice, unless the contact is the
+    # workspace's verified trial phone: then the trial number may send it.
+    if cannot_text and not await is_verified_trial_phone(db, org, to):
+        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     denial = await _shared_denial(db, call)
     if denial is not None:
         return AgentHandoverSmsResponse(
@@ -2091,12 +2163,31 @@ async def agent_handover_sms(
                 call, body, "sms", "agent_caps", detail=cap_denial.reason
             )
         )
-    if await us_registration_block(db, org, from_number, to) is not None:
-        return AgentHandoverSmsResponse(
-            sms=await _notice_blocked(call, body, "sms", "us_registration")
-        )
+    blocked = (
+        not cannot_text
+        and await us_registration_block(db, org, from_number, to) is not None
+    )
 
     _, words = await _notice_text(db, call, body)
+    sms_body = words[:SMS_MAX_BODY_CHARS]
+    meta = _notice_meta(call, body)
+    if cannot_text or blocked:
+        # The notice is cut to fit, so the footer always stays. A refused
+        # claim keeps today's answer and is not rolled back: this
+        # transaction may hold send-cap rows, which a refusal never commits.
+        trial = await claim_trial_send(
+            db, org, to=to, body=words, limit=SMS_MAX_BODY_CHARS, truncate=True
+        )
+        if trial is None:
+            if cannot_text:
+                return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
+            return AgentHandoverSmsResponse(
+                sms=await _notice_blocked(call, body, "sms", "us_registration")
+            )
+        # The claim holds the workspace lock until the commit below.
+        from_number = trial.number
+        sms_body = trial.body
+        meta = {**meta, **trial.metadata}
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -2106,8 +2197,8 @@ async def agent_handover_sms(
         agent_id=call.agent_id,
         direction="outbound",
         status="queued",
-        body=words[:SMS_MAX_BODY_CHARS],
-        metadata_=_notice_meta(call, body),
+        body=sms_body,
+        metadata_=meta,
     )
     db.add(sms)
     await db.commit()
