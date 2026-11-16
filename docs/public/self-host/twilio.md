@@ -62,7 +62,8 @@ organization's US long codes to US numbers return 422 until it is approved.
 number in your own organization with approved toll-free verification; empty
 turns it off. Set `HAIL_SMS_TRIAL_SENDING=true` only once that verification
 covers trial texts. Each organization verifies one phone and sends up to 25
-texts to it before its US registration is approved. Code:
+texts to it, ever. Verifying the phone needs a Hail console session, so on a
+self-host without the console leave `HAIL_SMS_TRIAL_NUMBER` empty. Code:
 [`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
 
 **Sender ID (optional, rest-of-world).** For destinations that allow it, set a
