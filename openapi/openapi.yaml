@@ -10675,15 +10675,18 @@ components:
           maxLength: 2
           minLength: 2
           title: Country Code
+          description: ISO 3166-1 alpha-2 country of the number, like GB.
         number_type:
           type: string
           title: Number Type
+          description: The number type of the offer, like `local` or `mobile`.
         subject_type:
           type: string
           enum:
             - person
             - business
           title: Subject Type
+          description: "'person' (you) or 'business' (your company)."
         fields:
           additionalProperties:
             type: string

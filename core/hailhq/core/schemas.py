@@ -2461,9 +2461,17 @@ class VerificationDocumentCautionsRequest(BaseModel):
     quote_id: UUID = Field(
         description="The `quote_id` of the number offer being verified."
     )
-    country_code: str = Field(min_length=2, max_length=2)
-    number_type: str
-    subject_type: Literal["person", "business"]
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO 3166-1 alpha-2 country of the number, like GB.",
+    )
+    number_type: str = Field(
+        description="The number type of the offer, like `local` or `mobile`."
+    )
+    subject_type: Literal["person", "business"] = Field(
+        description="'person' (you) or 'business' (your company)."
+    )
     fields: dict[str, str] = Field(
         default_factory=dict, description="The form's typed fields, by name."
     )

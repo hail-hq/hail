@@ -3782,22 +3782,28 @@ type VerificationDocumentCautionRead struct {
 // VerificationDocumentCautionsRequest Body of “POST /verifications/document-cautions“.
 type VerificationDocumentCautionsRequest struct {
 	// Address The typed address parts (`customer_name` is compared).
-	Address     *map[string]string `json:"address,omitempty"`
-	CountryCode string             `json:"country_code"`
+	Address *map[string]string `json:"address,omitempty"`
+
+	// CountryCode ISO 3166-1 alpha-2 country of the number, like GB.
+	CountryCode string `json:"country_code"`
 
 	// Documents The form's document slots, by name.
 	Documents *map[string]VerificationDocumentCautionDocument `json:"documents,omitempty"`
 
 	// Fields The form's typed fields, by name.
-	Fields     *map[string]string `json:"fields,omitempty"`
-	NumberType string             `json:"number_type"`
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// NumberType The number type of the offer, like `local` or `mobile`.
+	NumberType string `json:"number_type"`
 
 	// QuoteId The `quote_id` of the number offer being verified.
-	QuoteId     openapi_types.UUID                             `json:"quote_id"`
+	QuoteId openapi_types.UUID `json:"quote_id"`
+
+	// SubjectType 'person' (you) or 'business' (your company).
 	SubjectType VerificationDocumentCautionsRequestSubjectType `json:"subject_type"`
 }
 
-// VerificationDocumentCautionsRequestSubjectType defines model for VerificationDocumentCautionsRequest.SubjectType.
+// VerificationDocumentCautionsRequestSubjectType 'person' (you) or 'business' (your company).
 type VerificationDocumentCautionsRequestSubjectType string
 
 // VerificationDocumentCautionsResponse Returned by “POST /verifications/document-cautions“.
