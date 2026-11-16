@@ -40,7 +40,9 @@ export async function updateCollection(
   const headers = { "X-Api-Key": apiKey, "Content-Type": "application/json" };
   const existing = await fetcher(url, { headers });
   if (!existing.ok)
-    throw new Error(`Read Postman collection failed (HTTP ${existing.status})`);
+    throw new Error(
+      `Read Postman collection failed (HTTP ${existing.status})${await errorDetail(existing)}`,
+    );
   const current = (await existing.json()).collection;
   if (current?.info?.name !== collection.info.name) {
     throw new Error(

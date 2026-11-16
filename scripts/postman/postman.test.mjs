@@ -248,4 +248,13 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
     updateCollection(collection, uid, key, forbidden),
     /HTTP 403\): .*forbiddenError/,
   );
+  const unreadable = async () => ({
+    status: 404,
+    ok: false,
+    text: async () => '{"error":{"name":"instanceNotFoundError"}}',
+  });
+  await assert.rejects(
+    updateCollection(collection, uid, key, unreadable),
+    /Read Postman collection failed \(HTTP 404\): .*instanceNotFoundError/,
+  );
 });
