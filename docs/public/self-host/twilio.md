@@ -59,10 +59,12 @@ Partner); without it, SMS registration through Twilio is off. Texts from an
 organization's US long codes to US numbers return 422 until it is approved.
 
 **Trial texting (United States).** Set `HAIL_SMS_TRIAL_NUMBER` to a toll-free
-number in your own organization with approved toll-free verification; empty
-turns it off. Set `HAIL_SMS_TRIAL_SENDING=true` only once that verification
-covers trial texts. Each organization verifies one phone and sends up to 25
-texts to it, ever. Verifying the phone needs a Hail console session, so on a
+number with approved toll-free verification; empty turns it off. Put that
+number in a separate operator organization: the organization that owns the
+trial number never sends trial texts. `HAIL_SMS_TRIAL_SENDING` (default
+`false`, not in `.env.example`) turns sending on; set it to `true` only once
+that verification covers trial texts. Each organization verifies one phone and
+sends up to 25 texts to it, ever. Verifying the phone needs a Hail console session, so on a
 self-host without the console leave `HAIL_SMS_TRIAL_NUMBER` empty. Code:
 [`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
 
