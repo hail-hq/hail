@@ -1,7 +1,9 @@
 name: Deploy
 
 # Builds the three service images on push to main, pushes them to GHCR, and
-# SSHes the production VM to pull + roll them.
+# SSHes the production VM to pull + roll them. A push that changes only docs,
+# the web sites, the CLI or other files the services never read deploys
+# nothing (see paths-ignore below).
 #
 # Required repo secrets:
 #   DEPLOY_SSH_HOST          VM hostname or IP
@@ -27,6 +29,27 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # A push that changes only these files deploys nothing: no image copies
+    # them and the VM does not read them. Everything else deploys, including
+    # costs/ (the API image reads it), the compose files, the Caddyfile and
+    # scripts/deploy/. Run the workflow by hand to deploy anyway.
+    # core/tests/test_deploy_paths.py keeps this list away from those files.
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.tf"
+      - "**/*.hcl"
+      - "docs/**"
+      - "docs-site/**"
+      - "web/**"
+      - "shared/**"
+      - "postman/**"
+      - "scripts/postman/**"
+      - "scripts/costs/**"
+      - "infra/**"
+      - "cli/**"
+      - "openapi/**"
+      - ".agents/**"
+      - ".cursor-plugin/**"
   workflow_dispatch:
 
 concurrency:
