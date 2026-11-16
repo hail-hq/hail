@@ -125,6 +125,11 @@ _SQL_OPERATIONS = frozenset(
 )
 
 
+# Exception types and message markers that carry SQL text or bound values.
+_DB_ERROR_PREFIXES = ("sqlalchemy.", "asyncpg.", "psycopg.")
+_SQL_ERROR_MARKERS = ("[SQL:", "[parameters:")
+
+
 def _sql_operation(value: Any) -> str:
     words = value.split(maxsplit=1) if isinstance(value, str) else []
     operation = words[0].upper() if words else ""
@@ -132,7 +137,10 @@ def _sql_operation(value: Any) -> str:
 
 
 def _safe_attributes(
-    attributes: Mapping[str, Any] | None, *, include_content: bool = True
+    attributes: Mapping[str, Any] | None,
+    *,
+    include_content: bool = True,
+    sql: bool = False,
 ) -> dict[str, Any]:
     result = {}
     for key, value in (attributes or {}).items():
@@ -182,7 +190,7 @@ def _safe_attributes(
         ):
             # SQL can contain literals; preserve operation/timing, not query text.
             continue
-        if key in {"db.operation", "db.operation.name"}:
+        if sql and key in {"db.operation", "db.operation.name"}:
             value = _sql_operation(value)
         if isinstance(value, str):
             value = _safe_text(value)
@@ -214,12 +222,18 @@ def private_span(
     )
     # SQLAlchemy includes SQL and bound values in exceptions that escape to
     # a parent HTTP/operation span, which has no database attributes itself.
+    # A handler can also re-raise it inside another exception type, so the
+    # text markers SQLAlchemy puts in its messages count too.
     sql_error = any(
         isinstance(error_type := (event.attributes or {}).get("exception.type"), str)
-        and error_type.startswith("sqlalchemy.")
+        and error_type.startswith(_DB_ERROR_PREFIXES)
         for event in span.events
+    ) or any(
+        marker in (span.status.description or "") for marker in _SQL_ERROR_MARKERS
     )
-    attributes = _safe_attributes(span.attributes, include_content=include_content)
+    attributes = _safe_attributes(
+        span.attributes, include_content=include_content, sql=sql
+    )
     name = _safe_text(span.name)
     if sql:
         name = _sql_operation(

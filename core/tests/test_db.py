@@ -77,9 +77,16 @@ def test_a_tracing_failure_does_not_block_the_database(monkeypatch):
 
     monkeypatch.setattr(db, "_engine", None)
     monkeypatch.setattr(db, "_sessionmaker", None)
+    monkeypatch.setattr(db, "_sqlalchemy_tracing_tried", False)
     monkeypatch.setattr(db, "telemetry_enabled", lambda: True)
     monkeypatch.setattr(db.logfire, "instrument_sqlalchemy", refuse)
     try:
+        assert db._ensure_initialized() is not None
+        assert len(calls) == 1
+        # A second pool does not retry or log the warning again.
+        asyncio.run(db._engine.dispose())
+        monkeypatch.setattr(db, "_engine", None)
+        monkeypatch.setattr(db, "_sessionmaker", None)
         assert db._ensure_initialized() is not None
         assert len(calls) == 1
     finally:
@@ -312,14 +319,12 @@ assert not any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg"
 @pytest.mark.parametrize(
     "changed_package",
     [
-        "sqlalchemy",
         "opentelemetry-instrumentation-sqlalchemy",
         "logfire",
         "logfire-sdk",
     ],
 )
-@pytest.mark.filterwarnings("ignore:Instrumentation will have no effect")
-def test_unverified_dependencies_keep_normal_tracing_checks(
+def test_a_tracing_package_bump_keeps_the_sqlalchemy_bridge(
     monkeypatch, changed_package
 ):
     from hailhq.core import db
@@ -332,6 +337,29 @@ def test_unverified_dependencies_keep_normal_tracing_checks(
             "999" if package == changed_package else original_version(package)
         ),
     )
-    # The real locked instrumentor rejects SQLAlchemy 2.1 when checks run.
-    with pytest.raises(RuntimeError, match="could not instrument SQLAlchemy"):
-        db._instrument_sqlalchemy()
+    calls = []
+    monkeypatch.setattr(
+        db.logfire, "instrument_sqlalchemy", lambda **kw: calls.append(kw)
+    )
+    db._instrument_sqlalchemy()
+    assert calls == [{"skip_dep_check": True}]
+
+
+@pytest.mark.filterwarnings("ignore:Instrumentation will have no effect")
+def test_a_new_sqlalchemy_major_keeps_normal_tracing_checks(monkeypatch):
+    from hailhq.core import db
+
+    original_version = db.version
+    monkeypatch.setattr(
+        db,
+        "version",
+        lambda package: (
+            "3.0.0" if package == "sqlalchemy" else original_version(package)
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        db.logfire, "instrument_sqlalchemy", lambda **kw: calls.append(kw)
+    )
+    db._instrument_sqlalchemy()
+    assert calls == [{}]

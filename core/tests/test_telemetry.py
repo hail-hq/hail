@@ -380,6 +380,38 @@ def test_sql_export_keeps_operation_and_timing_without_display_or_error_content(
     assert original.attributes[sql_key] == "SELECT 'PRIVATE-SQL-LITERAL'"
 
 
+def test_non_sql_spans_keep_their_db_operation():
+    original = ReadableSpan(
+        "redis GET",
+        attributes={"db.system": "redis", "db.operation": "GET"},
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert exported.attributes["db.operation"] == "GET"
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "failed: (sqlalchemy.exc.X) [SQL: SELECT 1] PRIVATE-SQL-PARAMETER",
+        "boom [parameters: ('PRIVATE-SQL-PARAMETER',)]",
+    ],
+)
+def test_reraised_sql_error_text_is_dropped_from_parent_status(description):
+    original = ReadableSpan(
+        "POST /v1/things",
+        status=Status(StatusCode.ERROR, description),
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    assert memory.get_finished_spans()[0].status.description is None
+
+
 def test_escaping_sql_exception_keeps_parent_status_without_query_content():
     import os
     import subprocess

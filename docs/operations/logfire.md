@@ -126,12 +126,13 @@ SQL text and parameters stay private, including display messages and parent-span
 
 The lock has SQLAlchemy 2.1.6, Logfire/Logfire SDK 5.6.0, and SQLAlchemy
 instrumentation 0.66b1. A temporary compatibility bridge in
-[`db.py`](../../core/hailhq/core/db.py) enables only that exact combination.
+[`db.py`](../../core/hailhq/core/db.py) turns tracing on for any SQLAlchemy 2.x,
+so a Logfire or instrumentation bump keeps it on.
 [Upstream support](https://github.com/open-telemetry/opentelemetry-python-contrib/commit/5e23f93d7cdd01498d6521aa1ebcc53d7e9c82c0)
 widened the range to SQLAlchemy <2.2 without changing the 2.x hooks.
 The latest released instrumentor, 0.66b2, still rejects 2.1 as of 2026-11-15.
-Other versions use normal dependency checks. Unsupported tracing logs
-"SQLAlchemy tracing is off" and leaves the database available.
+SQLAlchemy 3 and later use normal dependency checks. Unsupported tracing logs
+"SQLAlchemy tracing is off" once per process and leaves the database available.
 Remove the bridge when a released instrumentor supports 2.1. Run
 `cd core && uv run --frozen pytest tests/test_db.py tests/test_telemetry.py`.
 Those tests use real Postgres queries and an offline exporter. They cover all
