@@ -616,8 +616,12 @@ async def check_documents(
         done, pending = await asyncio.wait(tasks.values(), timeout=CHECK_TIMEOUT_S)
         for task in pending:
             task.cancel()
-            # Nothing waits for it: take its outcome so it is not reported.
-            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        if pending:
+            # Let the cancelled reads unwind (a decoder killed, a counter
+            # rolled back) before the request ends.
+            await asyncio.wait(pending, timeout=2)
+            for task in pending:
+                task.add_done_callback(lambda t: t.cancelled() or t.exception())
         for name, task in tasks.items():
             if task in done and task.exception() is None and task.result():
                 reads[name] = task.result()
@@ -632,7 +636,9 @@ async def check_documents(
     # A proof of address fills the address first.
     for read in sorted(
         reads.values(),
-        key=lambda r: not _proves_address(r.slot, r.option),
+        key=lambda r: not _proves_address(
+            r.slot, r.option or documents[r.slot.name].option or None
+        ),
     ):
         for key, value in read.values.items():
             if key.startswith("address."):

@@ -3,8 +3,10 @@ carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
 Number-verification files and details pass through in memory to the carrier.
-``POST /verifications/document-check`` (``verification_documents.py``) also
-sends the files to an AI model to read them before submit.
+``POST /verifications/document-check`` (below; reading in
+``core/.../verification/document_check.py``, files loaded by
+``api/verification_files.py``) also sends the files to an AI model to read
+them before submit.
 SMS applications keep submitted text fields and address privately for repair;
 only the organization-scoped application endpoint returns them. Files sent as
 ``file.<slot>`` parts are never stored. A document uploaded with an upload link
@@ -66,7 +68,7 @@ from hailhq.core import (
 from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, org_lock, try_org_lock
+from hailhq.core.db import get_session, org_lock, session_scope, try_org_lock
 from hailhq.core.document_reads import take_document_read
 from hailhq.core.file_uploads import (
     delete_upload_objects,
@@ -2390,9 +2392,9 @@ async def check_verification_documents(
             country_code=_text_part(form, "country_code").upper(),
             number_type=_text_part(form, "number_type"),
             subject_type=_text_part(form, "subject_type"),
-            fields=_json_part(form, "fields", {}),
+            fields=_json_part(form, "fields", {}) or {},
             address=_json_part(form, "address", {}) or {},
-            documents=_json_part(form, "documents", {}),
+            documents=_json_part(form, "documents", {}) or {},
         )
     except ValidationError as exc:
         raise unprocessable(
@@ -2455,13 +2457,12 @@ async def check_verification_documents(
         for slot, part in sub.documents.items()
     }
 
-    # The daily cap: each file about to go to the model takes one read.
-    # Reads run in parallel on one session, so they take turns here.
-    turn = asyncio.Lock()
-
+    # The daily cap: each file about to go to the model takes one read, on
+    # a session of its own (reads run in parallel and may be cancelled at
+    # the time limit; the request's session stays out of it).
     async def take_read(slot: str) -> bool:
-        async with turn:
-            return await take_document_read(db, principal.organization_id, slot)
+        async with session_scope() as counter:
+            return await take_document_read(counter, principal.organization_id, slot)
 
     return await check_documents(
         requirements,

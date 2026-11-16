@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from hailhq.core.db import org_lock
+from hailhq.core.db import key_lock
 from hailhq.core.models import AgentSendLog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,10 +68,12 @@ async def take_document_read(
     db: AsyncSession, organization_id: UUID, slot: str
 ) -> bool:
     """Count one read for the workspace and return True, or return False when
-    today's cap is used up. Takes the workspace lock for the count and the
-    write, so two checks at once cannot pass the cap, and commits."""
+    today's cap is used up. Takes a short lock of its own (not the
+    workspace lock, which is held through carrier calls) for the count and
+    the write, so two checks at once cannot pass the cap, and commits.
+    Give it its own session: it commits."""
     try:
-        await org_lock(db, organization_id)
+        await key_lock(db, f"document_read:{organization_id}")
         if await document_reads_today(db, organization_id) >= DAILY_DOCUMENT_READS:
             await db.rollback()
             return False
@@ -84,6 +86,7 @@ async def take_document_read(
         )
         await db.commit()
         return True
-    except Exception:
+    except BaseException:
+        # Also on cancellation (the check's time limit).
         await db.rollback()
         raise

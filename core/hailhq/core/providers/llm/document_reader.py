@@ -16,19 +16,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
 import logging
+import os
 import re
+import sys
 import weakref
 from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import anthropic
 from hailhq.core.config import settings
 from hailhq.core.providers.llm.bedrock import bedrock_client
-from PIL import Image, ImageOps
 
 __all__ = ["READABLE_TYPES", "document_reader_configured", "read_document"]
 
@@ -39,46 +38,28 @@ READABLE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 
 # Enough for one form's worth of values. Short on purpose: the answer is JSON.
 _MAX_TOKENS = 2048
-# The model scales a larger image down to this long side anyway, and the
-# providers refuse large images (about 5 MB on Anthropic's API, less on
-# Bedrock). A phone photo is sent at this size, upright as a viewer shows it.
-_IMAGE_LONG_SIDE = 1568
-# The most pixels decoded. A PNG over this is skipped. A JPEG is first
-# decoded at a reduced scale (``draft``, down to 1/8 per side), so a 48 to 200
-# million pixel phone photo decodes at a few million; it is skipped only when
-# still over this after that. The header alone may claim up to
-# ``_MAX_HEADER_PIXELS`` (Pillow refuses more as a decompression bomb).
-_MAX_PIXELS = 25_000_000
-_MAX_HEADER_PIXELS = 256_000_000
-# Pillow refuses an image over twice this at open. Its default (about 179
-# million) would refuse a 200 million pixel phone photo before ``draft``.
-Image.MAX_IMAGE_PIXELS = _MAX_HEADER_PIXELS // 2
 # PDFs are sent as they are, within the providers' limits (checked
 # 2026-11-16): Amazon Bedrock takes requests up to 20 MB, Anthropic's API up
 # to 128 MB, and at most 100 pages for a model under 1M tokens of context
-# (600 at 1M). Hail keeps to the lowest of each, so any model fits.
+# (600 at 1M). A verification file is at most 10 MB (about 13.4 MB in
+# base64), so the size always fits; the pages are checked, at the lowest
+# limit, so any model fits.
 # Sources: platform.claude.com/docs/en/api/overview (request size limits)
 # and platform.claude.com/docs/en/build-with-claude/pdf-support.
-_MAX_PDF_REQUEST_BYTES = 20 * 1024 * 1024
 _MAX_PDF_PAGES = 100
 _PDF_PAGE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
-# Pillow decodes only the format the file was declared as, never another
-# format it happens to know.
-_IMAGE_FORMATS = {"image/jpeg": ("JPEG",), "image/png": ("PNG",)}
-# Images are decoded on their own 2 threads, never on asyncio's shared
-# pool. A decode waits for a free thread (bounded only by the caller's own
-# deadline: another request being busy is no reason to drop a file), then
-# has ``_DECODE_LIMIT_S`` from its start. A thread counts as busy until its
-# decode really ends, even when the read that asked for it was cancelled.
-_DECODE_THREADS = 2
-_decoder = ThreadPoolExecutor(
-    max_workers=_DECODE_THREADS, thread_name_prefix="document-decode"
-)
+# Images are decoded in a child process without credentials, under CPU and
+# memory limits (document_image.py), at most 2 at once. A decode waits for
+# its turn (bounded only by the caller's own deadline: another request being
+# busy is no reason to drop a file), then has ``_DECODE_LIMIT_S`` from its
+# start; past that its process is killed.
+_DECODES = 2
+_DECODE_LIMIT_S = 10.0
+_MAX_DECODED_BYTES = 8 * 1024 * 1024
 # One semaphore per event loop (tests run several loops; the API runs one).
 _decode_slots: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, asyncio.Semaphore
 ] = weakref.WeakKeyDictionary()
-_DECODE_LIMIT_S = 10.0
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
@@ -109,53 +90,46 @@ def _get_client() -> anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock:
     return _client
 
 
-def _image_for_model(content_type: str, data: bytes) -> bytes:
-    """The image as a JPEG at most ``_IMAGE_LONG_SIDE`` on its long side,
-    turned as its EXIF tag says, so the model sees what a person sees.
-    Raises for a file that is not its declared format, or too large."""
-    formats = _IMAGE_FORMATS[content_type]
-    with Image.open(io.BytesIO(data), formats=formats) as image:
-        if image.width * image.height > _MAX_HEADER_PIXELS:
-            raise ValueError("image too large")
-        if image.format == "JPEG":
-            # Decode a large JPEG at a reduced scale from the start.
-            image.draft("RGB", (_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE))
-        # For a JPEG this is the size after draft: what is really decoded.
-        if image.width * image.height > _MAX_PIXELS:
-            raise ValueError("image too large")
-        image = ImageOps.exif_transpose(image)
-        if image.mode in ("RGBA", "LA", "P", "PA"):
-            # Transparent pixels on white, as a viewer shows them, not black.
-            rgba = image.convert("RGBA")
-            image = Image.new("RGB", rgba.size, "white")
-            image.paste(rgba, mask=rgba.getchannel("A"))
-        else:
-            image = image.convert("RGB")
-        image.thumbnail((_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE), reducing_gap=3.0)
-        out = io.BytesIO()
-        image.save(out, "JPEG", quality=85)
-        return out.getvalue()
-
-
 def _pdf_fits(data: bytes) -> bool:
-    """True when the PDF is within the providers' size and page limits. The
-    pages are counted from the page objects the file shows; a file that
-    hides them (compressed object streams) is limited by its size only."""
-    if (len(data) + 2) // 3 * 4 > _MAX_PDF_REQUEST_BYTES:
-        return False
+    """True when the PDF is within the providers' page limit. The pages are
+    counted from the page objects the file shows; a file that hides them
+    (compressed object streams) is sent, and the provider refuses it if it
+    is over (fail open)."""
     return len(_PDF_PAGE.findall(data)) <= _MAX_PDF_PAGES
 
 
+async def _run_decoder(content_type: str, data: bytes) -> bytes:
+    """``document_image.py`` in a child process with no credentials in its
+    environment. Killed when the caller stops waiting."""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "hailhq.core.providers.llm.document_image",
+        content_type,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1"},
+    )
+    try:
+        stdout, _ = await process.communicate(data)
+        if process.returncode or not stdout or len(stdout) > _MAX_DECODED_BYTES:
+            raise ValueError("the image could not be decoded")
+        return stdout
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
 async def _decode_image(content_type: str, data: bytes) -> bytes:
-    """``_image_for_model`` on the decode threads. Waits for a free thread,
-    then gives the decode ``_DECODE_LIMIT_S``. The slot is freed only when
-    the decode ends, so a cancelled read never lets a third decode run."""
+    """Waits for a free decode, then gives it ``_DECODE_LIMIT_S``."""
     loop = asyncio.get_running_loop()
-    slots = _decode_slots.setdefault(loop, asyncio.Semaphore(_DECODE_THREADS))
-    await slots.acquire()
-    future = loop.run_in_executor(_decoder, _image_for_model, content_type, data)
-    future.add_done_callback(lambda _: slots.release())
-    return await asyncio.wait_for(asyncio.shield(future), timeout=_DECODE_LIMIT_S)
+    slots = _decode_slots.setdefault(loop, asyncio.Semaphore(_DECODES))
+    async with slots:
+        return await asyncio.wait_for(
+            _run_decoder(content_type, data), timeout=_DECODE_LIMIT_S
+        )
 
 
 def _file_block(content_type: str, data: bytes) -> dict[str, Any]:

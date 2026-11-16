@@ -490,16 +490,6 @@ async def test_reader_skips_a_file_of_another_format_than_declared(
     assert "document read failed" in caplog.text
 
 
-async def test_reader_skips_an_image_over_the_pixel_cap(
-    reader_settings, monkeypatch
-) -> None:
-    client, calls = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    monkeypatch.setattr(document_reader, "_MAX_PIXELS", 40 * 30 - 1)
-    assert await _read(data=_png((40, 30))) is None
-    assert calls == []
-
-
 async def test_reader_decodes_a_large_jpeg(reader_settings, monkeypatch) -> None:
     client, calls = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
@@ -511,54 +501,6 @@ async def test_reader_decodes_a_large_jpeg(reader_settings, monkeypatch) -> None
         io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
     )
     assert max(sent.size) == 1568
-
-
-async def test_reader_drops_a_decode_over_its_limit(
-    reader_settings, monkeypatch
-) -> None:
-    import time
-
-    client, calls = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.05)
-    monkeypatch.setattr(
-        document_reader, "_image_for_model", lambda *a: time.sleep(0.3) or b""
-    )
-    assert await _read() is None
-    assert calls == []
-
-
-async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(
-    reader_settings, monkeypatch
-) -> None:
-    import threading
-
-    client, calls = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.5)
-    release = threading.Event()
-    real = document_reader._image_for_model
-    started = []
-
-    def decode(content_type, data):
-        started.append(1)
-        if len(started) <= 2:
-            release.wait(5)
-        return real(content_type, data)
-
-    monkeypatch.setattr(document_reader, "_image_for_model", decode)
-    first = asyncio.ensure_future(_read())
-    second = asyncio.ensure_future(_read())
-    await asyncio.sleep(0.05)
-    third = asyncio.ensure_future(_read())
-    # The first two pass their limit; their threads stay busy until released.
-    assert await first is None and await second is None
-    await asyncio.sleep(0.3)
-    assert not third.done()
-    release.set()
-    # The third waited over 0.5 s in all, yet its own decode was quick.
-    assert await third == {}
-    assert len(calls) == 1
 
 
 async def test_reader_is_off_without_a_model(reader_settings, monkeypatch) -> None:
@@ -614,21 +556,6 @@ async def test_a_full_name_holds_a_part_printed_alone() -> None:
         reader=_reader(answer),
     )
     assert ok.warnings == []
-
-
-async def test_reader_puts_a_transparent_image_on_white(
-    reader_settings, monkeypatch
-) -> None:
-    client, calls = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    out = io.BytesIO()
-    Image.new("RGBA", (40, 30), (0, 0, 0, 0)).save(out, "PNG")
-    await _read(data=out.getvalue())
-    block = calls[0]["messages"][0]["content"][0]
-    sent = Image.open(
-        io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
-    )
-    assert sent.convert("RGB").getpixel((5, 5))[0] > 240
 
 
 # -- names in other scripts and spellings (all made up) ------------------------
@@ -742,22 +669,6 @@ def _jpeg(size) -> bytes:
     return out.getvalue()
 
 
-async def test_reader_decodes_a_large_jpeg_at_reduced_scale_first(
-    reader_settings, monkeypatch
-) -> None:
-    client, calls = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    # 12 million pixels in the header; drafted to 1/4 per side for a 500 px
-    # long side, under 1 million. (Real sizes: a 200 million pixel photo
-    # drafts to 12 million for 1568 px.)
-    monkeypatch.setattr(document_reader, "_IMAGE_LONG_SIDE", 500)
-    monkeypatch.setattr(document_reader, "_MAX_PIXELS", 4_000_000)
-    assert await _read(content_type="image/jpeg", data=_jpeg((4000, 3000))) == {}
-    # A PNG has no draft: the same size is skipped.
-    assert await _read(content_type="image/png", data=_png((4000, 3000))) is None
-    assert len(calls) == 1
-
-
 async def test_reader_skips_a_pdf_over_the_page_limit(
     reader_settings, monkeypatch
 ) -> None:
@@ -766,8 +677,6 @@ async def test_reader_skips_a_pdf_over_the_page_limit(
     pages = lambda n: b"%PDF-1.7\n" + b"<< /Type /Page >>\n" * n + b"<< /Type /Pages >>"
     assert await _read(content_type="application/pdf", data=pages(100)) == {}
     assert await _read(content_type="application/pdf", data=pages(101)) is None
-    monkeypatch.setattr(document_reader, "_MAX_PDF_REQUEST_BYTES", 10)
-    assert await _read(content_type="application/pdf", data=pages(1)) is None
     assert len(calls) == 1
 
 
@@ -790,3 +699,91 @@ async def test_reader_uses_the_document_model_setting(
     monkeypatch.setattr(settings, "document_reader_model", "claude-sonnet-x")
     await _read(content_type="application/pdf", data=b"%PDF-1.7")
     assert calls[0]["model"] == "claude-sonnet-x"
+
+
+# -- image decoding (in a child process) ------------------------------------
+
+
+def test_decode_refuses_a_png_over_the_pixel_cap(monkeypatch) -> None:
+    from hailhq.core.providers.llm import document_image
+
+    monkeypatch.setattr(document_image, "MAX_PIXELS", 40 * 30 - 1)
+    with pytest.raises(ValueError):
+        document_image.decode("image/png", _png((40, 30)))
+
+
+def test_decode_drafts_a_large_jpeg_before_the_cap(monkeypatch) -> None:
+    from hailhq.core.providers.llm import document_image
+
+    # 12 million pixels in the header; drafted to 1/4 per side for a 500 px
+    # long side, under 1 million. (Real sizes: a 200 million pixel photo
+    # drafts to about 12 million for 1568 px.)
+    monkeypatch.setattr(document_image, "LONG_SIDE", 500)
+    monkeypatch.setattr(document_image, "MAX_PIXELS", 4_000_000)
+    out = Image.open(
+        io.BytesIO(document_image.decode("image/jpeg", _jpeg((4000, 3000))))
+    )
+    assert max(out.size) == 500
+    with pytest.raises(ValueError):
+        document_image.decode("image/png", _png((4000, 3000)))
+
+
+def test_decode_puts_a_transparent_image_on_white() -> None:
+    from hailhq.core.providers.llm import document_image
+
+    src = io.BytesIO()
+    Image.new("RGBA", (40, 30), (0, 0, 0, 0)).save(src, "PNG")
+    out = Image.open(io.BytesIO(document_image.decode("image/png", src.getvalue())))
+    assert out.convert("RGB").getpixel((5, 5))[0] > 240
+
+
+async def test_reader_drops_a_decode_over_its_limit(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.05)
+
+    async def slow(*_):
+        await asyncio.sleep(1)
+        return b""
+
+    monkeypatch.setattr(document_reader, "_run_decoder", slow)
+    assert await _read() is None
+    assert calls == []
+
+
+async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.5)
+    started: list[float] = []
+
+    async def decode(*_):
+        started.append(asyncio.get_running_loop().time())
+        await asyncio.sleep(0.4)
+        return _jpeg((40, 30))
+
+    monkeypatch.setattr(document_reader, "_run_decoder", decode)
+    begin = asyncio.get_running_loop().time()
+    results = await asyncio.gather(_read(), _read(), _read())
+    # Two decode at once; the third waits 0.4 s for its turn, then decodes
+    # in 0.4 s: 0.8 s in all, over the 0.5 s limit, and still read.
+    assert results == [{}, {}, {}]
+    assert started[2] - begin >= 0.35
+    assert len(calls) == 3
+
+
+async def test_reader_decodes_a_real_image_in_a_child_process(
+    reader_settings, monkeypatch
+) -> None:
+    """The real child process: it decodes with no credentials in its
+    environment and gives back a JPEG."""
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "never-seen-by-the-child")
+    assert await _read(data=_png((400, 300))) == {}
+    block = calls[0]["messages"][0]["content"][0]
+    assert block["source"]["media_type"] == "image/jpeg"
