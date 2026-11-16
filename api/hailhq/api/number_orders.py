@@ -235,8 +235,11 @@ async def rejected_registration(
             )
     # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
     # has no fixes for them, so the customer reads the carrier's words.
-    reason = (
-        customer_reason([], [raw]) if raw and raw.strip() else REGISTRATION_REJECTED
+    reason = customer_reason(
+        [],
+        [raw or ""],
+        fallback=REGISTRATION_REJECTED,
+        next_step="start a new verification",
     )
     verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's
@@ -911,6 +914,13 @@ async def purchase_number(
         reason = number.provisioning_metadata.get(
             "failure_reason", "the carrier did not complete the order"
         )
+        if number.provisioning_metadata.get("carrier_reason"):
+            # The carrier's text can quote personal data, and Logfire
+            # records this exception. The verification holds the full reason.
+            reason = (
+                f"{REGISTRATION_REJECTED}. The verification's rejection_reason "
+                "says what to fix"
+            )
         raise HTTPException(
             status_code=409,
             detail=(

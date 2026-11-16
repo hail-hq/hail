@@ -626,8 +626,13 @@ class TwilioVerificationProvider(VerificationProvider):
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
             problems = await self._rejection_problems(refs)
+            # One text can cover several codes: write it once.
+            by_text: dict[str | None, list[str]] = {}
+            for code, text in problems:
+                by_text.setdefault(text, []).append(str(code) if code else "")
             raw = "; ".join(
-                ": ".join(str(p) for p in (code, text) if p) for code, text in problems
+                ": ".join(p for p in (", ".join(c for c in codes if c), text) if p)
+                for text, codes in by_text.items()
             )
             return ProviderStatus(
                 state="rejected",
@@ -663,7 +668,7 @@ class TwilioVerificationProvider(VerificationProvider):
 
     def _document_problems(self, sid: str) -> list[tuple[int | None, str | None]]:
         doc = self._rc.supporting_documents(sid).fetch()
-        if doc.status not in (None, "rejected"):
+        if doc.status in ("approved", "provisionally-approved"):
             # A reused document keeps an old reason after it was fixed.
             return []
         codes = [
@@ -681,7 +686,7 @@ class TwilioVerificationProvider(VerificationProvider):
         """The failed requirements of the newest evaluation. Hail's own
         pre-submit evaluation passed (or Hail would not have submitted), so
         its results add nothing."""
-        evaluations = self._rc.bundles(bundle_sid).evaluations.list()
+        evaluations = self._rc.bundles(bundle_sid).evaluations.list(limit=50)
         # Twilio does not promise an order: take the newest by date.
         newest = max(evaluations, key=lambda e: e.date_created or _EPOCH, default=None)
         found: list[tuple[int | None, str | None]] = []

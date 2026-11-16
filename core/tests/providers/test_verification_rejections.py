@@ -5,6 +5,7 @@ from __future__ import annotations
 from hailhq.core.providers.verification.base import DETAILS_REJECTED
 from hailhq.core.providers.verification.rejections import (
     FIX_AND_START_AGAIN,
+    FIX_THESE_AND_START_AGAIN,
     START_AGAIN,
     TWILIO_FIXES,
     customer_reason,
@@ -51,3 +52,18 @@ def test_every_fix_is_a_full_sentence() -> None:
     for code, fix in TWILIO_FIXES.items():
         assert fix.endswith("."), code
         assert "  " not in fix, code
+
+
+def test_mixed_fixes_and_carrier_text_end_with_fix_these() -> None:
+    reason = twilio_reason([(18008, None), (18999, "New rule.")])
+    assert reason == (
+        f"{TWILIO_FIXES[18008]} The carrier said: New rule. "
+        f"{FIX_THESE_AND_START_AGAIN}"
+    )
+
+
+def test_custom_fallback_and_next_step() -> None:
+    assert customer_reason([], [""], fallback="none") == "none"
+    assert customer_reason([], ["Blurry"], next_step="start a new one") == (
+        "The carrier said: Blurry. Fix that and start a new one."
+    )

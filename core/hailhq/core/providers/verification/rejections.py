@@ -85,6 +85,7 @@ _TWILIO_SUMMARY = {18050}
 
 START_AGAIN = "Then start again."
 FIX_AND_START_AGAIN = "Fix that and start again."
+FIX_THESE_AND_START_AGAIN = "Fix these and start again."
 
 
 def _sentence(text: str) -> str:
@@ -92,19 +93,31 @@ def _sentence(text: str) -> str:
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
-def customer_reason(fixes: Iterable[str], carrier_texts: Iterable[str]) -> str:
+def customer_reason(
+    fixes: Iterable[str],
+    carrier_texts: Iterable[str],
+    *,
+    fallback: str = DETAILS_REJECTED,
+    next_step: str = "start again",
+) -> str:
     """One reason for the customer. ``fixes`` are Hail's own sentences;
     ``carrier_texts`` are the carrier's own words for problems Hail has no
     fix for. Duplicates are dropped, order is kept. Nothing at all gives
-    Hail's generic wording."""
-    parts = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
+    ``fallback``. The reason ends with ``next_step``."""
+    fixes = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
     said = list(dict.fromkeys(_sentence(t) for t in carrier_texts if t and t.strip()))
+    if not fixes and not said:
+        return fallback
+    parts = [*fixes]
     if said:
         parts.append("The carrier said: " + " ".join(said))
-    if not parts:
-        return DETAILS_REJECTED
     # After the carrier's words, "Then" would follow no step of ours.
-    end = FIX_AND_START_AGAIN if said else START_AGAIN
+    if said and fixes:
+        end = f"Fix these and {next_step}."
+    elif said:
+        end = f"Fix that and {next_step}."
+    else:
+        end = f"Then {next_step}."
     return " ".join([*parts, end])
 
 
@@ -115,12 +128,15 @@ def twilio_reason(problems: Iterable[tuple[int | None, str | None]]) -> str:
     problems = list(problems)
     if any(code not in _TWILIO_SUMMARY for code, _ in problems):
         problems = [p for p in problems if p[0] not in _TWILIO_SUMMARY]
+    # One text can cover several codes (one document, many errors). A text
+    # with a code Hail has a fix for is covered by that fix.
+    covered = {text for code, text in problems if code in TWILIO_FIXES}
     fixes: list[str] = []
     said: list[str] = []
     for code, text in problems:
         fix = TWILIO_FIXES.get(code) if code is not None else None
         if fix:
             fixes.append(fix)
-        elif text:
+        elif text and text not in covered:
             said.append(text)
     return customer_reason(fixes, said)

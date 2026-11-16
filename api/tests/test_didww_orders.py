@@ -296,7 +296,10 @@ async def test_didww_registration_rejected_revokes_approval(
     assert decided == [str(verification.id)]
     # The buyer reads Hail's wording plus the carrier's reason, so they know
     # what to fix.
-    shown = "The carrier said: Document is blurry. Fix that and start again."
+    shown = (
+        "The carrier said: Document is blurry. "
+        "Fix that and start a new verification."
+    )
     assert number.provisioning_metadata["failure_reason"] == shown
     assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
     messages = [r.getMessage() for r in caplog.records]

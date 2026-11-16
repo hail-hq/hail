@@ -717,6 +717,27 @@ async def test_fixed_document_and_missing_item(provider) -> None:
 
 
 @responses.activate
+async def test_expired_document_text_is_covered_by_hails_fix(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "expired",
+                "failure_reason": "Expired, and a new rule.",
+                "errors": [{"code": 18003}, {"code": 18999}],
+            }
+        },
+        evaluation=[],
+    )
+    status = await provider.status(REFS)
+    assert status.reason.startswith(TWILIO_FIXES[18003])
+    # The one text covers both codes, and Hail's fix covers the text.
+    assert "Expired, and a new rule." not in status.reason
+    assert status.raw_reason == "18003, 18999: Expired, and a new rule."
+
+
+@responses.activate
 async def test_rejection_without_a_reason_stays_generic(provider) -> None:
     from hailhq.core.providers.verification.base import DETAILS_REJECTED
 

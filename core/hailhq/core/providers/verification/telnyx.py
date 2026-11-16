@@ -54,6 +54,10 @@ from hailhq.core.providers.verification.rejections import customer_reason
 logger = logging.getLogger(__name__)
 
 
+# Requirement id -> name. Telnyx ids are fixed per requirement type.
+_REQUIREMENT_NAMES: dict[str, str] = {}
+
+
 def _capital(text: str) -> str:
     return text[:1].upper() + text[1:]
 
@@ -425,7 +429,10 @@ class TelnyxVerificationProvider(VerificationProvider):
 
     async def _requirement_name(self, requirement_id: str) -> str | None:
         """The requirement's name, like "Proof of Address", or None when
-        Telnyx cannot say. Never raises: the name only words the reason."""
+        Telnyx cannot say. Never raises: the name only words the reason.
+        Names are cached for the life of the process."""
+        if requirement_id in _REQUIREMENT_NAMES:
+            return _REQUIREMENT_NAMES[requirement_id]
         try:
             data = (
                 await self._api.request(
@@ -440,7 +447,10 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
             return None
         name = data.get("name") if isinstance(data, dict) else None
-        return name.strip() if isinstance(name, str) and name.strip() else None
+        name = name.strip() if isinstance(name, str) and name.strip() else None
+        if name:
+            _REQUIREMENT_NAMES[requirement_id] = name
+        return name
 
     async def _problems(self, refs: dict) -> list[Problem]:
         """Telnyx has no evaluation call. A draft is complete when every
