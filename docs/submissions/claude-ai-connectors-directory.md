@@ -13,8 +13,8 @@ Review the live [Directory Policy](https://support.claude.com/en/articles/131453
 
 ## TODO
 
-- [x] Submitted (reported by the owner before 2026-11-16; portal status not checked yet)
-- [ ] Check the portal card says "In review", not "Draft" (steps in **Notes**)
+- [x] Submitted (reported by the owner before 2026-11-16)
+- [x] Portal shows "In review" (owner, 2026-11-16)
 - [ ] Confirm these steps from the earlier draft were done before submitting:
   - [ ] Written permission for AI phone calls (Directory Policy 4.B), or a separate connector scope agreed with Anthropic
   - [ ] Description and MCP telemetry changes deployed and verified
@@ -108,7 +108,7 @@ Each tool needs a recorded result. An error response alone does not demonstrate 
 
 ### Status
 
-The owner reports the connector was submitted before 2026-11-16. No email from Anthropic yet.
+The owner reports the connector was submitted before 2026-11-16 and is in review (2026-11-16). No email from Anthropic yet.
 
 Check the status (from <https://claude.com/docs/directory/submission-status.md>, read 2026-11-16):
 

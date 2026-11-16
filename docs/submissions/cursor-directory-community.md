@@ -63,6 +63,9 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 ## Notes
 
+- 2026-11-16: could not check whether Hail is listed. cursor.directory returned HTTP 429 (rate limit) to every scripted request. Check <https://cursor.directory/plugins/new> in a browser.
+
+
 - Listed as **"Unofficial community form"** with **no formal vetting** per the target brief — treat this as low-effort/low-certainty: no confirmation email, moderation queue, or SLA should be assumed. If the form submits with no visible acknowledgment, that's expected, not a failure.
 - SMS is a shipped, present-tense capability of Hail as a whole (voice, SMS, email), but there is currently no `send_sms`/`list_sms` tool wired into the MCP tool surface (`mcp/hailhq/mcp/tools.py` exposes only call and email tools plus event/stats readers) — SMS-over-MCP is "coming soon." Keep SMS out of any field that implies it's an MCP _tool_; it's fine in the general product description since Hail overall does ship SMS.
 - Voice is Twilio-backed, email is SES-backed (`core/hailhq/core/providers/voice/twilio.py`, `core/hailhq/core/providers/email/ses.py`) — no other carrier/vendor is wired up yet, so don't name any other provider in the listing copy.

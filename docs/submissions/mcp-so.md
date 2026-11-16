@@ -11,47 +11,74 @@ status: drafted
 
 ## TODO
 
-- [x] Confirm `https://mcp.hail.so` is publicly reachable over HTTPS (Hail Cloud's standing MCP endpoint) — re-verified 2026-07-07.
-- [x] Confirm `https://github.com/hail-hq/hail` is public — the repo link doubles as this submission's required "public URL/repo".
-- [x] **Corrected 2026-07-07: the real form is far simpler than originally drafted.** Fetched `https://mcp.so/submit` directly (server-rendered, not JS-blocked) — it has exactly **two fields**: `name` (text) and `url` (must be a GitHub repo URL, per its own placeholder example `https://github.com/chatmcp/mcp-server-github`). No description, category, tags, or logo fields exist on this form — mcp.so evidently auto-indexes the rest from the repo, similar to Glama. No account/login visible on the page.
-- [ ] No prep needed beyond the two values below — this is now a ~10-second manual fill, no draft copy/asset decisions required.
-- [ ] Submitted via mcp.so/submit.
-- [ ] Confirmed live — record the listing URL in Notes.
+- [x] Checked 2026-11-16: Hail is not listed (search "hail" on mcp.so; no GitHub issue for hail-hq in chatmcp/mcpso)
+- [ ] Submitted as a GitHub issue (free route)
+- [ ] Confirmed live: record the listing URL in **Notes**
 
 ## Steps to submit
 
-**Corrected 2026-07-07 — simpler than originally drafted:**
+The web form at <https://mcp.so/submit> now charges a one-time $39 fee ("Publish immediately without review"). The free route is a GitHub issue in `chatmcp/mcpso`. Other remote servers use the title "Submit Remote MCP Server: <Name> (<registry name>)".
 
-1. Go to [mcp.so/submit](https://mcp.so/submit).
-2. Fill in **Name**: `Hail`
-3. Fill in **URL**: `https://github.com/hail-hq/hail`
-4. Submit. That's the entire form — no other fields exist.
-5. Once mcp.so publishes the listing, update this file's frontmatter `status` to `submitted`, and once confirmed visible on the live site, add the listing URL to Notes.
+1. Save the issue body from **Content** below to a file, for example `mcpso-issue.md`.
+2. Open the issue from any folder, signed in to the `gh` CLI:
+
+```bash
+gh issue create \
+  --repo chatmcp/mcpso \
+  --title "Submit Remote MCP Server: Hail (io.github.hail-hq/hail-mcp)" \
+  --body-file mcpso-issue.md
+```
+
+3. Record the issue URL in **Notes**. Check <https://mcp.so/search?q=hail> for the listing later.
 
 ## Content
 
-**Name:** Hail
+Issue body:
 
-**One-liner (short description):** Phone, SMS & email — for agents.
+````markdown
+### Server Name
+Hail
 
-**Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive email, and read back structured events — all through one remote MCP server. No local install: point a client at `https://mcp.hail.so`, authorize once via OAuth, and the agent has tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+### Category
+Communication
 
-**Link:** `https://github.com/hail-hq/hail`
+### Official Website / Documentation
+https://hail.so/docs/mcp
 
-**Category:** mcp-registry
+### Repository
+https://github.com/hail-hq/hail (open source, AGPLv3). The MCP server is in the `mcp/` folder. The hosted server needs no local install.
 
-**Server URL (if a separate field exists):** `https://mcp.hail.so`
+### Remote MCP Endpoint
+`https://mcp.hail.so`, Streamable HTTP. OAuth 2.1 with dynamic client registration; sign in with a Hail account.
 
-**Tags/keywords (if the form supports them):** communication, voice, phone, sms, email, agents, self-hosted, open-source
+### Remote MCP Config
+```json
+{
+  "mcpServers": {
+    "hail": {
+      "type": "http",
+      "url": "https://mcp.hail.so"
+    }
+  }
+}
+```
 
-**License:** AGPLv3
+### Description
+Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
 
-**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `hail-website/public/assets/brand/logo/avatar-1024.png` as raster fallback)
+Your agent can:
+- Place an outbound AI call and read its transcript
+- Send and receive text messages
+- Send email, read replies and attachments, and check delivery events
+- Buy phone numbers in 120+ countries and route them to a saved agent
+- Submit carrier registrations, such as US A2P 10DLC
+
+Hail can also be self-hosted. The same features are in the CLI, the Python SDK and the OpenAPI spec.
+
+Listed in the official MCP registry as `io.github.hail-hq/hail-mcp`.
+````
 
 ## Notes
 
-- mcp.so's stated submission mechanism is a plain web form (name, description, link, category) — no OAuth-detection scan like Smithery's, so there's nothing to verify around a `401`/`WWW-Authenticate` challenge for this listing. No stated review SLA or contact channel found for mcp.so; treat it as self-serve via the public form.
-- The MCP tool surface today is eleven tools, all call/email — `place_call`, `send_email`, `get_call`, `list_calls`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `get_events` (verified against `mcp/hailhq/mcp/tools.py` in the `hail` repo). There is no `send_sms`/`list_sms` tool wired in yet — SMS-over-MCP is "coming soon." SMS is fine to mention as a shipped Hail _product_ capability in the general description, but don't imply it's callable as an MCP tool today.
-- Provider wiring verified in `core/hailhq/core/providers/`: voice is Twilio-backed (`voice/twilio.py`), outbound email is SES-backed (`email/ses.py`), inbound email is SES-backed (`email/inbound/ses.py`). An `SmtpInboundProvider` class exists (`email/inbound/smtp.py`) but every method raises `NotImplementedError` — it's a placeholder for a future cloud-agnostic milestone, not a wired path; don't claim SMTP inbound, list it as "coming soon" if mentioned at all. No other carrier/vendor is wired up — don't name any other provider in listing copy.
-- Repo link (`github.com/hail-hq/hail`) doubles as the "public URL/repo" requirement; `https://mcp.hail.so` is the live endpoint to use if the form asks for one separately.
+- 2026-11-16: the old two-field form (name, GitHub URL) from 2026-07 is gone. The page now has tabs (MCP Server, Remote Server, MCP Client, AI Product) and the $39 paid option.
+- No review time is stated. The repo had about 4,500 open issues on 2026-11-16.

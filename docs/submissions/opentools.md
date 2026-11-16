@@ -70,6 +70,9 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 ## Notes
 
+- 2026-11-16: Hail is not in the Communication category of <https://opentools.com/registry/communication> (21 servers). `/registry/hail` returns 404. The site now leads with its "Agent Usability Rating" product. No submit form or contribution repo was found. Next check: <https://github.com/opentools> or the OpenTools Discord at <https://opentools.com/discord>.
+
+
 - OpenTools has no documented self-serve submission form for the registry — listing requires scheduling a call with the team, and their acceptance requirements are not published; treat whatever they state on the call as authoritative and record it here afterward for future re-submissions.
 - No scheduling link or contact address was located during drafting. This needs live discovery at submission time — check the site's footer, an `/about` or `/contact` page, and any embedded scheduler.
 - **SMS is roadmap, not shipped — don't let any verbal or written follow-up imply otherwise.** `core/hailhq/core/providers/` has `voice/` and `email/` subpackages but no `sms/` — no SMS provider is wired to any carrier. The README's own capability checklist confirms this: under "SMS," both Outbound → Twilio and Inbound → Twilio are unchecked. There is no `hail sms` CLI command, no SMS route in the OpenAPI spec, and no `send_sms`/`list_sms` MCP tool. The one-liner "Phone, SMS & email" mirrors Hail's own README tagline (brand voice, product-level pitch) — if asked to elaborate live on the call, say SMS is "coming soon," not shipped.

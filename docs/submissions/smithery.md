@@ -4,7 +4,7 @@ slug: smithery
 category: mcp-registry
 url: "https://smithery.ai/docs/build/publish"
 score: 8
-status: drafted
+status: n/a
 ---
 
 # Smithery
@@ -93,6 +93,9 @@ npx -y @smithery/cli mcp publish "https://mcp.hail.so" -n @hail-hq/hail
 **Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark, use for the listing icon; `avatar-1024.png` as a raster fallback if SVG isn't accepted)
 
 ## Notes
+
+- **2026-11-16: Smithery is now part of Arcade (arcade.dev).** From <https://smithery.ai/future>: "On October 31, 2026, we're shutting down Smithery's connection management services. Smithery will remain as a public (non-proxied) MCP registry." Its accounts, API keys, CLI, and hosted server URLs are shut down. The steps above no longer work. No new submission path was found: <https://smithery.ai/docs> returns 404. Hail was not found at the Smithery server URLs tried. The registry search API returned HTTP 500.
+
 
 - Auto-scan will discover the tool list live from `https://mcp.hail.so` — the table above is included for the human filling out the form, but Smithery's own scan is the actual source that populates the listing page.
 - Smithery's docs describe an optional manual-metadata escape hatch at `/.well-known/mcp/server-card.json` for auth-protected servers where auto-scan can't complete. Checked directly: `https://mcp.hail.so/.well-known/mcp/server-card.json` currently 404s (`mcp/hailhq/mcp/server.py` only mounts `/.well-known/oauth-protected-resource`, which FastMCP auto-publishes for `oauth-rs` mode). If Smithery's OAuth-based auto-scan can't complete against Hail's flow, adding this file is the fallback — flag to engineering, don't build it speculatively for this submission.
