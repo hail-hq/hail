@@ -440,3 +440,62 @@ async def test_a_failed_give_back_never_hides_the_answer(
     _, _, key = org_and_key
     resp = await _post(client, key)
     assert resp.status_code == 200
+
+
+async def test_a_failed_upload_fetch_leaves_the_file_parts_read(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.api.main import app
+    from hailhq.core.document_reads import document_reads_today
+    from hailhq.core.providers.verification import (
+        DocumentOption,
+        DocumentSlot,
+        Requirements,
+    )
+
+    from .test_verifications_uploads import _upload
+
+    async def two_slots(country_code, number_type, subject_type):
+        passport = (DocumentOption(key="passport", label="Passport"),)
+        return Requirements(
+            provider="fake",
+            country_code=country_code,
+            number_type=number_type,
+            subject_type=subject_type,
+            required=True,
+            documents=(
+                DocumentSlot(name="identity", label="Identity", options=passport),
+                DocumentSlot(name="birth", label="Birth date", options=passport),
+            ),
+            subject_types=("person",),
+        )
+
+    monkeypatch.setattr(carrier, "requirements", two_slots)
+    calls = _fake_reader(monkeypatch)
+    store = AsyncMock()
+    store.fetch_raw.side_effect = RuntimeError("bucket down")
+    app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    try:
+        org_id, _, key = org_and_key
+        row = await _upload(async_session, org_id)
+        resp = await client.post(
+            "/verifications/document-check",
+            data=_form(
+                documents=json.dumps({"identity": {}, "birth": {}}),
+                **{"upload.birth": str(row.id)},
+            ),
+            files={"file.identity": ("id.jpg", b"\xff\xd8jpeg", "image/jpeg")},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+    assert resp.status_code == 200, resp.text
+    docs = resp.json()["documents"]
+    assert docs["identity"]["read"] is True
+    assert docs["birth"]["read"] is False
+    assert len(calls) == 1
+    # The upload's read was never sent: given back.
+    assert await document_reads_today(async_session, org_id) == 1

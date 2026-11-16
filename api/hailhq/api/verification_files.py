@@ -211,14 +211,15 @@ async def fetch_files(
         *(fetch(row) for row in distinct.values()), return_exceptions=True
     )
     fetched = dict(zip(distinct, results))
+    # The first failed fetch in slot order first, then the sizes.
+    for slot in slots:
+        if slot in rows and isinstance(fetched[rows[slot].id], BaseException):
+            raise fetched[rows[slot].id]
     files: dict[str, UploadedFile] = {}
     total = 0
     for slot in slots:
         if slot in rows:
-            result = fetched[rows[slot].id]
-            if isinstance(result, BaseException):
-                raise result
-            file: UploadedFile | None = result
+            file: UploadedFile | None = fetched[rows[slot].id]
         else:
             file = parts.get(slot)
         if file is None:

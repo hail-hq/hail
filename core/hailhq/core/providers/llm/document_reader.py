@@ -98,23 +98,28 @@ def _pdf_fits(data: bytes) -> bool:
     return len(_PDF_PAGE.findall(data)) <= _MAX_PDF_PAGES
 
 
-async def _run_decoder(content_type: str, data: bytes) -> bytes:
+async def _run_decoder(content_type: str, data: bytes, limit_s: float) -> bytes:
     """``document_image.py`` in a credential-free child process."""
     return await run_isolated(
         "hailhq.core.providers.llm.document_image",
         content_type,
         stdin=data,
-        timeout_s=_DECODE_LIMIT_S,
+        timeout_s=limit_s,
         max_output=_MAX_DECODED_BYTES,
     )
 
 
-async def _decode_image(content_type: str, data: bytes) -> bytes:
-    """Waits for a free decode, then gives it ``_DECODE_LIMIT_S``."""
+async def _decode_image(content_type: str, data: bytes, deadline: float) -> bytes:
+    """Waits for a free decode, then gives it ``_DECODE_LIMIT_S``, or what is
+    left of the read's time when less. With under a second left, it does
+    not start."""
     loop = asyncio.get_running_loop()
     slots = _decode_slots.setdefault(loop, asyncio.Semaphore(_DECODES))
     async with slots:
-        return await _run_decoder(content_type, data)
+        left = deadline - loop.time()
+        if left < 1.0:
+            raise TimeoutError("no time left to decode")
+        return await _run_decoder(content_type, data, min(_DECODE_LIMIT_S, left))
 
 
 def _file_block(content_type: str, data: bytes) -> dict[str, Any]:
@@ -156,7 +161,7 @@ async def read_document(
                 logger.warning("document read skipped: PDF over the limits")
                 return None
         else:
-            data = await _decode_image(content_type, data)
+            data = await _decode_image(content_type, data, deadline)
             content_type = "image/jpeg"
         # Everything that can fail here, before anything leaves: the client,
         # the request and its time.

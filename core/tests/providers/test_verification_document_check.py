@@ -763,8 +763,10 @@ async def test_reader_gives_the_model_only_the_time_left(
         return _jpeg((40, 30))
 
     monkeypatch.setattr(document_reader, "_run_decoder", decode)
-    await _read(timeout_s=1.0)
-    assert 0.5 < calls[0]["timeout"] < 0.75
+    await _read(timeout_s=2.0)
+    assert 1.5 < calls[0]["timeout"] < 1.75
+    # Under a second left: the decode does not start.
+    assert await _read(timeout_s=0.5) is None
 
 
 async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(

@@ -2490,7 +2490,15 @@ async def check_verification_documents(
     ]
     sent: set[str] = set()
     try:
-        files = await fetch_files(collected, to_read, s3)
+        try:
+            files = await fetch_files(collected, to_read, s3)
+        except HTTPException as exc:
+            if exc.status_code != http_status.HTTP_503_SERVICE_UNAVAILABLE:
+                raise
+            # The bucket failed: the uploads are not read (their reads are
+            # given back below), the file parts still are. Fail open.
+            logger.warning("document check: uploads not fetched (503)")
+            files = {s: collected.parts[s] for s in to_read if s in collected.parts}
         documents = {
             slot: DocumentInput(
                 option=part.option, fields=part.fields, file=files.get(slot)
@@ -2504,8 +2512,8 @@ async def check_verification_documents(
             documents,
             today=datetime.now(timezone.utc).date(),
             on_send=sent.add,
-            # Over the cap, or no model: read false, no warning.
-            skipped=[s for s in with_file if s not in to_read],
+            # Over the cap, no model, or not fetched: read false, no warning.
+            skipped=[s for s in with_file if s not in files],
         )
     finally:
         unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]
