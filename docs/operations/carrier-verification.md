@@ -220,6 +220,15 @@ registration does not verify toll-free messaging.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
 
+## Document check
+
+`POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads the files of a number verification form with an AI model before submit. The console calls it after each upload. Code: [`document_check.py`](../../core/hailhq/core/providers/verification/document_check.py) (mapping and warnings) and [`document_reader.py`](../../core/hailhq/core/providers/llm/document_reader.py) (the model call).
+
+- It returns the values each file shows, keyed by the carrier's field names, and warnings: unreadable, upside down or on its side, expired, another document type than the one chosen, or a typed name that differs from the printed one. Hail words every warning; the model only reads.
+- Warnings never block a submit. It fails open: no model, an error, a refusal or more than 15 s in total gives `read: false` and no warning.
+- Model: `ANTHROPIC_BACKUP_MODEL` (Haiku 5.5), on Bedrock when `ANTHROPIC_BEDROCK_REGION` is set, else on Anthropic's API. Same ids and access as [voice-llm.md](voice-llm.md). With neither set, the check reads nothing.
+- The files go to the model provider for this read only. Logs hold counts and exception types, never a value, a name or the answer.
+
 ## Cancel rules
 
 `DELETE /verifications/{id}`:

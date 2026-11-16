@@ -42,6 +42,9 @@ Exposes the following tools to the calling agent:
   for a number type (fields, documents, address)
 * ``check_verification`` — run every check Hail can run on a verification
   form without filing anything
+* ``check_verification_documents`` — read the files of a number
+  verification form: values to fill it, and warnings (expired, upside down,
+  wrong document type, a name that differs from the printed one)
 * ``submit_verification`` — send the user's details and documents to the
   carrier (irreversible once submitted; needs ``attest_authorized=True``)
 * ``list_verifications`` — the org's verifications and their states
@@ -1474,6 +1477,51 @@ async def check_verification(
             return {
                 "error": "the check found problems; nothing was filed. Fix the "
                 "listed problems with the user and check again.",
+                "problems": exc.problems or [],
+            }
+        return _submit_error(exc)
+    except Exception:
+        # No exception text: it could carry a request or response body.
+        return {"error": _UNEXPECTED_ERROR}
+
+
+async def check_verification_documents(
+    *,
+    client: HailClient,
+    country_code: str,
+    number_type: str,
+    fields: Any,
+    documents: Any,
+    files: Any,
+    subject_type: str | None,
+    address: Any = None,
+    quote_id: str | None = None,
+) -> dict[str, Any]:
+    error, form = _verification_request(
+        country_code=country_code,
+        number_type=number_type,
+        fields=fields,
+        documents=documents,
+        files=files,
+        subject_type=subject_type,
+        address=address,
+        quote_id=quote_id,
+        number_id=None,
+        purpose="number",
+    )
+    if error:
+        return {"error": error}
+    form.pop("purpose")
+    form.pop("number_id")
+    try:
+        return await client.check_verification_documents(**form)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except HailAPIError as exc:
+        if exc.status == 422:
+            return {
+                "error": "the form has problems; nothing was read. Fix the "
+                "listed problems and try again.",
                 "problems": exc.problems or [],
             }
         return _submit_error(exc)
@@ -3423,6 +3471,61 @@ def register_tools(
                     quote_id=quote_id,
                     number_id=number_id,
                     purpose=purpose,
+                )
+        except RuntimeError:
+            # Not the exception text: it must never carry submitted values.
+            return {"error": "could not authenticate the request"}
+
+    @mcp_app.tool(
+        name="check_verification_documents",
+        title="Read verification documents",
+        annotations=ToolAnnotations(
+            title="Read verification documents",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def check_verification_documents_tool(
+        ctx: Context,
+        country_code: Annotated[str, _COUNTRY_CODE],
+        number_type: Annotated[str, _NUMBER_TYPE_SCHEMA, _NUMBER_TYPE],
+        fields: Annotated[_JsonObject, _VERIFICATION_FIELDS],
+        documents: Annotated[_JsonObject, _VERIFICATION_DOCUMENTS],
+        files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
+        quote_id: Annotated[str | None, _UUID_OR_NULL, _VERIFICATION_QUOTE_ID] = None,
+        subject_type: Annotated[
+            str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
+        ] = None,
+        address: Annotated[_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+    ) -> dict[str, Any]:
+        """Read the files of a number verification form, before the form is filled or submitted.
+
+        Takes the arguments of ``check_verification``. ``documents`` may leave out
+        ``option`` while the type is not chosen; ``fields`` and ``address`` may be
+        empty or partial. An AI model reads each file.
+        Returns ``fields``, ``address`` and ``documents.<slot>.fields``: the values the
+        files show, by the form's own keys, to fill the form after the user confirms
+        them. ``documents.<slot>.option`` is the document type the file looks like.
+        ``warnings`` (``field``, ``kind``, ``message``) lists what the carrier may
+        refuse: an unreadable, upside-down or expired document, a file of another
+        type than the chosen one, or a typed name that differs from the printed one.
+        Each message names the fix. A submission with warnings is still accepted.
+        A file that could not be read has ``read`` false and no warning.
+        Nothing is filed, saved, held or charged, and uploads stay usable."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await check_verification_documents(
+                    client=client,
+                    country_code=country_code,
+                    number_type=number_type,
+                    fields=fields,
+                    documents=documents,
+                    files=files,
+                    subject_type=subject_type,
+                    address=address,
+                    quote_id=quote_id,
                 )
         except RuntimeError:
             # Not the exception text: it must never carry submitted values.

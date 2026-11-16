@@ -37,6 +37,7 @@ from hailhq.api.routes import sms_evidence as sms_evidence_routes
 from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import uploads as uploads_routes
+from hailhq.api.routes import verification_documents as verification_documents_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
@@ -502,6 +503,7 @@ _CUSTOMER_ROUTERS = [
     whoami_routes.router,
     providers_routes.router,
     sms_evidence_routes.router,
+    verification_documents_routes.router,
     verifications_routes.router,
 ]
 for _router in _CUSTOMER_ROUTERS:

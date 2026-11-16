@@ -3,6 +3,8 @@ carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
 Number-verification files and details pass through in memory to the carrier.
+``POST /verifications/document-check`` (``verification_documents.py``) also
+sends the files to an AI model to read them before submit.
 SMS applications keep submitted text fields and address privately for repair;
 only the organization-scoped application endpoint returns them. Files sent as
 ``file.<slot>`` parts are never stored. A document uploaded with an upload link

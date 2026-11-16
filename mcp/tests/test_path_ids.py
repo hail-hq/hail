@@ -88,6 +88,7 @@ _BODY_ID_METHODS = {
     "preview_sms_application",
     "submit_verification",
     "check_verification",
+    "check_verification_documents",
 }
 
 

@@ -38,10 +38,12 @@ _READ_ONLY = {
     "get_sms_application",
     "preview_sms_application",
     "check_verification",
+    "check_verification_documents",
 }
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {
     "check_verification",
+    "check_verification_documents",
     "get_sms_application",
     "preview_sms_application",
     "quote_numbers",
@@ -74,7 +76,7 @@ _OPEN_WORLD_WRITES = {
     "confirm_verification",
 }
 
-_EXPECTED_COUNT = 44
+_EXPECTED_COUNT = 45
 
 
 async def test_tool_count(tools_by_name) -> None:

@@ -2714,21 +2714,19 @@ paths:
               - type: "null"
             description:
               "Optional. Keep only options that do all these jobs, priced
-              and listed for these jobs only, the same as /numbers/quotes. Without
-              it, options are priced for every job they do, and each number type
-              shows its best option in this order: buy now before
-              order by hand, then ready now, then options that do every job the type
-              offers (even when a number that does fewer jobs costs less), then lower
-              price, then fewer papers."
+              and listed for these jobs only, the same as /numbers/quotes. Without it,
+              options are priced for every job they do, and each number type shows its
+              best option in this order: buy now before order by hand, then ready now,
+              then options that do every job the type offers (even when a number that
+              does fewer jobs costs less), then lower price, then fewer papers."
             title: Capabilities
           description:
-            "Optional. Keep only options that do all these jobs, priced
-            and listed for these jobs only, the same as /numbers/quotes. Without
-            it, options are priced for every job they do, and each number type
-            shows its best option in this order: buy now before
-            order by hand, then ready now, then options that do every job the type offers
-            (even when a number that does fewer jobs costs less), then lower price,
-            then fewer papers."
+            "Optional. Keep only options that do all these jobs, priced and
+            listed for these jobs only, the same as /numbers/quotes. Without it, options
+            are priced for every job they do, and each number type shows its best option
+            in this order: buy now before order by hand, then ready now, then options
+            that do every job the type offers (even when a number that does fewer jobs
+            costs less), then lower price, then fewer papers."
         - name: authorization
           in: header
           required: false
@@ -5047,6 +5045,95 @@ paths:
           description: No file of yours has this link.
         "503":
           description: This server does not store files.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-check:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Documents
+      description:
+        "Read the documents of a number verification form before you submit
+        it
+
+        (multipart/form-data).
+
+
+        Send the documents first: the same parts as `POST /verifications`, with
+
+        a file per slot (`file.<slot>`, or `upload.<slot>` with the id of a
+
+        `verification_document` upload). `quote_id`, `country_code`,
+
+        `number_type` and `subject_type` are required. `documents` may leave
+
+        out `option` while the type is not chosen; `fields` and `address` may
+
+        be empty or partial.
+
+
+        Returns the values the files show, by the carrier's field names, to
+
+        fill the form (`fields`, `address`, `documents.<slot>.fields`, and the
+
+        document type each file looks like in `documents.<slot>.option`). Also
+
+        returns `warnings`: an unreadable, upside-down or expired document, a
+
+        file that does not match the chosen document type, or a typed name that
+
+        differs from the printed one. Show each warning with its fix. You can
+
+        still submit.
+
+
+        A file that could not be read has `read` false and gives no warning.
+
+        Nothing is filed, saved, held or charged, and uploads are not used up.
+
+        The files are read by an AI model (Anthropic) for this check only."
+      operationId: check_verification_documents
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCheckResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "422":
           description: Validation Error
           content:
@@ -10439,6 +10526,151 @@ components:
       description:
         Returned by ``POST /verifications/check`` when every local check
         passes.
+    VerificationDocumentCheckResponse:
+      properties:
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the form's own `fields`, by field name, read from
+            the files.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description:
+            Address parts read from the files (`customer_name`, `street`,
+            `city`, `region`, `postal_code`, `country_code`). Only the parts found.
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentRead"
+          type: object
+          title: Documents
+          description: What was read from each slot that had a file, by slot name.
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description: Things the carrier may refuse. Empty when nothing was found.
+        note:
+          type: string
+          title: Note
+          description: What the check does not cover.
+      type: object
+      required:
+        - fields
+        - address
+        - documents
+        - warnings
+        - note
+      title: VerificationDocumentCheckResponse
+      description: Returned by ``POST /verifications/document-check``.
+    VerificationDocumentRead:
+      properties:
+        read:
+          type: boolean
+          title: Read
+          description:
+            False when the file was not read (the reader is off, the file
+            type is not supported, or the read failed or took too long). The other
+            values are then empty.
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description:
+            The slot's document type the file looks like, as an option
+            key, or null when none fits or it was not read.
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the fields of the slot's document types, by field
+            name, as printed on the file.
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description: The expiry date printed on the file (YYYY-MM-DD), or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null when not read.
+      type: object
+      required:
+        - read
+        - option
+        - fields
+        - expiry_date
+        - printed_name
+      title: VerificationDocumentRead
+      description: What was read from one slot's file.
+    VerificationDocumentWarning:
+      properties:
+        field:
+          type: string
+          title: Field
+          description:
+            "Where to show it: a slot name for the document itself, or
+            the path of a typed value (`first_name`, `<slot>.<field>`, `address.customer_name`)."
+        kind:
+          type: string
+          enum:
+            - unreadable
+            - rotated
+            - expired
+            - document_type
+            - name
+          title: Kind
+          description: "'unreadable', 'rotated' (upside down or on its side),
+            'expired', 'document_type' (the file does not match the chosen type),
+            or 'name' (the typed name differs from the printed one)."
+        message:
+          type: string
+          title: Message
+          description: What is wrong and how to fix it.
+      type: object
+      required:
+        - field
+        - kind
+        - message
+      title: VerificationDocumentWarning
+      description:
+        "Something on an uploaded document the carrier may refuse. A warning
+
+        only: you can still submit."
+    VerificationPrintedName:
+      properties:
+        given_names:
+          type: string
+          title: Given Names
+          description: A person's given names.
+        surnames:
+          type: string
+          title: Surnames
+          description: A person's surnames.
+        business_name:
+          type: string
+          title: Business Name
+          description: A company's name.
+      type: object
+      required:
+        - given_names
+        - surnames
+        - business_name
+      title: VerificationPrintedName
+      description:
+        The name printed on a document, as read. Empty strings when not
+        printed.
     VerificationRequirements:
       properties:
         country_code:

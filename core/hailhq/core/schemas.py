@@ -2320,6 +2320,86 @@ class VerificationCheckResponse(BaseModel):
     note: str = Field(description="What the check does not cover.")
 
 
+class VerificationDocumentWarning(BaseModel):
+    """Something on an uploaded document the carrier may refuse. A warning
+    only: you can still submit."""
+
+    field: str = Field(
+        description=(
+            "Where to show it: a slot name for the document itself, or the "
+            "path of a typed value (`first_name`, `<slot>.<field>`, "
+            "`address.customer_name`)."
+        )
+    )
+    kind: Literal["unreadable", "rotated", "expired", "document_type", "name"] = Field(
+        description=(
+            "'unreadable', 'rotated' (upside down or on its side), 'expired', "
+            "'document_type' (the file does not match the chosen type), or "
+            "'name' (the typed name differs from the printed one)."
+        )
+    )
+    message: str = Field(description="What is wrong and how to fix it.")
+
+
+class VerificationPrintedName(BaseModel):
+    """The name printed on a document, as read. Empty strings when not printed."""
+
+    given_names: str = Field(description="A person's given names.")
+    surnames: str = Field(description="A person's surnames.")
+    business_name: str = Field(description="A company's name.")
+
+
+class VerificationDocumentRead(BaseModel):
+    """What was read from one slot's file."""
+
+    read: bool = Field(
+        description=(
+            "False when the file was not read (the reader is off, the file "
+            "type is not supported, or the read failed or took too long). "
+            "The other values are then empty."
+        )
+    )
+    option: str | None = Field(
+        description=(
+            "The slot's document type the file looks like, as an option key, "
+            "or null when none fits or it was not read."
+        )
+    )
+    fields: dict[str, str] = Field(
+        description=(
+            "Values for the fields of the slot's document types, by field "
+            "name, as printed on the file."
+        )
+    )
+    expiry_date: str | None = Field(
+        description="The expiry date printed on the file (YYYY-MM-DD), or null."
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        description="The name printed on the file, or null when not read."
+    )
+
+
+class VerificationDocumentCheckResponse(BaseModel):
+    """Returned by ``POST /verifications/document-check``."""
+
+    fields: dict[str, str] = Field(
+        description="Values for the form's own `fields`, by field name, read from the files."
+    )
+    address: dict[str, str] = Field(
+        description=(
+            "Address parts read from the files (`customer_name`, `street`, "
+            "`city`, `region`, `postal_code`, `country_code`). Only the parts found."
+        )
+    )
+    documents: dict[str, VerificationDocumentRead] = Field(
+        description="What was read from each slot that had a file, by slot name."
+    )
+    warnings: list[VerificationDocumentWarning] = Field(
+        description="Things the carrier may refuse. Empty when nothing was found."
+    )
+    note: str = Field(description="What the check does not cover.")
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = Field(description="Plain-text body, if any.")
     body_html: str | None = Field(description="HTML body, if any.")
