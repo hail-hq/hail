@@ -194,6 +194,23 @@ async def test_from_equal_to_trial_number_uses_trial(
     assert await trial_texts_used(async_session, org_id) == 1
 
 
+async def test_own_unregistered_number_omits_from_for_trial(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """The path the hint names: a workspace whose own number is not
+    registered omits ``from`` and the text goes out as a trial text."""
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    await _own_number(async_session, org_id)
+
+    resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_e164"] == TRIAL_E164
+    assert sms_mock.send_sms.call_args.kwargs["body"] == WRAPPED_HI
+
+
 async def test_registered_number_preferred(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
@@ -262,11 +279,13 @@ async def test_trial_body_too_long_is_422(
     assert resp.status_code == 422
     assert resp.json()["detail"][0]["loc"] == ["body", "body"]
     assert _msg(resp) == str(TrialBodyTooLong(1600))
+    # The refusal ended the claim's transaction, so it released the
+    # workspace lock. (The route shares this session, which could re-take
+    # its own lock, so a follow-up send alone would not show it.)
+    assert not async_session.in_transaction()
     sms_mock.send_sms.assert_not_awaited()
     assert await _sms_count(async_session, org_id) == 0
 
-    # The refusal rolled back and released the workspace lock: the next
-    # send goes through.
     resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
     assert resp.status_code == 201, resp.text
 
