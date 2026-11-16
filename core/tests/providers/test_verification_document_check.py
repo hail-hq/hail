@@ -513,6 +513,27 @@ async def test_reader_decodes_a_large_jpeg(reader_settings, monkeypatch) -> None
     assert max(sent.size) == 1568
 
 
+async def test_reader_skips_an_image_when_no_decoder_is_free(
+    reader_settings, monkeypatch
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    busy = ThreadPoolExecutor(max_workers=1)
+    release = threading.Event()
+    busy.submit(release.wait)
+    monkeypatch.setattr(document_reader, "_decoder", busy)
+    monkeypatch.setattr(document_reader, "_DECODE_WAIT_S", 0.05)
+    try:
+        assert await _read() is None
+        assert calls == []
+    finally:
+        release.set()
+        busy.shutdown(wait=True)
+
+
 async def test_reader_is_off_without_a_model(reader_settings, monkeypatch) -> None:
     monkeypatch.setattr(settings, "anthropic_backup_model", "")
     assert await _read() is None

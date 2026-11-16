@@ -17,7 +17,7 @@ import base64
 import io
 import json
 import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import anthropic
@@ -44,10 +44,12 @@ _MAX_PIXELS = 25_000_000
 # Pillow decodes only the format the file was declared as, never another
 # format it happens to know.
 _IMAGE_FORMATS = {"image/jpeg": ("JPEG",), "image/png": ("PNG",)}
-# Images decoded at once, so a burst of uploads cannot take every thread.
-# Held by the decoding thread itself: a read cancelled at the time limit
-# leaves its thread running, and the slot stays taken until it ends.
-_decodes = threading.BoundedSemaphore(2)
+# Images are decoded on their own 2 threads, never on asyncio's shared
+# pool: a burst of uploads waits here and cannot take the threads other work
+# needs. A read cancelled at the time limit leaves its decode running on
+# these threads only. A decode that cannot start and finish in this time is
+# dropped (fail open).
+_decoder = ThreadPoolExecutor(max_workers=2, thread_name_prefix="document-decode")
 _DECODE_WAIT_S = 10.0
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
@@ -78,15 +80,6 @@ def _image_for_model(content_type: str, data: bytes) -> bytes:
     """The image as a JPEG at most ``_IMAGE_LONG_SIDE`` on its long side,
     turned as its EXIF tag says, so the model sees what a person sees.
     Raises for a file that is not its declared format, or too large."""
-    if not _decodes.acquire(timeout=_DECODE_WAIT_S):
-        raise TimeoutError("too many images decoding")
-    try:
-        return _decode(content_type, data)
-    finally:
-        _decodes.release()
-
-
-def _decode(content_type: str, data: bytes) -> bytes:
     formats = _IMAGE_FORMATS[content_type]
     with Image.open(io.BytesIO(data), formats=formats) as image:
         if image.width * image.height > _MAX_PIXELS:
@@ -135,7 +128,11 @@ async def read_document(
         return None
     try:
         if content_type != "application/pdf":
-            data = await asyncio.to_thread(_image_for_model, content_type, data)
+            loop = asyncio.get_running_loop()
+            data = await asyncio.wait_for(
+                loop.run_in_executor(_decoder, _image_for_model, content_type, data),
+                timeout=_DECODE_WAIT_S,
+            )
             content_type = "image/jpeg"
         response = await _get_client().messages.create(
             model=settings.anthropic_backup_model,
