@@ -120,6 +120,15 @@ html[data-theme="light"], html.light {
   --fs-display: clamp(48px,6vw,88px);
   --fs-title: clamp(34px,4.2vw,60px);
   --fs-h2-display: clamp(34px,4.3vw,64px);
+  --fs-hero: clamp(74px,7.7vw,116px);
+  --fs-panel: 40px; --fs-card: 34px;
+  --fs-closing: clamp(44px,4.9vw,74px);
+  --pad-feature: 36px; --pad-panel: 40px; --gap-panel: 60px;
+  --feature-height: 490px;
+  --code-panel: #151b28; --code-card: #111722; --code-ink: #ffffff;
+  --code-muted: #b7bdc9; --code-line: #ffffff25; --code-accent: #8fb5ff;
+  --recess: color-mix(in srgb,var(--ink) 5%,var(--card));
+  --ok-text: #287443;
   --fs-h2: 32px; --fs-h3: 24px; --fs-lede: 19px;
   --fs-body: 16px; --fs-small: 14px; --fs-note: 12px; --fs-label: 12px;
   --frame: 1px solid var(--lline);
@@ -141,9 +150,31 @@ html[data-theme="light"], html.light {
 @media (max-width:900px) {
   .hsite, .hail-public, .legal-page {
     --public-gutter: 24px; --pad-page: 48px; --gap-section: 48px; --gap-hero: 64px;
+    --fs-hero: clamp(46px,9vw,78px); --fs-panel: 34px; --fs-card: 30px; --fs-closing: 44px;
+    --pad-feature: 28px; --pad-panel: 28px; --gap-panel: 32px;
     --fs-h2: 28px; --fs-h3: 22px; --fs-lede: 17px; --r-2xl: 24px;
   }
 }
 @media (max-width:359px) {
   .hsite, .hail-public, .legal-page { --public-gutter: 20px; --pad-page: 36px; --fs-h2: 25px; --fs-lede: 16px; }
+}
+
+@media (max-width:720px) {
+  .hsite, .hail-public, .legal-page {
+    --fs-panel: 32px; --fs-closing: clamp(27px,7.8vw,44px);
+    --pad-panel: 26px; --gap-panel: 30px;
+  }
+}
+@media (max-width:440px) {
+  .hsite, .hail-public, .legal-page { --fs-hero: clamp(41px,12.6vw,57px); }
+}
+@media (max-width:359px) {
+  .hsite, .hail-public, .legal-page {
+    --fs-hero: 41px; --fs-panel: 28px; --fs-card: 27px;
+    --pad-feature: 24px; --pad-panel: 20px; --gap-panel: 24px; --feature-height: 475px;
+  }
+}
+html[data-theme="dark"] :is(.hsite,.hail-public,.legal-page), html.dark :is(.hsite,.hail-public,.legal-page) { --ok-text:#79d49a; }
+@media (prefers-color-scheme:dark) {
+  html:not([data-theme="light"]):not(.light) :is(.hsite,.hail-public,.legal-page) { --ok-text:#79d49a; }
 }

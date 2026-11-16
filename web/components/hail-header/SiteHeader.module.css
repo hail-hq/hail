@@ -50,13 +50,15 @@
   flex: none;
   gap: 8px;
   min-height: var(--nav-control);
-  font-size: 27px;
+  font-size: 32px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.06em;
 }
 .logo > svg {
   flex: none;
+  width: 36px;
+  height: 36px;
 }
 .nav {
   display: flex;
@@ -267,6 +269,10 @@
   .navActions {
     position: relative;
     z-index: 2;
+  }
+  .logo > svg {
+    width: 26px;
+    height: 26px;
   }
   .navActions {
     margin-left: auto;
