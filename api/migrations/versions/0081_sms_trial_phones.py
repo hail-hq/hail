@@ -71,6 +71,10 @@ def upgrade():
             "status IN ('pending','verified')",
             name="sms_trial_phones_status_check",
         ),
+        sa.CheckConstraint(
+            r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_phone_e164_check",
+        ),
     )
     op.create_index(
         "sms_trial_phones_verified_phone_uq",

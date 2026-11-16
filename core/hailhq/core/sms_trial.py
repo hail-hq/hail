@@ -14,6 +14,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us, on_approved_registration
+import phonenumbers
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +53,8 @@ class PhoneTaken(Exception):
 class CodeBudgetExceeded(Exception):
     def __init__(self, retry_after: timedelta) -> None:
         super().__init__(
-            f"You asked for {MAX_CODE_SENDS_PER_DAY} codes today. Try again tomorrow."
+            f"This phone got the maximum of {MAX_CODE_SENDS_PER_DAY} codes in "
+            "the last 24 hours. Try again later."
         )
         self.retry_after = retry_after
 
@@ -103,6 +105,19 @@ def code_text(code: str) -> str:
         f"Your Hail trial code is {code}. It expires in 10 minutes. "
         "Reply STOP to opt out, HELP for help."
     )
+
+
+def _canonical_phone(phone: str) -> str:
+    """``phone`` in canonical E.164, so every check, lock and stored value
+    uses one spelling. Raises ``PhoneNotUs`` when it does not parse or has
+    an impossible length."""
+    try:
+        parsed = phonenumbers.parse(phone, None)
+    except phonenumbers.NumberParseException as exc:
+        raise PhoneNotUs() from exc
+    if not phonenumbers.is_possible_number(parsed):
+        raise PhoneNotUs()
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
 def _hash_code(organization_id: UUID, phone: str, code: str) -> str:
@@ -192,8 +207,10 @@ async def start_phone_proof(
     user_id: UUID | None,
     now: datetime | None = None,
 ) -> IssuedCode:
-    """Issue a code for ``phone``. The caller texts it, then commits."""
+    """Issue a code for ``phone``. The caller texts it to ``row.phone_e164``
+    (the canonical form), then commits."""
     now = (now or datetime.now(UTC)).astimezone(UTC)
+    phone = _canonical_phone(phone)
     await org_lock(db, organization_id)
     if not is_us(phone):
         raise PhoneNotUs()

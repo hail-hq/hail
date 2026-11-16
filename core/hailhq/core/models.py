@@ -1219,6 +1219,10 @@ class SmsTrialPhone(Base):
             "status IN ('pending','verified')",
             name="sms_trial_phones_status_check",
         ),
+        CheckConstraint(
+            r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_phone_e164_check",
+        ),
         Index(
             "sms_trial_phones_verified_phone_uq",
             "phone_e164",

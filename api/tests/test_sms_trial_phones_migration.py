@@ -62,6 +62,21 @@ async def test_sms_trial_phones_round_trip(db):
         trial = [d for d in sms_defs if "sms_trial_org_idx" in d]
         assert trial and "metadata ? 'sms_trial'" in trial[0]
 
+        checks = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT conname FROM pg_constraint "
+                        "WHERE conrelid = 'sms_trial_phones'::regclass "
+                        "AND contype = 'c'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "sms_trial_phones_phone_e164_check" in checks
+
 
 async def test_one_workspace_per_verified_phone(async_session):
     async_session.add_all(
@@ -83,4 +98,11 @@ async def test_one_row_per_workspace(async_session):
     org = uuid.uuid4()
     async_session.add_all([_row(org), _row(org, phone="+14155550143")])
     with pytest.raises(IntegrityError):
+        await async_session.flush()
+
+
+@pytest.mark.parametrize("bad", [PHONE + "\n", "+123", "14155550142", "+0415555014"])
+async def test_phone_must_be_canonical_e164(async_session, bad):
+    async_session.add(_row(uuid.uuid4(), phone=bad))
+    with pytest.raises(IntegrityError, match="sms_trial_phones_phone_e164_check"):
         await async_session.flush()

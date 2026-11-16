@@ -248,7 +248,9 @@ async def test_code_text_is_not_an_sms_row_and_not_billed(
     assert resp.json()["texts_used"] == 0 and resp.json()["texts_left"] == 25
 
 
-@pytest.mark.parametrize("case", ["non_us", "hail_number", "taken", "sixth_code"])
+@pytest.mark.parametrize(
+    "case", ["non_us", "too_short", "hail_number", "taken", "sixth_code"]
+)
 async def test_start_maps_errors(
     jwt_client, async_session, monkeypatch, sms_mock, case
 ):
@@ -256,6 +258,8 @@ async def test_start_maps_errors(
     body = dict(START)
     if case == "non_us":
         body["phone"] = "+447700900123"
+    elif case == "too_short":
+        body["phone"] = "+12345"
     elif case == "hail_number":
         body["phone"] = TRIAL_E164
     elif case == "taken":
@@ -271,7 +275,7 @@ async def test_start_maps_errors(
 
     resp = await jwt_client.post("/v1/sms/trial/phone", json=body)
 
-    if case == "non_us":
+    if case in ("non_us", "too_short"):
         assert resp.status_code == 422, resp.text
         assert resp.json()["detail"][0]["loc"] == ["body", "phone"]
         assert _msg(resp) == "Trial texts go to US mobile numbers only."
@@ -285,7 +289,10 @@ async def test_start_maps_errors(
     else:
         assert resp.status_code == 429, resp.text
         assert int(resp.headers["Retry-After"]) > 0
-        assert "5 codes today" in resp.json()["detail"]
+        assert resp.json()["detail"] == (
+            "This phone got the maximum of 5 codes in the last 24 hours. "
+            "Try again later."
+        )
     assert sms_mock.send_sms.call_count == sends
 
 
@@ -526,3 +533,37 @@ async def test_errors_never_name_a_carrier(
     assert len(texts) == 9
     for text in texts:
         assert "twilio" not in text.lower() and "telnyx" not in text.lower(), text
+
+
+async def test_code_goes_to_the_stored_phone(
+    jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
+):
+    """The route texts and audits the phone core stored, not the request's."""
+    from hailhq.api.routes import sms_trial as route
+    from hailhq.core.sms_trial import start_phone_proof
+
+    org_id = org_and_key[0]
+    stored = "+14155550143"
+    await seed_sms_trial(async_session, monkeypatch)
+
+    async def _stores_other(db, organization_id, **kwargs):
+        return await start_phone_proof(
+            db, organization_id, **{**kwargs, "phone": stored}
+        )
+
+    monkeypatch.setattr(route, "start_phone_proof", _stores_other)
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 200, resp.text
+    assert sms_mock.send_sms.call_args.kwargs["to_e164"] == stored
+    audits = await _audit(session_factory, org_id, "sms.trial.code_sent")
+    assert audits[0].payload == {"phone": stored}
+
+
+def test_confirm_409_is_documented_as_phone_taken():
+    from hailhq.api.main import app
+
+    spec = app.openapi()
+    confirm = spec["paths"]["/v1/sms/trial/phone/confirm"]["post"]["responses"]
+    assert confirm["409"]["description"] == (
+        "Another workspace uses this phone for trial texts. Use a different phone."
+    )

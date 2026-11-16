@@ -197,6 +197,19 @@ def test_sms_create_validates_e164() -> None:
         SmsCreate(to="not-a-number", body="hi", recipient_consent=True)
 
 
+@pytest.mark.parametrize("bad", ["+14155550142\n", "+14155550142 ", " +14155550142"])
+def test_e164_fields_refuse_a_trailing_or_leading_character(bad) -> None:
+    """Python ``$`` matches before a trailing newline; the check must not."""
+    from hailhq.core.schemas import SmsCreate, SmsTrialPhoneStart
+
+    with pytest.raises(ValidationError):
+        SmsCreate(to=bad, body="hi", recipient_consent=True)
+    with pytest.raises(ValidationError):
+        SmsTrialPhoneStart(phone=bad, recipient_consent=True, consent_version="v1")
+    with pytest.raises(ValidationError):
+        CallCreate(to=bad, system_prompt="Hi", recipient_consent=True)
+
+
 def test_sms_create_happy_path() -> None:
     from hailhq.core.schemas import SmsCreate
 

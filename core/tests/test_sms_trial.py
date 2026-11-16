@@ -235,7 +235,10 @@ async def test_sixth_code_in_a_day_is_refused(async_session):
         await _start(async_session, org)
     with pytest.raises(CodeBudgetExceeded) as e:
         await _start(async_session, org)
-    assert str(e.value) == "You asked for 5 codes today. Try again tomorrow."
+    assert str(e.value) == (
+        "This phone got the maximum of 5 codes in the last 24 hours. "
+        "Try again later."
+    )
     assert e.value.retry_after == timedelta(hours=24)
     issued = await _start(async_session, org, now=NOW + timedelta(hours=24))
     assert issued.code is not None
@@ -584,3 +587,33 @@ async def test_claim_checks_the_phone_under_the_lock(
         await holder.commit()
         assert await asyncio.wait_for(claim, timeout=10) is None
         await claimer.rollback()
+
+
+async def test_start_stores_the_canonical_phone(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org, phone="+1 415 555 0142\n")
+    assert issued.row.phone_e164 == PHONE
+    assert issued.row.code_send_log[-1]["phone"] == PHONE
+
+
+async def test_non_canonical_phone_cannot_skip_the_taken_check(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    issued = await _start(async_session, a)
+    await confirm_phone(async_session, a, issued.code, now=NOW)
+    with pytest.raises(PhoneTaken):
+        await _start(async_session, b, phone=PHONE + "\n")
+
+
+async def test_non_canonical_phone_counts_toward_the_phone_cap(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    for _ in range(5):
+        await _start(async_session, a)
+    with pytest.raises(CodeBudgetExceeded):
+        await _start(async_session, b, phone=PHONE + "\n")
+
+
+@pytest.mark.parametrize("bad", ["+1abc", "not a phone", "", "+12345", "+1415555014"])
+async def test_unparsable_phone_is_not_us(async_session, bad):
+    org = await _org(async_session)
+    with pytest.raises(PhoneNotUs):
+        await _start(async_session, org, phone=bad)

@@ -65,14 +65,8 @@ _SEND_FAILED = "Hail could not send the code. Try again."
 # The carrier's error for a recipient that replied STOP to the sender.
 _STOP_ERROR_CODE = "21610"
 
-_PHONE_RESPONSES: dict = {
-    403: {"description": "Only a signed-in console session can set the phone."},
-    409: {
-        "description": (
-            "Trial texting is not available yet, or another workspace uses "
-            "this phone."
-        )
-    },
+_CONSOLE_ONLY_RESPONSE: dict = {
+    403: {"description": "Only a signed-in console session can set the phone."}
 }
 
 
@@ -116,7 +110,13 @@ async def get_sms_trial(
     "/phone",
     response_model=SmsTrialResponse,
     responses={
-        **_PHONE_RESPONSES,
+        **_CONSOLE_ONLY_RESPONSE,
+        409: {
+            "description": (
+                "Trial texting is not available yet, or another workspace uses "
+                "this phone."
+            )
+        },
         422: {
             "description": (
                 "The phone is not a US number, is a Hail number, replied STOP "
@@ -186,16 +186,18 @@ async def start_sms_trial_phone(
         ) from exc
 
     if issued.code is None:
-        # Already verified with this phone: nothing to text.
-        await db.commit()
+        # Already verified with this phone: nothing to text or write.
+        await db.rollback()
         return await _trial_status(db, principal.organization_id)
 
     # start_phone_proof holds the workspace and phone locks until the commit,
-    # so only the send runs between the claim and the commit.
+    # so only the send runs between the claim and the commit. Text and audit
+    # the phone as stored (canonical), never the request's spelling.
+    phone = issued.row.phone_e164
     try:
         result = await sms_route(number.provider).send_sms(
             from_e164=number.e164,
-            to_e164=body.phone,
+            to_e164=phone,
             body=code_text(issued.code),
             status_callback_url=None,
         )
@@ -227,7 +229,7 @@ async def start_sms_trial_phone(
         action="sms.trial.code_sent",
         resource_type="sms_trial_phone",
         resource_id=row_id,
-        payload={"phone": body.phone},
+        payload={"phone": phone},
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
@@ -238,7 +240,13 @@ async def start_sms_trial_phone(
     "/phone/confirm",
     response_model=SmsTrialResponse,
     responses={
-        **_PHONE_RESPONSES,
+        **_CONSOLE_ONLY_RESPONSE,
+        409: {
+            "description": (
+                "Another workspace uses this phone for trial texts. Use a "
+                "different phone."
+            )
+        },
         422: {
             "description": (
                 "No code is open, the code expired, or the code is not "

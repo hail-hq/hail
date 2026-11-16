@@ -32,7 +32,8 @@ def _e164_or_error(v: str | None) -> str | None:
     """Shared to/from validator for the phone-channel create schemas
     (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
     reword the error."""
-    if v is not None and not E164.match(v):
+    # fullmatch: ``$`` with ``match`` also accepts a trailing newline.
+    if v is not None and not E164.fullmatch(v):
         raise ValueError("must be E.164 (e.g. +14155551234)")
     return v
 
