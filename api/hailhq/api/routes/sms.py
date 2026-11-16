@@ -309,7 +309,6 @@ async def create_sms(
         )
 
     await require_funds(db, principal, idem)
-    await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
 
     # The dedicated-number requirement is conditional on the destination
     # corridor (Task 5). For alphanumeric-eligible corridors with no explicit
@@ -352,9 +351,21 @@ async def create_sms(
             ) from None
         if trial is None and db.in_transaction():
             # A refused claim may hold the workspace lock (all texts used,
-            # phone changed). Nothing is written yet: release the lock
-            # before the checks below, which can call the carrier.
+            # phone changed). Release it before the checks below, which can
+            # call the carrier. The rollback drops nothing: this transaction
+            # has only read so far (authentication commits its own key
+            # stamp, and the agent caps below write their log after it).
+            # test_refused_trial_claim_rolls_back_only_reads checks this.
             await db.rollback()
+    # The agent caps log the send, so they run after any rollback above;
+    # a trial send logs it under the claim's lock.
+    try:
+        await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
+    except HTTPException:
+        if trial is not None:
+            # Release the claim's workspace lock before answering.
+            await db.rollback()
+        raise
     if trial is not None:
         # The claim holds the workspace lock: nothing commits before the
         # insert and commit below, in this same transaction.

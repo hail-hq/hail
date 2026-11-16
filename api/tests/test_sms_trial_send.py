@@ -4,10 +4,19 @@ registration sends to its verified trial phone from Hail's trial number."""
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from hailhq.core.config import settings
-from hailhq.core.models import CarrierVerification, PhoneNumber, Sms, UsageEvent
+from hailhq.core.models import (
+    AgentSendLog,
+    CarrierVerification,
+    Organization,
+    PhoneNumber,
+    Sms,
+    UsageEvent,
+)
 from hailhq.core.sms_registration_gate import BLOCK_MESSAGE
 from hailhq.core.sms_trial import (
     SMS_TRIAL_META_KEY,
@@ -15,9 +24,8 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     trial_texts_used,
 )
-from sqlalchemy import func, select, text, update
+from sqlalchemy import event, func, select, text, update
 
-from .test_sms_api import STATUS_AUTH_TOKEN, _signed_status_form
 from .conftest import (
     approve_us_sms,
     insert_org_and_key,
@@ -25,11 +33,13 @@ from .conftest import (
     seed_trial_texts,
     verify_trial_phone,
 )
+from .test_sms_api import STATUS_AUTH_TOKEN, _signed_status_form
 
 TRIAL_E164 = "+18005550199"
 PHONE = "+14155550142"
 OTHER_PHONE = "+14155550143"
 OWN_NUMBER = "+14155550144"
+CA_NUMBER = "+14165550145"
 WRAPPED_HI = "[Hail trial] hi\nHail does not read replies."
 
 
@@ -435,3 +445,148 @@ async def test_trial_text_refused_by_callback_frees_the_cap(
     assert await trial_texts_used(async_session, org_id) == 0
     row = await async_session.get(Sms, uuid.UUID(sent.json()["id"]))
     assert row.error_code == "21610"
+
+
+async def _agent_org_with_ca_number(session, org_id, monkeypatch) -> None:
+    """An agent-origin workspace whose only text number is Canadian, with an
+    SMS cap of 2 an hour. Its sends to the US skip the US registration gate,
+    so they go out after a refused trial claim."""
+    session.add(Organization(id=org_id, origin="agent"))
+    session.add(
+        PhoneNumber(
+            organization_id=org_id,
+            e164=CA_NUMBER,
+            country_code="CA",
+            number_type="local",
+            capabilities=["sms"],
+            provider="twilio",
+            provider_resource_id="PN_ca",
+            provisioning_state="active",
+        )
+    )
+    await session.commit()
+    monkeypatch.setattr(settings, "agent_sms_per_hour", 2)
+
+
+async def _agent_send_logs(session, org_id) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(AgentSendLog)
+            .where(AgentSendLog.organization_id == org_id)
+        )
+    ).scalar_one()
+
+
+@contextmanager
+def _rolled_back_statements(session) -> Iterator[list[list[str]]]:
+    """The SQL of each transaction that ended in a rollback while the block
+    runs, one list per transaction."""
+    engine = session.bind.sync_engine
+    open_: dict[int, list[str]] = {}
+    rolled_back: list[list[str]] = []
+
+    def on_execute(conn, cursor, statement, parameters, context, executemany):
+        open_.setdefault(id(conn), []).append(statement)
+
+    def on_commit(conn):
+        open_.pop(id(conn), None)
+
+    def on_rollback(conn):
+        rolled_back.append(open_.pop(id(conn), []))
+
+    listeners = [
+        ("before_cursor_execute", on_execute),
+        ("commit", on_commit),
+        ("rollback", on_rollback),
+    ]
+    for name, fn in listeners:
+        event.listen(engine, name, fn)
+    try:
+        yield rolled_back
+    finally:
+        for name, fn in listeners:
+            event.remove(engine, name, fn)
+
+
+@pytest.mark.parametrize("trial", ["off", "all_used"])
+async def test_refused_trial_claim_keeps_agent_caps(
+    trial, client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """A refused trial claim rolls back. The send then goes out from the
+    workspace's own number and must still count toward the agent caps."""
+    org_id, _, plaintext = org_and_key
+    await _agent_org_with_ca_number(async_session, org_id, monkeypatch)
+    if trial == "all_used":
+        # Refused under the workspace lock: the claim's last check.
+        await seed_sms_trial(async_session, monkeypatch)
+        await verify_trial_phone(async_session, org_id)
+        await seed_trial_texts(async_session, org_id, 25)
+
+    codes = []
+    for _ in range(4):
+        resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+        codes.append(resp.status_code)
+
+    assert codes == [201, 201, 429, 429]
+    assert await _agent_send_logs(async_session, org_id) == 2
+    assert [c.kwargs["from_e164"] for c in sms_mock.send_sms.call_args_list] == [
+        CA_NUMBER,
+        CA_NUMBER,
+    ]
+    assert not await _holds_advisory_lock(async_session)
+
+
+async def test_refused_trial_claim_rolls_back_only_reads(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """Everything the route ran before it rolls back a refused claim is a
+    read, so the rollback drops no row."""
+    org_id, _, plaintext = org_and_key
+    await _agent_org_with_ca_number(async_session, org_id, monkeypatch)
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    await seed_trial_texts(async_session, org_id, 25)
+
+    with _rolled_back_statements(async_session) as rolled_back:
+        resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+
+    assert resp.status_code == 201, resp.text
+    statements = [s for txn in rolled_back for s in txn]
+    # The claim's lock is the proof the refused claim's transaction is here.
+    assert any("pg_advisory_xact_lock" in s for s in statements)
+    writes = [
+        s
+        for s in statements
+        if s.lstrip().split(None, 1)[0].upper()
+        not in {"SELECT", "SAVEPOINT", "RELEASE"}
+    ]
+    assert writes == []
+
+
+async def test_trial_send_counts_toward_agent_caps(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """A trial send logs one agent send. Over the cap it is refused: no
+    text, no trial text used, and the workspace lock is released."""
+    org_id, _, plaintext = org_and_key
+    async_session.add(Organization(id=org_id, origin="agent"))
+    await async_session.commit()
+    monkeypatch.setattr(settings, "agent_sms_per_hour", 1)
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+
+    first = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+    assert first.status_code == 201, first.text
+    assert first.json()["from_e164"] == TRIAL_E164
+    assert await _agent_send_logs(async_session, org_id) == 1
+
+    second = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+    assert second.status_code == 429
+    assert second.json()["detail"] == "sms cap reached: 1/hour per workspace"
+    assert second.headers["Retry-After"] == "3600"
+    assert not await _holds_advisory_lock(async_session)
+    assert len(_trial_sends(sms_mock)) == 1
+    assert await trial_texts_used(async_session, org_id) == 1
+    assert await _sms_count(async_session, org_id) == 1
+    assert await _agent_send_logs(async_session, org_id) == 1
