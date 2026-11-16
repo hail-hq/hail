@@ -2876,9 +2876,13 @@ class ProviderValidateResult(BaseModel):
 class Address(BaseModel):
     customer_name: str = Field(description="Name associated with the address.")
     street: str = Field(description="Street address.")
-    city: str = Field(description="City or locality.")
+    city: str = Field(
+        description="City or town of the street address, as written on mail sent there."
+    )
     region: str = Field(description="State, province or region.")
-    postal_code: str = Field(description="Postal or ZIP code.")
+    postal_code: str = Field(
+        description="Postal or ZIP code of the street address, such as `94103`."
+    )
     country_code: str = Field(description="ISO alpha-2 address country.")
 
 
