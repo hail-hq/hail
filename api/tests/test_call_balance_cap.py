@@ -382,7 +382,11 @@ async def _handover(
             )
         )
     await async_session.commit()
-    body = json.dumps({"call_id": str(call.id), "contact_id": str(contact.id)})
+    return await _post_handover(client, call.id, contact.id), call
+
+
+async def _post_handover(client, call_id, contact_id):
+    body = json.dumps({"call_id": str(call_id), "contact_id": str(contact_id)})
     r = await client.post(
         "/internal/agent/handover",
         content=body.encode(),
@@ -391,7 +395,7 @@ async def _handover(
             "X-Hail-Signature": hmac_signing.sign(body.encode(), SECRET),
         },
     )
-    return r.json(), call
+    return r.json()
 
 
 async def test_handover_is_capped_to_the_balance(
@@ -648,30 +652,31 @@ async def test_priced_handover_counts_an_earlier_unpriced_dial(
     monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
     quote.price = None
     data, call = await _handover(
-        client, async_session, add_phone_number, 100_000, timedelta(seconds=30)
+        client,
+        async_session,
+        add_phone_number,
+        100_000,
+        timedelta(seconds=30),
+        limit=110,
     )
     assert data["max_seconds"] is None
-    quote.price = (Decimal(20), Decimal(0))
+
+    async def fake(org, legs, recording):
+        # The call alone 10¢ a minute; both lines 20¢.
+        return (Decimal(10 * len(legs)), Decimal(0))
+
+    monkeypatch.setattr("hailhq.api.routes.internal.agent.quote_call_price", fake)
     contact = (
         await async_session.execute(
             select(Contact).where(Contact.organization_id == call.organization_id)
         )
     ).scalar_one()
-    body = json.dumps({"call_id": str(call.id), "contact_id": str(contact.id)})
-    r = await client.post(
-        "/internal/agent/handover",
-        content=body.encode(),
-        headers={
-            "Content-Type": "application/json",
-            "X-Hail-Signature": hmac_signing.sign(body.encode(), SECRET),
-        },
-    )
-    assert r.json()["ok"] is True
-    # The priced handover counts the earlier dial, and its price stays
-    # unknown, so the full hold counts once the call ends.
+    assert (await _post_handover(client, call.id, contact.id))["ok"] is True
+    # 3 minutes alone (30¢), 10¢ for the earlier dial's second line, and 3
+    # minutes of both lines (60¢). The price stays unknown, so the full
+    # hold counts once the call ends.
     row = await _hold(async_session, call.id)
-    assert row.dials == 2
-    assert row.cents > 0
+    assert (row.cents, row.dials) == (Decimal(100), 2)
     assert (row.cents_per_minute, row.cents_per_call) == (None, None)
 
 
