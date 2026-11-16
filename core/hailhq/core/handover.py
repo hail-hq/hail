@@ -87,6 +87,14 @@ def handover_sms_text(agent_name: str, caller: str | None, reason: str | None) -
 # answer, when the agent sets no ``handover_max_duration_seconds``.
 HANDOVER_DEFAULT_MAX_SECONDS = 30 * 60
 
+
+def handover_limit(agent: Agent | None) -> int:
+    """How long a call may run after the handover contact answers: the
+    agent's own limit, else the default."""
+    seconds = agent.handover_max_duration_seconds if agent else None
+    return seconds or HANDOVER_DEFAULT_MAX_SECONDS
+
+
 # Once a handover contact answers, max_duration_seconds no longer applies and
 # the call runs until someone hangs up. The sweep then waits this long after
 # COALESCE(started_at, requested_at) before closing the row. It only closes
