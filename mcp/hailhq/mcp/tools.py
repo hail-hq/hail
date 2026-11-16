@@ -128,7 +128,6 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope, tag_context
-from hailhq.mcp import analytics
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import (
     HailAPIError,
@@ -1749,6 +1748,16 @@ def _argument_errors(exc: ValidationError) -> str:
 _ACTOR_TTL_SECONDS = 300
 # A failed lookup is retried after this, not on every tool call.
 _ACTOR_FAILURE_TTL_SECONDS = 30
+# Set by analytics.instrument_analytics once PostHog instrumentation succeeded.
+_analytics_actor = False
+
+
+def resolve_actor_for_analytics(enabled: bool) -> None:
+    """Fill the actor cache for analytics even when Logfire is off."""
+    global _analytics_actor
+    _analytics_actor = enabled
+
+
 _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -1774,7 +1783,7 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
     # Logfire tags spans with the actor. PostHog analytics reads the cache
     # (``cached_actor_ids``), which exists only for per-bearer clients.
     tracing = telemetry_enabled()
-    if tracing or (cache_key and analytics.active):
+    if tracing or (cache_key and _analytics_actor):
         key = _actor_cache_key(cache_key) if cache_key else None
         hit = _actor_cache.get(key) if key else None
         if hit and hit[0] > time.monotonic():

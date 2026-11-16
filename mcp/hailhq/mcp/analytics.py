@@ -21,8 +21,6 @@ from hailhq.core.config import settings
 
 logger = logging.getLogger(__name__)
 _FLUSH_SECONDS = 2
-# True once instrument() succeeded. Tools resolve the actor only when it is.
-active = False
 
 _KEPT_PROPERTIES = frozenset(
     {
@@ -107,8 +105,9 @@ class Analytics:
 
 def instrument_analytics(server: Any) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
-    global active
-    active = False
+    from hailhq.mcp.tools import resolve_actor_for_analytics
+
+    resolve_actor_for_analytics(False)
     token = settings.next_public_posthog_key
     if not token:
         return None
@@ -128,7 +127,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
             server_build=settings.logfire_service_version or None,
         )
         handle = instrument(server, client, options)
-        active = True
+        resolve_actor_for_analytics(True)
         return Analytics(client, handle)
     except Exception:  # analytics must never block startup
         logger.warning("PostHog MCP analytics setup failed", exc_info=True)

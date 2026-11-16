@@ -118,7 +118,7 @@ async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_ke
     from hailhq.mcp import tools
 
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
-    monkeypatch.setattr(tools.analytics, "active", True)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
     monkeypatch.setattr(tools, "_actor_cache", {})
     org_name = AsyncMock(return_value="Example Workspace")
     monkeypatch.setattr(tools, "fetch_organization_name", org_name)
@@ -140,7 +140,7 @@ async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
     from hailhq.mcp import tools
 
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
-    monkeypatch.setattr(tools.analytics, "active", True)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
     monkeypatch.setattr(tools, "_actor_cache", {})
     whoami = AsyncMock(side_effect=RuntimeError("unavailable"))
     client = SimpleNamespace(whoami=whoami)
@@ -158,7 +158,7 @@ async def test_no_actor_lookup_when_analytics_setup_failed(monkeypatch):
     from hailhq.mcp import tools
 
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
-    monkeypatch.setattr(tools.analytics, "active", False)
+    monkeypatch.setattr(tools, "_analytics_actor", False)
     whoami = AsyncMock()
     async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="u"):
         pass
