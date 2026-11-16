@@ -620,6 +620,7 @@ async def check_documents(
     on_send: Callable[[str], None] | None = None,
     skipped: Collection[str] = (),
     groups: list[list[str]] | None = None,
+    over_limit: Collection[str] = (),
 ) -> VerificationDocumentCheckResponse:
     """Read every slot of this request that has a file, at once, within
     ``CHECK_TIMEOUT_S`` in total. A slot without a file here is not read.
@@ -628,7 +629,9 @@ async def check_documents(
     runs with the slot name just before its file goes to the model; a file
     given for several slots is sent once, named by the first of them.
     ``skipped`` slots had a file the caller did not read
-    (the daily cap): they come back ``read: false`` with no warning. When
+    (the daily cap, no bucket, a failed fetch): they come back ``read:
+    false`` with no warning; those in ``over_limit`` (the daily cap) also
+    carry ``skipped: "daily_limit"``. When
     the caller stops waiting, every read still running is cancelled.
     ``groups`` names the slots that share one file, first slot first (the
     caller's grouping, so its reads and ``on_send`` names agree); without
@@ -729,7 +732,12 @@ async def check_documents(
     warnings: list[VerificationDocumentWarning] = []
     out_documents: dict[str, VerificationDocumentRead] = {
         name: VerificationDocumentRead(
-            read=False, option=None, fields={}, expiry_date=None, printed_name=None
+            read=False,
+            option=None,
+            fields={},
+            expiry_date=None,
+            printed_name=None,
+            skipped="daily_limit" if name in over_limit else None,
         )
         for name in skipped
     }

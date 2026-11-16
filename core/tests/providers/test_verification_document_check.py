@@ -4,8 +4,10 @@ warnings worked out from them. The model is a fake; every name is made up."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import logging
+import sys
 from datetime import date
 from types import SimpleNamespace
 
@@ -445,7 +447,9 @@ async def test_reader_sends_the_file_and_the_schema(
 ) -> None:
     client, calls = _fake_client(_response('{"readable": true}'))
     monkeypatch.setattr(document_reader, "_client", client)
-    assert await _read(content_type="application/pdf") == {"readable": True}
+    assert await _read(content_type="application/pdf", data=_pdf(1)) == {
+        "readable": True
+    }
     call = calls[0]
     assert call["model"] == "claude-haiku-5-5"
     assert call["thinking"] == {"type": "disabled"}
@@ -671,15 +675,44 @@ def _jpeg(size) -> bytes:
     return out.getvalue()
 
 
-async def test_reader_skips_a_pdf_over_the_page_limit(
+def _pdf(pages: int) -> bytes:
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument.new()
+    for _ in range(pages):
+        pdf.new_page(595, 842)
+    buf = io.BytesIO()
+    pdf.save(buf)
+    pdf.close()
+    return buf.getvalue()
+
+
+def _pages_sent(call: dict) -> int:
+    import pypdfium2 as pdfium
+
+    block = call["messages"][0]["content"][0]
+    assert block["type"] == "document"
+    with pdfium.PdfDocument(base64.b64decode(block["source"]["data"])) as pdf:
+        return len(pdf)
+
+
+async def test_reader_sends_only_the_first_pages_of_a_short_pdf(
     reader_settings, monkeypatch
 ) -> None:
     client, calls = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
-    pages = lambda n: b"%PDF-1.7\n" + b"<< /Type /Page >>\n" * n + b"<< /Type /Pages >>"
-    assert await _read(content_type="application/pdf", data=pages(100)) == {}
-    assert await _read(content_type="application/pdf", data=pages(101)) is None
-    assert len(calls) == 1
+    sends: list[int] = []
+    for pages in (1, 3, 5):
+        assert await _read(content_type="application/pdf", data=_pdf(pages)) == {}
+    assert [_pages_sent(c) for c in calls] == [1, 3, 3]
+    # Over 5 pages: not read at all, and no read is used.
+    out = await _read(
+        content_type="application/pdf", data=_pdf(6), on_send=lambda: sends.append(1)
+    )
+    assert out is None and len(calls) == 3 and sends == []
+    # Not a PDF at all: the same.
+    assert await _read(content_type="application/pdf", data=b"%PDF-1.7") is None
+    assert len(calls) == 3
 
 
 async def test_reader_reports_a_send_even_when_the_call_fails(
@@ -701,7 +734,7 @@ async def test_reader_uses_the_document_model_setting(
     client, calls = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
     monkeypatch.setattr(settings, "document_reader_model", "claude-sonnet-x")
-    await _read(content_type="application/pdf", data=b"%PDF-1.7")
+    await _read(content_type="application/pdf", data=_pdf(1))
     assert calls[0]["model"] == "claude-sonnet-x"
 
 
@@ -1021,8 +1054,8 @@ def test_decode_scales_down_before_any_full_size_copy(monkeypatch) -> None:
     Image.new("RGBA", (4000, 3000), (0, 0, 0, 0)).save(src, "PNG")
     document_image.decode("image/png", src.getvalue())
     assert max(seen[0]) <= document_image.LONG_SIDE
-    # The size math: 100 million RGBA pixels decoded, then only small copies.
-    assert document_image.MAX_PIXELS * 4 < 1024**3 // 2
+    # The size math: the most RGBA pixels decoded, then only small copies.
+    assert document_image.MAX_PIXELS * 4 < document_image.MEMORY_LIMIT_BYTES // 2
 
 
 def test_a_decomposed_umlaut_reads_as_one() -> None:
@@ -1117,3 +1150,55 @@ def test_decode_scales_a_palette_image_with_a_real_filter(monkeypatch) -> None:
         Image.new(mode, (3200, 2400)).save(src, "PNG")
         document_image.decode("image/png", src.getvalue())
     assert modes == ["RGBA", "L"]
+
+
+def test_memory_limits_fit_the_server() -> None:
+    """One decode at a time per API process, in a 512 MB child: the server
+    has little memory and no swap, and live calls run beside it."""
+    from hailhq.core.providers.llm import document_image
+
+    assert document_reader._DECODES == 1
+    assert document_image.MEMORY_LIMIT_BYTES == 512 * 1024 * 1024
+    # A palette image converted to RGBA: the source and the copy.
+    worst = document_image.MAX_PIXELS * (1 + 4)
+    assert worst < document_image.MEMORY_LIMIT_BYTES // 2
+
+
+def test_a_png_or_progressive_jpeg_over_the_pixel_cap_is_refused(
+    monkeypatch,
+) -> None:
+    from hailhq.core.providers.llm import document_image
+
+    monkeypatch.setattr(document_image, "MAX_PIXELS", 40_000)
+    monkeypatch.setattr(document_image, "LONG_SIDE", 100)
+    png = io.BytesIO()
+    Image.new("L", (400, 300)).save(png, "PNG")
+    with pytest.raises(ValueError):
+        document_image.decode("image/png", png.getvalue())
+    progressive = io.BytesIO()
+    Image.new("RGB", (400, 300)).save(progressive, "JPEG", progressive=True)
+    with pytest.raises(ValueError):
+        document_image.decode("image/jpeg", progressive.getvalue())
+    # A baseline JPEG is decoded at a reduced scale: its header may be larger.
+    baseline = io.BytesIO()
+    Image.new("RGB", (800, 600)).save(baseline, "JPEG")
+    assert document_image.decode("image/jpeg", baseline.getvalue())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the memory limit is Linux only")
+async def test_the_largest_images_decode_within_the_child_memory_limit() -> None:
+    from hailhq.core.isolated_process import run_isolated
+    from hailhq.core.providers.llm import document_image
+
+    side = int(document_image.MAX_PIXELS**0.5)
+    for mode in ("RGBA", "P"):
+        src = io.BytesIO()
+        Image.new(mode, (side, side)).save(src, "PNG")
+        out = await run_isolated(
+            "hailhq.core.providers.llm.document_image",
+            "image/png",
+            stdin=src.getvalue(),
+            timeout_s=20,
+            max_output=8 * 1024 * 1024,
+        )
+        assert out[:2] == b"\xff\xd8", mode

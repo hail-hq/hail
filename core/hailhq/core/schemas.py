@@ -2388,6 +2388,14 @@ class VerificationDocumentRead(BaseModel):
     printed_name: VerificationPrintedName | None = Field(
         description="The name printed on the file, or null when not read."
     )
+    skipped: Literal["daily_limit"] | None = Field(
+        default=None,
+        description=(
+            "Why the file was not read, when Hail chose not to: "
+            "'daily_limit' when the workspace has used today's document "
+            "reads. Null otherwise."
+        ),
+    )
 
 
 class VerificationDocumentCheckResponse(BaseModel):

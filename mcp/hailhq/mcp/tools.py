@@ -3546,7 +3546,9 @@ def register_tools(
         type than the chosen one, or a typed name that differs from the printed one.
         Each message names the fix. A submission with warnings is still accepted.
         A file nothing was read from has ``read`` false; an unclear file also has an
-        ``unreadable`` warning.
+        ``unreadable`` warning, and a file past the daily reads has ``skipped``
+        ``daily_limit``. Only the first 3 pages of a PDF are read; a PDF of more
+        than 5 pages is not read.
         Each file read uses one of the workspace's daily document reads (30 per day);
         a file given for several slots uses one. Nothing is filed, saved, held or
         charged, and uploads stay usable."""

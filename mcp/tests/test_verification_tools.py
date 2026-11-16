@@ -2162,6 +2162,7 @@ _DOCUMENT_CHECK_OK = {
                 "latin_surnames": "",
                 "business_name": "",
             },
+            "skipped": None,
         }
     },
     "warnings": [

@@ -2532,12 +2532,17 @@ async def check_verification_documents(
     # read whose file was never sent is given back below. A failure here
     # (the database, the lock) reserves nothing: every slot is read false.
     reserved: dict[str, UUID] = {}
+    over_limit: list[str] = []
     if document_reader_configured() and leads:
         try:
             async with independent_session_scope() as counter:
                 reserved = await reserve_document_reads(
                     counter, principal.organization_id, leads
                 )
+            # The cap refused the rest: their slots say so.
+            over_limit = [
+                slot for g in groups.values() if g[0] not in reserved for slot in g
+            ]
         except Exception as exc:
             logger.warning("document check: no reads reserved (%s)", type(exc).__name__)
             reserved = {}
@@ -2595,6 +2600,7 @@ async def check_verification_documents(
             # Over the cap, no model, not fetched, or a file part left out:
             # read false, no warning.
             skipped=[s for s in [*with_file, *stray, *orphans] if s not in files],
+            over_limit=over_limit,
         )
     finally:
         unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]

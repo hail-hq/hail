@@ -18,6 +18,7 @@ dependencies = [
     "tldextract>=5.3.2",
     "phonenumbers>=9.0.39",
     "pillow>=12",
+    "pypdfium2>=5",
     "regex>=2026.4.4",
     "didww>=3.1",
     "logfire[aiohttp-client,httpx,requests,sqlalchemy]>=5.6.0",

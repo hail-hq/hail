@@ -18,7 +18,6 @@ import asyncio
 import base64
 import json
 import logging
-import re
 import weakref
 from collections.abc import Callable
 from typing import Any
@@ -37,27 +36,24 @@ READABLE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 
 # Enough for one form's worth of values. Short on purpose: the answer is JSON.
 _MAX_TOKENS = 2048
-# PDFs are sent as they are, within the providers' limits (checked
-# 2026-11-16): Amazon Bedrock takes requests up to 20 MB, Anthropic's API up
-# to 128 MB, and at most 100 pages for a model under 1M tokens of context
-# (600 at 1M). A verification file is at most 10 MB (about 13.4 MB in
-# base64), so the size always fits; the pages are checked, at the lowest
-# limit, so any model fits.
-# Sources: platform.claude.com/docs/en/api/overview (request size limits)
-# and platform.claude.com/docs/en/build-with-claude/pdf-support.
-_MAX_PDF_PAGES = 100
-_PDF_PAGE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
-# Images are decoded in a child process without credentials, under CPU and
-# memory limits (document_image.py, run by core/isolated_process.py), at
-# most 4 at once. A decode waits for its turn (bounded only by the caller's
-# own deadline: another request being busy is no reason to drop a file),
-# then has ``_DECODE_LIMIT_S`` from its start; past that its process is
-# killed.
-_DECODES = 4
+# Every file is prepared in a child process without credentials, under CPU
+# and memory limits (document_image.py, run by core/isolated_process.py):
+# an image is scaled down to a JPEG; a PDF of at most 5 pages is cut to its
+# first 3 (a longer one is not read). One at a time per API process: the
+# server has little memory and no swap, and live calls run beside it. A
+# file waits for its turn (bounded only by the caller's own deadline:
+# another request being busy is no reason to drop a file), then has
+# ``_DECODE_LIMIT_S`` from its start; past that its process is killed.
+# The providers' limits (Bedrock requests up to 20 MB, at most 100 PDF
+# pages) are far above what is sent.
+_DECODES = 1
 _DECODE_LIMIT_S = 10.0
 # The least time left at which a file is still sent to the model.
 _MIN_SEND_S = 1.0
 _MAX_DECODED_BYTES = 8 * 1024 * 1024
+# The first pages of a PDF of at most 10 MB; 12 MB is 16 MB in base64,
+# under Bedrock's 20 MB request limit.
+_MAX_PDF_BYTES = 12 * 1024 * 1024
 # One semaphore per event loop (tests run several loops; the API runs one).
 _decode_slots: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, asyncio.Semaphore
@@ -92,14 +88,6 @@ def _get_client() -> anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock:
     return _client
 
 
-def _pdf_fits(data: bytes) -> bool:
-    """True when the PDF is within the providers' page limit. The pages are
-    counted from the page objects the file shows; a file that hides them
-    (compressed object streams) is sent, and the provider refuses it if it
-    is over (fail open)."""
-    return len(_PDF_PAGE.findall(data)) <= _MAX_PDF_PAGES
-
-
 async def _run_decoder(content_type: str, data: bytes, limit_s: float) -> bytes:
     """``document_image.py`` in a credential-free child process."""
     return await run_isolated(
@@ -107,7 +95,9 @@ async def _run_decoder(content_type: str, data: bytes, limit_s: float) -> bytes:
         content_type,
         stdin=data,
         timeout_s=limit_s,
-        max_output=_MAX_DECODED_BYTES,
+        max_output=(
+            _MAX_PDF_BYTES if content_type == "application/pdf" else _MAX_DECODED_BYTES
+        ),
     )
 
 
@@ -158,12 +148,10 @@ async def read_document(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     try:
-        if content_type == "application/pdf":
-            if not _pdf_fits(data):
-                logger.warning("document read skipped: PDF over the limits")
-                return None
-        else:
-            data = await _decode_image(content_type, data, deadline)
+        # A PDF over 5 pages, or an image over the limits, fails here: no
+        # read is used.
+        data = await _decode_image(content_type, data, deadline)
+        if content_type != "application/pdf":
             content_type = "image/jpeg"
         # Everything that can fail here, before anything leaves: the client,
         # the request and its time.

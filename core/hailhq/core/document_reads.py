@@ -7,8 +7,8 @@ read whose file was never sent (not readable, over the limits, not decoded)
 is given back. Hail pays the model
 provider for every read, and reads are free to customers for now, so each
 workspace gets at most ``DAILY_DOCUMENT_READS`` per UTC day. Past the cap the
-check skips the model: the slot comes back ``read: false`` with no error and
-no warning, and the customer fills the form by hand. A file that is not sent
+check skips the model: the slot comes back ``read: false`` and ``skipped:
+"daily_limit"``, with no error and no warning, and the customer fills the form by hand. A file that is not sent
 (skipped, unsupported, over the limits) does not count.
 
 Cost: at most 30 reads x about 1 US cent = about 30 cents per workspace per

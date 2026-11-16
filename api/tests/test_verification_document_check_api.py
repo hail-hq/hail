@@ -198,6 +198,8 @@ async def test_a_workspace_gets_a_daily_number_of_reads(
     assert resp.status_code == 200
     body = resp.json()
     assert body["documents"]["proof_of_identity"]["read"] is False
+    # It says why, so the console does not blame the file.
+    assert body["documents"]["proof_of_identity"]["skipped"] == "daily_limit"
     assert body["warnings"] == [] and body["fields"] == {}
     assert len(calls) == 2
     rows = (
@@ -528,6 +530,8 @@ async def test_a_failed_reservation_reads_nothing_and_still_answers(
     resp = await _post(client, key)
     assert resp.status_code == 200
     assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    # Not the cap: no reason given.
+    assert resp.json()["documents"]["proof_of_identity"]["skipped"] is None
     assert calls == []
 
 
