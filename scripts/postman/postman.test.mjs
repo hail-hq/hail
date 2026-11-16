@@ -261,10 +261,28 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
 
 test("export has no text Postman's firewall blocks", () => {
   // Postman's Cloudflare firewall answers 403 "Just a moment..." to an update
-  // whose text has `curl -s` or a `--data-binary @file` upload. Write upload
-  // examples as `curl --fail --upload-file <file> '<url>'`.
+  // with `curl -sS`, `--data-binary @file` or `-d @file` in it. Write upload
+  // examples as `curl --fail-with-body --upload-file <file> '<url>'`.
   const text = JSON.stringify(collection);
-  for (const blocked of [/curl -s/, /--data-binary @/]) {
+  for (const blocked of [/curl -s/, /(?:-d|--data[a-z-]*) @/]) {
     assert.doesNotMatch(text, blocked);
   }
+});
+
+test("publishing names the firewall when Cloudflare blocks the update", async () => {
+  const uid = "12345-00000000-0000-4000-8000-000000000000";
+  const existing = structuredClone(collection);
+  const challenged = async (_url, options) =>
+    options.method === "PUT"
+      ? {
+          status: 403,
+          ok: false,
+          headers: new Headers({ "cf-mitigated": "challenge" }),
+          text: async () => "<!DOCTYPE html><title>Just a moment...</title>",
+        }
+      : { ok: true, status: 200, json: async () => ({ collection: existing }) };
+  await assert.rejects(
+    updateCollection(collection, uid, "PMAK-test", challenged),
+    /Postman's firewall \(Cloudflare\) blocked the update/,
+  );
 });

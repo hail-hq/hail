@@ -158,7 +158,7 @@ async def create_file_upload(
     once, before `expires_at` (15 minutes):
 
     ```
-    curl --fail --upload-file passport.jpg '<upload_url>'
+    curl --fail-with-body --upload-file passport.jpg '<upload_url>'
     ```
 
     The PUT answers with `size_bytes` and `sha256` of what was stored. An

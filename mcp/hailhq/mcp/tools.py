@@ -1508,11 +1508,12 @@ async def create_file_upload(
     return {
         **link,
         "curl": (
-            "curl -sS -X PUT --data-binary @<path to the file> "
+            "curl --fail-with-body --upload-file <path to the file> "
             f"-H 'Content-Type: {link['content_type']}' '{link['upload_url']}'"
         ),
         "next": (
-            "Run the curl line from a shell, with the file's path after the @. "
+            "Run the curl line from a shell, with the file's path in place of "
+            "<path to the file>. "
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."

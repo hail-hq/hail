@@ -2035,7 +2035,7 @@ async def test_create_file_upload_returns_a_ready_curl_line(
     assert result["id"] == _UPLOAD
     assert result["upload_url"] == _LINK["upload_url"]
     assert result["curl"] == (
-        "curl -sS -X PUT --data-binary @<path to the file> "
+        "curl --fail-with-body --upload-file <path to the file> "
         f"-H 'Content-Type: image/jpeg' '{_LINK['upload_url']}'"
     )
     assert "size_bytes" in result["next"] and "sha256" in result["next"]

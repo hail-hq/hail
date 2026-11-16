@@ -57,6 +57,12 @@ export async function updateCollection(
     headers,
     body: JSON.stringify({ collection: next }),
   });
+  // Cloudflare in front of Postman blocks some text (see postman.test.mjs).
+  // Its challenge page does not say which, so name the cause here.
+  if (response.headers?.get("cf-mitigated") === "challenge")
+    throw new Error(
+      `Update Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the update. Some text in the collection matches a firewall rule. Upload parts of the collection to a test collection to find it.`,
+    );
   // Use synchronous updates. Do not report a queued 202 task as completed.
   if (response.status !== 200)
     throw new Error(
