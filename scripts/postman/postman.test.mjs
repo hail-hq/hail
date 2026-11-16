@@ -64,10 +64,7 @@ test("export has unique stable IDs and no internal requests or fake auth headers
   );
   assert.equal(collection.item[0].name, "Start here");
   assert.equal(collection.auth.bearer[0].value, "{{api_key}}");
-  assert.equal(
-    collection.variable.find((v) => v.key === "api_key").value,
-    "",
-  );
+  assert.equal(collection.variable.find((v) => v.key === "api_key").value, "");
   for (const { request } of items) {
     const url = request.url.raw ?? request.url;
     assert.doesNotMatch(url, /\/(internal|admin|superadmin)(\/|$)/);
@@ -237,4 +234,18 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
       new RegExp(`HTTP ${status}`),
     );
   }
+  // Postman's error body is shown, so a failed run names the cause.
+  const forbidden = async (_, options) =>
+    options.method === "PUT"
+      ? {
+          status: 403,
+          ok: false,
+          text: async () =>
+            '{"error":{"name":"forbiddenError","message":"You do not have access"}}',
+        }
+      : { ok: true, status: 200, json: async () => ({ collection: existing }) };
+  await assert.rejects(
+    updateCollection(collection, uid, key, forbidden),
+    /HTTP 403\): .*forbiddenError/,
+  );
 });

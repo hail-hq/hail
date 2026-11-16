@@ -58,9 +58,20 @@ export async function updateCollection(
   // Use synchronous updates. Do not report a queued 202 task as completed.
   if (response.status !== 200)
     throw new Error(
-      `Update Postman collection failed (HTTP ${response.status})`,
+      `Update Postman collection failed (HTTP ${response.status})${await errorDetail(response)}`,
     );
   return response.json();
+}
+
+// Postman's error body names the cause (for example a missing role). It
+// never echoes the API key, which goes only in the request header.
+async function errorDetail(response) {
+  try {
+    const text = (await response.text?.())?.trim();
+    return text ? `: ${text.slice(0, 500)}` : "";
+  } catch {
+    return "";
+  }
 }
 
 async function publish() {
