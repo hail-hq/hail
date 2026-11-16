@@ -34,6 +34,7 @@ from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import recordings as recordings_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import sms_evidence as sms_evidence_routes
+from hailhq.api.routes import sms_trial as sms_trial_routes
 from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import uploads as uploads_routes
@@ -496,6 +497,8 @@ _CUSTOMER_ROUTERS = [
     numbers_routes.router,
     webhooks_routes.router,
     unsubscribe_routes.router,
+    # Before sms_routes: GET /sms/{sms_id} would capture /sms/trial.
+    sms_trial_routes.router,
     sms_routes.router,
     *sms_webhooks.routers,
     contacts_routes.router,

@@ -586,6 +586,66 @@ class SenderIdResponse(BaseModel):
     )
 
 
+class SmsTrialResponse(BaseModel):
+    configured: bool = Field(
+        description="True when this Hail deployment has a trial number set up."
+    )
+    available: bool = Field(
+        description=(
+            "True when trial texts can be sent now. False while the trial "
+            "number waits for carrier approval."
+        )
+    )
+    status: Literal["none", "pending", "verified"] = Field(
+        description=(
+            "The workspace's trial phone: 'none' (no phone yet), 'pending' "
+            "(code sent, not confirmed) or 'verified' (receives trial texts)."
+        )
+    )
+    phone: str | None = Field(
+        description="The trial phone in E.164. Null when status is 'none'."
+    )
+    code_expires_at: datetime | None = Field(
+        description="When the current code expires. Null when no code is open."
+    )
+    texts_used: int = Field(description="Trial texts this workspace has sent.")
+    texts_limit: int = Field(description="Trial texts a workspace can send, ever.")
+    texts_left: int = Field(description="Trial texts this workspace can still send.")
+
+
+class SmsTrialPhoneStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(
+        description=(
+            "Your own US mobile in E.164 (e.g. +14155551234). Hail texts a "
+            "6-digit code to it."
+        )
+    )
+    recipient_consent: Literal[True] = Field(
+        description=(
+            "Must be true: the phone's owner agreed to get the code and the "
+            "trial texts."
+        )
+    )
+    consent_version: str = Field(
+        min_length=1,
+        max_length=40,
+        description="Version of the consent wording the person agreed to.",
+    )
+
+    _validate_e164 = field_validator("phone")(_e164_or_error)
+
+
+class SmsTrialPhoneConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(
+        pattern=r"^\d{6}$",
+        description="The 6-digit code Hail texted to the trial phone.",
+    )
+
+
 class NumberAcquireRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     quote_id: UUID = Field(
