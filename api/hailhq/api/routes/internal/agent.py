@@ -1896,6 +1896,9 @@ async def _handover_cap(
         # line's price is unknown, so the call's full hold counts after it
         # ends.
         logger.warning("handover price unknown for call %s; agent limit", call.id)
+        # Under the lock, like the priced path, so a handover racing this one
+        # reads this dial.
+        await org_lock(db, call.organization_id)
         await forget_price(db, call.id)
         await db.commit()
         return None

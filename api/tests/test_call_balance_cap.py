@@ -631,7 +631,15 @@ async def test_handover_unknown_price_uses_the_agent_limit(
     assert data["ok"] is True
     # No balance cap: the voicebot applies the agent's own handover limit.
     assert data["max_seconds"] is None
-    assert await _hold(async_session, call.id) is None
+    # Nothing held, but the dial and the unknown price are kept, so a later
+    # priced handover counts this dial and the full hold.
+    row = await _hold(async_session, call.id)
+    assert (row.cents, row.cents_per_minute, row.cents_per_call, row.dials) == (
+        Decimal(0),
+        None,
+        None,
+        1,
+    )
 
 
 async def test_handover_unknown_price_counts_the_full_hold(

@@ -23,7 +23,7 @@ from decimal import Decimal
 from hailhq.core.billing import get_ledger_cents
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
-from sqlalchemy import bindparam, case, func, null, or_, select, text, update
+from sqlalchemy import bindparam, case, func, null, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -239,16 +239,17 @@ def _kept_price(old, new):
 async def forget_price(db: AsyncSession, call_id: uuid.UUID) -> None:
     """Mark the call's hold as run at an unknown price (a handover whose
     quote failed), so the full hold counts after the call ends, and count
-    the approved dial, so a later handover's hold covers it. No-op when the
-    call holds nothing."""
-    await db.execute(
-        update(CallBalanceHold)
-        .where(CallBalanceHold.call_id == call_id)
-        .values(
-            cents_per_minute=None,
-            cents_per_call=None,
-            dials=CallBalanceHold.dials + 1,
-        )
+    the approved dial, so a later handover's hold covers it. A call that
+    holds nothing (an inbound call) gets a 0-cent row, so a later priced
+    handover keeps the prices unknown and counts this dial too."""
+    await hold(
+        db,
+        call_id,
+        Decimal(0),
+        datetime.now(UTC),
+        cents_per_minute=None,
+        cents_per_call=None,
+        dial=True,
     )
 
 
