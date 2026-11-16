@@ -2519,8 +2519,6 @@ def register_tools(
         US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number.
 
         Hail does not verify consent.
-        ``message_type="marketing"`` also requires ``consent_source``.
-        A different ``idempotency_key`` represents a new message.
 
         Returns the SMS ID, status, sender, destination, segment count and retry key, or an error.
         """
@@ -4019,7 +4017,7 @@ def register_tools(
             Field(
                 ge=1,
                 le=500,
-                description=("How many contacts to return in one reply. Omitted: 100."),
+                description="How many contacts to return in one reply. Omitted: 100.",
             ),
         ] = None,
     ) -> dict[str, Any]:

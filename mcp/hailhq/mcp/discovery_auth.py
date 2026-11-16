@@ -62,7 +62,7 @@ _DISCOVERY_METHODS = frozenset(
 
 # Safelisted methods that must not open a session. On an older protocol the
 # SDK's session manager mints a new transport for ANY POST that lacks an
-# Mcp-Session-Id header, before it answers 400 — so a session-less tools/list,
+# Mcp-Session-Id header, before it answers 400 — so a session-less list call,
 # server/discover or notifications/initialized would create a session while
 # bypassing the initialize cap below. These pass only with that header, or on
 # the newer protocol (_opens_no_session), whose requests never create a
