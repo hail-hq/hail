@@ -81,10 +81,19 @@ __all__ = [
 RETENTION_PERIOD_AFTER_CLOSURE = timedelta(days=365)
 
 
-# The ``provider_refs`` keys that copy what the customer typed into a US
-# texting registration: the answers (names, address, tax ID, contacts), the
-# texting program text filed from them, and the sender name.
-REGISTRATION_ANSWER_REFS = ("application", "campaign", "subject_name")
+# The ``provider_refs`` keys that hold what the customer typed into a US
+# texting registration, or text made from it: the answers (names, address,
+# tax ID, contacts), a hash of the last amendment, the texting program text,
+# the filed STOP/HELP replies (sender name, contact email) and the sender
+# name. Every other key is a carrier id, a flag or a time
+# (core/tests/test_retention.py checks the list).
+REGISTRATION_ANSWER_REFS = (
+    "application",
+    "application_amendment_hash",
+    "campaign",
+    "replies",
+    "subject_name",
+)
 
 
 async def clear_closed_org_registrations(

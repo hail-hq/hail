@@ -7,8 +7,10 @@ left untouched; audit_log is never touched.
 
 from __future__ import annotations
 
+import ast
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from hailhq.core.models import (
@@ -21,7 +23,11 @@ from hailhq.core.models import (
     PhoneNumber,
     Sms,
 )
-from hailhq.core.retention import clear_closed_org_registrations, purge_expired_data
+from hailhq.core.retention import (
+    REGISTRATION_ANSWER_REFS,
+    clear_closed_org_registrations,
+    purge_expired_data,
+)
 from sqlalchemy import select
 
 
@@ -439,7 +445,9 @@ _KEPT_REFS = {
 }
 _ANSWER_REFS = {
     "application": {"fields": {"first_name": "Ada", "tax_id": "12-3456789"}},
+    "application_amendment_hash": "0" * 64,
     "campaign": {"description": "Order updates", "contact_email": "ada@example.com"},
+    "replies": {"help": "Ada Lovelace: Reply STOP to opt out."},
     "subject_name": "Ada Lovelace",
 }
 
@@ -555,3 +563,116 @@ async def test_closed_org_clear_waits_for_closed_at_and_takes_one_org(async_sess
     for row in rows:
         await async_session.refresh(row)
     assert [("application" in r.provider_refs) for r in rows] == [True, False, True]
+
+
+# provider_refs keys that hold no customer-entered text: carrier ids, flags,
+# times, Hail's own ids and the form's slot labels. A key missing from this
+# list and from REGISTRATION_ANSWER_REFS fails the test below: decide which
+# one it belongs to.
+_NOT_ANSWER_REFS = {
+    "address_id",
+    "address_sid",
+    "brand_id",
+    "brand_reused",
+    "brand_sid",
+    "bundle_sid",
+    "campaign_accepted",
+    "campaign_filed_at",
+    "campaign_id",
+    "campaign_needs_repair",
+    "campaign_reserved_at",
+    "campaign_sid",
+    "confirm_attempts",
+    "country_code",
+    "document_ids",
+    "document_sids",
+    "e164",  # the Hail number on a toll-free registration
+    "end_user_sid",
+    "file_ids",
+    "group_id",
+    "identity_created",
+    "identity_id",
+    "identity_verified",
+    "messaging_profile_id",
+    "messaging_service_sid",
+    "needs_information",
+    "number_type",
+    "organization_id",
+    "otp_reference_id",
+    "otp_sent_at",
+    "profile_sid",
+    "proof_ids",
+    "provider_resource_id",
+    "refused_at_filing",
+    "registration_kind",
+    "replies_set",
+    "requirement_id",
+    "runtime_ready",
+    "slots",
+    "subject_type",
+    "tollfree_verification_sid",
+    "trust_sid",
+    "vetting_requested",
+}
+
+_ROOT = Path(__file__).resolve().parents[2]
+_REFS_WRITERS = [
+    *sorted((_ROOT / "core/hailhq/core/providers/verification").glob("*.py")),
+    _ROOT / "api/hailhq/api/routes/verifications.py",
+    _ROOT / "api/hailhq/api/sms_registration.py",
+]
+
+
+def _is_refs(node: ast.AST) -> bool:
+    name = getattr(node, "id", None) or getattr(node, "attr", None) or ""
+    return name.endswith("refs")
+
+
+def _dict_keys(node: ast.AST) -> list[str]:
+    if not isinstance(node, ast.Dict):
+        return []
+    return [k.value for k in node.keys if isinstance(k, ast.Constant)]
+
+
+def _written_refs_keys() -> set[str]:
+    """Keys the code writes into a ``*refs`` dict: ``refs["k"] = ...``,
+    ``refs = {"k": ...}``, ``refs={"k": ...}`` and ``refs.setdefault("k")``."""
+    keys: set[str] = set()
+    for path in _REFS_WRITERS:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                for target in targets:
+                    if _is_refs(target):
+                        keys.update(_dict_keys(node.value))
+                    for sub in ast.walk(target):
+                        if (
+                            isinstance(sub, ast.Subscript)
+                            and _is_refs(sub.value)
+                            and isinstance(sub.slice, ast.Constant)
+                        ):
+                            keys.add(sub.slice.value)
+            elif isinstance(node, ast.keyword) and (node.arg or "").endswith("refs"):
+                keys.update(_dict_keys(node.value))
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setdefault"
+                and _is_refs(node.func.value)
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                keys.add(node.args[0].value)
+    return keys
+
+
+def test_every_written_refs_key_is_classified():
+    """A new provider_refs key must be listed as an answer (deleted at
+    account close) or as not an answer."""
+    written = _written_refs_keys()
+    assert set(REGISTRATION_ANSWER_REFS) <= written
+    assert not set(REGISTRATION_ANSWER_REFS) & _NOT_ANSWER_REFS
+    unlisted = written - set(REGISTRATION_ANSWER_REFS) - _NOT_ANSWER_REFS
+    assert not unlisted, f"classify these provider_refs keys: {sorted(unlisted)}"

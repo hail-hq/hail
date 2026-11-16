@@ -6829,6 +6829,7 @@ async def test_background_pass_deletes_answers_of_closed_orgs(
 
     from hailhq.api.routes.verifications import sweep_verifications
     from hailhq.core.models import OrgClosure
+    from hailhq.core.retention import REGISTRATION_ANSWER_REFS
 
     org_id, _, key = org_and_key
     vid = (await _post_sms(client, key)).json()["id"]
@@ -6847,7 +6848,7 @@ async def test_background_pass_deletes_answers_of_closed_orgs(
 
     assert counts["closed"] == 1
     await async_session.refresh(row)
-    assert not {"application", "campaign", "subject_name"} & row.provider_refs.keys()
+    assert not set(REGISTRATION_ANSWER_REFS) & row.provider_refs.keys()
     assert row.subject_name is None and row.state == "submitted"
     assert (await sweep_verifications(async_session, lambda *_: None))["closed"] == 0
 
