@@ -1,9 +1,28 @@
+import re
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from hailhq.core.config import Settings, settings
-from hailhq.core.models import CarrierVerification, Organization, PhoneNumber
+from hailhq.core.models import (
+    CarrierVerification,
+    Organization,
+    PhoneNumber,
+)
 from hailhq.core.sms_trial import (
+    CODE_TTL,
+    CodeBudgetExceeded,
+    CodeExpired,
+    NoPendingCode,
+    PhoneIsHailNumber,
+    PhoneNotUs,
+    PhoneTaken,
+    WrongCode,
+    code_text,
+    confirm_phone,
+    get_trial_phone,
+    is_verified_trial_phone,
+    start_phone_proof,
     TRIAL_FOOTER,
     TRIAL_PREFIX,
     trial_body,
@@ -130,3 +149,168 @@ async def test_trial_sender_needs_an_approved_registration(async_session, monkey
 
     monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
     assert (await trial_sender(async_session)).id == number.id
+
+
+PHONE = "+14155550142"
+NOW = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
+
+
+async def _org(session):
+    org_id = uuid.uuid4()
+    session.add(Organization(id=org_id, origin="human"))
+    await session.flush()
+    return org_id
+
+
+async def _start(session, org, phone=PHONE, now=NOW):
+    return await start_phone_proof(
+        session, org, phone=phone, consent_version="v1", user_id=None, now=now
+    )
+
+
+def test_code_text():
+    assert code_text("123456") == (
+        "Your Hail trial code is 123456. It expires in 10 minutes. "
+        "Reply STOP to opt out, HELP for help."
+    )
+
+
+async def test_start_issues_six_digit_code_and_stores_hash_only(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    assert re.fullmatch(r"\d{6}", issued.code)
+    assert issued.row.code_hash != issued.code
+    assert issued.code not in issued.row.code_hash
+    assert issued.row.code_expires_at - NOW == CODE_TTL == timedelta(minutes=10)
+    assert issued.row.status == "pending"
+    assert (await get_trial_phone(async_session, org)).phone_e164 == PHONE
+
+
+async def test_start_refuses_non_us_phone(async_session):
+    org = await _org(async_session)
+    with pytest.raises(PhoneNotUs) as e:
+        await _start(async_session, org, phone="+447700900123")
+    assert str(e.value) == "Trial texts go to US mobile numbers only."
+
+
+async def test_start_refuses_a_hail_number(async_session):
+    org = await _org(async_session)
+    other = await _org(async_session)
+    async_session.add(
+        PhoneNumber(
+            id=uuid.uuid4(),
+            organization_id=other,
+            e164=PHONE,
+            country_code="US",
+            number_type="local",
+            provider="twilio",
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    with pytest.raises(PhoneIsHailNumber):
+        await _start(async_session, org)
+
+
+async def test_start_refuses_phone_verified_elsewhere(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    issued = await _start(async_session, a)
+    await confirm_phone(async_session, a, issued.code, now=NOW)
+    with pytest.raises(PhoneTaken):
+        await _start(async_session, b)
+
+
+async def test_sixth_code_in_a_day_is_refused(async_session):
+    org = await _org(async_session)
+    for _ in range(5):
+        await _start(async_session, org)
+    with pytest.raises(CodeBudgetExceeded) as e:
+        await _start(async_session, org)
+    assert str(e.value) == "You asked for 5 codes today. Try again tomorrow."
+    assert e.value.retry_after == timedelta(hours=24)
+    issued = await _start(async_session, org, now=NOW + timedelta(hours=24))
+    assert issued.code is not None
+    assert issued.row.code_sends == 1
+
+
+async def test_same_verified_phone_sends_no_code(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    await confirm_phone(async_session, org, issued.code, now=NOW)
+    again = await _start(async_session, org)
+    assert again.code is None
+    assert again.row.status == "verified"
+    assert await is_verified_trial_phone(async_session, org, PHONE)
+    assert not await is_verified_trial_phone(async_session, org, "+14155550143")
+
+
+async def test_new_phone_resets_to_pending(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    await confirm_phone(async_session, org, issued.code, now=NOW)
+    new = await _start(async_session, org, phone="+14155550143")
+    assert new.code is not None
+    assert new.row.status == "pending" and new.row.verified_at is None
+    assert not await is_verified_trial_phone(async_session, org, PHONE)
+    assert new.row.code_sends == 2
+
+
+async def test_confirm_right_code_verifies(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    row = await confirm_phone(async_session, org, issued.code, now=NOW)
+    assert row.status == "verified" and row.verified_at == NOW
+    assert row.code_hash is None and row.code_expires_at is None
+    assert row.code_attempts == 0
+
+
+async def test_confirm_without_start_is_no_pending_code(async_session):
+    org = await _org(async_session)
+    with pytest.raises(NoPendingCode) as e:
+        await confirm_phone(async_session, org, "123456", now=NOW)
+    assert str(e.value) == "Send a code first."
+
+
+async def test_confirm_after_ten_minutes_is_expired(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    with pytest.raises(CodeExpired):
+        await confirm_phone(
+            async_session,
+            org,
+            issued.code,
+            now=NOW + timedelta(minutes=10, seconds=1),
+        )
+
+
+async def test_fifth_wrong_try_burns_the_code(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    wrong = "000000" if issued.code != "000000" else "111111"
+    left = []
+    for _ in range(5):
+        with pytest.raises(WrongCode) as e:
+            await confirm_phone(async_session, org, wrong, now=NOW)
+        left.append(e.value.tries_left)
+    assert left == [4, 3, 2, 1, 0]
+    assert str(e.value) == "The code is not correct. Send a new code."
+    with pytest.raises(NoPendingCode):
+        await confirm_phone(async_session, org, issued.code, now=NOW)
+
+
+async def test_wrong_code_message(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    wrong = "000000" if issued.code != "000000" else "111111"
+    with pytest.raises(WrongCode) as e:
+        await confirm_phone(async_session, org, wrong, now=NOW)
+    assert str(e.value) == "The code is not correct. 4 tries left."
+
+
+async def test_confirm_race_second_workspace_gets_phone_taken(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    ia = await _start(async_session, a)
+    ib = await _start(async_session, b)
+    await confirm_phone(async_session, a, ia.code, now=NOW)
+    with pytest.raises(PhoneTaken):
+        await confirm_phone(async_session, b, ib.code, now=NOW)
