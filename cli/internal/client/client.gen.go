@@ -3612,11 +3612,14 @@ type SmsTrialResponse struct {
 	// Available True when trial texts can be sent now. False while the trial number waits for carrier approval.
 	Available bool `json:"available"`
 
-	// CodeExpiresAt When the current code expires. Null when no code is open.
+	// CodeExpiresAt When the open code expires, for pending_phone when set, else for phone. Null when no code is open.
 	CodeExpiresAt *time.Time `json:"code_expires_at"`
 
 	// Configured True when this Hail deployment has a trial number set up.
 	Configured bool `json:"configured"`
+
+	// PendingPhone A new phone in E.164 that got a code and is not confirmed yet. Until it is, the verified phone keeps getting trial texts. Null when no new phone waits.
+	PendingPhone *string `json:"pending_phone"`
 
 	// Phone The trial phone in E.164. Null when status is 'none'.
 	Phone *string `json:"phone"`
