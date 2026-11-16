@@ -40,7 +40,9 @@ export async function updateCollection(
   const headers = { "X-Api-Key": apiKey, "Content-Type": "application/json" };
   const existing = await fetcher(url, { headers });
   if (!existing.ok)
-    throw new Error(`Read Postman collection failed (HTTP ${existing.status})`);
+    throw new Error(
+      `Read Postman collection failed (HTTP ${existing.status})${await errorDetail(existing)}`,
+    );
   const current = (await existing.json()).collection;
   if (current?.info?.name !== collection.info.name) {
     throw new Error(
@@ -58,9 +60,20 @@ export async function updateCollection(
   // Use synchronous updates. Do not report a queued 202 task as completed.
   if (response.status !== 200)
     throw new Error(
-      `Update Postman collection failed (HTTP ${response.status})`,
+      `Update Postman collection failed (HTTP ${response.status})${await errorDetail(response)}`,
     );
   return response.json();
+}
+
+// Postman's error body names the cause (for example a missing role). It
+// never echoes the API key, which goes only in the request header.
+async function errorDetail(response) {
+  try {
+    const text = (await response.text?.())?.trim();
+    return text ? `: ${text.slice(0, 500)}` : "";
+  } catch {
+    return "";
+  }
 }
 
 async function publish() {
