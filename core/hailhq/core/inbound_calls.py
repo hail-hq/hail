@@ -33,7 +33,7 @@ from hailhq.core.carrier_routing import inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import session_scope
-from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS, handover_targets
+from hailhq.core.handover import handover_limit, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.models import (
     Agent,
@@ -291,9 +291,7 @@ async def _answer_or_refuse(
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
             "handover_targets": await handover_targets(db, agent.id, attrs.caller),
-            "handover_max_duration_seconds": (
-                agent.handover_max_duration_seconds or HANDOVER_DEFAULT_MAX_SECONDS
-            ),
+            "handover_max_duration_seconds": handover_limit(agent),
             "org_name": await org_name,
         }
     )

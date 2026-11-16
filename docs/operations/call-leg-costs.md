@@ -40,3 +40,29 @@ ORDER BY 1, 2;
 ## Build order
 
 This is step 2 of per-destination call pricing. The steps after it ship in a fixed order: see "Order of work" in [CLAUDE.md](../../CLAUDE.md#order-of-work).
+
+## Call length follows the balance
+
+Hail charges a call after it ends, so the balance does not drop while the call runs. The balance and the holds are read in one statement, so a debit written meanwhile is never missed. Code: [`call_allowance.py`](../../core/hailhq/core/call_allowance.py).
+
+- Before an outbound call, the API asks hail-website for its price per minute (`POST /api/internal/voice-rates/quote`, 5 s budget). It cuts the time limit to the whole minutes the balance pays for, less 10 s for the goodbye, and sets that money aside: a `call_balance_holds` row (cents, hold_until, and the price per minute and per call).
+- The next call sees the balance less every live hold. Less than one minute left: 402, and a `call.blocked` audit entry with reason `insufficient_funds`.
+- A live call's hold stops counting at `hold_until`. A call that ends unbilled (not answered and not completed) stops at once.
+- A billed call's hold counts until the rater prices its usage row (`usage_events.priced_at`), however long that takes, up to a day past `hold_until`. Once the call ends, the hold shrinks to its real cost: billed minutes plus 1 spare, at the highest price held, plus the fee, plus a minute and a fee per handover dial (never more than the hold). A billed call with no usage row (0 ms, or closed by another writer) stops 5 minutes after it ends.
+- A handover dial: the minutes talked and the ring are priced as the call alone, the handover as both lines plus the agent, from pickup (30 s pickup check, then the agent's handover limit or what the balance pays for, whichever is shorter). Its cap rides in the `/internal/agent/handover` response (`max_seconds`), and the hold grows to cover it (it never shrinks while the call runs). Less than one minute left: the handover is refused (`insufficient_funds` in the audit log).
+- The quote fails on an outbound call: the limit is at most `HAIL_VOICE_MAX_DURATION_SECONDS` (default 300) and nothing is held. Look for `call price unknown` in the API logs.
+- The quote fails on a handover: the agent's own handover limit applies and nothing more is held. The call's hold keeps counting until that limit can end, then counts in full after the call ends (its prices are set to NULL), and the dial counts toward the next handover's hold. Look for `handover price unknown`.
+- Not capped: inbound calls without a handover (their carrier cost is small), and the self-host shared key (no `HAIL_BASE_URL`).
+
+Live calls holding money now (an ended billed call's hold also counts until its usage row is priced; the exact rule is `_HELD_SQL` in `call_allowance.py`):
+
+```sql
+SELECT h.call_id, c.organization_id, c.status, c.max_duration_seconds,
+       h.cents, h.hold_until
+FROM call_balance_holds h
+JOIN calls c ON c.id = h.call_id
+WHERE h.hold_until > now()
+  AND c.ended_at IS NULL
+  AND c.status IN ('queued', 'dialing', 'ringing', 'in_progress')
+ORDER BY h.created_at DESC;
+```

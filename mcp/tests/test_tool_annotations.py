@@ -72,9 +72,11 @@ _OPEN_WORLD_WRITES = {
     "amend_sms_application",
     "cancel_verification",
     "confirm_verification",
+    # Uses the workspace's daily document reads, which cost money.
+    "check_verification_documents",
 }
 
-_EXPECTED_COUNT = 44
+_EXPECTED_COUNT = 45
 
 
 async def test_tool_count(tools_by_name) -> None:
@@ -145,8 +147,25 @@ async def test_submit_verification_params_have_schema_types(tools_by_name) -> No
     assert props["fields"]["type"] == "object"
     assert props["documents"]["type"] == "object"
     assert props["files"]["type"] == "array"
-    assert props["files"]["items"] == {"type": "object"}
-    assert props["address"]["anyOf"] == [{"type": "object"}, {"type": "null"}]
+    assert props["files"]["maxItems"] == 20
+    upload, inline = props["files"]["items"]["anyOf"]
+    assert upload["required"] == ["slot", "upload_id"]
+    assert inline["properties"]["content_type"]["enum"] == [
+        "image/jpeg",
+        "image/png",
+        "application/pdf",
+    ]
+    address, null = props["address"]["anyOf"]
+    assert null == {"type": "null"}
+    assert address["type"] == "object"
+    assert set(address["required"]) == {
+        "customer_name",
+        "street",
+        "city",
+        "region",
+        "postal_code",
+        "country_code",
+    }
 
 
 async def test_read_only_set_is_exact(tools_by_name) -> None:

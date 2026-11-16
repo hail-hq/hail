@@ -10,11 +10,13 @@ from __future__ import annotations
 import base64
 import json
 import re
+from dataclasses import asdict
 from uuid import uuid4
 
 import httpx
 import pytest
 import respx
+from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
 
@@ -1435,6 +1437,39 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
 
 @respx.mock
 @pytest.mark.parametrize(
+    ("extra", "version"),
+    [
+        ({}, 1),
+        ({"consent_methods": "WEBSITE", "website_url": "https://example.com/j"}, 2),
+        ({"consent_methods": "KEYWORD", "keyword_keyword": "JOIN"}, 2),
+    ],
+)
+async def test_preview_sms_application_accepts_every_text_version(
+    client: HailClient, extra: dict[str, str], version: int
+) -> None:
+    # Built by the real campaign_text, for each version it writes today.
+    fields = {
+        "text_types": "ACCOUNT_NOTIFICATION",
+        "campaign_description": "Account notices for signed-up customers.",
+        "opt_in_description": "They tick an unchecked box at sign-up.",
+        "sample_1": "Acme: Your balance is low. Reply STOP to opt out.",
+        "privacy_policy_url": "https://example.com/privacy",
+        "terms_url": "https://example.com/sms",
+        **extra,
+    }
+    preview = asdict(campaign_text(fields, "business"))
+    assert preview["schema_version"] == version
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(200, json=preview)
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="business", fields=fields
+    )
+    assert result == preview
+
+
+@respx.mock
+@pytest.mark.parametrize(
     "over",
     [
         {"subject_type": "robot"},
@@ -1691,7 +1726,10 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         httpx.Response(
             200, json={k: v for k, v in _CAMPAIGN_TEXT.items() if k != "opt_in_message"}
         ),
-        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 0}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": "2"}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": True}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2.0}),
         httpx.Response(404, json={"detail": "Not Found"}),
     ],
 )
@@ -1997,10 +2035,13 @@ async def test_create_file_upload_returns_a_ready_curl_line(
     assert result["id"] == _UPLOAD
     assert result["upload_url"] == _LINK["upload_url"]
     assert result["curl"] == (
-        "curl -sS -X PUT --data-binary @<path to the file> "
-        f"-H 'Content-Type: image/jpeg' '{_LINK['upload_url']}'"
+        "curl --silent --show-error --globoff --upload-file 'FILE_PATH' "
+        f"'{_LINK['upload_url']}'"
     )
     assert "size_bytes" in result["next"] and "sha256" in result["next"]
+    # A quoted path keeps a file name such as $(...).pdf from running.
+    assert "keep the single quotes" in result["next"]
+    assert "'\\''" in result["next"]
 
 
 async def test_create_file_upload_checks_the_purpose_locally(
@@ -2106,3 +2147,65 @@ async def test_tollfree_submission_preserves_owned_number_and_type(
     assert captured["number_id"]["body"] == number_id.encode()
     assert captured["country_code"]["body"] == b"CA"
     assert captured["number_type"]["body"] == b"toll_free"
+
+
+_DOCUMENT_CHECK_OK = {
+    "fields": {"first_name": "Testa"},
+    "address": {},
+    "documents": {
+        "identity": {
+            "read": True,
+            "option": "passport",
+            "fields": {},
+            "expiry_date": "2024-01-15",
+            "printed_name": {
+                "given_names": "Testa",
+                "surnames": "Example",
+                "latin_given_names": "",
+                "latin_surnames": "",
+                "business_name": "",
+            },
+            "skipped": None,
+        }
+    },
+    "warnings": [
+        {
+            "field": "identity",
+            "kind": "expired",
+            "message": "This document expired on 2024-01-15. Upload one that is still valid.",
+        }
+    ],
+    "note": "Warnings only.",
+}
+
+
+@respx.mock
+async def test_document_check_posts_the_form_and_returns_values_and_warnings(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(200, json=_DOCUMENT_CHECK_OK)
+
+    route = respx.post(f"{_BASE_URL}/verifications/document-check").mock(
+        side_effect=_handler
+    )
+    kwargs = _check_kwargs(client, files=[{"slot": "identity", "upload_id": _UPLOAD}])
+    for key in ("purpose", "number_id"):
+        kwargs.pop(key, None)
+    result = await tools.check_verification_documents(**kwargs)
+    assert route.called
+    assert result == _DOCUMENT_CHECK_OK
+    parts = captured["parts"]
+    assert parts["upload.identity"]["body"] == _UPLOAD.encode()
+    assert parts["quote_id"]["body"] == _QUOTE.encode()
+
+
+async def test_document_check_needs_a_quote(client: HailClient) -> None:
+    kwargs = _check_kwargs(client, quote_id=None)
+    for key in ("purpose", "number_id"):
+        kwargs.pop(key, None)
+    result = await tools.check_verification_documents(**kwargs)
+    assert "quote_id" in result["error"]

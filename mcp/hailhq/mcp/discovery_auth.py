@@ -8,15 +8,18 @@ tools exist, matching the "properly scoped, upgrade to public tool
 listing" gap an external audit flagged.
 
 This middleware runs BEFORE MCPServer's own auth middleware (see server.py's
-middleware ordering) and, for exactly four JSON-RPC methods —
-"initialize", "server/discover", "tools/list" and
-"notifications/initialized" — injects a synthetic, non-functional bearer
-token if the request has none.
+middleware ordering) and, for exactly these JSON-RPC methods —
+"initialize", "server/discover", "tools/list", "resources/list",
+"resources/templates/list", "prompts/list" and "notifications/initialized" —
+injects a synthetic, non-functional bearer token if the request has none.
+The server registers no resources or prompts, but the SDK advertises both
+capabilities, so their list methods answer anonymously with empty lists, the
+same as tools/list answers with the tool list.
 auth.PassThroughVerifier accepts any non-empty token string as "valid" (real validation is the downstream
 API's job, and these methods never call the downstream API), so
 MCPServer's auth layer then lets the request through.
 
-Every other method (tools/call, resources/*, other notifications/*, ping, ...)
+Every other method (tools/call, resources/read, other notifications/*, ping, ...)
 is untouched: no header is injected, so a request with no real bearer
 401s exactly as it did before this file existed. This is a safelist, not
 a bypass — widening it later needs the same scrutiny as the original
@@ -26,7 +29,7 @@ entries, not a one-line addition.
 _ANON_INIT_MAX_PER_WINDOW below) — unlike tools/list, a real initialize
 call creates a permanent, stateful MCP session, so unrestricted anonymous
 initialize is a resource-exhaustion vector, not just an information leak.
-"server/discover", "tools/list" and "notifications/initialized" are only
+Every safelisted method except "initialize" is only
 safelisted when they carry an Mcp-Session-Id header or a 2026-07-28 (or later)
 MCP-Protocol-Version header (see _SESSION_REQUIRED_METHODS): a session-less
 POST on an older protocol makes the SDK create a session before it answers
@@ -51,8 +54,11 @@ from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
 from mcp.shared.inbound import MCP_PROTOCOL_VERSION_HEADER
 from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
 
+_LIST_METHODS = frozenset(
+    {"tools/list", "resources/list", "resources/templates/list", "prompts/list"}
+)
 _DISCOVERY_METHODS = frozenset(
-    {"initialize", "server/discover", "tools/list", "notifications/initialized"}
+    {"initialize", "server/discover", "notifications/initialized", *_LIST_METHODS}
 )
 
 # Only protocol names reach telemetry. An arbitrary method string can contain
@@ -77,15 +83,13 @@ _OBSERVABLE_METHODS = _DISCOVERY_METHODS | frozenset(
 
 # Safelisted methods that must not open a session. On an older protocol the
 # SDK's session manager mints a new transport for ANY POST that lacks an
-# Mcp-Session-Id header, before it answers 400 — so a session-less tools/list,
+# Mcp-Session-Id header, before it answers 400 — so a session-less list call,
 # server/discover or notifications/initialized would create a session while
 # bypassing the initialize cap below. These pass only with that header, or on
 # the newer protocol (_opens_no_session), whose requests never create a
 # session. Otherwise they fall through to MCPServer's auth middleware and
 # 401, exactly as before this file existed.
-_SESSION_REQUIRED_METHODS = frozenset(
-    {"server/discover", "tools/list", "notifications/initialized"}
-)
+_SESSION_REQUIRED_METHODS = _DISCOVERY_METHODS - {"initialize"}
 
 # 64 KiB — comfortably above any real initialize/tools/list payload (both are
 # small JSON-RPC envelopes; neither carries bulk data), and small enough to

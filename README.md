@@ -23,6 +23,12 @@ providers remain external. Open source under AGPLv3.
 
 ![Animated terminal demo of hail tail streaming live call events](docs/assets/gifs/hail-tail-live-stream.gif)
 
+## Vercel Chat SDK
+
+Connect a bot to Hail SMS with [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter). Receive signed webhooks and reply from your Hail number with `thread.post()`. The adapter currently supports SMS; Hail email and phone calls remain available through the Hail APIs.
+
+See the [setup guide](https://hail.so/docs/webhooks#chat-sdk), [adapter source](https://github.com/hail-hq/chat-sdk-adapter), and [release announcement](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0).
+
 ## Self-host quick start
 
 Prerequisites: Git, Docker Engine, and Docker Compose v2. For a public

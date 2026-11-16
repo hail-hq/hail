@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from hailhq.mcp import metadata
 
 # Claude Code cuts each tool description and the instructions at 2 KB.
@@ -59,3 +60,73 @@ def test_package_version_matches_registry_entry() -> None:
     package = tomllib.loads((root / "pyproject.toml").read_text())["project"]
     registry = json.loads((root / "server.json").read_text())
     assert package["version"] == registry["version"]
+
+
+async def test_bad_arguments_name_the_field_and_rule_without_values(
+    monkeypatch,
+) -> None:
+    import importlib
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+    import hailhq.mcp.server as srv
+
+    srv = importlib.reload(srv)
+    cases = [
+        ("list_calls", {"limit": 500, "status": "SECRET-STATUS"}),
+        ("send_email", {"to": [], "subject": "SECRET-SUBJECT", "body_text": "x"}),
+        (
+            "create_agent",
+            {"name": "SECRET-NAME", "system_prompt": "p", "language": "xx"},
+        ),
+    ]
+    expected = [
+        ["limit: Input should be less than or equal to 200", "status: Input should be"],
+        ["recipient_consent: Field required", "to: List should have at least 1 item"],
+        ["language: Input should be"],
+    ]
+    for (tool, args), parts in zip(cases, expected, strict=True):
+        with pytest.raises(ToolError) as caught:
+            await srv.mcp_app.call_tool(tool, args)
+        text = str(caught.value)
+        assert text.startswith(f"Invalid arguments for {tool}: ")
+        for part in parts:
+            assert part in text
+        assert "SECRET" not in text and "input_value" not in text
+        assert "errors.pydantic.dev" not in text
+
+
+async def test_bad_subject_type_or_purpose_keeps_the_ask_the_user_message(
+    monkeypatch,
+) -> None:
+    import importlib
+
+    monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
+    import hailhq.mcp.server as srv
+
+    srv = importlib.reload(srv)
+    base = {"country_code": "US", "number_type": "local", "quote_id": None}
+    for args, needle in [
+        ({**base, "subject_type": "me"}, "ask the user whether this is for them"),
+        ({**base, "subject_type": "person", "purpose": "x"}, "purpose must be"),
+    ]:
+        result = await srv.mcp_app.call_tool("get_verification_requirements", args)
+        assert needle in str(result)
+    result = await srv.mcp_app.call_tool(
+        "acquire_number",
+        {
+            "quote_id": "00000000-0000-0000-0000-000000000001",
+            "country_code": "US",
+            "number_type": "local",
+            "confirm_total_cents": 100,
+            "subject_type": "me",
+        },
+    )
+    assert "ask the user whether this is for them" in str(result)
+    result = await srv.mcp_app.call_tool(
+        "preview_sms_application", {"subject_type": "me", "fields": {}}
+    )
+    assert "ask the user whether this is for them" in str(result)

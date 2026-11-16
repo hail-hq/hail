@@ -41,6 +41,7 @@ from hailhq.core.telemetry import (
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.core.urls import join_url
+from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
@@ -137,6 +138,11 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # all memory; past it, new sessions get 503. Idle sessions close after the
     # SDK's 30-minute timeout.
     http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
+    # After streamable_http_app() on purpose: instrument() would otherwise add
+    # PostHog's session-minting middleware, which buffers request bodies and
+    # sets Mcp-Session-Id on initialize responses the transport left without
+    # one. This server keeps its own sessions; tool calls are still captured.
+    analytics = instrument_analytics(mcp_app)
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -178,11 +184,16 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with mcp_app.session_manager.run():
-            try:
+        try:
+            async with mcp_app.session_manager.run():
                 yield
-            finally:
-                await asyncio.to_thread(flush_telemetry)
+        finally:
+            # After the session manager stops, so tool calls that end while
+            # sessions close are flushed too.
+            flushes = [asyncio.to_thread(flush_telemetry)]
+            if analytics:
+                flushes.append(analytics.flush())
+            await asyncio.gather(*flushes)
 
     # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*
