@@ -680,7 +680,7 @@ paths:
 
         ```
 
-        curl --silent --show-error --globoff --upload-file passport.jpg '<upload_url>'
+        curl --silent --show-error --globoff --upload-file 'passport.jpg' '<upload_url>'
 
         ```
 

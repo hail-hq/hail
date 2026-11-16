@@ -2420,7 +2420,8 @@ def register_tools(
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
-        and a ready ``curl`` line with a placeholder for the file's path after ``@``.
+        and a ready ``curl`` line with a ``'FILE_PATH'`` placeholder for the
+        file's absolute path.
         The link needs no key and works once. The upload response holds
         ``size_bytes`` and ``sha256`` to compare with the local file."""
         try:
