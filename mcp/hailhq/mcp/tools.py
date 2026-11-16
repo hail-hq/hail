@@ -1505,12 +1505,12 @@ async def create_file_upload(
     return {
         **link,
         "curl": (
-            "curl --silent --show-error --upload-file 'FILE_PATH' "
+            "curl --silent --show-error --globoff --upload-file FILE_PATH "
             f"'{link['upload_url']}'"
         ),
         "next": (
-            "Replace FILE_PATH with the file's path, keep the single quotes, "
-            "and run the curl line from a shell. "
+            "Replace FILE_PATH with the file's full path (in quotes if it has "
+            "spaces) and run the curl line from a shell. "
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."

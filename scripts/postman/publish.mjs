@@ -69,11 +69,15 @@ export async function updateCollection(
 
 // Cloudflare in front of Postman answers with a challenge page that does not
 // say why. Text in the collection was the cause once (see postman.test.mjs);
-// the caller's IP or request rate can be too.
+// the caller's IP or request rate can be too. A read sends no collection.
 function firewallCheck(response, step) {
   if (response.headers?.get("cf-mitigated") !== "challenge") return;
+  const cause =
+    step === "Update"
+      ? "Likely cause: text in the collection matches a firewall rule; upload parts of it to a test collection to find which. It can also block the caller's IP or request rate."
+      : "It blocks the caller's IP or request rate; try again later or from another network.";
   throw new Error(
-    `${step} Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the ${step.toLowerCase()}. Likely cause: text in the collection matches a firewall rule; upload parts of it to a test collection to find which. It can also block the caller's IP or request rate.`,
+    `${step} Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the ${step.toLowerCase()}. ${cause}`,
   );
 }
 

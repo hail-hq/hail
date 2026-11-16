@@ -35,7 +35,7 @@ curl -X POST "$HAIL_API_URL/v1/uploads" \
   -d '{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}'
 # → {"id": "...", "upload_url": "https://api.hail.so/v1/uploads/<id>?token=<token>", ...}
 
-curl --silent --show-error --upload-file invoice.pdf '<upload_url>'
+curl --silent --show-error --globoff --upload-file invoice.pdf '<upload_url>'
 # → {"id": "...", "size_bytes": 48213, "sha256": "..."}
 ```
 
