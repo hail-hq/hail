@@ -118,7 +118,7 @@ async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_ke
     from hailhq.mcp import tools
 
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
-    monkeypatch.setattr(tools.settings, "next_public_posthog_key", "phc_test")
+    monkeypatch.setattr(tools.analytics, "active", True)
     monkeypatch.setattr(tools, "_actor_cache", {})
     org_name = AsyncMock(return_value="Example Workspace")
     monkeypatch.setattr(tools, "fetch_organization_name", org_name)
@@ -131,3 +131,35 @@ async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_ke
     else:
         # Static-key mode has no per-bearer cache for analytics to read.
         whoami.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hailhq.mcp import tools
+
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools.analytics, "active", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    whoami = AsyncMock(side_effect=RuntimeError("unavailable"))
+    client = SimpleNamespace(whoami=whoami)
+    for _ in range(3):
+        async with tools._actor_for(client, cache_key="user.jwt"):
+            pass
+    assert whoami.await_count == 1
+    assert tools.cached_actor_ids("user.jwt") == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_no_actor_lookup_when_analytics_setup_failed(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hailhq.mcp import tools
+
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools.analytics, "active", False)
+    whoami = AsyncMock()
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="u"):
+        pass
+    whoami.assert_not_awaited()

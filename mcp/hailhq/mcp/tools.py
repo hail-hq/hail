@@ -98,7 +98,6 @@ from typing import Annotated, Any, Literal, get_args
 
 import httpx
 from hailhq.core.carrier_offer import SubjectType
-from hailhq.core.config import settings
 from hailhq.core.file_uploads import (
     PURPOSES as _UPLOAD_PURPOSES,
 )
@@ -129,6 +128,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.telemetry import telemetry_enabled
 from hailhq.core.telemetry_identity import identity_scope, tag_context
+from hailhq.mcp import analytics
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import (
     HailAPIError,
@@ -1747,6 +1747,8 @@ def _argument_errors(exc: ValidationError) -> str:
 
 
 _ACTOR_TTL_SECONDS = 300
+# A failed lookup is retried after this, not on every tool call.
+_ACTOR_FAILURE_TTL_SECONDS = 30
 _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -1772,7 +1774,7 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
     # Logfire tags spans with the actor. PostHog analytics reads the cache
     # (``cached_actor_ids``), which exists only for per-bearer clients.
     tracing = telemetry_enabled()
-    if tracing or (cache_key and settings.next_public_posthog_key):
+    if tracing or (cache_key and analytics.active):
         key = _actor_cache_key(cache_key) if cache_key else None
         hit = _actor_cache.get(key) if key else None
         if hit and hit[0] > time.monotonic():
@@ -1784,25 +1786,25 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
                 identity = {
                     "organization_id": actor.get("organization_id"),
                     "user_id": actor.get("user_id"),
-                    "user_email": actor.get("email"),
-                    "auth_kind": actor.get("auth_kind"),
-                    "actor_kind": actor.get("auth_kind"),
                 }
                 org_id = actor.get("organization_id")
-                if org_id and tracing:
-                    identity["organization_name"] = await fetch_organization_name(
-                        str(org_id)
-                    )
-                if key:
-                    if len(_actor_cache) >= _ACTOR_CACHE_MAX:
-                        _actor_cache.clear()
-                    _actor_cache[key] = (
-                        time.monotonic() + _ACTOR_TTL_SECONDS,
-                        dict(identity),
-                    )
+                if tracing:
+                    # Analytics alone needs only the two ids.
+                    identity["user_email"] = actor.get("email")
+                    identity["auth_kind"] = actor.get("auth_kind")
+                    identity["actor_kind"] = actor.get("auth_kind")
+                    if org_id:
+                        identity["organization_name"] = await fetch_organization_name(
+                            str(org_id)
+                        )
+                ttl = _ACTOR_TTL_SECONDS
             except Exception:
                 # Metadata enrichment never decides whether the tool is authorized.
-                pass
+                identity, ttl = {}, _ACTOR_FAILURE_TTL_SECONDS
+            if key:
+                if len(_actor_cache) >= _ACTOR_CACHE_MAX:
+                    _actor_cache.clear()
+                _actor_cache[key] = (time.monotonic() + ttl, dict(identity))
     with identity_scope(identity):
         yield
 
