@@ -29,6 +29,7 @@ from hailhq.core.models import (
     ApiKey,
     OrganizationMember,
     PhoneNumber,
+    SmsTrialPhone,
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.base import (
@@ -564,10 +565,8 @@ async def verify_trial_phone(
     phone: str = "+14155550142",
     *,
     status: str = "verified",
-):
+) -> SmsTrialPhone:
     """The workspace's trial phone row, committed."""
-    from hailhq.core.models import SmsTrialPhone
-
     now = datetime.now(timezone.utc)
     row = SmsTrialPhone(
         organization_id=organization_id,

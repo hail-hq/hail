@@ -18,6 +18,7 @@ from sqlalchemy import func, select, update
 from .conftest import (
     insert_org_and_key,
     seed_sms_trial,
+    seed_trial_texts,
     verify_trial_phone,
 )
 
@@ -110,6 +111,19 @@ async def test_get_trial_off(client, org_and_key, monkeypatch):
         "texts_limit": 25,
         "texts_left": 25,
     }
+
+
+async def test_get_trial_counts_sent_trial_texts(
+    jwt_client, org_and_key, async_session, monkeypatch
+):
+    org_id = org_and_key[0]
+    await seed_sms_trial(async_session, monkeypatch)
+    await seed_trial_texts(async_session, org_id, 3)
+    await seed_trial_texts(async_session, org_id, 2, status="failed")
+
+    body = (await jwt_client.get("/v1/sms/trial")).json()
+    assert body["texts_used"] == 3 and body["texts_left"] == 22
+    assert body["texts_limit"] == 25
 
 
 async def test_get_trial_configured_not_approved(
@@ -344,6 +358,12 @@ async def test_failed_send_uses_no_budget_and_changes_no_row(
     assert after.code_expires_at == before.code_expires_at
     assert len(after.code_send_log) == 1
     assert len(await _audit(session_factory, org_id, "sms.trial.code_sent")) == 1
+
+    # A later good send logs one more entry: the failed one left nothing in
+    # the session either.
+    sms_mock.send_sms.side_effect = _result()
+    assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
+    assert len((await _row(session_factory, org_id)).code_send_log) == 2
 
 
 async def test_start_again_after_verified_sends_nothing(
