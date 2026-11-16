@@ -2426,7 +2426,8 @@ async def check_verification_documents(
     failed or took too long, the file is over the size or page limits, or
     the workspace used its 30 reads for today). Nothing is filed, saved,
     held or charged, and uploads are not used up. The files are read by an
-    AI model (Anthropic) for this check only.
+    Anthropic AI model, on AWS (Amazon Bedrock) or Anthropic's API, for this
+    check only.
     """
     form = await _parse_form(request)
     values = _form_values(form)

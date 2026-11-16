@@ -5599,7 +5599,9 @@ paths:
 
         held or charged, and uploads are not used up. The files are read by an
 
-        AI model (Anthropic) for this check only."
+        Anthropic AI model, on AWS (Amazon Bedrock) or Anthropic's API, for this
+
+        check only."
       operationId: check_verification_documents
       parameters:
         - name: authorization
