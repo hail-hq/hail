@@ -346,6 +346,14 @@ async def test_agent_trial_refused(
     assert await send(client) == REFUSED[site]
     sms_mock.send_sms.assert_not_awaited()
     assert await _outbound(async_session, org) == []
+    if site == "browser":
+        # Nothing commits on a refusal: the request session's rollback drops
+        # the test-text reservation, so it does not use one of the three.
+        await async_session.rollback()
+        call = (
+            await async_session.execute(select(Call).where(Call.organization_id == org))
+        ).scalar_one()
+        assert "browser_actions" not in call.metadata_
 
 
 @pytest.mark.parametrize("site", SITES)
