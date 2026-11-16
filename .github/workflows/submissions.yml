@@ -1,0 +1,31 @@
+name: Submissions
+
+# Checks the directory submission files: frontmatter, sections, and copy
+# rules (for example "email inbox", never "inbox" alone).
+on:
+  pull_request:
+    paths:
+      - "docs/submissions/**"
+      - ".github/workflows/submissions.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: docs/submissions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - run: uvx pytest -q test_validate_submission.py
+      - name: Validate every submission file
+        run: |
+          for f in *.md
+          do
+            case "$f" in README.md|_TEMPLATE.md) continue ;; esac
+            python validate_submission.py "$f"
+          done

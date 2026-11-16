@@ -26,8 +26,8 @@ status: drafted
 2. If prompted, create an account or log in — Toolify's submission flow is typically gated behind a free account.
 3. Enter the tool's website URL: `https://hail.so`.
 4. Fill in **Tool Name**: `Hail`.
-5. Fill in **Tagline / short description** with the one-liner from Content below: `Phone, SMS & email — for agents.`
-6. Fill in **Full description** with the long copy from Content below (it's sized to the stated 200-400 word requirement — paste as-is, don't trim).
+5. Fill in **Tagline / short description** with the one-liner from Content below: `Give your AI a phone number and an email inbox.`
+6. Fill in **Full description** with the long copy from Content below (paste as-is; it is about 150 words, so check the form minimum).
 7. Select **Category** — pick the closest match Toolify exposes (likely something under "Developer Tools," "AI Agent," or "Communication" / "API" — there is no single canonical "AI Directory" category on their taxonomy, choose whichever reads closest to an agent-facing communications API).
 8. Fill in **Tags/Keywords** with the list from Content below, comma-separated or one-per-box depending on the widget.
 9. Set **Pricing model** — select "Free" or "Open Source" if offered (Hail is AGPLv3 and self-hostable) and add "Paid cloud option" or similar if the form allows a secondary tag, since managed Hail Cloud is also billed.
@@ -47,19 +47,21 @@ status: drafted
 
 **Website:** `https://hail.so`
 
-**Tagline (one-liner):** Phone, SMS & email — for agents.
+**Tagline (one-liner):** Give your AI a phone number and an email inbox.
 
 **Full description (long):**
 
-Hail gives AI agents a real phone number, SMS line, and inbox — then exposes all three as plain tool calls instead of a dashboard to click through or a webhook pipeline to wire by hand. An agent places a call, sends a text, or reads an email the same way it calls any other function.
+Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
-The full surface ships four ways: a CLI for humans scripting Hail directly, a Python SDK, an OpenAPI-documented REST API, and a remote MCP server reachable over Streamable HTTP. Point any MCP-capable client — Claude, ChatGPT, Cursor, and others — at the endpoint, authorize once, and the tools are live immediately. No local install, no stdio bridge, no server to run yourself unless you want to.
+Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
 
-Voice calls run on a real-time pipeline — Twilio for the carrier leg, with your choice of model driving the in-call conversation (OpenAI, Gemini, or Claude). Email sends and receives on AWS SES, with support for a shared Hail sending domain or your own custom domain. SMS rides the same number as voice, two-way, so an agent that just placed a call can follow up with a text without provisioning a second number.
+Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
 
-Every action — a call placed, a message sent, an email delivered — comes back as a structured, queryable event. Tail activity live from the CLI, pull status on a specific call or message, or query delivery and engagement stats after the fact. Nothing about what the agent did is opaque.
+Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
 
-Hail is self-hostable and open source under AGPLv3 — clone the repo, bring your own carrier and AWS credentials, and run the full stack yourself — or use the managed Hail Cloud and skip credential setup entirely. Built for agents that need to actually reach people: appointment reminders, no-show follow-ups, support callbacks, and anything else that needs a real phone number and inbox sitting behind an API instead of a human.
+Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+
+Hail is open source. Use Hail Cloud, or host it yourself.
 
 **Category:** ai-directory (map to Toolify's closest taxonomy match at submission time — see Steps step 7)
 

@@ -7,6 +7,8 @@ import sys
 REQUIRED_KEYS = ["target", "slug", "category", "url", "score", "status"]
 VALID_STATUSES = {"drafted", "submitted", "rejected", "n/a"}
 REQUIRED_SECTIONS = ["## TODO", "## Steps to submit", "## Content", "## Notes"]
+# "inbox" alone confuses non-native English readers: always write "email inbox".
+BARE_INBOX = re.compile(r"(?<!email )(?<![/\w-])inbox\b", re.IGNORECASE)
 
 
 class ValidationError(Exception):
@@ -48,6 +50,13 @@ def validate(text):
     missing_sections = [s for s in REQUIRED_SECTIONS if s not in body]
     if missing_sections:
         raise ValidationError(f"missing sections: {missing_sections}")
+
+    bare = BARE_INBOX.search(body)
+    if bare:
+        line = body[: bare.start()].count("\n") + 1
+        raise ValidationError(
+            f'write "email inbox", not "inbox" alone (body line {line})'
+        )
 
     return fields
 

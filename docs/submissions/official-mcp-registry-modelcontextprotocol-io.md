@@ -67,7 +67,7 @@ curl -i https://mcp.hail.so/
 
 To publish a change: edit `mcp/server.json`, bump `version` (the registry refuses a version it already has), merge. Check the run under Actions, then confirm with step 7.
 
-Why not the laptop login any more: since 2026-10 the registry grants an org namespace only to org Owners, read through `GET /user/memberships/orgs` with the `read:org` scope. The token from `mcp-publisher login github` does not see the `hail-hq` org (verified 2026-10-18: publish returns 403 "You have permission to publish: io.github.r13i/*"), even after granting the OAuth app org access. A `gh auth token` does see it. Manual fallback, from `mcp/`, if the workflow is ever unavailable:
+Why not the laptop login any more: since 2026-10 the registry grants an org namespace only to org Owners, read through `GET /user/memberships/orgs` with the `read:org` scope. The token from `mcp-publisher login github` does not see the `hail-hq` org (verified 2026-10-18: publish returns 403 "You have permission to publish: io.github.r13i/\*"), even after granting the OAuth app org access. A `gh auth token` does see it. Manual fallback, from `mcp/`, if the workflow is ever unavailable:
 
 ```bash
 T=$(gh auth token)
@@ -139,11 +139,21 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 
 **One-liner** (for `description` / anywhere a short pitch is needed):
 
-> Phone, SMS and email for agents. One remote MCP endpoint, OAuth login, zero install.
+> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
 
 **Longer description** (for `websiteUrl` context / any registry aggregator that mirrors this listing with more room):
 
-> Hail is a self-hostable, AGPLv3 communication platform for AI agents: voice calls, SMS, and email, all reachable from one remote MCP server. No stdio, no local install, no API keys to juggle: paste `https://mcp.hail.so` into your client, click Allow, your agent gets call/email tools with OAuth-scoped access. Self-host the whole stack if you'd rather not touch Hail Cloud.
+> Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
+>
+> Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+>
+> Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+>
+> Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+>
+> Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+>
+> Hail is open source. Use Hail Cloud, or host it yourself.
 
 **`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** Ready, validated file at `mcp/server.json`:
 
@@ -152,7 +162,7 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hail-hq/hail-mcp",
   "title": "Hail",
-  "description": "Phone, SMS and email for AI agents. One remote MCP endpoint, OAuth login, zero install.",
+  "description": "A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.",
   "websiteUrl": "https://hail.so/mcp",
   "repository": {
     "url": "https://github.com/hail-hq/hail",

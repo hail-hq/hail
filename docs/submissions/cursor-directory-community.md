@@ -34,10 +34,21 @@ status: drafted
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive email, and read back structured events — all through one remote MCP server. No local install: connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
+
+Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+
+Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+
+Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+
+Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+
+Hail is open source. Use Hail Cloud, or host it yourself.
 
 **Config/URL field:**
 
@@ -64,7 +75,6 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 ## Notes
 
 - 2026-11-16: could not check whether Hail is listed. cursor.directory returned HTTP 429 (rate limit) to every scripted request. Check <https://cursor.directory/plugins/new> in a browser.
-
 
 - Listed as **"Unofficial community form"** with **no formal vetting** per the target brief — treat this as low-effort/low-certainty: no confirmation email, moderation queue, or SLA should be assumed. If the form submits with no visible acknowledgment, that's expected, not a failure.
 - SMS is a shipped, present-tense capability of Hail as a whole (voice, SMS, email), but there is currently no `send_sms`/`list_sms` tool wired into the MCP tool surface (`mcp/hailhq/mcp/tools.py` exposes only call and email tools plus event/stats readers) — SMS-over-MCP is "coming soon." Keep SMS out of any field that implies it's an MCP _tool_; it's fine in the general product description since Hail overall does ship SMS.

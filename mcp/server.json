@@ -2,14 +2,14 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hail-hq/hail-mcp",
   "title": "Hail",
-  "description": "Phone, SMS and email for AI agents. One remote MCP endpoint, OAuth login, zero install.",
+  "description": "A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.",
   "websiteUrl": "https://hail.so/mcp",
   "repository": {
     "url": "https://github.com/hail-hq/hail",
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "icons": [
     {
       "src": "https://hail.so/assets/brand/icons/icon-512.png",

@@ -50,10 +50,11 @@ status: n/a
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description:**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive email, and read back structured events — all through one remote MCP server. No local install: connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 **Server URL (paste into Smithery):**
 
@@ -95,7 +96,6 @@ npx -y @smithery/cli mcp publish "https://mcp.hail.so" -n @hail-hq/hail
 ## Notes
 
 - **2026-11-16: Smithery is now part of Arcade (arcade.dev).** From <https://smithery.ai/future>: "On October 31, 2026, we're shutting down Smithery's connection management services. Smithery will remain as a public (non-proxied) MCP registry." Its accounts, API keys, CLI, and hosted server URLs are shut down. The steps above no longer work. No new submission path was found: <https://smithery.ai/docs> returns 404. Hail was not found at the Smithery server URLs tried. The registry search API returned HTTP 500.
-
 
 - Auto-scan will discover the tool list live from `https://mcp.hail.so` — the table above is included for the human filling out the form, but Smithery's own scan is the actual source that populates the listing page.
 - Smithery's docs describe an optional manual-metadata escape hatch at `/.well-known/mcp/server-card.json` for auth-protected servers where auto-scan can't complete. Checked directly: `https://mcp.hail.so/.well-known/mcp/server-card.json` currently 404s (`mcp/hailhq/mcp/server.py` only mounts `/.well-known/oauth-protected-resource`, which FastMCP auto-publishes for `oauth-rs` mode). If Smithery's OAuth-based auto-scan can't complete against Hail's flow, adding this file is the fallback — flag to engineering, don't build it speculatively for this submission.

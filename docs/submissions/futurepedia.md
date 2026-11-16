@@ -45,10 +45,21 @@ status: drafted
 
 **Tool URL:** `https://hail.so`
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive SMS, send and receive email, and read back structured events and analytics — all through one remote MCP server (Streamable HTTP, no local install or stdio package). Connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI (`hail`), a Python SDK, and OpenAPI for non-MCP integrations. Deliverability tooling and per-channel analytics are built in, not bolted on.
+
+Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
+
+Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+
+Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+
+Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+
+Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+
+Hail is open source. Use Hail Cloud, or host it yourself.
 
 **Category:** AI Agents / Developer Tools / Productivity (pick closest available on the form — see Steps)
 

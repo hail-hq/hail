@@ -37,21 +37,27 @@ Issue body:
 
 ````markdown
 ### Server Name
+
 Hail
 
 ### Category
+
 Communication
 
 ### Official Website / Documentation
+
 https://hail.so/docs/mcp
 
 ### Repository
+
 https://github.com/hail-hq/hail (open source, AGPLv3). The MCP server is in the `mcp/` folder. The hosted server needs no local install.
 
 ### Remote MCP Endpoint
+
 `https://mcp.hail.so`, Streamable HTTP. OAuth 2.1 with dynamic client registration; sign in with a Hail account.
 
 ### Remote MCP Config
+
 ```json
 {
   "mcpServers": {
@@ -64,9 +70,11 @@ https://github.com/hail-hq/hail (open source, AGPLv3). The MCP server is in the 
 ```
 
 ### Description
-Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
+
+Give your AI a phone number and an email inbox. One remote MCP server covers phone calls, text messages (SMS), and email.
 
 Your agent can:
+
 - Place an outbound AI call and read its transcript
 - Send and receive text messages
 - Send email, read replies and attachments, and check delivery events

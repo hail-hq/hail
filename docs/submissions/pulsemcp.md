@@ -34,11 +34,11 @@ Nothing to paste into a PulseMCP-specific field — there is none. The listing i
 
 **One-liner:**
 
-> Phone, SMS & email — for agents. One remote MCP endpoint, OAuth login, zero install.
+> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
 
 **Description** (mirrors the `server.json` `description` field the crawler ingests):
 
-> Voice calls, SMS, and email for AI agents — one remote MCP endpoint, OAuth login, zero install. Place calls, send messages, read replies, and pull deliverability events without standing up a phone system or mail server.
+> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
 
 **Repo / manual-fallback URL:**
 

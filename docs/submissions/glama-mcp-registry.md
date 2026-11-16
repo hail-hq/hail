@@ -47,10 +47,11 @@ below describe the previous setup.
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description (if an editable field is offered post-index):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number and inbox — place and receive calls, send and receive email, and read back structured delivery events — all through one remote MCP server. No local install: point a client at `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 **Hosting type (Glama facet):** Remote (Streamable HTTP; no stdio, no local install — see [docs/setup/mcp.md](../setup/mcp.md#why-remote-only-no-stdio--no-pypi-install))
 

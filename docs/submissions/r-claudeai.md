@@ -41,7 +41,7 @@ status: drafted
 
 ### Title
 
-I gave Claude a real phone number and a real inbox (via MCP) — it called my no-show customers itself
+I gave Claude a real phone number and a real email inbox (via MCP) — it called my no-show customers itself
 
 ### Flair
 
@@ -49,7 +49,7 @@ Built with Claude
 
 ### Post body
 
-````markdown
+```markdown
 **What I built:** a no-show follow-up agent for a small side-project booking system. When someone misses a slot, Claude decides whether to call or email them, does it, then reads back what happened and decides the next move — no branching logic I wrote by hand, just Claude driving tools.
 
 **How:** I connected Claude.ai to [Hail](https://hail.so) — Settings → Connectors → Add custom connector → `https://mcp.hail.so` — and clicked Allow. That's the whole setup, no API keys pasted anywhere. Hail is a self-hostable, open-source (AGPLv3) comms server that exposes phone calls and email as MCP tools: `place_call`, `send_email`, `get_call`, `list_calls`, `get_email`, `list_emails`, `get_events`, plus a few reader tools for events/attachments/stats. I'm the person who built Hail, disclosing that up front — this post is about what Claude did with it, not a pitch.
@@ -77,7 +77,7 @@ Claude read the list, called `place_call` four times with a per-call `system_pro
 The part that stood out: I never told it "if voicemail, send an email" — that branch was Claude's own read of the situation, and it did it without asking me first. That's the bit that actually made me want to write this up instead of just quietly using it.
 
 Repo's linked in the first comment if anyone wants to poke at it or self-host instead of using the hosted connector.
-````
+```
 
 ### Suggested first comment
 

@@ -27,7 +27,7 @@ Review the live [Directory Policy](https://support.claude.com/en/articles/131453
 Paste these into the portal at <https://claude.ai/directory/manage>.
 
 - **Name:** Hail
-- **Tagline (55 characters or fewer):** Phone, SMS and email for agents.
+- **Tagline (55 characters or fewer):** Give your AI a phone number and an email inbox.
 - **Categories:** Communication, Productivity, Developer Tools
 - **Docs URL:** <https://hail.so/docs/mcp>
 - **Privacy policy URL:** <https://hail.so/legal/privacy>
@@ -38,11 +38,17 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 
 **Description (2,000 characters or fewer):**
 
-> Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
+> Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 >
-> Place an outbound AI call and read its transcript. Send and receive text messages. Send email, read replies and attachments, and check delivery events and stats. Buy and route phone numbers, manage saved agents, and submit carrier registrations.
+> Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
 >
-> Sign in with OAuth. Each person authorizes their own Hail account. Hail is open source (AGPLv3) and can be self-hosted. The same features are available in the CLI, the Python SDK and the OpenAPI spec.
+> Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+>
+> Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+>
+> Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+>
+> Hail is open source. Use Hail Cloud, or host it yourself.
 
 **Use cases:**
 

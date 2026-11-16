@@ -36,7 +36,7 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
 - **Repository:** `https://github.com/hail-hq/hail`
 - **Plugin name:** `hail`
 - **Display name:** Hail
-- **Description:** Give your AI assistant a phone number and an email inbox. Handle calls, texts, and email through Hail in Cursor.
+- **Description:** Give your AI a phone number and an email inbox. Make calls, send texts, and handle email from Cursor.
 - **Homepage:** `https://hail.so/mcp/cursor`
 - **License:** AGPL-3.0-or-later
 - **Support contact:** `hi@hail.so`

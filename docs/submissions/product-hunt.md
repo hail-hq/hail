@@ -48,7 +48,7 @@ status: drafted
 
 **Name:** Hail
 
-**Tagline (one-liner):** Phone, SMS & email — for agents.
+**Tagline (one-liner):** Give your AI a phone number and an email inbox.
 
 **Topics:** Developer Tools · Artificial Intelligence · Open Source · APIs
 
@@ -58,7 +58,8 @@ status: drafted
 - Repo: `https://github.com/hail-hq/hail`
 
 **Description:**
-Hail is a self-hostable, open-source (AGPLv3) communication platform for AI agents. Phone, SMS & email — for agents: your agent places and receives calls, sends and reads email, with delivery analytics and deliverability tracking built in, not bolted on. No dashboard to click through — agents drive it directly over a CLI, a Python SDK, a documented OpenAPI spec, or a remote MCP server (Streamable HTTP — no stdio, nothing to install locally). Self-host the whole stack with `docker compose up` on your own Twilio and AWS SES accounts, or run it managed at hail.so. Full source, no asterisks: it's AGPLv3.
+
+Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 **Install / usage snippet:**
 
@@ -93,12 +94,12 @@ hail mcp endpoint                  # prints your self-hosted connector URL (e.g.
 
 **Maker's first comment (post immediately at launch):**
 
-> Hey Product Hunt — I built Hail because every "give my agent a phone number / inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code around Twilio you had to write yourself. Hail is that glue, already written: one API — plus a remote MCP server, so a client just plugs in — for voice calls, SMS, and email. Self-host it on your own Twilio and AWS SES accounts, or run it managed at hail.so. It's AGPLv3: full source, no asterisks. I'll be here all day answering questions about the architecture, the pricing, or why voice agents are still harder than they should be.
+> Hey Product Hunt — I built Hail because every "give my agent a phone number / email inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code around Twilio you had to write yourself. Hail is that glue, already written: one API — plus a remote MCP server, so a client just plugs in — for voice calls, SMS, and email. Self-host it on your own Twilio and AWS SES accounts, or run it managed at hail.so. It's AGPLv3: full source, no asterisks. I'll be here all day answering questions about the architecture, the pricing, or why voice agents are still harder than they should be.
 
 ## Notes
 
 - Product Hunt has no formal review queue for standard launches — a scheduled listing goes live automatically at the chosen time, provided it isn't flagged as spam/duplicate. No submission-to-live turnaround to wait on; the only gate is the founder's own schedule and the comment-thread commitment on launch day.
-- Contact used: redouane.a.achouri@gmail.com (founder's account email).
+- Contact used: the founder's account email.
 - Voice is Twilio-backed, email (send + receive) is AWS SES-backed — see `core/hailhq/core/providers/voice/twilio.py` and `core/hailhq/core/providers/email/ses.py`. No other carrier/vendor is wired up; don't name any other provider in the listing or comments.
 - **SMS is not yet wired to a concrete endpoint** — there is no `/sms` route in `openapi/openapi.yaml`, no `hail sms` CLI command, and no SMS tool in the MCP server (`mcp/hailhq/mcp/tools.py` only exposes call/email tools). Keep SMS in the tagline/description as a stated product capability (per brand-voice policy), but do **not** demo a literal SMS command in comments or gallery captions — there isn't one to run yet. Treat it as "coming soon" if a commenter asks for a live example.
 - MCP tool surface today: `place_call`, `send_email`, `get_call`, `list_calls`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `get_events` — no SMS tools (matches the point above).

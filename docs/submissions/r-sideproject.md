@@ -36,13 +36,13 @@ status: drafted
 ## Content
 
 **Title:**
-I gave my AI agent a phone number and an inbox it can actually use (self-hosted, AGPLv3) — feedback wanted
+I gave my AI agent a phone number and an email inbox it can actually use (self-hosted, AGPLv3) — feedback wanted
 
 **Body:**
 
-What I built: **Hail** — a self-hostable, open-source (AGPLv3) communication platform that gives an AI agent a real phone number, an inbox, and delivery analytics, driven however you already build agents: a CLI, a Python SDK, a documented OpenAPI spec, or a remote MCP server (Streamable HTTP — no stdio, nothing to install locally, just point a client at an endpoint).
+What I built: **Hail** — a self-hostable, open-source (AGPLv3) communication platform that gives an AI agent a real phone number, an email inbox, and delivery analytics, driven however you already build agents: a CLI, a Python SDK, a documented OpenAPI spec, or a remote MCP server (Streamable HTTP — no stdio, nothing to install locally, just point a client at an endpoint).
 
-Why I built it: I was wiring an agent to call a lead, follow up by email the moment the call ended, and see the whole thing happen in one place instead of tailing three different provider dashboards. Every "give my agent a phone / inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code you write yourself around a telephony carrier and a mail provider. I wanted the glue already written, and I wanted to be able to read every line of it — so I built it and open-sourced the whole stack.
+Why I built it: I was wiring an agent to call a lead, follow up by email the moment the call ended, and see the whole thing happen in one place instead of tailing three different provider dashboards. Every "give my agent a phone / email inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code you write yourself around a telephony carrier and a mail provider. I wanted the glue already written, and I wanted to be able to read every line of it — so I built it and open-sourced the whole stack.
 
 The concrete thing I used it for (this is the loop the demo below actually runs):
 

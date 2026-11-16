@@ -2,7 +2,7 @@
   "name": "hail",
   "displayName": "Hail",
   "version": "1.0.0",
-  "description": "Give your AI assistant a phone number and an email inbox. Handle calls, texts, and email through Hail in Cursor.",
+  "description": "Give your AI a phone number and an email inbox. Make calls, send texts, and handle email from Cursor.",
   "author": {
     "name": "Hail",
     "email": "hi@hail.so"

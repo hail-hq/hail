@@ -92,7 +92,7 @@ To ensure your Pull Request is dealt with swiftly, please check the following (c
 
 Field notes:
 
-- `description`: 97 chars (limit 250). Sentence case. No "self-hosted", "open-source", "free" (redundant per guidelines). No leading "A …". Channel claims match `README.md` Milestones (2026-08-23): outbound calls, SMS in/out, email in/out — all checked. Matches site copy (`home-copy.ts`: "Give your AI agent a voice, a phone number, and an inbox… Send SMS and agent mail"). Leads with "Phone calls, SMS, and email" so it reads as a running service, not an SDK (SDKs are in "What does not qualify").
+- `description`: 97 chars (limit 250). Sentence case. No "self-hosted", "open-source", "free" (redundant per guidelines). No leading "A …". Channel claims match `README.md` Milestones (2026-08-23): outbound calls, SMS in/out, email in/out — all checked. Matches site copy (`home-copy.ts`: "Give your AI agent a voice, a phone number, and an email inbox… Send SMS and agent mail"). Leads with "Phone calls, SMS, and email" so it reads as a running service, not an SDK (SDKs are in "What does not qualify").
 - No `(alternative to …)` suffix. No single well-known product is a clean match; adding one invites review debate.
 - `licenses`: `AGPL-3.0` is the identifier in `licenses.yml` (line 10, checked 2026-08-23).
 - `platforms`: only what runs the server — Python (api, voicebot, mcp) and Docker (`docker compose up`). Go is dropped: the CLI is a client, and the PR template says platforms "match the platforms required to install and run the software".

@@ -1,5 +1,45 @@
 # Submission tracker
 
+## Listing copy
+
+Decided 2026-11-16. Paste these into every listing. Each submission file below already holds the right version for its fields.
+
+Rules:
+
+- Sell the outcome: the AI gets its own phone number and email inbox.
+- Always write "email inbox", never "inbox" alone. Non-native English readers may not know the word. `validate_submission.py` fails on a bare "inbox".
+- Use one wording everywhere. Do not A/B test across directories: traffic per listing is too small to compare.
+
+**Tagline** (47 characters; fits Claude's 55 and Product Hunt's 60):
+
+> Give your AI a phone number and an email inbox.
+
+**Short** (92 characters; fits the 100-character MCP Registry `description`):
+
+> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+
+**Medium** (243 characters; fits Product Hunt's 260 and card descriptions):
+
+> Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+
+**Long** (825 characters; for Claude, Muse, ChatGPT and other long description fields):
+
+> Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
+>
+> Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+>
+> Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+>
+> Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+>
+> Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+>
+> Hail is open source. Use Hail Cloud, or host it yourself.
+
+Search terms in this copy, with US monthly volume from the hail-website SEO bank (`docs/seo/`, Ahrefs, October and November 2026): ai receptionist (13,000), ai answering service (3,900), ai phone agent (1,700), phone number for ai agent (20).
+
+## Tracker
+
 Ranked by relevance/impact score, highest first. Update the **Status** column as work progresses: `drafted` -> `submitted` -> `submitted (live)` or `rejected` / `n/a`.
 
 | Rank | Target                                             | Category      | Score | Status                                                                                                                        | File                                                                                                         |

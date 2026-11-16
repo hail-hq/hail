@@ -44,10 +44,21 @@ status: drafted
 
 **Repo:** `https://github.com/hail-hq/hail`
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line: place and receive voice calls, send and receive SMS, send and receive email, and read back structured events and per-channel analytics — all through one system, not a pile of glue code around someone else's API. Run the whole stack yourself with `docker compose up` on your own Twilio and AWS SES accounts — Postgres-backed, with deliverability tracking and analytics built into the core, not bolted on after the fact. Agents drive it directly: a CLI (`hail call`, `hail email send`, `hail tail` for a live cross-channel event stream), a Python SDK, a documented OpenAPI spec, or a remote MCP server over Streamable HTTP — no stdio, nothing to install locally, just point a client at the endpoint and authorize. Full source is available under AGPLv3; nothing about the core communication surface is held back behind a paid tier.
+
+Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
+
+Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+
+Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+
+Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+
+Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
+
+Hail is open source. Use Hail Cloud, or host it yourself.
 
 **License:** Open Source — AGPL-3.0-or-later ([`LICENSE`](../../LICENSE))
 

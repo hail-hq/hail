@@ -39,13 +39,13 @@ status: drafted
 ## Content
 
 **Title:**
-Gave my AI agent a real phone number and inbox — self-hosted, AGPLv3, here's the actual loop it runs
+Gave my AI agent a real phone number and email inbox — self-hosted, AGPLv3, here's the actual loop it runs
 
 **Body:**
 
 What I built: **Hail** — a self-hostable communication platform for AI agents: phone calls, SMS, and email, driven by a CLI, a Python SDK, a documented OpenAPI spec, or a remote MCP server (Streamable HTTP — no stdio, nothing to install locally). Genuine public repo, real license: [github.com/hail-hq/hail](https://github.com/hail-hq/hail), [AGPL-3.0-or-later](https://github.com/hail-hq/hail/blob/main/LICENSE) — run a modified Hail as a service and you must release your source, same as the license on the tin says.
 
-Why I built it: I was wiring an agent to call a lead, follow up by email the moment the call ended, and watch the whole thing happen in one place instead of tailing three provider dashboards. Every "give my agent a phone / inbox" project I found was a SaaS behind a black-box pricing page, or a pile of glue code you write yourself around a telephony carrier and a mail provider. I wanted the glue already written, and I wanted to read every line of it — so I built it and open-sourced the whole stack instead of keeping it a private script.
+Why I built it: I was wiring an agent to call a lead, follow up by email the moment the call ended, and watch the whole thing happen in one place instead of tailing three provider dashboards. Every "give my agent a phone / email inbox" project I found was a SaaS behind a black-box pricing page, or a pile of glue code you write yourself around a telephony carrier and a mail provider. I wanted the glue already written, and I wanted to read every line of it — so I built it and open-sourced the whole stack instead of keeping it a private script.
 
 The concrete loop the demo below actually runs:
 

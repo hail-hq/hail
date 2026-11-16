@@ -34,10 +34,11 @@ status: drafted
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:** Give your AI a phone number and an email inbox.
 
 **Description:**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number and inbox — place and receive calls, send and receive email, and read back structured delivery events — all through one remote MCP server. No local install: point a client at `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 **Server URL:** `https://mcp.hail.so` (Hail Cloud) / `http://<your-host>:8081` (self-hosted)
 
@@ -71,7 +72,6 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 ## Notes
 
 - 2026-11-16: Hail is not in the Communication category of <https://opentools.com/registry/communication> (21 servers). `/registry/hail` returns 404. The site now leads with its "Agent Usability Rating" product. No submit form or contribution repo was found. Next check: <https://github.com/opentools> or the OpenTools Discord at <https://opentools.com/discord>.
-
 
 - OpenTools has no documented self-serve submission form for the registry — listing requires scheduling a call with the team, and their acceptance requirements are not published; treat whatever they state on the call as authoritative and record it here afterward for future re-submissions.
 - No scheduling link or contact address was located during drafting. This needs live discovery at submission time — check the site's footer, an `/about` or `/contact` page, and any embedded scheduler.

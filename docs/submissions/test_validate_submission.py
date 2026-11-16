@@ -20,7 +20,7 @@ status: drafted
 2. Run `mcp-publisher publish`
 
 ## Content
-Hail gives your agents a phone number, inbox, and SMS line.
+Hail gives your agents a phone number, email inbox, and SMS line.
 
 ## Notes
 Requires DNS access to hail.so.
@@ -62,3 +62,12 @@ def test_missing_section_fails():
     bad = GOOD.replace("## Notes\nRequires DNS access to hail.so.\n", "")
     with pytest.raises(ValidationError, match="missing sections"):
         validate(bad)
+
+
+def test_bare_inbox_fails():
+    with pytest.raises(ValidationError, match="email inbox"):
+        validate(GOOD.replace("email inbox", "inbox"))
+
+
+def test_inbox_in_a_path_passes():
+    validate(GOOD.replace("## Notes", "See `/console/inbox`.\n\n## Notes"))
