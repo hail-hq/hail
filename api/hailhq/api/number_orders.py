@@ -28,6 +28,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.verification import get_verification_provider
+from hailhq.core.providers.verification.rejections import customer_reason
 from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
@@ -173,7 +174,7 @@ async def finish_order(
 
 
 # Shown to the buyer when the carrier refuses the end-user registration of a
-# bought number. Hail's own wording, never the carrier's.
+# bought number and gives no reason.
 REGISTRATION_REJECTED = (
     "the carrier rejected the end-user registration; "
     "start a new verification with corrected details"
@@ -235,7 +236,7 @@ async def rejected_registration(
     # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
     # has no fixes for them, so the customer reads the carrier's words.
     reason = (
-        f"{REGISTRATION_REJECTED}. The carrier said: {raw.strip()}"
+        customer_reason(["The carrier rejected the end-user registration."], [raw])
         if raw and raw.strip()
         else REGISTRATION_REJECTED
     )

@@ -7,8 +7,8 @@ and the carrier's own text for anything else. The reason is stored in
 the API and the MCP server all show.
 
 The carrier's text can quote what the customer filed (a name, an address),
-so it is never logged. It is shown only to the customer who filed it, and
-kept in the audit row.
+so it is never logged. It is shown to the workspace (console, API) and in
+the rejection email to the workspace owners, and kept in the audit row.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ TWILIO_FIXES: dict[int, str] = {
     "number's country. Upload one with a local address.",
     18013: "This number type needs an emergency address in the number's "
     "country. Upload a document that shows one.",
-    18014: "The address is incomplete or not valid. Enter the full street " "address.",
+    18014: "The address is incomplete or not valid. Enter the full address.",
     18015: "The emergency address is incomplete or not valid. Enter the full "
     "street address.",
     18016: "The address you typed does not match the document. Type it exactly "
@@ -86,13 +86,18 @@ _TWILIO_SUMMARY = {18050}
 START_AGAIN = "Then start again."
 
 
+def _sentence(text: str) -> str:
+    text = text.strip()
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
 def customer_reason(fixes: Iterable[str], carrier_texts: Iterable[str]) -> str:
     """One reason for the customer. ``fixes`` are Hail's own sentences;
     ``carrier_texts`` are the carrier's own words for problems Hail has no
     fix for. Duplicates are dropped, order is kept. Nothing at all gives
     Hail's generic wording."""
     parts = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
-    said = list(dict.fromkeys(t.strip() for t in carrier_texts if t and t.strip()))
+    said = list(dict.fromkeys(_sentence(t) for t in carrier_texts if t and t.strip()))
     if said:
         parts.append("The carrier said: " + " ".join(said))
     if not parts:

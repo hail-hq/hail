@@ -738,6 +738,8 @@ async def test_rejection_names_each_failed_requirement() -> None:
     for r in reqs:
         r["status"] = "approved"
     reqs[0]["status"], reqs[1]["status"] = "declined", "expired"
+    reqs[1]["field_type"] = "document"
+    reqs[2]["status"], reqs[2]["field_type"] = "expired", "textual"
     names = {reqs[0]["requirement_id"]: "Proof of Address"}
 
     def answers(request):
@@ -751,10 +753,13 @@ async def test_rejection_names_each_failed_requirement() -> None:
     status = await provider(Telnyx(answers)).status({"group_id": GROUP})
     assert status.state == "rejected"
     assert 'The carrier did not accept "Proof of Address".' in status.reason
-    assert "A document has expired." in status.reason
+    assert "A document has expired. Upload one" in status.reason
+    # An expired text field asks for the text, not a file.
+    assert "A detail has expired. Enter it again." in status.reason
     assert reqs[0]["requirement_id"] not in status.reason
     assert status.raw_reason == (
-        f"Proof of Address: declined; {reqs[1]['requirement_id']}: expired"
+        f"Proof of Address: declined; {reqs[1]['requirement_id']}: expired; "
+        f"{reqs[2]['requirement_id']}: expired"
     )
 
 

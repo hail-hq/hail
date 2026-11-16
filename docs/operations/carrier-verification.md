@@ -312,5 +312,5 @@ The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/cor
 - **Telnyx.** The requirement group lists each `declined` or `expired` requirement. Hail names it from `GET /requirement_types/{id}`.
 - **DIDWW.** The address verification's `reject_reasons` and `reject_comment` follow "The carrier said:".
 
-The carrier's text can quote what the customer filed. It is shown only to that customer, kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
+The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
 

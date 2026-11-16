@@ -591,11 +591,12 @@ def _rejected_bundle(documents: dict, evaluation: list | None = None) -> None:
         status=200,
     )
     for sid, doc in documents.items():
+        status = doc.pop("_status", 200)
         responses.add(
             responses.GET,
             f"{NUMBERS}/SupportingDocuments/{sid}",
             json={"sid": sid, **doc},
-            status=doc.pop("_status", 200),
+            status=status,
         )
     responses.add(
         responses.GET,
@@ -664,6 +665,30 @@ async def test_rejection_reads_the_evaluation(provider) -> None:
     status = await provider.status(REFS)
     assert "The carrier said: A brand new rule." in status.reason
     assert status.raw_reason == "18999: A brand new rule."
+
+
+@responses.activate
+async def test_one_lost_document_keeps_the_others_reasons(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    refs = {**REFS, "document_sids": ["RD" + "2" * 32, REFS["document_sids"][0]]}
+    _rejected_bundle(
+        {
+            refs["document_sids"][0]: {"_status": 404},
+            refs["document_sids"][1]: {
+                "status": "rejected",
+                "failure_reason": None,
+                "errors": [{"code": 18003}],
+            },
+        },
+        evaluation=[
+            {"passed": True, "error_code": None, "failure_reason": "stale note"}
+        ],
+    )
+    status = await provider.status(refs)
+    assert status.reason.startswith(TWILIO_FIXES[18003])
+    # A passed requirement is not a problem; a missing text is not "None".
+    assert status.raw_reason == "18003"
 
 
 @responses.activate

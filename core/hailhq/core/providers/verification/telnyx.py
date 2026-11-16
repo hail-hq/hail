@@ -12,6 +12,7 @@ what ``place_number_order`` attaches to the order.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import re
@@ -499,19 +500,28 @@ class TelnyxVerificationProvider(VerificationProvider):
             return ProviderStatus(state="approved")
         if state in ("declined", "expired"):
             failed = [
-                (r["requirement_id"], r["status"])
+                r
                 for r in group.get("regulatory_requirements") or []
                 if r.get("status") in ("declined", "expired")
             ]
+            names = await asyncio.gather(
+                *(self._requirement_name(r["requirement_id"]) for r in failed)
+            )
             fixes, raw = [], []
-            for req_id, req_status in failed:
-                name = await self._requirement_name(req_id)
-                raw.append(f"{name or req_id}: {req_status}")
-                if req_status == "expired":
+            for req, name in zip(failed, names, strict=True):
+                req_status = req["status"]
+                raw.append(f"{name or req['requirement_id']}: {req_status}")
+                if req_status == "expired" and req.get("field_type") == "document":
                     fixes.append(
                         f'"{name}" has expired. Upload one that is still valid.'
                         if name
                         else "A document has expired. Upload one that is still valid."
+                    )
+                elif req_status == "expired":
+                    fixes.append(
+                        f'"{name}" has expired. Enter it again.'
+                        if name
+                        else "A detail has expired. Enter it again."
                     )
                 else:
                     fixes.append(

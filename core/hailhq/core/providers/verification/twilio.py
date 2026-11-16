@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 import requests
 from hailhq.core.config import settings
@@ -45,6 +46,8 @@ from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
+
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
 _UPLOAD_URL = (
     "https://numbers-upload.twilio.com/v2/RegulatoryCompliance/SupportingDocuments"
@@ -623,7 +626,7 @@ class TwilioVerificationProvider(VerificationProvider):
                 )
                 problems = []
             raw = "; ".join(
-                f"{code}: {text}" if code else str(text) for code, text in problems
+                ": ".join(str(p) for p in (code, text) if p) for code, text in problems
             )
             return ProviderStatus(
                 state="rejected",
@@ -639,7 +642,11 @@ class TwilioVerificationProvider(VerificationProvider):
         lists failed requirements."""
         found: list[tuple[int | None, str | None]] = []
         for sid in refs.get("document_sids") or []:
-            doc = self._rc.supporting_documents(sid).fetch()
+            try:
+                doc = self._rc.supporting_documents(sid).fetch()
+            except Exception:  # one lost document must not hide the others
+                logger.warning("could not read Twilio document %s", sid, exc_info=True)
+                continue
             codes = [
                 int(e["code"])
                 for e in doc.errors or []
@@ -649,8 +656,12 @@ class TwilioVerificationProvider(VerificationProvider):
                 found += [(code, doc.failure_reason) for code in codes]
             elif doc.failure_reason:
                 found.append((None, doc.failure_reason))
-        evaluations = self._rc.bundles(refs["bundle_sid"]).evaluations.list(limit=1)
-        for result in (evaluations[0].results or []) if evaluations else []:
+        # Twilio does not promise an order: take the newest by date.
+        evaluations = self._rc.bundles(refs["bundle_sid"]).evaluations.list(limit=20)
+        newest = max(evaluations, key=lambda e: e.date_created or _EPOCH, default=None)
+        for result in (newest.results or []) if newest else []:
+            if result.get("passed"):
+                continue
             for item in [result, *(result.get("invalid") or [])]:
                 code, text = item.get("error_code"), item.get("failure_reason")
                 if code or text:
