@@ -1,4 +1,4 @@
-"""0079 adds sms_trial_phones and the sms trial index."""
+"""0081 adds sms_trial_phones and the sms trial index."""
 
 import importlib.util
 import uuid
@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 pytestmark = pytest.mark.recreate_schema
 spec = importlib.util.spec_from_file_location(
     "sms_trial_phones_migration",
-    Path(__file__).parents[1] / "migrations/versions/0079_sms_trial_phones.py",
+    Path(__file__).parents[1] / "migrations/versions/0081_sms_trial_phones.py",
 )
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
