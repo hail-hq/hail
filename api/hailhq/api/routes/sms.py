@@ -219,6 +219,12 @@ async def deliver_sms(
     return None
 
 
+_NO_SMS_NUMBER = (
+    "no dedicated SMS-capable phone number on this organization; "
+    "SMS requires a dedicated number, not the shared voice pool"
+)
+
+
 async def _with_trial_hint(
     db: AsyncSession, organization_id: UUID, to: str, msg: str
 ) -> str:
@@ -329,11 +335,26 @@ async def create_sms(
         if body.from_ is None and is_us(body.to)
         else None
     )
-    # Trial texts: no ``from`` and no registered number, or ``from`` names
-    # the trial number. ``claim_trial_send`` decides the rest.
+    # No ``from``, a US recipient and no registered number: the workspace's
+    # own number and its gate answer, found once and before the trial claim
+    # takes the workspace lock (the gate can ask the carrier).
+    own_checked = body.from_ is None and is_us(body.to) and registered is None
+    own_number = None
+    own_block = None
+    if own_checked:
+        own_number = await resolve_org_number(
+            db, principal.organization_id, None, capability="sms"
+        )
+        if own_number is not None:
+            own_block = await us_registration_block(
+                db, principal.organization_id, own_number, body.to
+            )
+    # Trial texts: ``from`` names the trial number, or no ``from`` and the
+    # own number is missing or blocked, as at the agent send sites.
+    # ``claim_trial_send`` decides the rest.
     trial = None
     trial_from = body.from_ is not None and body.from_ == settings.hail_sms_trial_number
-    if trial_from or (body.from_ is None and is_us(body.to) and registered is None):
+    if trial_from or (own_checked and (own_number is None or own_block is not None)):
         try:
             trial = await claim_trial_send(
                 db,
@@ -356,6 +377,8 @@ async def create_sms(
             # has only read so far (authentication commits its own key
             # stamp, and the agent caps below write their log after it).
             # test_refused_trial_claim_rolls_back_only_reads checks this.
+            # The rollback expires ``own_number``; below, only its gate
+            # answer is read.
             await db.rollback()
     # The agent caps log the send, so they run after any rollback above;
     # a trial send logs it under the claim's lock.
@@ -391,7 +414,26 @@ async def create_sms(
             # resolved Sender ID; no dedicated number is provisioned.
             from_e164 = resolution.sender_id
 
-    if from_e164 is None:
+    if from_e164 is None and own_checked:
+        # The own number was resolved and gated above.
+        if own_number is None:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    await _with_trial_hint(
+                        db, principal.organization_id, body.to, _NO_SMS_NUMBER
+                    ),
+                    loc=["body", "from"],
+                ),
+            )
+        if own_block:
+            msg = await _with_trial_hint(
+                db, principal.organization_id, body.to, own_block
+            )
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+        from_number = own_number
+        from_e164 = own_number.e164
+    elif from_e164 is None:
         # Explicit ``from``, or a corridor that still requires a dedicated
         # SMS-capable number.
         from_number = registered or await resolve_org_number(
@@ -405,11 +447,7 @@ async def create_sms(
                 )
             else:
                 msg = await _with_trial_hint(
-                    db,
-                    principal.organization_id,
-                    body.to,
-                    "no dedicated SMS-capable phone number on this organization; "
-                    "SMS requires a dedicated number, not the shared voice pool",
+                    db, principal.organization_id, body.to, _NO_SMS_NUMBER
                 )
             raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         block = await us_registration_block(

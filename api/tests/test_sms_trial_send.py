@@ -6,6 +6,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core.config import settings
@@ -40,6 +42,7 @@ PHONE = "+14155550142"
 OTHER_PHONE = "+14155550143"
 OWN_NUMBER = "+14155550144"
 CA_NUMBER = "+14165550145"
+OWN_TOLLFREE = "+18005550111"
 WRAPPED_HI = "[Hail trial] hi\nHail does not read replies."
 
 
@@ -283,6 +286,80 @@ async def test_registered_number_preferred(
     assert await trial_texts_used(async_session, org_id) == 0
 
 
+async def test_own_ca_number_sends_without_trial(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """A Canadian own number passes the US registration gate, so a from-less
+    text to the verified trial phone goes out from it, not as a trial."""
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org_id,
+            e164=CA_NUMBER,
+            country_code="CA",
+            number_type="local",
+            capabilities=["sms"],
+            provider="twilio",
+            provider_resource_id="PN_ca",
+            provisioning_state="active",
+        )
+    )
+    await async_session.commit()
+
+    resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_e164"] == CA_NUMBER
+    sent = sms_mock.send_sms.call_args.kwargs
+    assert sent["from_e164"] == CA_NUMBER
+    assert sent["body"] == "hi"
+    assert _trial_sends(sms_mock) == []
+    assert await trial_texts_used(async_session, org_id) == 0
+
+
+async def test_live_approved_tollfree_sends_without_trial(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """An own toll-free number the carrier reports approved, with no
+    registration row, passes the gate: the text goes out from it, and the
+    carrier is asked once."""
+    from hailhq.core import carrier_routing
+
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org_id,
+            e164=OWN_TOLLFREE,
+            country_code="US",
+            number_type="toll_free",
+            capabilities=["sms"],
+            provider="twilio",
+            provider_resource_id="PN_own_tf",
+            provisioning_state="active",
+        )
+    )
+    await async_session.commit()
+    lookup = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        carrier_routing,
+        "sms_route",
+        lambda provider: SimpleNamespace(tollfree_approved=lookup),
+    )
+
+    resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["from_e164"] == OWN_TOLLFREE
+    assert sms_mock.send_sms.call_args.kwargs["body"] == "hi"
+    assert _trial_sends(sms_mock) == []
+    assert await trial_texts_used(async_session, org_id) == 0
+    lookup.assert_awaited_once()
+
+
 async def test_hail_own_workspace_sends_normally(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
@@ -449,8 +526,8 @@ async def test_trial_text_refused_by_callback_frees_the_cap(
 
 async def _agent_org_with_ca_number(session, org_id, monkeypatch) -> None:
     """An agent-origin workspace whose only text number is Canadian, with an
-    SMS cap of 2 an hour. Its sends to the US skip the US registration gate,
-    so they go out after a refused trial claim."""
+    SMS cap of 2 an hour. Its sends to the US pass the US registration gate,
+    so they go out from it with no trial claim."""
     session.add(Organization(id=org_id, origin="agent"))
     session.add(
         PhoneNumber(
@@ -513,12 +590,12 @@ def _rolled_back_statements(session) -> Iterator[list[list[str]]]:
 async def test_refused_trial_claim_keeps_agent_caps(
     trial, client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
-    """A refused trial claim rolls back. The send then goes out from the
-    workspace's own number and must still count toward the agent caps."""
+    """The send goes out from the workspace's Canadian number, which passes
+    the US gate, so no trial claim runs; with the trial on and used up, the
+    sends must still count toward the agent caps."""
     org_id, _, plaintext = org_and_key
     await _agent_org_with_ca_number(async_session, org_id, monkeypatch)
     if trial == "all_used":
-        # Refused under the workspace lock: the claim's last check.
         await seed_sms_trial(async_session, monkeypatch)
         await verify_trial_phone(async_session, org_id)
         await seed_trial_texts(async_session, org_id, 25)
@@ -541,9 +618,13 @@ async def test_refused_trial_claim_rolls_back_only_reads(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     """Everything the route ran before it rolls back a refused claim is a
-    read, so the rollback drops no row."""
+    read, so the rollback drops no row. The own number is blocked, so the
+    claim runs, is refused (all texts used) and the gate answers 422 after
+    the agent caps."""
     org_id, _, plaintext = org_and_key
-    await _agent_org_with_ca_number(async_session, org_id, monkeypatch)
+    async_session.add(Organization(id=org_id, origin="agent"))
+    await async_session.commit()
+    await _own_number(async_session, org_id)
     await seed_sms_trial(async_session, monkeypatch)
     await verify_trial_phone(async_session, org_id)
     await seed_trial_texts(async_session, org_id, 25)
@@ -551,10 +632,14 @@ async def test_refused_trial_claim_rolls_back_only_reads(
     with _rolled_back_statements(async_session) as rolled_back:
         resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
 
-    assert resp.status_code == 201, resp.text
-    statements = [s for txn in rolled_back for s in txn]
-    # The claim's lock is the proof the refused claim's transaction is here.
-    assert any("pg_advisory_xact_lock" in s for s in statements)
+    assert resp.status_code == 422, resp.text
+    assert _msg(resp) == BLOCK_MESSAGE
+    # The claim's lock marks the refused claim's transaction.
+    claim_txns = [
+        txn for txn in rolled_back if any("pg_advisory_xact_lock" in s for s in txn)
+    ]
+    assert len(claim_txns) == 1
+    statements = claim_txns[0]
     writes = [
         s
         for s in statements
