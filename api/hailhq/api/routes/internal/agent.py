@@ -2180,6 +2180,12 @@ async def agent_handover_sms(
         not cannot_text
         and await us_registration_block(db, org, from_number, to) is not None
     )
+    # A blocked notice to any contact but the verified trial phone answers
+    # now, before the notice text is built or a trial claimed.
+    if blocked and not (trial_enabled() and await is_verified_trial_phone(db, org, to)):
+        return AgentHandoverSmsResponse(
+            sms=await _notice_blocked(call, body, "sms", "us_registration")
+        )
 
     _, words = await _notice_text(db, call, body)
     sms_body = words[:SMS_MAX_BODY_CHARS]

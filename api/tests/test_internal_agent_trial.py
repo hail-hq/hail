@@ -605,3 +605,38 @@ async def test_reply_sms_never_uses_trial(client, async_session, sms_mock, monke
     assert data["ok"] is False and data["state"] == "skipped"
     assert data["reason"] == BLOCK_MESSAGE
     sms_mock.send_sms.assert_not_awaited()
+
+
+@pytest.mark.parametrize("case", ["not_verified_phone", "feature_off"])
+async def test_handover_blocked_notice_skips_trial_work_for_other_contacts(
+    client, async_session, sms_mock, monkeypatch, case
+):
+    """A US registration block on a contact that is not the verified trial
+    phone answers before the notice text is built or a trial is claimed."""
+    from hailhq.api.routes.internal import agent as agent_routes
+
+    await seed_sms_trial(async_session, monkeypatch)
+    org = uuid.uuid4()
+    await verify_trial_phone(async_session, org, PHONE)
+    to = OTHER_PHONE if case == "not_verified_phone" else PHONE
+    if case == "feature_off":
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    calls: list[str] = []
+    real_claim = agent_routes.claim_trial_send
+    real_text = agent_routes._notice_text
+
+    async def claim_spy(*args, **kwargs):
+        calls.append("claim")
+        return await real_claim(*args, **kwargs)
+
+    async def text_spy(*args, **kwargs):
+        calls.append("text")
+        return await real_text(*args, **kwargs)
+
+    monkeypatch.setattr(agent_routes, "claim_trial_send", claim_spy)
+    monkeypatch.setattr(agent_routes, "_notice_text", text_spy)
+    send = await _handover(async_session, org, to, registered=False)
+
+    assert await send(client) == {"sms": "blocked:us_registration"}
+    assert calls == []
+    sms_mock.send_sms.assert_not_awaited()
