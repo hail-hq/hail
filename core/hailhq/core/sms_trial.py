@@ -1,5 +1,7 @@
-"""US trial texting: a workspace without a US registration can text its own
-verified phone from one Hail-owned toll-free number."""
+"""US trial texting: a workspace can send up to 25 texts to its own verified
+phone from one Hail-owned toll-free number. With no ``from`` the trial is
+used only when the workspace's own number cannot text that US phone; a
+``from`` equal to the trial number uses a trial text directly."""
 
 from __future__ import annotations
 

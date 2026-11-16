@@ -3738,7 +3738,9 @@ paths:
             The phone is not a US number, is a Hail number, replied STOP
             to Hail, or could not be texted.
         "502":
-          description: Hail could not send the code. Nothing was changed.
+          description:
+            Hail could not reach the carrier. The code may still arrive
+            and counts toward the 5 codes.
   /v1/sms/trial/phone/confirm:
     post:
       tags:
@@ -3819,9 +3821,10 @@ paths:
         \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
         \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
         recipient_consent=true on the request body; Hail does not verify\nlawful basis\
-        \ to contact the recipient, the caller warrants it.\n\nA workspace without\
-        \ approved US registration can omit from to send up\nto 25 trial texts to\
-        \ its verified trial phone."
+        \ to contact the recipient, the caller warrants it.\n\nTrial texts (up to\
+        \ 25, only to the workspace's verified trial phone):\nwith no from, Hail uses\
+        \ one when the workspace's own number cannot text\nthat US phone; set from\
+        \ to the trial number to use one directly."
       operationId: create_sms_v1_sms_post
       parameters:
         - name: authorization
@@ -10202,9 +10205,10 @@ components:
             none is set; Australia (+61) may always use 'HAIL', depending on the
             carrier. Every other destination, including the US and Canada, uses the
             organization's oldest active SMS-capable number; if none exists the request
-            fails with 422. SMS never uses the shared pool. A US workspace without
-            an approved registration can omit from to send up to 25 trial texts to
-            its verified trial phone."
+            fails with 422. SMS never uses the shared pool. Trial texts (up to 25,
+            only to the workspace's verified trial phone): with no from, Hail uses
+            one when the workspace's own number cannot text that US phone; set from
+            to the trial number to use one directly."
         body:
           type: string
           maxLength: 1600

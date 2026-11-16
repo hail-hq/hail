@@ -474,8 +474,10 @@ class SmsCreate(ConsentAttestationMixin):
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
             "exists the request fails with 422. SMS never uses the shared pool. "
-            "A US workspace without an approved registration can omit from to "
-            "send up to 25 trial texts to its verified trial phone."
+            "Trial texts (up to 25, only to the workspace's verified trial "
+            "phone): with no from, Hail uses one when the workspace's own "
+            "number cannot text that US phone; set from to the trial number "
+            "to use one directly."
         ),
     )
     body: str = Field(
