@@ -582,6 +582,7 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
             documents=(
                 DocumentSlot(name="identity", label="Identity", options=passport),
                 DocumentSlot(name="birth", label="Birth date", options=passport),
+                DocumentSlot(name="extra", label="Extra proof", options=passport),
             ),
             subject_types=("person",),
         )
@@ -603,6 +604,21 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
     assert len(calls) == 1
     assert "It is also given as: Birth date." in calls[0]["prompt"]
     assert await document_reads_today(async_session, org_id) == 1
+    # A chain (identity covers birth, birth covers extra), listed in any
+    # order: one read for all three.
+    chain = await _post(
+        client,
+        key,
+        documents=json.dumps(
+            {
+                "birth": {"covers": ["extra"]},
+                "identity": {"option": "passport", "covers": ["birth"]},
+            }
+        ),
+        files={"file.identity": ("p.jpg", b"\xff\xd8jpeg", "image/jpeg")},
+    )
+    assert chain.status_code == 200, chain.text
+    assert all(chain.json()["documents"][s]["read"] for s in ("birth", "extra"))
     # The holder sent no file: the covered slot still comes back, read false.
     orphan = await _post(
         client,

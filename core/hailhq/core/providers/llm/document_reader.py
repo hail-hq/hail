@@ -106,7 +106,9 @@ async def _decode_image(content_type: str, data: bytes, deadline: float) -> byte
     left of the read's time when less. With under a second left, it does
     not start."""
     loop = asyncio.get_running_loop()
-    slots = _decode_slots.setdefault(loop, asyncio.Semaphore(_DECODES))
+    slots = _decode_slots.get(loop)
+    if slots is None:
+        slots = _decode_slots[loop] = asyncio.Semaphore(_DECODES)
     async with slots:
         left = deadline - loop.time()
         if left < 1.0:

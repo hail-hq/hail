@@ -2509,12 +2509,18 @@ async def check_verification_documents(
             else f"part:{hashlib.sha256(collected.parts[slot].data).hexdigest()}"
         )
         groups.setdefault(key, []).append(slot)
-    for other, holder in covered_by.items():
-        if other in own_file:
-            continue  # its own file wins
-        for group in groups.values():
-            if holder in group and other not in group:
-                group.append(other)
+    # Until nothing changes: a slot covered by a covered slot (A covers B,
+    # B covers C) joins its file's group whatever the order they came in.
+    changed = True
+    while changed:
+        changed = False
+        for other, holder in covered_by.items():
+            if other in own_file:
+                continue  # its own file wins
+            for group in groups.values():
+                if holder in group and other not in group:
+                    group.append(other)
+                    changed = True
     with_file = [slot for group in groups.values() for slot in group]
     # A covered slot whose holder sent no file: read false, as it is not read.
     orphans = [slot for slot in covered_by if slot not in with_file]
