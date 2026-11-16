@@ -258,3 +258,13 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
     /Read Postman collection failed \(HTTP 404\): .*instanceNotFoundError/,
   );
 });
+
+test("export has no text Postman's firewall blocks", () => {
+  // Postman's Cloudflare firewall answers 403 "Just a moment..." to an update
+  // whose text has `curl -s` or a `--data-binary @file` upload. Write upload
+  // examples as `curl --fail --upload-file <file> '<url>'`.
+  const text = JSON.stringify(collection);
+  for (const blocked of [/curl -s/, /--data-binary @/]) {
+    assert.doesNotMatch(text, blocked);
+  }
+});
