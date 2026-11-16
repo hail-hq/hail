@@ -105,7 +105,6 @@ from hailhq.core.file_uploads import (
     VERIFICATION_FILE_TYPES,
     VERIFICATION_MAX_FILE_BYTES,
     matches_declared_type,
-    valid_content_type,
 )
 from hailhq.core.file_uploads import Purpose as UploadPurpose
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -1499,20 +1498,20 @@ async def create_file_upload(
         return _format_api_error(exc)
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
-    # Both go into a shell line in single quotes: refuse anything that could
-    # end the quote (the API never sends one).
-    if not _SHELL_SAFE_URL.fullmatch(link["upload_url"]) or not valid_content_type(
-        link["content_type"]
-    ):
+    # The link goes into a shell line in single quotes: refuse anything that
+    # could end the quote (the API never sends one).
+    if not _SHELL_SAFE_URL.fullmatch(link["upload_url"]):
         return {"error": "the API returned an upload link this tool cannot use"}
     return {
         **link,
         "curl": (
-            "curl -sS -X PUT --data-binary @<path to the file> "
-            f"-H 'Content-Type: {link['content_type']}' '{link['upload_url']}'"
+            "curl --silent --show-error --globoff --upload-file 'FILE_PATH' "
+            f"'{link['upload_url']}'"
         ),
         "next": (
-            "Run the curl line from a shell, with the file's path after the @. "
+            "Replace FILE_PATH with the file's absolute path (no ~ or $HOME), "
+            "keep the single quotes, write any ' in the path as '\\'', and run "
+            "the curl line from a shell. "
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."
@@ -2421,7 +2420,8 @@ def register_tools(
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
-        and a ready ``curl`` line with a placeholder for the file's path after ``@``.
+        and a ready ``curl`` line with a ``'FILE_PATH'`` placeholder for the
+        file's absolute path.
         The link needs no key and works once. The upload response holds
         ``size_bytes`` and ``sha256`` to compare with the local file."""
         try:

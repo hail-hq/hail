@@ -1960,6 +1960,10 @@ async def _handover_cap(
         quote_call_price(org, [main], recording),
         quote_call_price(org, [main, second], recording),
     )
+    # The agent's own handover limit: the voicebot stops the handover there.
+    limit = handover_limit(
+        await db.get(Agent, call.agent_id) if call.agent_id else None
+    )
     if alone is None or both is None:
         # The agent's own handover limit, nothing more held: a slow price
         # check must not cut off callers who have the credit. The second
@@ -1969,14 +1973,19 @@ async def _handover_cap(
         # Under the lock, like the priced path, so a handover racing this one
         # reads this dial.
         await org_lock(db, call.organization_id)
-        await forget_price(db, call.id)
+        # The call can now run until the handover limit ends: keep its hold
+        # counting until then.
+        await forget_price(
+            db,
+            call.id,
+            hold_until(
+                datetime.now(timezone.utc),
+                (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + limit,
+            ),
+        )
         await db.commit()
         return None
     per_minute, per_call = both
-    # The agent's own handover limit: the voicebot stops the handover there.
-    limit = handover_limit(
-        await db.get(Agent, call.agent_id) if call.agent_id else None
-    )
     await org_lock(db, call.organization_id)
     # Read under the lock: each earlier approved dial is counted, even one
     # whose result the voicebot has not posted yet.

@@ -23,6 +23,7 @@ _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
 _ORG = "00000000-0000-0000-0000-0000000000aa"
 _USER = "00000000-0000-0000-0000-0000000000bb"
+_MODEL = "claude-test"
 
 
 def _body(resp: httpx.Response) -> dict:
@@ -53,7 +54,13 @@ def _modern(method: str, request_id: int, **params) -> tuple[dict, dict]:
 
 
 async def _session(
-    monkeypatch, token: str, *, oauth: bool, protocol: str, fail: bool
+    monkeypatch,
+    token: str,
+    *,
+    oauth: bool,
+    protocol: str,
+    fail: bool,
+    call: dict | None = None,
 ) -> tuple[list, list]:
     monkeypatch.setattr("hailhq.core.config.settings.mcp_resource_url", "https://m.t")
     monkeypatch.setattr(
@@ -93,7 +100,9 @@ async def _session(
     actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
     cache = {key: (time.monotonic() + 300, actor)}
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
-    call = {"name": "list_number_regions", "arguments": {}}
+    # Analytics adds an optional llm_model input; the agent fills it.
+    args = {"llm_model": _MODEL} if token else {}
+    call = call or {"name": "list_number_regions", "arguments": args}
 
     # Imported here: building the app at import needs the auth settings above.
     import hailhq.mcp.server as srv
@@ -157,6 +166,20 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     seen, events = await _session(monkeypatch, "phc_test", **kw)
 
     assert plain_events == []
+    # The only difference agents see: an optional llm_model input on each tool.
+    listed = [
+        r for r in seen if isinstance(r[2], dict) and "tools" in r[2].get("result", {})
+    ]
+    assert listed
+    for _, _, body in listed:
+        for tool in body["result"]["tools"]:
+            props = tool["inputSchema"].get("properties", {})
+            model = props.pop("llm_model")
+            assert model == {
+                "type": "string",
+                "description": analytics._MODEL_DESCRIPTION,
+            }
+            assert "llm_model" not in tool["inputSchema"].get("required", [])
     assert seen == plain
     is_error = seen[-1][2]["result"].get("isError", False)
 
@@ -166,6 +189,8 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     assert props["$mcp_tool_name"] == "list_number_regions"
     assert props["$mcp_is_error"] is is_error
     assert props["$mcp_server_build"] == "abc1234"
+    assert props["$mcp_llm_model"] == _MODEL
+    assert props["$mcp_llm_model_source"] == "self_reported"
     assert set(props) <= analytics._KEPT_PROPERTIES
     if oauth:
         assert calls[0]["distinct_id"] == _USER
@@ -206,3 +231,47 @@ def test_keep_metadata_org_without_user():
         "$process_person_profile": False,
         "$groups": {"organization": _ORG},
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", ["", "phc_test"])
+async def test_llm_model_argument_never_reaches_the_tool(monkeypatch, token):
+    email_id = "00000000-0000-0000-0000-0000000000cc"
+    received: list = []
+
+    async def get_email(_self, email_id):
+        received.append(email_id)
+        return {"id": email_id}
+
+    monkeypatch.setattr("hailhq.mcp.hail_client.HailClient.get_email", get_email)
+    call = {
+        "name": "get_email",
+        "arguments": {"email_id": email_id, "llm_model": _MODEL},
+    }
+    seen, _ = await _session(
+        monkeypatch, token, oauth=False, protocol=_LEGACY, fail=False, call=call
+    )
+    assert received == [email_id]
+    assert not seen[-1][2]["result"].get("isError"), seen[-1]
+
+
+@pytest.mark.parametrize(
+    ("model", "kept"),
+    [
+        ("claude-opus-4-8", True),
+        ("openai/gpt-5.2", True),
+        ("+14155550123", False),
+        ("me@example.com", False),
+        ("call my mom", False),
+    ],
+)
+def test_keep_metadata_keeps_only_model_ids(model, kept):
+    event = {
+        "properties": {
+            "$mcp_llm_model": model,
+            "$mcp_llm_model_source": "self_reported",
+        }
+    }
+    props = analytics._keep_metadata(event)["properties"]
+    assert ("$mcp_llm_model" in props) is kept
+    assert ("$mcp_llm_model_source" in props) is kept
