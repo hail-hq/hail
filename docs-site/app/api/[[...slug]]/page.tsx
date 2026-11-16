@@ -1,4 +1,4 @@
-import { DocsBody, DocsPage } from "fumadocs-ui/page";
+import { DocsBody, DocsPage, DocsTitle } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -83,6 +83,7 @@ export default async function Page(props: {
   const MDX = page.data.body;
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <DocsTitle>{page.data.title}</DocsTitle>
       <DocsBody>
         <MDX
           components={getMDXComponents({ OpenAPIPage: PreloadedOpenAPIPage })}

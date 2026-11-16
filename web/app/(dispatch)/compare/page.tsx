@@ -19,12 +19,7 @@ export const metadata = pageMetadata({
 export default function ComparePage() {
   return (
     <>
-      <header
-        style={{
-          padding: "40px 0 28px",
-          borderBottom: "2px solid var(--color-ink)",
-        }}
-      >
+      <header className="costs-hero costs-hero--compact">
         <div className="wrap">
           <h1 className="dispatch-h1">Side by side.</h1>
         </div>
@@ -34,21 +29,10 @@ export default function ComparePage() {
         <CompareModels llm={llm.models} stt={stt.models} tts={tts.models} />
       </Suspense>
 
-      <section
-        style={{ padding: "32px 0", borderTop: "2px solid var(--color-ink)" }}
-      >
+      <section className="costs-popular">
         <div className="wrap">
-          <h2
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--color-mute)",
-              margin: "0 0 16px",
-            }}
-          >
-            Popular comparisons
-          </h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <h2>Popular comparisons</h2>
+          <div className="costs-model-options">
             {featuredPairs.map((p) => (
               <a
                 key={p.slug}

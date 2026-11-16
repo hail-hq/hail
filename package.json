@@ -18,6 +18,7 @@
     "docs:urls": "node docs-site/scripts/urls.mjs",
     "docs:check-urls": "node docs-site/scripts/urls.mjs --check",
     "test:site-audit": "node --test scripts/site-audit.test.mjs",
+    "test:public-design": "node --test scripts/public-design.test.mjs",
     "postman:test": "node --test scripts/postman/*.test.mjs",
     "postman:generate": "node scripts/postman/generate.mjs",
     "postman:publish": "node scripts/postman/publish.mjs"

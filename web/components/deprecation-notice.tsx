@@ -11,17 +11,7 @@ export function DeprecationNotice({
   if (deprecated.length === 0) return null;
 
   return (
-    <div
-      style={{
-        border: "2px solid var(--color-ink)",
-        background: "var(--color-paper)",
-        padding: "14px 18px",
-        marginBottom: 24,
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-      }}
-      role="note"
-    >
+    <div className="costs-notice" role="note">
       {deprecated.map((m) => (
         <div key={m.model_id}>
           <b>{m.display_name}</b> was deprecated on {m.deprecated_at}.
@@ -34,7 +24,7 @@ export function DeprecationNotice({
         </div>
       ))}
       {successorSlug ? (
-        <div style={{ marginTop: 8 }}>
+        <div className="costs-notice-link">
           <a href={`/costs/compare/${successorSlug}`}>
             See the current comparison →
           </a>
