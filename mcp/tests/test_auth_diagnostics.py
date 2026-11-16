@@ -177,3 +177,24 @@ async def test_single_exchange_discovery_is_not_labelled_missing_session(method)
     assert "mcp.auth.rejection_reason" not in attrs
     assert (b"authorization", b"Bearer anonymous-discovery") in seen["headers"]
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header", "kind"),
+    [
+        ("Bearer aaa.bbb.ccc", "bearer_jwt"),
+        ("Bearer hail_live_abc123", "bearer_other"),
+        ("Basic dXNlcjpwYXNz", "other_scheme"),
+    ],
+)
+async def test_credential_kind_is_a_bounded_label_not_the_value(header, kind):
+    attrs, _, _ = await _request(content=b"{}", headers={"Authorization": header})
+    assert attrs["mcp.auth.credential_kind"] == kind
+    assert header.split(" ")[-1] not in repr(attrs)
+
+
+@pytest.mark.asyncio
+async def test_anonymous_request_has_no_credential_kind():
+    attrs, _, _ = await _request(content=b'{"method":"tools/call"}')
+    assert attrs["mcp.auth.credential_kind"] == "none"

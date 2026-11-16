@@ -142,6 +142,17 @@ def _header(scope: Scope, name: str) -> bytes | None:
     return next((v for k, v in scope.get("headers", []) if k == key), None)
 
 
+def _credential_kind(authorization: bytes | None) -> str:
+    """Bounded label for the Authorization header's shape. Never the value."""
+    if authorization is None:
+        return "none"
+    scheme, _, token = authorization.partition(b" ")
+    if scheme.lower() != b"bearer":
+        return "other_scheme"
+    # A JWT has three dot-separated parts; Hail API keys do not.
+    return "bearer_jwt" if token.strip().count(b".") == 2 else "bearer_other"
+
+
 def _opens_no_session(scope: Scope) -> bool:
     """True when the SDK serves this POST as one exchange with no session.
 
@@ -203,6 +214,7 @@ class DiscoveryAuthMiddleware:
         send: Send,
         *,
         has_auth: bool,
+        credential_kind: str = "none",
         method: str = "uninspected",
         rejection_reason: str = "missing_authorization",
         discovery: bool = False,
@@ -212,6 +224,7 @@ class DiscoveryAuthMiddleware:
             span.set_attributes(
                 {
                     "mcp.auth.header_present": has_auth,
+                    "mcp.auth.credential_kind": credential_kind,
                     "mcp.auth.discovery": discovery,
                     "mcp.request.method": method,
                 }
@@ -233,15 +246,18 @@ class DiscoveryAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        has_auth = any(
-            k.lower() == b"authorization" for k, _ in scope.get("headers", [])
+        authorization = next(
+            (v for k, v in scope.get("headers", []) if k.lower() == b"authorization"),
+            None,
         )
+        has_auth = authorization is not None
         if scope["method"] != "POST" or has_auth:
             await self._forward(
                 scope,
                 receive,
                 send,
                 has_auth=has_auth,
+                credential_kind=_credential_kind(authorization),
                 rejection_reason=(
                     "credentials_rejected" if has_auth else "missing_authorization"
                 ),

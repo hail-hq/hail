@@ -5,12 +5,13 @@ A 401 count alone does not establish that a customer could not connect.
 
 The discovery middleware adds bounded attributes to the existing HTTP span:
 
-| Attribute                   | Meaning                                                                     |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `mcp.request.method`        | Known protocol method, `other`, `unknown`, or `uninspected`                 |
-| `mcp.auth.header_present`   | Whether the original request carried an Authorization header                |
-| `mcp.auth.discovery`        | Whether the existing anonymous-discovery rule supplied its synthetic bearer |
-| `mcp.auth.rejection_reason` | Local decision category, set only when the response is 401                  |
+| Attribute                   | Meaning                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| `mcp.request.method`        | Known protocol method, `other`, `unknown`, or `uninspected`                             |
+| `mcp.auth.header_present`   | Whether the original request carried an Authorization header                            |
+| `mcp.auth.credential_kind`  | Shape of the Authorization header: `none`, `bearer_jwt`, `bearer_other`, `other_scheme` |
+| `mcp.auth.discovery`        | Whether the existing anonymous-discovery rule supplied its synthetic bearer             |
+| `mcp.auth.rejection_reason` | Local decision category, set only when the response is 401                              |
 
 Rejection categories:
 
@@ -19,7 +20,7 @@ Rejection categories:
 - `missing_session`: an older-protocol anonymous discovery request had no session header.
 - `discovery_rate_limited`: anonymous initialize exceeded the existing per-IP cap.
 - `body_too_large`, `body_timeout`, `invalid_request`: the bounded discovery peek could not accept the request.
-- `credentials_rejected`: credentials were forwarded, but downstream returned 401. This does not identify a JWT failure reason.
+- `credentials_rejected`: credentials were forwarded, but downstream returned 401. This does not identify a JWT failure reason. Group by `mcp.auth.credential_kind` to tell a bad JWT from a bad API key or a wrong scheme.
 - `discovery_rejected`: a request allowed by the anonymous-discovery rule still returned 401 downstream.
 
 Authenticated bodies are not inspected. Only known protocol method names are
@@ -29,14 +30,18 @@ Authentication, discovery rules, body limits and responses are unchanged.
 
 ```sql
 SELECT attributes->>'mcp.auth.rejection_reason' AS reason,
+       attributes->>'mcp.auth.credential_kind' AS credential,
        attributes->>'mcp.request.method' AS method,
-       attributes->>'http.user_agent' AS client, count(*) AS requests
+       COALESCE(attributes->>'user_agent.original',
+                attributes->>'http.user_agent') AS client,
+       count(*) AS requests
 FROM records
 WHERE service_name = 'hail-mcp'
-  AND attributes->>'http.status_code' = '401'
+  AND COALESCE(attributes->>'http.response.status_code',
+               attributes->>'http.status_code') = '401'
   AND start_timestamp >= 'START_UTC'
   AND start_timestamp < 'END_UTC'
-GROUP BY 1, 2, 3 ORDER BY requests DESC;
+GROUP BY 1, 2, 3, 4 ORDER BY requests DESC;
 ```
 
 When using the Logfire CLI, pass both `--start` and `--end`; its hosted default is
