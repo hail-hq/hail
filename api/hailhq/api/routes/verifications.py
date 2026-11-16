@@ -3,6 +3,11 @@ carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
 Number-verification files and details pass through in memory to the carrier.
+``POST /verifications/document-check`` (below; reading in
+``core/.../verification/document_check.py``, files loaded by
+``api/verification_files.py``) also sends the files to an AI model to read
+them before submit. ``POST /verifications/document-cautions`` checks the
+typed form again against those reads, with no file and no model.
 SMS applications keep submitted text fields and address privately for repair;
 only the organization-scoped application endpoint returns them. Files sent as
 ``file.<slot>`` parts are never stored. A document uploaded with an upload link
@@ -50,6 +55,12 @@ from hailhq.api.sms_registration import (
     reconcile_approved_registrations,
 )
 from hailhq.api.superadmin import require_superadmin
+from hailhq.api.verification_files import (
+    MAX_PARALLEL_FETCHES,
+    MAX_REQUEST_BYTES,
+    collect_files,
+    fetch_files,
+)
 from hailhq.core import (
     sms_registration_fees,
     sms_setup,
@@ -59,11 +70,17 @@ from hailhq.core import (
 from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, org_lock, try_org_lock
+from hailhq.core.db import (
+    get_session,
+    independent_session_scope,
+    org_lock,
+    try_org_lock,
+)
+from hailhq.core.document_reads import (
+    release_document_reads,
+    reserve_document_reads,
+)
 from hailhq.core.file_uploads import (
-    VERIFICATION_FILE_TYPES,
-    VERIFICATION_MAX_FILE_BYTES,
-    VERIFICATION_UPLOAD_TTL,
     delete_upload_objects,
 )
 from hailhq.core.internal_webhook import (
@@ -78,6 +95,7 @@ from hailhq.core.models import (
     NumberOffer,
     PhoneNumber,
 )
+from hailhq.core.providers.llm.document_reader import document_reader_configured
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
@@ -95,6 +113,10 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
+from hailhq.core.providers.verification.document_check import (
+    check_documents,
+    document_cautions,
+)
 from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
@@ -104,6 +126,9 @@ from hailhq.core.schemas import (
     SmsApplicationResponse,
     VerificationCheckFile,
     VerificationCheckResponse,
+    VerificationDocumentCautionsRequest,
+    VerificationDocumentCautionsResponse,
+    VerificationDocumentCheckResponse,
     VerificationResponse,
 )
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
@@ -126,11 +151,7 @@ from sqlalchemy.orm.attributes import flag_modified, get_history
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_BYTES = VERIFICATION_MAX_FILE_BYTES
-MAX_REQUEST_BYTES = 30 * 1024 * 1024
-ALLOWED_FILE_TYPES = set(VERIFICATION_FILE_TYPES)
 NUMBER_TYPES = {"local", "mobile", "toll_free", "national"}
-_READ_CHUNK = 1024 * 1024
 _LIVE_STATES = ("draft", "awaiting_review", "submitting", "submitted", "approved")
 _POLLED_STATES = ("submitting", "submitted")
 _POLL_INTERVAL_S = 60
@@ -143,6 +164,11 @@ _MAX_CONFIRM_ATTEMPTS = 5
 _SUBMITTING_STUCK_AFTER = timedelta(minutes=5)
 # When this process last asked the carrier about a submitted verification.
 _last_polled: dict[UUID, float] = {}
+# The form of each carrier, country, number type and subject, for
+# POST /verifications/document-cautions only: the console calls it after
+# each edit, and the carrier's form API is not cached. Successes only.
+_CAUTION_FORM_TTL_S = 600
+_caution_forms: dict[tuple[str, str, str, str], tuple[float, Requirements]] = {}
 
 PURPOSES = {"number", "sms"}
 
@@ -1712,6 +1738,30 @@ def _duplicate_detail(subject_type: str, subject_name: str | None) -> str:
     )
 
 
+def _form_values(form) -> dict:
+    """The named parts of a verification form, read the same way for
+    submit, check and the document check."""
+    return {
+        "provider": _text_part(form, "provider") or None,
+        "quote_id": _text_part(form, "quote_id") or None,
+        "number_id": _text_part(form, "number_id") or None,
+        "purpose": _text_part(form, "purpose", "number"),
+        "country_code": _text_part(form, "country_code").upper(),
+        "number_type": _text_part(form, "number_type"),
+        "subject_type": _text_part(form, "subject_type"),
+        "fields": _json_part(form, "fields", {}),
+        "address": _json_part(form, "address", None),
+        "documents": _json_part(form, "documents", {}),
+    }
+
+
+def _form_422(exc: ValidationError) -> HTTPException:
+    """422 for a form that does not fit its model, naming each field."""
+    return unprocessable(
+        "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()),
+    )
+
+
 def _text_part(form, name: str, default: str = "") -> str:
     raw = form.get(name)
     if raw is None or raw == "":
@@ -1742,27 +1792,6 @@ async def _parse_form(request: Request):
         max_bytes=MAX_REQUEST_BYTES,
         max_files=20,
         max_fields=MAX_FORM_FIELDS,
-    )
-
-
-async def _read_file(upload) -> UploadedFile:
-    if upload.content_type not in ALLOWED_FILE_TYPES:
-        raise unprocessable(
-            "files must be JPG, PNG or PDF",
-            loc=["body", "files", upload.filename or ""],
-        )
-    buf = bytearray()
-    while True:
-        chunk = await upload.read(_READ_CHUNK)
-        if not chunk:
-            break
-        buf += chunk
-        if len(buf) > MAX_FILE_BYTES:
-            raise unprocessable(
-                "each file must be 10 MB or smaller", loc=["body", "files"]
-            )
-    return UploadedFile(
-        filename="upload", content_type=upload.content_type, data=bytes(buf)
     )
 
 
@@ -1806,24 +1835,9 @@ async def _prepare_submission(
         )
 
     try:
-        sub = _Submission(
-            provider=_text_part(form, "provider") or None,
-            quote_id=_text_part(form, "quote_id") or None,
-            number_id=_text_part(form, "number_id") or None,
-            purpose=_text_part(form, "purpose", "number"),
-            country_code=_text_part(form, "country_code").upper(),
-            number_type=_text_part(form, "number_type"),
-            subject_type=_text_part(form, "subject_type"),  # type: ignore[arg-type]
-            fields=_json_part(form, "fields", {}),
-            address=_json_part(form, "address", None),
-            documents=_json_part(form, "documents", {}),
-        )
+        sub = _Submission(**_form_values(form))
     except ValidationError as exc:
-        raise unprocessable(
-            "; ".join(
-                f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()
-            ),
-        ) from exc
+        raise _form_422(exc) from exc
 
     if sub.purpose not in PURPOSES:
         raise unprocessable("unknown purpose", loc=["body", "purpose"])
@@ -1956,77 +1970,22 @@ async def _prepare_submission(
     if too_long:
         raise HTTPException(status_code=422, detail=_problem_details(too_long))
 
+    # The files: the shared loader (verification_files.py) checks type,
+    # size, owner, age and the 30 MB total, then fetches the uploads.
+    collected = await collect_files(
+        form, sub.documents, db, principal.organization_id, s3
+    )
+    loaded = await fetch_files(collected, sub.documents, s3)
     documents: dict[str, DocumentInput] = {}
     files: list[VerificationCheckFile] = []
-    for key in form:
-        if key.startswith("upload.") and key[len("upload.") :] not in sub.documents:
-            raise unprocessable(
-                "this upload names a slot that is not in documents",
-                loc=["body", key],
-            )
-    # The upload rows first (one session: one query at a time), and the file
-    # parts, then the total size from both, all before any object is fetched.
-    rows: dict[str, FileUpload] = {}
-    parts: dict[str, UploadedFile] = {}
-    total = 0
-    for slot in sub.documents:
-        part = form.get(f"file.{slot}")
-        has_part = part is not None and hasattr(part, "read")
-        upload_ref = form.get(f"upload.{slot}")
-        if upload_ref is not None and upload_ref != "":
-            if has_part:
-                raise unprocessable(
-                    f"send file.{slot} or upload.{slot}, not both",
-                    loc=["body", f"upload.{slot}"],
-                )
-            rows[slot] = await _usable_upload(
-                db, principal.organization_id, slot, upload_ref
-            )
-        elif has_part:
-            parts[slot] = await _read_file(part)
-            total += len(parts[slot].data)
-            if total > MAX_REQUEST_BYTES:
-                raise _files_too_large()
-    # Per slot: one upload in two slots is sent to the carrier twice.
-    total += sum(row.size_bytes or 0 for row in rows.values())
-    if total > MAX_REQUEST_BYTES:
-        raise _files_too_large()
-    if rows and s3 is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="file uploads are not configured on this server",
-        )
-    fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
-
-    async def fetch(row: FileUpload) -> UploadedFile:
-        async with fetches:
-            return await _read_upload(s3, row)
-
-    # Each distinct upload once. Every fetch finishes (the total was checked
-    # above, so this is bounded), then the first failure in slot order is
-    # raised, with its cause: the same request always gets the same error.
-    distinct = {row.id: row for row in rows.values()}
-    results = await asyncio.gather(
-        *(fetch(row) for row in distinct.values()), return_exceptions=True
-    )
-    fetched = dict(zip(distinct, results))
-    for slot in sub.documents:
-        if slot in rows and isinstance(fetched[rows[slot].id], BaseException):
-            raise fetched[rows[slot].id]
-    total = 0
     for slot, value in sub.documents.items():
-        file: UploadedFile | None = (
-            fetched[rows[slot].id] if slot in rows else parts.get(slot)
-        )
+        file = loaded.get(slot)
         if file is not None:
-            # Again with the bytes read: an object may differ from its row.
-            total += len(file.data)
-            if total > MAX_REQUEST_BYTES:
-                raise _files_too_large()
+            row = collected.rows.get(slot)
             files.append(
                 VerificationCheckFile(
                     slot=slot,
-                    upload_id=rows[slot].id if slot in rows else None,
+                    upload_id=row.id if row is not None else None,
                     size_bytes=len(file.data),
                     sha256=hashlib.sha256(file.data).hexdigest(),
                 )
@@ -2107,7 +2066,7 @@ async def _prepare_submission(
         subject_name=subject_name,
         documents=documents,
         draft_kwargs=draft_kwargs,
-        uploads=list(distinct.values()),
+        uploads=list({row.id: row for row in collected.rows.values()}.values()),
         files=files,
     )
 
@@ -2314,63 +2273,6 @@ async def create_verification(
     return _out(row, registry)
 
 
-# ``upload.<slot>`` objects fetched from the bucket at once.
-_MAX_PARALLEL_FETCHES = 4
-
-
-def _files_too_large() -> HTTPException:
-    return unprocessable("the files total more than 30 MB", loc=["body", "files"])
-
-
-async def _usable_upload(
-    db: AsyncSession, organization_id: UUID, slot: str, value: object
-) -> FileUpload:
-    """The ``upload.<slot>`` row: this organization's verification document,
-    uploaded less than ``VERIFICATION_UPLOAD_TTL`` ago. Else 422 naming the
-    slot only."""
-    where = ["body", f"upload.{slot}"]
-    try:
-        upload_id = UUID(str(value))
-    except ValueError:
-        raise unprocessable(f"upload.{slot} must be an upload id", loc=where) from None
-    row = (
-        await db.execute(
-            select(FileUpload).where(
-                FileUpload.id == upload_id,
-                FileUpload.organization_id == organization_id,
-                FileUpload.purpose == "verification_document",
-                FileUpload.uploaded_at.is_not(None),
-                FileUpload.uploaded_at
-                > func.statement_timestamp() - VERIFICATION_UPLOAD_TTL,
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise unprocessable(
-            f"upload.{slot}: no usable upload with this id; it must be a "
-            "verification_document of this organization, uploaded less than "
-            "1 hour ago",
-            loc=where,
-        )
-    return row
-
-
-async def _read_upload(s3: S3MailClient, row: FileUpload) -> UploadedFile:
-    """The upload's bytes from the mail bucket, in memory only."""
-    try:
-        data = await s3.fetch_raw(row.s3_key)
-    except Exception as exc:
-        logger.warning("verification upload read failed (%s)", type(exc).__name__)
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
-    if row.content_type not in ALLOWED_FILE_TYPES or len(data) > MAX_FILE_BYTES:
-        # The PUT checked both; this is a guard against an edited row.
-        raise unprocessable("files must be JPG, PNG or PDF, 10 MB or smaller")
-    return UploadedFile(filename="upload", content_type=row.content_type, data=data)
-
-
 async def _delete_used_uploads(
     db: AsyncSession, s3: S3MailClient | None, uploads: list[FileUpload]
 ) -> None:
@@ -2465,6 +2367,353 @@ async def check_verification(
         ok=True,
         files=prepared.files,
         note="The carrier runs its own checks when you submit.",
+    )
+
+
+class _DocumentCheckPart(_DocumentPart):
+    # Other slots this slot's file also stands for (one passport for several
+    # proofs): the file is sent once, here, and read once for all of them.
+    covers: list[str] = Field(default_factory=list)
+
+
+class _DocumentCheckForm(BaseModel):
+    quote_id: UUID | None = None
+    country_code: str = Field(min_length=2, max_length=2)
+    number_type: str
+    subject_type: str
+    fields: dict[str, str] = Field(default_factory=dict)
+    address: dict[str, str] = Field(default_factory=dict)
+    documents: dict[str, _DocumentCheckPart] = Field(default_factory=dict)
+
+
+@router.post(
+    "/document-check",
+    response_model=VerificationDocumentCheckResponse,
+    operation_id="check_verification_documents",
+)
+async def check_verification_documents(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+) -> VerificationDocumentCheckResponse:
+    """Read the documents of a number verification form before you submit it
+    (multipart/form-data).
+
+    Send the documents first: the same parts as `POST /verifications`, with
+    a file per slot to read (`file.<slot>`, or `upload.<slot>` with the id
+    of a `verification_document` upload). Only the slots with a file in
+    this request are read. A file that stands for other slots too (one
+    passport for several proofs) is sent once, for its slot, with
+    `documents.<slot>.covers` listing the other slots: it is read once and
+    fills all of them. One file given for several slots uses one read. A
+    `file.<slot>` part for a slot not in `documents` is not read and comes
+    back `read` false. `quote_id`, `country_code`, `number_type` and
+    `subject_type` are required. `documents` may leave out `option` while
+    the type is not chosen; `fields` and `address` may be empty or partial.
+
+    Returns the values the files show, by the carrier's field names, to
+    fill the form (`fields`, `address`, `documents.<slot>.fields`, and the
+    document type each file looks like in `documents.<slot>.option`). Also
+    returns `warnings`: an unreadable, upside-down or expired document, a
+    file that does not match the chosen document type, or a typed name that
+    differs from the printed one. Show each warning with its fix. You can
+    still submit.
+
+    A file nothing was read from has `read` false: with an `unreadable`
+    warning when the file is not clear, else with no warning (the read
+    failed or took too long, the file is over the size or page limits, or
+    the workspace used its 30 reads for today). Nothing is filed, saved,
+    held or charged, and uploads are not used up. The files are read by an
+    AI model (Anthropic) for this check only.
+    """
+    form = await _parse_form(request)
+    values = _form_values(form)
+    try:
+        sub = _DocumentCheckForm(
+            quote_id=values["quote_id"],
+            country_code=values["country_code"],
+            number_type=values["number_type"],
+            subject_type=values["subject_type"],
+            # May be partial or empty: the files fill them. Only JSON null
+            # becomes empty; another wrong type is a 422, as for submit.
+            fields={} if values["fields"] is None else values["fields"],
+            address={} if values["address"] is None else values["address"],
+            documents={} if values["documents"] is None else values["documents"],
+        )
+    except ValidationError as exc:
+        raise _form_422(exc) from exc
+    if sub.subject_type not in ("person", "business"):
+        raise unprocessable(
+            "subject_type is required: 'person' (you) or 'business' (your company)",
+            loc=["body", "subject_type"],
+        )
+    if sub.quote_id is None:
+        raise _quote_required("body")
+    offer = await _quote_offer(
+        db,
+        principal.organization_id,
+        sub.quote_id,
+        sub.country_code,
+        sub.number_type,
+        "body",
+    )
+    provider = _provider_or_404(registry, offer["provider"], "number")
+    # Nothing is written. End the read transaction before the carrier call.
+    await db.rollback()
+    requirements = await _requirements(
+        provider,
+        sub.country_code,
+        sub.number_type,
+        sub.subject_type,  # type: ignore[arg-type]
+        where="body",
+    )
+    # Every slot must be in the form before any part is read or any upload
+    # row is looked up.
+    slots = [s.name for s in requirements.documents]
+    for slot in sub.documents:
+        if slot not in slots:
+            raise unprocessable(
+                "this slot is not in the form", loc=["body", "documents", slot]
+            )
+    covered_by: dict[str, str] = {}
+    for slot, part in sub.documents.items():
+        for other in part.covers:
+            if other not in slots or other == slot:
+                raise unprocessable(
+                    "covers names a slot that is not in the form",
+                    loc=["body", "documents", slot, "covers"],
+                )
+            covered_by.setdefault(other, slot)
+    # A file.<slot> part for a slot not in documents is not read, as submit
+    # does; it comes back read: false so the caller can see that.
+    stray = [
+        key.partition(".")[2]
+        for key in form
+        if key.startswith("file.")
+        and key.partition(".")[2] in slots
+        and key.partition(".")[2] not in sub.documents
+    ]
+    collected = await collect_files(
+        form, sub.documents, db, principal.organization_id, s3, require_s3=False
+    )
+    # The upload rows are detached, then the transaction ends before the
+    # slow calls (the bucket, the model): a rollback expires loaded rows, and
+    # reading an expired row would need the database again.
+    for row in collected.rows.values():
+        if row in db:
+            db.expunge(row)
+    await db.rollback()
+
+    # One read per distinct file: an upload, or the same file part, given
+    # for several slots, and the slots a file covers, are read once for all
+    # of them. Each group is named by its first slot (the lead); the same
+    # groups go to check_documents, so the reads reserved, sent and given
+    # back are named the same way. Each part is hashed once, here.
+    own_file = [s for s in slots if s in collected.rows or s in collected.parts]
+    groups: dict[str, list[str]] = {}
+    for slot in own_file:
+        row = collected.rows.get(slot)
+        key = (
+            f"upload:{row.id}"
+            if row is not None
+            else f"part:{hashlib.sha256(collected.parts[slot].data).hexdigest()}"
+        )
+        groups.setdefault(key, []).append(slot)
+    # Until nothing changes: a slot covered by a covered slot (A covers B,
+    # B covers C) joins its file's group whatever the order they came in.
+    changed = True
+    while changed:
+        changed = False
+        for other, holder in covered_by.items():
+            if other in own_file:
+                continue  # its own file wins
+            for group in groups.values():
+                if holder in group and other not in group:
+                    group.append(other)
+                    changed = True
+    with_file = [slot for group in groups.values() for slot in group]
+    # A covered slot whose holder sent no file: read false, as it is not read.
+    orphans = [slot for slot in covered_by if slot not in with_file]
+    # An upload cannot be read without the bucket: read false, no read used.
+    if s3 is None:
+        groups = {
+            k: g for k, g in groups.items() if not any(s in collected.rows for s in g)
+        }
+    leads = [group[0] for group in groups.values()]
+
+    # The daily cap, before any file is fetched or decoded: the reads of
+    # this request are reserved in one short transaction of their own. A
+    # slot over the cap is not read. A read is used right before its file
+    # is sent to the model, whatever happens to the call after. A reserved
+    # read whose file was never sent is given back below. A failure here
+    # (the database, the lock) reserves nothing: every slot is read false.
+    reserved: dict[str, UUID] = {}
+    over_limit: list[str] = []
+    if document_reader_configured() and leads:
+        try:
+            async with independent_session_scope() as counter:
+                reserved = await reserve_document_reads(
+                    counter, principal.organization_id, leads
+                )
+            # The cap refused the rest: their slots say so.
+            over_limit = [
+                slot for g in groups.values() if g[0] not in reserved for slot in g
+            ]
+        except Exception as exc:
+            logger.warning("document check: no reads reserved (%s)", type(exc).__name__)
+            reserved = {}
+    to_read = [g for g in groups.values() if g[0] in reserved]
+    sent: set[str] = set()
+    try:
+        # Each file once, a few at a time. A failed fetch makes only its
+        # slots read false (and its read is given back); the other files are
+        # still read. So does a file past the request's total.
+        gate = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
+        results = await asyncio.gather(
+            *(fetch_files(collected, [g[0]], s3, gate=gate) for g in to_read),
+            return_exceptions=True,
+        )
+        files: dict[str, UploadedFile] = {}
+        read_groups: list[list[str]] = []
+        total = 0
+        for group, result in zip(to_read, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "document check: a file was not fetched (%s)",
+                    type(result).__name__,
+                )
+                continue
+            total += len(result[group[0]].data)
+            if total > MAX_REQUEST_BYTES:
+                total -= len(result[group[0]].data)
+                logger.warning("document check: a file is past the total size")
+                continue
+            for slot in group:
+                files[slot] = result[group[0]]
+            read_groups.append(group)
+        documents = {
+            slot: DocumentInput(
+                option=part.option, fields=part.fields, file=files.get(slot)
+            )
+            for slot, part in sub.documents.items()
+        }
+        for slot in with_file:
+            if slot not in documents:
+                # A covered slot with no entry of its own still gets its read.
+                documents[slot] = DocumentInput(option="", file=files.get(slot))
+        return await check_documents(
+            requirements,
+            sub.fields,
+            sub.address,
+            documents,
+            today=datetime.now(timezone.utc).date(),
+            on_send=sent.add,
+            groups=read_groups,
+            # Over the cap, no model, not fetched, or a file part left out:
+            # read false, no warning.
+            skipped=[s for s in [*with_file, *stray, *orphans] if s not in files],
+            over_limit=over_limit,
+        )
+    finally:
+        unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]
+        if unsent:
+            try:
+                async with independent_session_scope() as counter:
+                    await release_document_reads(counter, unsent)
+            except Exception as exc:
+                # Never hide the request's own outcome; the reads stay used.
+                logger.warning(
+                    "could not give back %d document read(s) (%s)",
+                    len(unsent),
+                    type(exc).__name__,
+                )
+
+
+async def _caution_form(
+    provider_name: str,
+    provider: VerificationProvider,
+    country_code: str,
+    number_type: str,
+    subject_type: SubjectType,
+) -> Requirements:
+    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process."""
+    key = (provider_name, country_code.upper(), number_type, subject_type)
+    now = time.monotonic()
+    hit = _caution_forms.get(key)
+    if hit is not None and now - hit[0] < _CAUTION_FORM_TTL_S:
+        return hit[1]
+    requirements = await _requirements(
+        provider, country_code, number_type, subject_type, where="body"
+    )
+    for old in [
+        k for k, (at, _) in _caution_forms.items() if now - at >= _CAUTION_FORM_TTL_S
+    ]:
+        del _caution_forms[old]
+    _caution_forms[key] = (now, requirements)
+    return requirements
+
+
+@router.post(
+    "/document-cautions",
+    response_model=VerificationDocumentCautionsResponse,
+    operation_id="check_verification_document_cautions",
+)
+async def check_verification_document_cautions(
+    body: VerificationDocumentCautionsRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+) -> VerificationDocumentCautionsResponse:
+    """Check the typed names and chosen document types again, against the
+    reads an earlier `POST /verifications/document-check` returned (JSON).
+
+    Send the form as it is now, with each slot's earlier read in
+    `documents.<slot>.read` (the `documents.<slot>` that check returned).
+    Only slots with a read are checked. Returns the `name` and
+    `document_type` warnings that check would give for this form. No file is
+    sent, no AI model runs, no daily read is used, and nothing is saved.
+    """
+    offer = await _quote_offer(
+        db,
+        principal.organization_id,
+        body.quote_id,
+        body.country_code,
+        body.number_type,
+        "body",
+    )
+    provider = _provider_or_404(registry, offer["provider"], "number")
+    # Nothing is written. End the read transaction before any carrier call.
+    await db.rollback()
+    requirements = await _caution_form(
+        offer["provider"],
+        provider,
+        body.country_code,
+        body.number_type,
+        body.subject_type,
+    )
+    slots = {s.name for s in requirements.documents}
+    for slot in body.documents:
+        if slot not in slots:
+            raise unprocessable(
+                "this slot is not in the form", loc=["body", "documents", slot]
+            )
+    return VerificationDocumentCautionsResponse(
+        warnings=document_cautions(
+            requirements,
+            body.fields,
+            body.address,
+            {
+                slot: DocumentInput(option=doc.option, fields=doc.fields)
+                for slot, doc in body.documents.items()
+            },
+            {
+                slot: doc.read
+                for slot, doc in body.documents.items()
+                if doc.read is not None
+            },
+        )
     )
 
 

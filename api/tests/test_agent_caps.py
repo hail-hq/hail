@@ -171,3 +171,21 @@ async def test_global_channel_ceiling(
         async_session, org_a, "sms", ["+15550000003"]
     )
     assert denial is not None and "platform" in denial.reason
+
+
+async def test_document_reads_never_count_as_agent_sends(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent_send_log also holds document reads (channel 'document_read',
+    the daily cap in document_reads.py). The agent caps filter by channel,
+    so those rows never use up an agent's sends."""
+    org = await _mk_org(async_session, "agent")
+    monkeypatch.setattr(settings, "agent_email_per_hour", 1)
+    for _ in range(50):
+        async_session.add(
+            AgentSendLog(organization_id=org, channel="document_read", recipient="slot")
+        )
+    await async_session.flush()
+    assert (
+        await check_agent_send_allowed(async_session, org, "email", ["a@b.co"]) is None
+    )

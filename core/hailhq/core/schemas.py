@@ -2320,6 +2320,181 @@ class VerificationCheckResponse(BaseModel):
     note: str = Field(description="What the check does not cover.")
 
 
+class VerificationDocumentWarning(BaseModel):
+    """Something on an uploaded document the carrier may refuse. A warning
+    only: you can still submit."""
+
+    field: str = Field(
+        description=(
+            "Where to show it: a slot name for the document itself, or the "
+            "path of a typed value (`first_name`, `<slot>.<field>`, "
+            "`address.customer_name`)."
+        )
+    )
+    kind: Literal["unreadable", "rotated", "expired", "document_type", "name"] = Field(
+        description=(
+            "'unreadable', 'rotated' (upside down or on its side), 'expired', "
+            "'document_type' (the file does not match the chosen type), or "
+            "'name' (the typed name differs from the printed one)."
+        )
+    )
+    message: str = Field(description="What is wrong and how to fix it.")
+
+
+class VerificationPrintedName(BaseModel):
+    """The name printed on a document, as read. Empty strings when not printed."""
+
+    given_names: str = Field(description="A person's given names.")
+    surnames: str = Field(description="A person's surnames.")
+    latin_given_names: str = Field(
+        default="",
+        description=(
+            "The given names in Latin letters as the document prints them "
+            "(its machine-readable zone or a transliteration), or empty."
+        ),
+    )
+    latin_surnames: str = Field(
+        default="", description="The surnames in Latin letters, the same way."
+    )
+    business_name: str = Field(description="A company's name.")
+
+
+class VerificationDocumentRead(BaseModel):
+    """What was read from one slot's file."""
+
+    read: bool = Field(
+        description=(
+            "False when nothing was read from the file: the reader is off, "
+            "the file type is not supported, the read failed or took too "
+            "long (no warning), or the file is unreadable (an 'unreadable' "
+            "warning). The other values are then empty."
+        )
+    )
+    option: str | None = Field(
+        description=(
+            "The slot's document type the file looks like, as an option key, "
+            "or null when none fits or it was not read."
+        )
+    )
+    fields: dict[str, str] = Field(
+        description=(
+            "Values for the fields of the slot's document types, by field "
+            "name, as printed on the file."
+        )
+    )
+    expiry_date: str | None = Field(
+        description="The expiry date printed on the file (YYYY-MM-DD), or null."
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        description="The name printed on the file, or null when not read."
+    )
+    skipped: Literal["daily_limit"] | None = Field(
+        default=None,
+        description=(
+            "Why the file was not read, when Hail chose not to: "
+            "'daily_limit' when the workspace has used today's document "
+            "reads. Null otherwise."
+        ),
+    )
+
+
+class VerificationDocumentCheckResponse(BaseModel):
+    """Returned by ``POST /verifications/document-check``."""
+
+    fields: dict[str, str] = Field(
+        description="Values for the form's own `fields`, by field name, read from the files."
+    )
+    address: dict[str, str] = Field(
+        description=(
+            "Address parts read from the files (`customer_name`, `street`, "
+            "`city`, `region`, `postal_code`, `country_code`). Only the parts found."
+        )
+    )
+    documents: dict[str, VerificationDocumentRead] = Field(
+        description="What was read from each slot that had a file, by slot name."
+    )
+    warnings: list[VerificationDocumentWarning] = Field(
+        description="Things the carrier may refuse. Empty when nothing was found."
+    )
+    note: str = Field(description="What the check does not cover.")
+
+
+class VerificationDocumentCautionRead(BaseModel):
+    """A slot's earlier read, as `POST /verifications/document-check`
+    returned it in `documents.<slot>`. Only `option` and `printed_name` are
+    used; the other keys of that object may be sent and are ignored."""
+
+    option: str | None = Field(
+        default=None,
+        description="The document type the file looked like, or null.",
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        default=None,
+        description="The name printed on the file, or null (no name check).",
+    )
+
+
+class VerificationDocumentCautionDocument(BaseModel):
+    """One slot of the form: what is typed now, and its earlier read."""
+
+    option: str = Field(
+        default="",
+        description="The chosen document type key, or empty when not chosen yet.",
+    )
+    fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="The values typed for this slot's fields, by field name.",
+    )
+    read: VerificationDocumentCautionRead | None = Field(
+        default=None,
+        description=(
+            "The slot's `documents.<slot>` from an earlier document check, or "
+            "null when it has no successful read. Only slots with a read are "
+            "checked."
+        ),
+    )
+
+
+class VerificationDocumentCautionsRequest(BaseModel):
+    """Body of ``POST /verifications/document-cautions``."""
+
+    quote_id: UUID = Field(
+        description="The `quote_id` of the number offer being verified."
+    )
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO 3166-1 alpha-2 country of the number, like GB.",
+    )
+    number_type: str = Field(
+        description="The number type of the offer, like `local` or `mobile`."
+    )
+    subject_type: Literal["person", "business"] = Field(
+        description="'person' (you) or 'business' (your company)."
+    )
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The form's typed fields, by name."
+    )
+    address: dict[str, str] = Field(
+        default_factory=dict,
+        description="The typed address parts (`customer_name` is compared).",
+    )
+    documents: dict[str, VerificationDocumentCautionDocument] = Field(
+        default_factory=dict, description="The form's document slots, by name."
+    )
+
+
+class VerificationDocumentCautionsResponse(BaseModel):
+    """Returned by ``POST /verifications/document-cautions``."""
+
+    warnings: list[VerificationDocumentWarning] = Field(
+        description=(
+            "`name` and `document_type` warnings: the typed form against the "
+            "earlier reads. Empty when nothing differs."
+        )
+    )
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = Field(description="Plain-text body, if any.")
     body_html: str | None = Field(description="HTML body, if any.")

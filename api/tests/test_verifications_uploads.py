@@ -518,7 +518,7 @@ async def test_one_upload_can_fill_two_slots_and_is_fetched_once(
 async def test_one_upload_in_many_slots_counts_each_use_in_the_total(
     client, org_and_key, carrier, s3, async_session
 ) -> None:
-    from hailhq.api.routes.verifications import MAX_FILE_BYTES
+    from hailhq.api.verification_files import MAX_FILE_BYTES
 
     org_id, _, key = org_and_key
     row = await _upload(async_session, org_id)
@@ -573,7 +573,7 @@ async def test_uploads_over_the_total_are_refused_before_any_fetch(
     client, org_and_key, carrier, s3, async_session
 ) -> None:
     """The rows' sizes, plus the file parts, are summed before fetching."""
-    from hailhq.api.routes.verifications import MAX_FILE_BYTES
+    from hailhq.api.verification_files import MAX_FILE_BYTES
 
     org_id, _, key = org_and_key
     slots = ["proof_of_identity", "extra_0", "extra_1"]

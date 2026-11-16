@@ -21,14 +21,14 @@ Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` 
 
 ## Lifecycle
 
-| State             | Meaning                                                       | Who moves it here                                                                           |
-| ----------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `awaiting_review` | Draft exists at the carrier, not yet sent for review.         | `POST /verifications`, or a submit that failed because the carrier was down.                |
-| `submitting`      | Hail is sending it to the carrier right now.                  | `_submit_row` before the carrier call (so a crash cannot submit twice).                     |
-| `submitted`       | Carrier is reviewing.                                         | `_submit_row` after the carrier accepted.                                                   |
-| `approved`        | Carrier approved. Numbers can be bought.                      | `GET` refresh or the background pass, from the carrier's status.                            |
+| State             | Meaning                                                                                                                     | Who moves it here                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `awaiting_review` | Draft exists at the carrier, not yet sent for review.                                                                       | `POST /verifications`, or a submit that failed because the carrier was down.                |
+| `submitting`      | Hail is sending it to the carrier right now.                                                                                | `_submit_row` before the carrier call (so a crash cannot submit twice).                     |
+| `submitted`       | Carrier is reviewing.                                                                                                       | `_submit_row` after the carrier accepted.                                                   |
+| `approved`        | Carrier approved. Numbers can be bought.                                                                                    | `GET` refresh or the background pass, from the carrier's status.                            |
 | `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why and what to fix (see [Rejection reasons](#rejection-reasons)). | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
-| `cancelled`       | Customer withdrew or dismissed it.                            | `DELETE /verifications/{id}`.                                                               |
+| `cancelled`       | Customer withdrew or dismissed it.                                                                                          | `DELETE /verifications/{id}`.                                                               |
 
 For a number (`purpose=number`): an organization may hold several live verifications per (carrier, country, number type, `subject_type`): several people, several companies. Only an exact duplicate is refused: the same `subject_type` and the same `subject_name`, ignoring case (unique index `carrier_verifications_number_live_uniq` on `(organization_id, provider, country_code, number_type, subject_type, lower(subject_name))`, rows with a name only). That is a 409 `You already have a verification for <name> as a person/company for this number type.` For US SMS (`purpose=sms`): one live registration per (organization, carrier, country, number type) (`carrier_verifications_sms_live_uniq`). `cancelled` and `rejected` rows do not count, so the customer can start over.
 
@@ -220,6 +220,31 @@ registration does not verify toll-free messaging.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
 
+## Document check (AI read)
+
+`POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads the files of a number verification form with an AI model before submit. The console calls it once per uploaded file. A file that stands for other slots (one passport for several proofs) is sent once, with `documents.<slot>.covers` naming those slots; one read fills all of them. It returns the values each file shows, by the carrier's field names, and warnings: unreadable, turned, expired, another document type, or a typed name that differs from the printed one. Hail words every warning; the model only reads. Code: [`document_check.py`](../../core/hailhq/core/providers/verification/document_check.py), [`document_reader.py`](../../core/hailhq/core/providers/llm/document_reader.py), [`document_reads.py`](../../core/hailhq/core/document_reads.py) (the cap).
+
+- **Model:** `DOCUMENT_READER_MODEL`, code default `ANTHROPIC_BACKUP_MODEL` (Haiku 5.5). Not in `.env.example`: set it only to try another model. It must take thinking `disabled`, effort `low` and structured output. Bedrock when `ANTHROPIC_BEDROCK_REGION` is set, else Anthropic's API ([voice-llm.md](voice-llm.md)).
+- **Fallback models:** when the model call raises an API error (a refused request, a missing model, a server or connection error), the same read tries `ANTHROPIC_BACKUP_MODEL`, then `ANTHROPIC_MODEL` (thinking `between_tools`: Sonnet 5.5 refuses `disabled`), each id once. Never after a timeout, and only with at least 1 s left of the same 15 s. A fallback never uses a second read. Logs name the exception type and the try number only. Probed on 2026-11-16, Bedrock eu-central-1: Haiku 5.5 and Sonnet 5.5 (with `between_tools`) read a PNG and a PDF; Sonnet 5.5 with `disabled` is a 400. A model that refuses the request is harmless: the read fails open.
+- **Cautions after an edit:** `POST /v1/verifications/document-cautions` (JSON, console only, no MCP tool) gives the `name` and `document_type` warnings again for the form as typed now, from the reads the console got earlier (`documents.<slot>.read`). Same rules as the check (`document_cautions` in `document_check.py`); no file, no model, no read used. The "does not look like one" type warning needs a fresh read, so only the check gives it. The carrier's form is kept 10 minutes per API process for this route (`_caution_forms`), so an edit does not call the carrier.
+- **Fails open:** no model, an error on every model tried, a timeout, a refusal, a PDF of more than 5 pages, a file that is not its declared type, a PNG or progressive JPEG over 40 million pixels (larger baseline JPEGs are decoded at a reduced scale), more than 15 s, under 1 s left before the send, a failed bucket fetch, a file past the 30 MB total, or a failed cap reservation gives `read: false` for those slots and no warning; the other files are still read. The customer fills the form by hand. Only the first 3 pages of a PDF go to the model. Files are prepared in a child process without credentials ([`document_image.py`](../../core/hailhq/core/providers/llm/document_image.py), run by [`isolated_process.py`](../../core/hailhq/core/isolated_process.py), shared with the voicebot's attachment reader), one at a time per API process, with 512 MB of memory and 10 s each: the server has no swap, and live calls run beside the API. The model gets only what is left of the 15 s.
+- **Cap:** 30 reads per workspace per UTC day (`DAILY_DOCUMENT_READS`). A read is one file sent to the model, whatever happens to the call after (an error, a timeout). A request reserves its reads before any file is fetched, so a workspace over the cap costs nothing; a reserved read whose file was never sent (not readable, over the limits, not decoded) is given back. With no model configured nothing is reserved or fetched. One file given for several slots (one upload, or one passport covering several proofs) is read once and counts once. Past the cap a slot is `read: false` with `skipped: "daily_limit"`, no error and no warning; the console shows "You have used today's automatic reads. Fill in the boxes below." A Haiku 5.5 read costs well under 1 cent. A read that falls back to Sonnet 5.5 costs more. A refused request or a missing model is not billed; a try that fails after the model answered in part can be. So the 30 reads bound the count, not a fixed price per day.
+- **Count:** rows in `agent_send_log` with `channel = 'document_read'` and the slot name as `recipient`. Today's usage for a workspace:
+
+  ```sql
+  SELECT count(*) FROM agent_send_log
+  WHERE organization_id = '<org id>' AND channel = 'document_read'
+    AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+  ```
+
+- **Privacy:** the files go to the model provider for this read only. Logs hold counts and exception types, never a value, a name or the answer.
+
+**Open decision: charge per read or keep free.** Reads are free to customers now; Hail pays the provider. Options:
+
+1. Charge per read from credits. Needs a per-read price in the website rater (prices are kept out of this repo) and a usage row the rater prices.
+2. Keep free, with the daily cap (today).
+3. Free only for workspaces that hold credits; others fill the form by hand.
+
 ## Cancel rules
 
 `DELETE /verifications/{id}`:
@@ -313,4 +338,3 @@ The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/cor
 - **DIDWW.** DIDWW rejects the registration when a number is ordered. The order step (`rejected_registration` in `api/hailhq/api/number_orders.py`) puts the address verification's `reject_reasons` and `reject_comment` after "The carrier said:".
 
 The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
-
