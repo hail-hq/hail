@@ -1197,10 +1197,11 @@ class SmsTrialPhone(Base):
     code_attempts: Mapped[int] = mapped_column(
         Integer, server_default=text("0"), nullable=False
     )
-    code_sends: Mapped[int] = mapped_column(
-        Integer, server_default=text("0"), nullable=False
+    # One {"phone", "at"} entry per code text, pruned to the last 24 hours.
+    # Kept per phone so switching phones cannot reset a phone's send count.
+    code_send_log: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb"), nullable=False
     )
-    code_window_started_at: Mapped[datetime | None] = mapped_column(TS)
     consent_version: Mapped[str] = mapped_column(Text, nullable=False)
     consent_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     consent_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))

@@ -230,7 +230,7 @@ async def test_sixth_code_in_a_day_is_refused(async_session):
     assert e.value.retry_after == timedelta(hours=24)
     issued = await _start(async_session, org, now=NOW + timedelta(hours=24))
     assert issued.code is not None
-    assert issued.row.code_sends == 1
+    assert len(issued.row.code_send_log) == 1
 
 
 async def test_same_verified_phone_sends_no_code(async_session):
@@ -252,7 +252,7 @@ async def test_new_phone_resets_to_pending(async_session):
     assert new.code is not None
     assert new.row.status == "pending" and new.row.verified_at is None
     assert not await is_verified_trial_phone(async_session, org, PHONE)
-    assert new.row.code_sends == 2
+    assert len(new.row.code_send_log) == 2
 
 
 async def test_confirm_right_code_verifies(async_session):
@@ -335,3 +335,27 @@ async def test_phone_code_cap_spans_workspaces(async_session):
     assert other.code is not None
     later = await _start(async_session, b, now=NOW + timedelta(hours=24))
     assert later.code is not None
+
+
+async def test_rotation_bypass_is_closed(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    for _ in range(4):
+        await _start(async_session, a)
+    await _start(async_session, a, phone="+14155550144")  # A moves to Q
+    assert (await get_trial_phone(async_session, a)).phone_e164 == "+14155550144"
+    # The 4 codes A sent to PHONE still count: B gets one more, then is refused.
+    assert (await _start(async_session, b)).code is not None
+    with pytest.raises(CodeBudgetExceeded):
+        await _start(async_session, b)
+
+
+async def test_rolling_window(async_session):
+    org = await _org(async_session)
+    for h in (0, 5, 10, 15, 20):
+        await _start(async_session, org, now=NOW + timedelta(hours=h))
+    with pytest.raises(CodeBudgetExceeded) as e:
+        await _start(async_session, org, now=NOW + timedelta(hours=23))
+    assert e.value.retry_after == timedelta(hours=1)
+    again = await _start(async_session, org, now=NOW + timedelta(hours=24, seconds=1))
+    assert again.code is not None
+    assert len(again.row.code_send_log) == 5

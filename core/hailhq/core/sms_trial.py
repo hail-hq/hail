@@ -11,10 +11,10 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.db import org_lock
+from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import PhoneNumber, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us, on_approved_registration
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,7 +167,7 @@ async def start_phone_proof(
     now: datetime | None = None,
 ) -> IssuedCode:
     """Issue a code for ``phone``. The caller texts it, then commits."""
-    now = now or datetime.now(UTC)
+    now = (now or datetime.now(UTC)).astimezone(UTC)
     await org_lock(db, organization_id)
     if not is_us(phone):
         raise PhoneNotUs()
@@ -192,32 +192,32 @@ async def start_phone_proof(
     if row is not None and row.status == "verified" and row.phone_e164 == phone:
         return IssuedCode(row=row, code=None)
 
-    sends, window_start = 0, now
-    if row is not None and row.code_window_started_at is not None:
-        if now - row.code_window_started_at < CODE_WINDOW:
-            sends, window_start = row.code_sends, row.code_window_started_at
-    if sends >= MAX_CODE_SENDS_PER_DAY:
-        raise CodeBudgetExceeded(window_start + CODE_WINDOW - now)
+    cutoff = now - CODE_WINDOW
+    log = [
+        e
+        for e in (row.code_send_log if row is not None else [])
+        if datetime.fromisoformat(e["at"]) > cutoff
+    ]
+    if len(log) >= MAX_CODE_SENDS_PER_DAY:
+        oldest = min(datetime.fromisoformat(e["at"]) for e in log)
+        raise CodeBudgetExceeded(oldest + CODE_WINDOW - now)
 
-    # Per-phone cap across all workspaces, so many workspaces cannot flood
-    # one phone with codes.
-    recent = (
+    # Per-phone cap across all workspaces, counting entries left by a
+    # workspace that later switched phone. The lock makes the count and the
+    # send log write atomic per phone (always after org_lock).
+    await key_lock(db, f"sms_trial_phone:{phone}")
+    at_rows = (
         await db.execute(
-            select(
-                SmsTrialPhone.code_sends, SmsTrialPhone.code_window_started_at
-            ).where(
-                SmsTrialPhone.phone_e164 == phone,
-                SmsTrialPhone.organization_id != organization_id,
-                SmsTrialPhone.code_window_started_at > now - CODE_WINDOW,
-            )
+            text(
+                "SELECT (e->>'at')::timestamptz AS at FROM sms_trial_phones, "
+                "jsonb_array_elements(code_send_log) e "
+                "WHERE e->>'phone' = :phone AND (e->>'at')::timestamptz > :cutoff"
+            ),
+            {"phone": phone, "cutoff": cutoff},
         )
     ).all()
-    phone_sends = sends + sum(r.code_sends for r in recent)
-    if phone_sends >= MAX_CODE_SENDS_PER_DAY:
-        starts = [r.code_window_started_at for r in recent]
-        if sends:
-            starts.append(window_start)
-        raise CodeBudgetExceeded(min(starts) + CODE_WINDOW - now)
+    if len(at_rows) >= MAX_CODE_SENDS_PER_DAY:
+        raise CodeBudgetExceeded(min(r.at for r in at_rows) + CODE_WINDOW - now)
 
     code = f"{secrets.randbelow(10**6):06d}"
     fields = {
@@ -227,8 +227,10 @@ async def start_phone_proof(
         "code_hash": _hash_code(organization_id, phone, code),
         "code_expires_at": now + CODE_TTL,
         "code_attempts": 0,
-        "code_sends": sends + 1,
-        "code_window_started_at": window_start,
+        "code_send_log": [
+            *log,
+            {"phone": phone, "at": now.astimezone(UTC).isoformat()},
+        ],
         "consent_version": consent_version,
         "consent_at": now,
         "consent_user_id": user_id,

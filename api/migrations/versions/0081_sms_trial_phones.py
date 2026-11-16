@@ -45,9 +45,11 @@ def upgrade():
             "code_attempts", sa.Integer(), server_default=sa.text("0"), nullable=False
         ),
         sa.Column(
-            "code_sends", sa.Integer(), server_default=sa.text("0"), nullable=False
+            "code_send_log",
+            postgresql.JSONB(),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
         ),
-        sa.Column("code_window_started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("consent_version", sa.Text(), nullable=False),
         sa.Column("consent_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consent_user_id", postgresql.UUID(as_uuid=True), nullable=True),
