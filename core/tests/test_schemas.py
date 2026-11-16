@@ -220,6 +220,15 @@ def test_e164_fields_refuse_extra_or_non_ascii_characters(bad) -> None:
         CallCreate(to=bad, system_prompt="Hi", recipient_consent=True)
 
 
+@pytest.mark.parametrize("bad", ["\uff11\uff12\uff13\uff14\uff15\uff16", "12345\uff16"])
+def test_trial_code_refuses_non_ascii_digits(bad) -> None:
+    from hailhq.core.schemas import SmsTrialPhoneConfirm
+
+    with pytest.raises(ValidationError):
+        SmsTrialPhoneConfirm(code=bad)
+    assert SmsTrialPhoneConfirm(code="123456").code == "123456"
+
+
 def test_sms_create_happy_path() -> None:
     from hailhq.core.schemas import SmsCreate
 

@@ -657,7 +657,8 @@ class SmsTrialPhoneConfirm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     code: str = Field(
-        pattern=r"^\d{6}$",
+        # ``[0-9]``: ``\d`` also matches non-ASCII digits.
+        pattern=r"^[0-9]{6}$",
         description="The 6-digit code Hail texted to the trial phone.",
     )
 

@@ -566,3 +566,14 @@ def test_confirm_409_is_documented_as_phone_taken():
     assert confirm["409"]["description"] == (
         "Another workspace uses this phone for trial texts. Use a different phone."
     )
+
+
+async def test_confirm_refuses_full_width_digits(jwt_client) -> None:
+    resp = await jwt_client.post(
+        "/v1/sms/trial/phone/confirm",
+        json={"code": "\uff11\uff12\uff13\uff14\uff15\uff16"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "code"]
+    # Refused by the schema, not by the route's "Send a code first."
+    assert resp.json()["detail"][0]["type"] == "string_pattern_mismatch"
