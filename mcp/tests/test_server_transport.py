@@ -643,6 +643,78 @@ async def test_oauth_rs_modern_tools_list_is_public_but_tools_call_is_not(
     assert "resource_metadata=" in called.headers.get("www-authenticate", "")
 
 
+_EMPTY_LISTS = {
+    "resources/list": "resources",
+    "resources/templates/list": "resourceTemplates",
+    "prompts/list": "prompts",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(_EMPTY_LISTS))
+async def test_oauth_rs_empty_lists_are_public(monkeypatch, method):
+    """The SDK advertises resources and prompts, so a client checking them
+    with no bearer gets the empty lists, on either protocol, and no session."""
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            modern = await c.post(
+                "/", headers=_modern_headers(method), json=_modern_request(method)
+            )
+            assert len(sessions) == 0
+            init = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "0.0.0"},
+                    },
+                },
+            )
+            legacy = await c.post(
+                "/",
+                headers={
+                    "Accept": _MCP_ACCEPT,
+                    "Mcp-Session-Id": init.headers["mcp-session-id"],
+                },
+                json={"jsonrpc": "2.0", "id": 2, "method": method, "params": {}},
+            )
+            session_less = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT},
+                json={"jsonrpc": "2.0", "id": 3, "method": method},
+            )
+        assert len(sessions) == 1
+
+    key = _EMPTY_LISTS[method]
+    assert modern.status_code == 200
+    assert _parse_mcp_body(modern)["result"][key] == []
+    assert legacy.status_code == 200
+    assert _parse_mcp_body(legacy)["result"][key] == []
+    assert session_less.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_resources_read_still_401s(monkeypatch):
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            resp = await c.post(
+                "/",
+                headers=_modern_headers("resources/read"),
+                json=_modern_request("resources/read", uri="file:///x"),
+            )
+    assert resp.status_code == 401
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version", [None, "2025-06-18"])
 async def test_oauth_rs_session_less_legacy_discover_creates_no_session(

@@ -28,6 +28,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.verification import get_verification_provider
+from hailhq.core.providers.verification.rejections import customer_reason
 from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
@@ -106,7 +107,8 @@ async def finish_order(
 
     ``reason`` is stored for a failed order and shown to the buyer; it is
     Hail's own wording, never the carrier's text (``rejected_registration``
-    keeps that as ``carrier_reason`` in the metadata).
+    keeps that as ``carrier_reason`` in the metadata and on the
+    verification).
     ``keep_setup`` charges the setup fee even on failure:
     the carrier already billed it and does not refund (the number was
     bought, then its registration was rejected or never cleared)."""
@@ -173,7 +175,7 @@ async def finish_order(
 
 
 # Shown to the buyer when the carrier refuses the end-user registration of a
-# bought number. Hail's own wording, never the carrier's.
+# bought number and gives no reason.
 REGISTRATION_REJECTED = (
     "the carrier rejected the end-user registration; "
     "start a new verification with corrected details"
@@ -205,11 +207,13 @@ async def rejected_registration(
 ) -> str:
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
-    verification rejected. Returns the reason shown to the buyer: Hail's own
-    wording. The carrier's text is kept in the DB only (the audit row's
-    ``carrier_reason`` and the number's
-    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
-    The log line names the carrier and the org, number and verification ids.
+    verification rejected. The verification's ``rejection_reason`` quotes
+    the carrier's text, if any, so the customer knows what to fix. The
+    returned order reason is Hail's own wording only: it reaches the 409
+    (which Logfire records) and the number's metadata. The carrier's text
+    is also kept in the audit row's ``carrier_reason`` and the number's
+    ``provisioning_metadata['carrier_reason']``. It is never logged: the log
+    line names only the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run
     under that lock on purpose: two concurrent reconciles must never both
@@ -232,7 +236,14 @@ async def rejected_registration(
                 "approval back by hand: number=%s",
                 number.id,
             )
-    reason = REGISTRATION_REJECTED
+    # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
+    # has no fixes for them, so the customer reads the carrier's words.
+    reason = customer_reason(
+        [],
+        [raw or ""],
+        fallback=REGISTRATION_REJECTED,
+        next_step="start a new verification",
+    )
     verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's
     # papers, and logs leave this server. It is kept in the DB below.
@@ -251,8 +262,8 @@ async def rejected_registration(
         }
     if verification is not None:
         verification.state = "rejected"
-        # Hail's wording for the customer; the carrier's text is in the
-        # audit row below.
+        # Hail's wording plus the carrier's text; the carrier's text alone
+        # is in the audit row below.
         verification.rejection_reason = reason
         verification.updated_at = datetime.now(timezone.utc)
         # Same audit trail as every other system-driven rejection
@@ -267,7 +278,12 @@ async def rejected_registration(
             actor_user_id=None,
             actor_kind="system",
         )
-    return reason
+        if raw and raw.strip():
+            # The order's failure_reason reaches the 409 (which Logfire
+            # records) and the number's metadata: Hail's wording only. The
+            # carrier's text stays on the verification.
+            return f"{REGISTRATION_REJECTED}; the verification's rejection_reason says what to fix"
+    return REGISTRATION_REJECTED
 
 
 async def _purchase_verification(

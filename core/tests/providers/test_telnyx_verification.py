@@ -33,6 +33,14 @@ GROUP = "8a3c1e4e-0000-4000-8000-000000000001"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_requirement_names(monkeypatch):
+    """Requirement names are cached per process; each test starts empty."""
+    from hailhq.core.providers.verification import telnyx as telnyx_mod
+
+    monkeypatch.setattr(telnyx_mod, "_REQUIREMENT_NAMES", {})
+
+
 def _rules(name: str) -> dict:
     return json.loads((FIXTURES / f"telnyx-regulatory-SE-{name}.json").read_text())
 
@@ -730,6 +738,37 @@ async def test_status_mapping(telnyx_status, state) -> None:
     status = await provider(fake).status({"group_id": GROUP})
     assert status.state == state
     assert (status.reason is not None) == (state == "rejected")
+
+
+async def test_rejection_names_each_failed_requirement() -> None:
+    group = _group("mobile", status="declined")
+    reqs = group["regulatory_requirements"]
+    for r in reqs:
+        r["status"] = "approved"
+    reqs[0]["status"], reqs[1]["status"] = "declined", "expired"
+    reqs[1]["field_type"] = "document"
+    reqs[2]["status"], reqs[2]["field_type"] = "expired", "textual"
+    names = {reqs[0]["requirement_id"]: "Proof of Address"}
+
+    def answers(request):
+        if "/requirement_types/" in request.url.path:
+            req_id = request.url.path.rsplit("/", 1)[1]
+            if req_id in names:
+                return httpx.Response(200, json={"data": {"name": names[req_id]}})
+            return httpx.Response(404, json={"errors": []})
+        return httpx.Response(200, json={"data": group})
+
+    status = await provider(Telnyx(answers)).status({"group_id": GROUP})
+    assert status.state == "rejected"
+    assert 'The carrier did not accept "Proof of Address".' in status.reason
+    assert "A document has expired. Upload one" in status.reason
+    # An expired text field asks for the text, not a file.
+    assert "A detail has expired. Enter it again." in status.reason
+    assert reqs[0]["requirement_id"] not in status.reason
+    assert status.raw_reason == (
+        f"Proof of Address: declined; {reqs[1]['requirement_id']}: expired; "
+        f"{reqs[2]['requirement_id']}: expired"
+    )
 
 
 async def test_purchase_handle_is_the_group_id() -> None:

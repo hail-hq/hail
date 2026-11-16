@@ -26,6 +26,7 @@ from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
 from hailhq.core.carrier_offer import Approval, CarrierOffer, cents, number_prefix
 from hailhq.core.config import settings
+from hailhq.core.providers.verification.rejections import sentence
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierPreOrderError,
@@ -581,11 +582,8 @@ def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | N
         return None
     newest = max(rejected, key=lambda v: v["attributes"].get("created_at") or "")
     attrs = newest["attributes"]
-    parts = [
-        "; ".join(r for r in attrs.get("reject_reasons") or [] if r),
-        attrs.get("reject_comment") or "",
-    ]
-    return " - ".join(p.strip() for p in parts if p.strip()) or None
+    parts = [*(attrs.get("reject_reasons") or []), attrs.get("reject_comment") or ""]
+    return " ".join(sentence(p) for p in parts if p and p.strip()) or None
 
 
 async def revoke_registration(
