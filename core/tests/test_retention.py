@@ -14,13 +14,14 @@ import pytest
 from hailhq.core.models import (
     AuditLog,
     Call,
+    CarrierVerification,
     Contact,
     Email,
     OrgClosure,
     PhoneNumber,
     Sms,
 )
-from hailhq.core.retention import purge_expired_data
+from hailhq.core.retention import clear_closed_org_registrations, purge_expired_data
 from sqlalchemy import select
 
 
@@ -425,3 +426,132 @@ async def test_an_evidence_failure_does_not_skip_the_verification_uploads(
     with pytest.raises(RuntimeError, match="1 org"):
         await purge_expired_data(async_session, now)
     assert uploads_tried == [org]
+
+
+# What a filed US texting registration keeps in provider_refs: carrier ids
+# and billing keys (kept), and copies of the customer's answers (deleted).
+_KEPT_REFS = {
+    "brand_sid": "BN1",
+    "campaign_sid": "CM1",
+    "campaign_filed_at": "2026-11-01T00:00:00+00:00",
+    "brand_reused": True,
+    "subject_type": "person",
+}
+_ANSWER_REFS = {
+    "application": {"fields": {"first_name": "Ada", "tax_id": "12-3456789"}},
+    "campaign": {"description": "Order updates", "contact_email": "ada@example.com"},
+    "subject_name": "Ada Lovelace",
+}
+
+
+def _verification(org, **over) -> CarrierVerification:
+    return CarrierVerification(
+        organization_id=org,
+        provider=over.pop("provider", "twilio"),
+        country_code=over.pop("country_code", "US"),
+        number_type="local",
+        subject_type="person",
+        purpose=over.pop("purpose", "sms"),
+        subject_name=over.pop("subject_name", "Ada Lovelace"),
+        state=over.pop("state", "approved"),
+        provider_refs=over.pop("provider_refs", {**_KEPT_REFS, **_ANSWER_REFS}),
+        rejection_reason=over.pop("rejection_reason", None),
+        requirements_version="1",
+        **over,
+    )
+
+
+async def test_closed_org_registrations_lose_their_answers_at_close(async_session):
+    now = datetime.now(timezone.utc)
+    closed, open_org, other = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    # Closed just now: no 12-month wait.
+    async_session.add(
+        OrgClosure(organization_id=closed, closed_at=now, source="hail_website")
+    )
+    rows = {
+        "approved": _verification(closed),
+        "rejected": _verification(
+            closed,
+            provider="telnyx",
+            state="rejected",
+            rejection_reason="The carrier could not match Ada Lovelace.",
+        ),
+        # Two live number verifications: their names stay (a nameless-live
+        # unique index), the reason goes.
+        "number_a": _verification(
+            closed,
+            purpose="number",
+            country_code="GB",
+            subject_name="Ada Lovelace",
+            provider_refs={"bundle_sid": "BU1"},
+            rejection_reason="Earlier: blurry passport",
+        ),
+        "number_b": _verification(
+            closed,
+            purpose="number",
+            country_code="GB",
+            subject_name="Grace Hopper",
+            provider_refs={"bundle_sid": "BU2"},
+        ),
+        "number_ended": _verification(
+            closed,
+            purpose="number",
+            country_code="DE",
+            state="cancelled",
+            provider_refs={"bundle_sid": "BU3"},
+        ),
+        "open": _verification(open_org, rejection_reason="Fix the website"),
+        "other": _verification(other, provider="telnyx"),
+    }
+    async_session.add_all(rows.values())
+    await async_session.commit()
+
+    assert await clear_closed_org_registrations(async_session, now) == 4
+    # Safe to run twice: nothing left to clear.
+    assert await clear_closed_org_registrations(async_session, now) == 0
+
+    for row in rows.values():
+        await async_session.refresh(row)
+    for name in ("approved", "rejected"):
+        row = rows[name]
+        assert row.provider_refs == _KEPT_REFS, name
+        assert row.subject_name is None and row.rejection_reason is None, name
+    # State and dates stay for billing.
+    assert rows["approved"].state == "approved"
+    assert rows["rejected"].state == "rejected"
+    assert rows["number_a"].subject_name == "Ada Lovelace"
+    assert rows["number_a"].rejection_reason is None
+    assert rows["number_a"].provider_refs == {"bundle_sid": "BU1"}
+    assert rows["number_b"].subject_name == "Grace Hopper"
+    assert rows["number_ended"].subject_name is None
+    assert rows["number_ended"].provider_refs == {"bundle_sid": "BU3"}
+    # An open org and any other org keep everything.
+    for name in ("open", "other"):
+        row = rows[name]
+        assert row.provider_refs == {**_KEPT_REFS, **_ANSWER_REFS}, name
+        assert row.subject_name == "Ada Lovelace", name
+    assert rows["open"].rejection_reason == "Fix the website"
+
+
+async def test_closed_org_clear_waits_for_closed_at_and_takes_one_org(async_session):
+    now = datetime.now(timezone.utc)
+    later, first, second = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async_session.add_all(
+        [
+            OrgClosure(
+                organization_id=later,
+                closed_at=now + timedelta(days=1),
+                source="hail_website",
+            ),
+            OrgClosure(organization_id=first, closed_at=now, source="hail_website"),
+            OrgClosure(organization_id=second, closed_at=now, source="hail_website"),
+        ]
+    )
+    rows = [_verification(org) for org in (later, first, second)]
+    async_session.add_all(rows)
+    await async_session.commit()
+
+    assert await clear_closed_org_registrations(async_session, now, first) == 1
+    for row in rows:
+        await async_session.refresh(row)
+    assert [("application" in r.provider_refs) for r in rows] == [True, False, True]

@@ -1990,7 +1990,7 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
     assert carrier.submitted == []
     await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
     carrier.remote_status = ProviderStatus(state="approved")
@@ -2084,7 +2084,7 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
@@ -6817,6 +6817,39 @@ async def test_old_ended_applications_lose_their_saved_answers(
         assert kept is (name in ("new_cancelled", "old_submitted")), name
         # Only the answers go: the billing mark stays.
         assert row.provider_refs["brand_reused"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_background_pass_deletes_answers_of_closed_orgs(
+    client, org_and_key, sms_carrier, async_session
+):
+    """The pass clears a closed org's answers even when the closure endpoint
+    did not (it failed, or a refresh wrote them back)."""
+    from datetime import datetime, timezone
+
+    from hailhq.api.routes.verifications import sweep_verifications
+    from hailhq.core.models import OrgClosure
+
+    org_id, _, key = org_and_key
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    assert "application" in row.provider_refs
+    async_session.add(
+        OrgClosure(
+            organization_id=org_id,
+            closed_at=datetime.now(timezone.utc),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+
+    counts = await sweep_verifications(async_session, lambda *_: None)
+
+    assert counts["closed"] == 1
+    await async_session.refresh(row)
+    assert not {"application", "campaign", "subject_name"} & row.provider_refs.keys()
+    assert row.subject_name is None and row.state == "submitted"
+    assert (await sweep_verifications(async_session, lambda *_: None))["closed"] == 0
 
 
 @pytest.mark.usefixtures("us_number")

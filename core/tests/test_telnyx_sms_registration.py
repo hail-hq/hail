@@ -2815,7 +2815,11 @@ async def test_campaign_operational_errors_keep_the_brand_retryable(status, deta
 
 
 @pytest.mark.parametrize("subject", ["person", "business"])
-async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+# No text at all: deleted when the account closed.
+@pytest.mark.parametrize("saved", [{"campaign": {}}, {}])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(
+    subject, saved
+):
     calls = []
 
     def handler(req):
@@ -2823,7 +2827,7 @@ async def test_legacy_sender_waits_for_information_without_new_paid_resources(su
         return httpx.Response(200, json={"identityStatus": "VERIFIED"})
 
     provider = _provider(handler)
-    refs = {"brand_id": "B1", "subject_type": subject, "campaign": {}}
+    refs = {"brand_id": "B1", "subject_type": subject, **saved}
     assert (await provider.status(refs)).state == "pending"
     assert provider.step(refs) == "needs_information" and refs["brand_id"] == "B1"
     assert set(calls) == {"GET"}

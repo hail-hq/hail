@@ -29,6 +29,9 @@ explicit replacement for that cascade. Unlike Call/Sms/Email, contacts have
 no separate "content" field to scrub — a ``Contact`` row *is* identifying
 data (name, phone, email) — so it's deleted outright, not content-cleared.
 
+Also clears the US texting registration answers on ``carrier_verifications``
+at close, with no 12-month wait: see ``clear_closed_org_registrations``.
+
 Run as a one-shot script::
 
     cd core && uv run python -m hailhq.core.retention
@@ -46,21 +49,89 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from hailhq.core.file_uploads import delete_org_verification_uploads
-from hailhq.core.models import Call, Contact, Email, FileUpload, OrgClosure, Sms
+from hailhq.core.models import (
+    Call,
+    CarrierVerification,
+    Contact,
+    Email,
+    FileUpload,
+    OrgClosure,
+    Sms,
+)
 from hailhq.core.recordings import delete_recording
 from hailhq.core.sms_evidence import delete_org_evidence
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import Text, and_, case, cast, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RETENTION_PERIOD_AFTER_CLOSURE", "PurgeSummary", "purge_expired_data"]
+__all__ = [
+    "REGISTRATION_ANSWER_REFS",
+    "RETENTION_PERIOD_AFTER_CLOSURE",
+    "PurgeSummary",
+    "clear_closed_org_registrations",
+    "purge_expired_data",
+]
 
 # "12 months" approximated as a fixed day-count. This is a compliance
 # boundary, not a billing-precision figure, so a plain timedelta avoids
 # pulling in a calendar-math dependency (e.g. dateutil.relativedelta) for
 # one constant.
 RETENTION_PERIOD_AFTER_CLOSURE = timedelta(days=365)
+
+
+# The ``provider_refs`` keys that copy what the customer typed into a US
+# texting registration: the answers (names, address, tax ID, contacts), the
+# texting program text filed from them, and the sender name.
+REGISTRATION_ANSWER_REFS = ("application", "campaign", "subject_name")
+
+
+async def clear_closed_org_registrations(
+    session: AsyncSession, now: datetime, organization_id: UUID | None = None
+) -> int:
+    """Delete the registration answers of closed organizations, at close.
+
+    For every ``carrier_verifications`` row of an org in ``org_closures``
+    (``closed_at`` reached; one org when ``organization_id`` is given):
+
+    * drops ``REGISTRATION_ANSWER_REFS`` from ``provider_refs``;
+    * clears ``rejection_reason`` (a carrier's text can quote the filing;
+      the audit row keeps it);
+    * clears ``subject_name``, except on a live number verification: two
+      nameless live ones would break the
+      ``carrier_verifications_number_nameless_live_uniq`` index.
+
+    Keeps the state, timestamps, carrier ids and the billing keys
+    (``brand_reused``, the filed campaign ids). Safe to run again: a second
+    run changes nothing. Commits. Returns how many rows changed. Never logs
+    a value.
+    """
+    closed = select(OrgClosure.organization_id).where(OrgClosure.closed_at <= now)
+    if organization_id is not None:
+        closed = closed.where(OrgClosure.organization_id == organization_id)
+    keys = cast(array(REGISTRATION_ANSWER_REFS), ARRAY(Text))
+    v = CarrierVerification
+    name_goes = or_(v.purpose == "sms", v.state.in_(("cancelled", "rejected")))
+    result = await session.execute(
+        update(v)
+        .where(
+            v.organization_id.in_(closed),
+            or_(
+                v.provider_refs.has_any(keys),
+                v.rejection_reason.isnot(None),
+                and_(v.subject_name.isnot(None), name_goes),
+            ),
+        )
+        .values(
+            provider_refs=v.provider_refs.op("-")(keys),
+            rejection_reason=None,
+            subject_name=case((name_goes, None), else_=v.subject_name),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    return result.rowcount or 0
 
 
 @dataclass

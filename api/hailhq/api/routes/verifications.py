@@ -120,6 +120,7 @@ from hailhq.core.providers.verification.document_check import (
 from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
+from hailhq.core.retention import clear_closed_org_registrations
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
@@ -2997,8 +2998,10 @@ async def _reject_row(
 
 
 async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str, int]:
-    """Background pass: submit drafts that are still waiting, and pull the
-    carrier's answer for submitted ones. Returns counts for the log."""
+    """Background pass: submit drafts that are still waiting, pull the
+    carrier's answer for submitted ones, and delete saved answers that must
+    go (30 days after an end, or at account close). Returns counts for the
+    log."""
     now = datetime.now(timezone.utc)
     submitted = refreshed = 0
     waiting = (
@@ -3039,7 +3042,14 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
     await _release_unused_holds(db, now)
     await reconcile_approved_registrations(db, registry)
     forgotten = await forget_old_applications(db, now)
-    return {"submitted": submitted, "refreshed": refreshed, "forgotten": forgotten}
+    # Last: a refresh above may have written a closed org's answers back.
+    closed = await clear_closed_org_registrations(db, now)
+    return {
+        "submitted": submitted,
+        "refreshed": refreshed,
+        "forgotten": forgotten,
+        "closed": closed,
+    }
 
 
 async def forget_old_applications(db: AsyncSession, now: datetime) -> int:

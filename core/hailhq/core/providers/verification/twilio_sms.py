@@ -492,7 +492,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             # Recover a paid submission whose response was lost before retrying.
             if self._recover_campaign(refs):
                 return ProviderStatus(state="pending")
-            text = refs["campaign"]
+            # No text once the account closed (its answers are deleted): held.
+            text = refs.get("campaign") or {}
             if text.get("schema_version", 1) < 2:
                 refs["needs_information"] = True
                 return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)

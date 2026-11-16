@@ -703,7 +703,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if await self.recover_campaign(refs, brand):
                     await self._set_replies(refs)
                     return ProviderStatus(state="pending")
-                text = refs["campaign"]
+                # No text once the account closed (its answers are deleted): held.
+                text = refs.get("campaign") or {}
                 if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
                     refs["needs_information"] = True
                     return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)

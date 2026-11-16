@@ -1093,7 +1093,11 @@ async def test_campaign_operational_errors_are_retryable(status, message):
 
 
 @pytest.mark.parametrize("subject", ["person", "business"])
-async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+# No text at all: deleted when the account closed.
+@pytest.mark.parametrize("saved", [{"campaign": {}}, {}])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(
+    subject, saved
+):
     responses = _ok_responses()
     responses["brand_registrations.fetch"] = SimpleNamespace(
         status="APPROVED", identity_status="VERIFIED"
@@ -1103,7 +1107,7 @@ async def test_legacy_sender_waits_for_information_without_new_paid_resources(su
         "brand_sid": "BN1",
         "messaging_service_sid": "MG1",
         "subject_type": subject,
-        "campaign": {},
+        **saved,
     }
     assert (await provider.status(refs)).state == "pending"
     assert provider.step(refs) == "needs_information" and refs["brand_sid"] == "BN1"
