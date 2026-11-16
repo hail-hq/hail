@@ -17,14 +17,17 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
+import httpx
+from didww.exceptions import DidwwApiError
 from hailhq.core.carrier_offer import Approval, CarrierOffer
 from hailhq.core.config import settings
 from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.voice import OrderState, didww, telnyx, twilio
-from hailhq.core.providers.voice.base import LegCosts
+from hailhq.core.providers.voice.base import CarrierRequestError, LegCosts
 from hailhq.core.schemas import NumberType
+from twilio.base.exceptions import TwilioRestException
 
 TWILIO = "twilio"
 TELNYX = "telnyx"
@@ -256,3 +259,37 @@ def sms_status_path(provider: str) -> str:
 
 def inbound_trunk(provider: str) -> str:
     return carrier(provider).inbound_trunk()
+
+
+# A 4xx a retry does not change. Not these: 401/403 (credentials or account
+# setup, an operator fixes them), 404 (the adapters already treat it as
+# gone), 408/409/425/429 (timing).
+_RETRYABLE_4XX = frozenset({401, 403, 404, 408, 409, 425, 429})
+
+
+def _http_status(exc: BaseException) -> int | None:
+    if isinstance(exc, (CarrierRequestError, TwilioRestException)):
+        return exc.status
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    if isinstance(exc, DidwwApiError):
+        return exc.status_code
+    return None
+
+
+def final_refusal(exc: BaseException) -> int | None:
+    """The HTTP status when a carrier refused a request for good (a 4xx a
+    retry does not change), else None. Reads ``exc`` and the errors it was
+    raised from, so a plug-in error that wraps the carrier's still counts.
+    Never the carrier's text: callers store and log the status only."""
+    seen: BaseException | None = exc
+    for _ in range(5):
+        if seen is None:
+            break
+        status = _http_status(seen)
+        if status is not None:
+            if 400 <= status < 500 and status not in _RETRYABLE_4XX:
+                return status
+            return None
+        seen = seen.__cause__ or seen.__context__
+    return None

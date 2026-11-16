@@ -25,6 +25,7 @@ from hailhq.core.providers.verification.base import (
     RegistrationHoldsAnotherNumber,
     SmsRegistrationProvider,
 )
+from hailhq.core.retention import org_closed
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -460,7 +461,9 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
         )
 
 
-async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
+async def reconcile_approved_registrations(
+    db: AsyncSession, registry, now: datetime | None = None
+) -> int:
     """Repair missing campaign links, including numbers held before territory support.
 
     Only an existing approved campaign is used; this never files a new brand
@@ -486,6 +489,11 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
                     CarrierVerification.purpose == "sms",
                     CarrierVerification.state == "approved",
                     missing_number,
+                    # A closed org's numbers are released, never attached.
+                    ~org_closed(
+                        CarrierVerification.organization_id,
+                        now or datetime.now(timezone.utc),
+                    ),
                 )
             )
         )

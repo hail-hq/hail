@@ -33,6 +33,7 @@ from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
 )
+from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -153,7 +154,12 @@ async def finish_order(
         meta["failure_reason"] = reason or "the carrier did not complete the order"
     number.provisioning_metadata = meta
     await db.commit()
-    if not failed and "sms" in number.capabilities:
+    if (
+        not failed
+        and "sms" in number.capabilities
+        # A closed org's number is released by the close step, not set up.
+        and not await org_is_closed(db, number.organization_id)
+    ):
         # The number is bought and billed; SMS setup is a separate, retried
         # step (assigning a texts agent or POST /enable-sms runs it again).
         # The commit above released the transaction-scoped org lock. Take it
@@ -1078,6 +1084,10 @@ async def sync_sms_setup() -> None:
                         PhoneNumber.provisioning_state == "active",
                         PhoneNumber.messaging_service_sid.is_(None),
                         PhoneNumber.capabilities.any("sms"),
+                        # Never set up a closed org's number: it is released.
+                        ~org_closed(
+                            PhoneNumber.organization_id, datetime.now(timezone.utc)
+                        ),
                     )
                     .limit(50)
                 )

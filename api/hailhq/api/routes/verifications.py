@@ -120,7 +120,7 @@ from hailhq.core.providers.verification.document_check import (
 from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
-from hailhq.core.retention import clear_closed_org_registrations
+from hailhq.core.retention import clear_closed_org_registrations, org_closed
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
@@ -3000,8 +3000,10 @@ async def _reject_row(
 async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str, int]:
     """Background pass: submit drafts that are still waiting, pull the
     carrier's answer for submitted ones, and delete saved answers that must
-    go (30 days after an end, or at account close). Returns counts for the
-    log."""
+    go (30 days after an end, or at account close). Closed orgs are skipped
+    except for that delete; ``hailhq.api.org_close`` releases their numbers
+    and cancels their registrations first (the worker runs it before this).
+    Returns counts for the log."""
     now = datetime.now(timezone.utc)
     submitted = refreshed = 0
     waiting = (
@@ -3010,6 +3012,8 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
                 select(CarrierVerification.id).where(
                     CarrierVerification.state == "awaiting_review",
                     CarrierVerification.updated_at <= now - _RETRY_SUBMIT_AFTER,
+                    # A closed org files nothing: the close step cancels it.
+                    ~org_closed(CarrierVerification.organization_id, now),
                 )
             )
         )
@@ -3023,7 +3027,9 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
         (
             await db.execute(
                 select(CarrierVerification).where(
-                    CarrierVerification.state.in_(_POLLED_STATES)
+                    CarrierVerification.state.in_(_POLLED_STATES),
+                    # A poll can file a campaign: never for a closed org.
+                    ~org_closed(CarrierVerification.organization_id, now),
                 )
                 # Oldest first: with credit for one campaign, the oldest
                 # registration gets it, as in the list.
@@ -3040,7 +3046,7 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
             refreshed += 1
     # Before the repair pass: a carrier error there must not keep holds.
     await _release_unused_holds(db, now)
-    await reconcile_approved_registrations(db, registry)
+    await reconcile_approved_registrations(db, registry, now)
     forgotten = await forget_old_applications(db, now)
     # Last: a refresh above may have written a closed org's answers back.
     closed = await clear_closed_org_registrations(db, now)
@@ -3485,18 +3491,7 @@ async def cancel_verification(
             detail="The verification changed while cancellation was prepared; refresh its current status.",
         )
     approved_sms = row.purpose == "sms" and row.state in ("approved", "submitted")
-    state_before = row.state
-    if approved_sms:
-        await _detach_registration(db, row, provider)
-    kept: dict = {}
-    if isinstance(provider, SmsRegistrationProvider) and row.state == "rejected":
-        kept = await provider.discard_rejected(row.provider_refs)
-    elif provider is not None:
-        await provider.discard(row.provider_refs)
-    now = datetime.now(timezone.utc)
-    row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
-    row.updated_at = row.cancelled_at = now
-    await _release_number_hold(db, row)
+    state_before = await cancel_locked(db, row, provider)
     await db.commit()
     _notify_billing([row])
     if approved_sms:
@@ -3512,6 +3507,40 @@ async def cancel_verification(
             actor_kind=actor_kind,
         )
     return _out(row, registry)
+
+
+async def cancel_locked(
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider | None,
+    *,
+    keep_brand: bool = True,
+) -> str:
+    """Cancel ``row`` at the carrier and in Hail: numbers leave an approved
+    SMS registration, the carrier draft or filing is discarded, the refs
+    are emptied, ``cancelled_at`` is set and a number verification's hold
+    goes back. The caller holds the org lock and the row lock, decides
+    whether the row may be cancelled, commits, and rates, notifies and
+    audits. ``keep_brand`` False discards a rejected filing whole, a brand
+    ``discard_rejected`` would keep too (account close). Returns the state
+    before."""
+    state_before = row.state
+    if row.purpose == "sms" and row.state in ("approved", "submitted"):
+        await _detach_registration(db, row, provider)
+    kept: dict = {}
+    if (
+        keep_brand
+        and isinstance(provider, SmsRegistrationProvider)
+        and row.state == "rejected"
+    ):
+        kept = await provider.discard_rejected(row.provider_refs)
+    elif provider is not None:
+        await provider.discard(row.provider_refs)
+    now = datetime.now(timezone.utc)
+    row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
+    row.updated_at = row.cancelled_at = now
+    await _release_number_hold(db, row)
+    return state_before
 
 
 async def _detach_registration(

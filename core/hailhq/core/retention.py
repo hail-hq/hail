@@ -1,15 +1,14 @@
 """Post-account-closure retention sweep.
 
 Founder policy: transcripts and stored email content are retained for the
-account's duration + 12 months after account closure. hail's own database
-does not own account/org lifecycle state (organizations/accounts live in
-the separate hail-website repo's Postgres, better-auth schema), so it
-cannot on its own tell whether an org is closed or when — that's what
-``org_closures`` (see ``hailhq.core.models.OrgClosure``) exists to record.
-hail-website calls ``POST /internal/org-closures`` on account close/delete
-to populate it (see
-``api/hailhq/api/routes/internal/org_closures.py`` for the receiving
-endpoint and integration note — this module does not make that call).
+account's duration + 12 months after account closure. hail does not own
+account/org lifecycle state: hail-website owns the ``organizations`` table
+(better-auth schema) in the same database and deletes the row on account
+deletion, so hail cannot tell from it whether an org is closed or when.
+That's what ``org_closures`` (see ``hailhq.core.models.OrgClosure``)
+records. hail-website's account deletion inserts the row in its own
+deletion transaction, then calls ``POST /internal/org-closures`` (see
+``api/hailhq/api/routes/internal/org_closures.py``).
 
 An org with no ``org_closures`` row, or one closed less than 12 months
 ago, is left completely untouched by this sweep.
@@ -60,7 +59,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.recordings import delete_recording
 from hailhq.core.sms_evidence import delete_org_evidence
-from sqlalchemy import Text, and_, case, cast, delete, or_, select, update
+from sqlalchemy import Text, and_, case, cast, delete, exists, or_, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +70,9 @@ __all__ = [
     "RETENTION_PERIOD_AFTER_CLOSURE",
     "PurgeSummary",
     "clear_closed_org_registrations",
+    "closed_org_ids",
+    "org_closed",
+    "org_is_closed",
     "purge_expired_data",
 ]
 
@@ -96,6 +98,37 @@ REGISTRATION_ANSWER_REFS = (
 )
 
 
+def closed_org_ids(now: datetime, organization_id: UUID | None = None):
+    """SELECT of the organizations closed by ``now`` (one org when
+    ``organization_id`` is given). Only an ``org_closures`` row closes an
+    org: a missing ``organizations`` row does not (the self-hosted org has
+    none)."""
+    closed = select(OrgClosure.organization_id).where(OrgClosure.closed_at <= now)
+    if organization_id is not None:
+        closed = closed.where(OrgClosure.organization_id == organization_id)
+    return closed
+
+
+def org_closed(org_column, now: datetime):
+    """SQL test: the org in ``org_column`` is closed by ``now``. NOT EXISTS
+    (``~org_closed(...)``) keeps rows whose org is NULL (pool numbers),
+    which ``NOT IN`` would drop."""
+    return exists().where(
+        OrgClosure.organization_id == org_column, OrgClosure.closed_at <= now
+    )
+
+
+async def org_is_closed(
+    session: AsyncSession, organization_id: UUID | None, now: datetime | None = None
+) -> bool:
+    """True when ``organization_id`` has an ``org_closures`` row closed by
+    ``now`` (default: the current time)."""
+    if organization_id is None:
+        return False
+    at = now or datetime.now(timezone.utc)
+    return bool(await session.scalar(select(org_closed(organization_id, at))))
+
+
 async def clear_closed_org_registrations(
     session: AsyncSession, now: datetime, organization_id: UUID | None = None
 ) -> int:
@@ -116,9 +149,7 @@ async def clear_closed_org_registrations(
     run changes nothing. Commits. Returns how many rows changed. Never logs
     a value.
     """
-    closed = select(OrgClosure.organization_id).where(OrgClosure.closed_at <= now)
-    if organization_id is not None:
-        closed = closed.where(OrgClosure.organization_id == organization_id)
+    closed = closed_org_ids(now, organization_id)
     keys = cast(array(REGISTRATION_ANSWER_REFS), ARRAY(Text))
     v = CarrierVerification
     name_goes = or_(v.purpose == "sms", v.state.in_(("cancelled", "rejected")))

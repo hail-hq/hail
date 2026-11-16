@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from fastapi import BackgroundTasks
+from hailhq.api.routes.internal import org_closures as org_closures_module
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.internal.org_closures import (
     OrgClosureIn,
@@ -111,11 +113,23 @@ async def test_happy_path_inserts_row(
 
 
 @pytest.mark.asyncio
-async def test_closure_deletes_the_orgs_texting_registration_answers(
+async def test_closure_cancels_the_registration_and_deletes_its_answers(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     internal_secret_set,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    discarded: list[dict] = []
+
+    class _Carrier:
+        async def discard(self, refs):
+            discarded.append(dict(refs))
+
+    monkeypatch.setattr(
+        org_closures_module,
+        "get_verification_provider",
+        lambda name, purpose="number": _Carrier(),
+    )
     closed, other = uuid.uuid4(), uuid.uuid4()
     refs = {
         "brand_sid": "BN1",
@@ -154,8 +168,11 @@ async def test_closure_deletes_the_orgs_texting_registration_answers(
 
     for row in rows:
         await async_session.refresh(row)
-    assert rows[0].provider_refs == {"brand_sid": "BN1", "brand_reused": True}
-    assert rows[0].subject_name is None and rows[0].state == "approved"
+    # Cancelled at the carrier (after the response), then the answers go.
+    assert [d["brand_sid"] for d in discarded] == ["BN1"]
+    assert rows[0].provider_refs == {"brand_reused": True}
+    assert rows[0].subject_name is None and rows[0].state == "cancelled"
+    assert rows[1].state == "approved"
     assert rows[1].provider_refs == refs
     assert rows[1].subject_name == "Ada Lovelace"
 
@@ -221,6 +238,7 @@ async def test_concurrent_notifications_for_same_org_do_not_race(
                     organization_id=org_id, closed_at=closed_at, source="hail_website"
                 ),
                 session,
+                BackgroundTasks(),
             )
 
     # Warm the pool with two concurrent connections first. On a cold pool,

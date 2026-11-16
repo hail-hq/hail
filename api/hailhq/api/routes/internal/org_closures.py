@@ -1,16 +1,19 @@
 """POST /internal/org-closures — hail-website → API.
 
-hail-website must call this endpoint when an account is closed/deleted,
-so hail's own retention sweep (``hailhq.core.retention.purge_expired_data``)
-can find orgs past the account-duration + 12-months retention window —
-hail's DB otherwise has no way to know an org closed at all (see
-``hailhq.core.models.OrgClosure``). That call is a separate change in the
-hail-website repo, not built here — this is only the receiving endpoint.
+hail-website's account deletion inserts the ``org_closures`` row inside its
+own deletion transaction (hail-website and hail share the same database),
+then calls this endpoint, which upserts the same row (see
+``hailhq.core.models.OrgClosure``). hail's retention sweep
+(``hailhq.core.retention.purge_expired_data``) reads it later.
 
-At close it also deletes the org's US texting registration answers
-(``hailhq.core.retention.clear_closed_org_registrations``). The
-verification background pass runs the same delete for every closed org,
-so a failure here is retried there.
+After the response, for that org, it releases the numbers and cancels the
+carrier registrations (``hailhq.api.org_close.close_org_carrier_items``),
+then deletes the US texting registration answers
+(``hailhq.core.retention.clear_closed_org_registrations``). The carrier
+calls can take longer than the caller waits, so they run after the
+response. The verification worker runs both for every closed org on each
+pass, so a failure here is retried there, and a closure row with no call is
+handled too.
 
 Idempotent: re-notifying the same ``organization_id`` (e.g. a retry, or a
 corrected ``closed_at``) updates the existing row rather than erroring.
@@ -22,15 +25,20 @@ infrastructure → API, like ``ses_events.py``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
+from hailhq.api.org_close import close_org_carrier_items
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.db import get_session
+from hailhq.core.db import background_context, get_session, session_scope
+from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import OrgClosure
+from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.retention import clear_closed_org_registrations
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -52,10 +60,42 @@ class OrgClosureIn(BaseModel):
     source: str = "hail_website"
 
 
+async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
+    """Release the org's numbers, cancel its registrations, then delete its
+    texting answers, in a fresh session. Never raises: the verification
+    worker retries whatever is left."""
+    now = datetime.now(timezone.utc)
+    async with session_scope() as db:
+        try:
+            await close_org_carrier_items(
+                db, now, get_verification_provider, lk, organization_id
+            )
+        except Exception:
+            await db.rollback()
+            logger.exception("org closure: carrier close step failed")
+        try:
+            cleared = await clear_closed_org_registrations(db, now, organization_id)
+            logger.info("org closure: %d verification(s) cleared", cleared)
+        except Exception:
+            await db.rollback()
+            logger.exception("org closure: could not clear verification answers")
+
+
+async def _close_after_response(
+    organization_id: UUID, lk: LiveKitClient | None
+) -> None:
+    # On the background pool: the carrier calls hold a session for seconds.
+    await asyncio.create_task(
+        close_org(organization_id, lk), context=background_context()
+    )
+
+
 @router.post("/org-closures")
 async def record_org_closure(
     body: OrgClosureIn,
     db: Annotated[AsyncSession, Depends(get_session)],
+    background: BackgroundTasks,
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)] = None,
 ) -> dict:
     stmt = (
         pg_insert(OrgClosure)
@@ -71,15 +111,7 @@ async def record_org_closure(
     )
     await db.execute(stmt)
     await db.commit()
-    # Not part of recording the closure: the background pass retries it.
-    try:
-        cleared = await clear_closed_org_registrations(
-            db, datetime.now(timezone.utc), body.organization_id
-        )
-        logger.info("org closure: %d verification(s) cleared", cleared)
-    except Exception:
-        await db.rollback()
-        logger.exception("org closure: could not clear verification answers")
+    background.add_task(_close_after_response, body.organization_id, lk)
     return {
         "organization_id": str(body.organization_id),
         "closed_at": body.closed_at.isoformat(),

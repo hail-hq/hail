@@ -33,3 +33,31 @@ The implementation is in [number_orders.py](../../api/hailhq/api/number_orders.p
 Telnyx's [number adapter](../../core/hailhq/core/providers/voice/telnyx.py)
 separates the US/Canadian destination code from subscriber digits during
 search and checks every returned number against the requested prefix.
+
+## Release at account close
+
+When hail-website deletes an account, the org gets an `org_closures` row.
+[`close_org_carrier_items`](../../api/hailhq/api/org_close.py) releases each
+of its numbers through `release_org_number`, the same code as
+`DELETE /numbers/{id}`. It runs after `POST /internal/org-closures`
+answers, and on every verification worker pass.
+
+- A pending order is released on a later pass, once the order reconciler
+  has the carrier's answer. SMS setup is skipped for a closed org's number.
+- A failed release is retried on the next pass.
+- A 4xx a retry does not change (not 401, 403, 404, 408, 409, 425, 429), or
+  a carrier Hail cannot release through the API, is stored as
+  `provisioning_metadata.release_refused` (`status`, `at`). That number is
+  not tried again: release it at the carrier by hand.
+- No ledger row and no audit row is written. DIDWW ends a number at the end
+  of its billing cycle and does not refund.
+
+```sql
+BEGIN READ ONLY;
+SELECT id, organization_id, provisioning_state,
+       provisioning_metadata->'release_refused' AS release_refused
+FROM phone_numbers
+WHERE organization_id IN (SELECT organization_id FROM org_closures)
+  AND provisioning_state <> 'released';
+ROLLBACK;
+```
