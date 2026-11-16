@@ -3,8 +3,9 @@ name: CI
 on:
   pull_request:
     # A PR that changes only these files runs nothing here: no job lints,
-    # tests or builds them. Python files anywhere still run (lint covers the
-    # whole tree), and so do costs/ (the API tests read it).
+    # tests or builds them. core/tests/test_deploy_paths.py fails if this
+    # list covers Python, TOML or lock files, costs/, cli/, openapi/, or any
+    # file an image copies.
     # A skipped run reports no checks, so a required check on main would
     # block these PRs forever: drop this list before requiring a CI job.
     paths-ignore:

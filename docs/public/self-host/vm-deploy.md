@@ -142,7 +142,7 @@ The GHCR push uses the workflow's `GITHUB_TOKEN` (already scoped `packages: writ
 
 ## 6. Trigger the first deploy
 
-Push a commit to `main` that changes service code, or run **Actions → Deploy → Run workflow** in the GitHub UI. A push that changes only docs, the web sites or the CLI does not deploy (`paths-ignore` in `.github/workflows/deploy.yml`). The workflow:
+Push a commit to `main` that changes service code, or run **Actions → Deploy → Run workflow** in the GitHub UI. A push that changes only docs, the web sites, the CLI or other files the services never read does not deploy (`paths-ignore` in `.github/workflows/deploy.yml`). The workflow:
 
 1. Builds `api`, `voicebot`, `mcp` images in parallel and pushes both `sha-<commit>` and `latest` to ghcr.io/hail-hq/hail-\*.
 2. Connects to the VM with SSH, fetches the new commit, and runs `alembic upgrade head`. Then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` rolls every service except the voicebot onto the newly pulled `:latest`.
