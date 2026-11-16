@@ -133,6 +133,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     claim_trial_send,
     is_verified_trial_phone,
+    trial_enabled,
 )
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
@@ -2140,9 +2141,12 @@ async def agent_handover_sms(
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
     org = call.organization_id
     cannot_text = from_number is None or "sms" not in from_number.capabilities
-    # A number that cannot text skips the notice, unless the contact is the
-    # workspace's verified trial phone: then the trial number may send it.
-    if cannot_text and not await is_verified_trial_phone(db, org, to):
+    # A number that cannot text skips the notice, unless trial texting is on
+    # and the contact is the workspace's verified trial phone: then the
+    # trial number may send it.
+    if cannot_text and not (
+        trial_enabled() and await is_verified_trial_phone(db, org, to)
+    ):
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     denial = await _shared_denial(db, call)
     if denial is not None:

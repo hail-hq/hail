@@ -518,7 +518,7 @@ async def test_handover_voice_only_number_texts_the_verified_phone(
     assert sms_mock.send_sms.await_args.kwargs["from_e164"] == TRIAL_E164
 
 
-@pytest.mark.parametrize("case", ["not_verified_phone", "cap_used_25"])
+@pytest.mark.parametrize("case", ["not_verified_phone", "cap_used_25", "feature_off"])
 async def test_handover_voice_only_number_still_skips_other_contacts(
     client, async_session, sms_mock, monkeypatch, case
 ):
@@ -530,13 +530,15 @@ async def test_handover_voice_only_number_still_skips_other_contacts(
     to = OTHER_PHONE if case == "not_verified_phone" else PHONE
     if case == "cap_used_25":
         await seed_trial_texts(async_session, org, 25)
+    if case == "feature_off":
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
     send = await _handover(
         async_session, org, to, registered=False, capabilities=("voice",)
     )
 
     assert await send(client) == {"sms": "skipped:number_cannot_text"}
     sms_mock.send_sms.assert_not_awaited()
-    if case == "not_verified_phone":
+    if case != "cap_used_25":
         # Returned before the gates: the send caps logged nothing.
         logs = (
             (
