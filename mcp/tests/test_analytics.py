@@ -22,6 +22,7 @@ _MODERN = "2026-07-28"
 _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
 _ORG = "00000000-0000-0000-0000-0000000000aa"
+_USER = "00000000-0000-0000-0000-0000000000bb"
 
 
 def _body(resp: httpx.Response) -> dict:
@@ -63,6 +64,8 @@ async def _session(
         "hailhq.core.config.settings.hail_api_key", "" if oauth else "hl_live_test"
     )
     monkeypatch.setattr("hailhq.core.config.settings.next_public_posthog_key", token)
+    # The reload below sets this flag; monkeypatch puts it back after the test.
+    monkeypatch.setattr("hailhq.mcp.tools._analytics_actor", False)
     # A capture that escapes the patch below goes nowhere.
     monkeypatch.setattr(
         "hailhq.core.config.settings.next_public_posthog_host", "http://127.0.0.1:9"
@@ -85,12 +88,14 @@ async def _session(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
     auth = _AUTH if oauth else {}
-    # What _actor_for caches for this bearer when Logfire telemetry is on.
+    # What _actor_for caches for this bearer.
     key = hashlib.sha256(b"user.jwt.token").hexdigest()
-    cache = {key: (time.monotonic() + 300, {"organization_id": _ORG})}
+    actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
+    cache = {key: (time.monotonic() + 300, actor)}
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
     call = {"name": "list_number_regions", "arguments": {}}
 
+    # Imported here: building the app at import needs the auth settings above.
     import hailhq.mcp.server as srv
 
     srv = importlib.reload(srv)
@@ -163,10 +168,12 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     assert props["$mcp_server_build"] == "abc1234"
     assert set(props) <= analytics._KEPT_PROPERTIES
     if oauth:
-        assert calls[0]["distinct_id"] == _ORG
+        assert calls[0]["distinct_id"] == _USER
         assert props["$groups"] == {"organization": _ORG}
+        assert props["$process_person_profile"] is True
     else:
         assert "$groups" not in props
+        assert props["$process_person_profile"] is False
     assert _SECRET not in json.dumps([e for _, e in events], default=str)
 
 
@@ -182,4 +189,20 @@ def test_keep_metadata_drops_content():
     }
     assert analytics._keep_metadata(event)["properties"] == {
         "$mcp_tool_name": "send_sms"
+    }
+
+
+def test_keep_metadata_org_without_user():
+    event = {
+        "distinct_id": "ses_1",
+        "properties": {
+            analytics._ORG_PROPERTY: _ORG,
+            "$process_person_profile": False,
+        },
+    }
+    kept = analytics._keep_metadata(event)
+    assert kept["distinct_id"] == _ORG
+    assert kept["properties"] == {
+        "$process_person_profile": False,
+        "$groups": {"organization": _ORG},
     }

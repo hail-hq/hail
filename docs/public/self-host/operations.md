@@ -184,10 +184,10 @@ Run `hail login`. The CLI opens `/device` on the website. You approve, and the C
 
 The MCP service (`hail/mcp`) picks one of two modes at boot from env:
 
-| Mode           | Env                                                            | Behaviour                                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mode           | Env                                                            | Behaviour                                                                                                                                                                                    |
+| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **oauth-rs**   | `HAIL_AUTH_URL` + `MCP_RESOURCE_URL` set, `HAIL_API_KEY` empty | MCPServer rejects unauth requests with `401 WWW-Authenticate: Bearer resource_metadata=…`; tools forward each request's JWT to the API; `.well-known/oauth-protected-resource` is published. |
-| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                  |
+| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                    |
 
 If both are set, boot fails with `ambiguous MCP auth config`. If neither is set, boot fails with `MCP auth not configured`. The service decides the mode once; a restart is necessary to change it.
 
@@ -199,7 +199,7 @@ Optional. The HTTP MCP server reuses `NEXT_PUBLIC_POSTHOG_KEY`, the PostHog proj
 
 - Sent: tool name, argument names (not values), duration, success or error type and status, MCP client name, version and User-Agent, protocol version, the tool name list on `tools/list`, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`). `_KEPT_PROPERTIES` is the full allowlist.
 - Never sent: argument values, tool results, error messages.
-- In oauth-rs mode, the caller's organization id is the `distinct_id` and the `organization` group. It comes from the actor cache that tools fill when Logfire telemetry is on (`HAIL_LOGFIRE_ENABLED=true`), so it adds no API call. Without it (telemetry off, static-key mode, or a caller's first `initialize` and `tools/list` before any tool call), events use the session id. Clients on protocol 2026-07-28 send no session id, so their sessionless events share one session id per process.
+- In oauth-rs mode, the caller's user id (the OAuth user or the API key owner) is the `distinct_id`, and the organization id is the `organization` group. The website identifies the same user id, so MCP events join that person. A caller with no user id uses the organization id. Both come from the actor cache that tool calls fill: one `whoami` call per bearer token, cached 5 minutes (30 seconds after a failed call), shared with Logfire. Without it (static-key mode, or a caller's first `initialize` and `tools/list` before any tool call), events use the session id. Clients on protocol 2026-07-28 send no session id, so their sessionless events share one session id per process.
 - Tool schemas and results are unchanged. The stdio entry point sends nothing.
 - `NEXT_PUBLIC_POSTHOG_HOST` sets the ingestion host for both. Empty means PostHog US Cloud.
 - Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.

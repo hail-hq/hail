@@ -1646,7 +1646,7 @@ func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
 
 // Address defines model for Address.
 type Address struct {
-	// City City or locality.
+	// City City or town of the street address, as written on mail sent there.
 	City string `json:"city"`
 
 	// CountryCode ISO alpha-2 address country.
@@ -1655,7 +1655,7 @@ type Address struct {
 	// CustomerName Name associated with the address.
 	CustomerName string `json:"customer_name"`
 
-	// PostalCode Postal or ZIP code.
+	// PostalCode Postal or ZIP code of the street address, such as `94103`.
 	PostalCode string `json:"postal_code"`
 
 	// Region State, province or region.

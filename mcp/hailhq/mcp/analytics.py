@@ -3,9 +3,10 @@
 Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
 timings, outcomes and client names only. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
-every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's org id
-becomes ``distinct_id`` and the ``organization`` group, read from the actor
-cache tools already fill (no extra API call). Tool schemas and tool results stay
+every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
+user id (OAuth token or API key owner) becomes ``distinct_id``, the same
+person id the website identifies, and the org id becomes the ``organization``
+group. Both come from the actor cache tool calls fill. Tool schemas and tool results stay
 unchanged, because the SDK options that inject arguments are turned off.
 Any setup or capture failure logs a warning and the server keeps serving.
 """
@@ -17,8 +18,17 @@ import logging
 from typing import Any
 
 from hailhq.core.config import settings
+from hailhq.mcp.tools import cached_actor_ids, resolve_actor_for_analytics
 
 logger = logging.getLogger(__name__)
+
+try:
+    from posthog import Posthog
+    from posthog.mcp import get_request_headers, instrument
+    from posthog.mcp.types import MCPAnalyticsOptions
+except ImportError:  # analytics must never block startup
+    logger.warning("PostHog SDK import failed; MCP analytics is off", exc_info=True)
+    Posthog = None
 _FLUSH_SECONDS = 2
 
 _KEPT_PROPERTIES = frozenset(
@@ -50,28 +60,33 @@ _KEPT_PROPERTIES = frozenset(
 
 
 _ORG_PROPERTY = "hail_organization_id"
+_USER_PROPERTY = "hail_user_id"
 
 
-def _organization(_request: Any, extra: Any) -> dict[str, str] | None:
-    from hailhq.mcp.tools import cached_organization_id
-    from posthog.mcp import get_request_headers
-
+def _actor(_request: Any, extra: Any) -> dict[str, str] | None:
     scheme, _, bearer = (
         (get_request_headers(extra) or {}).get("authorization") or ""
     ).partition(" ")
     if scheme.lower() != "bearer" or not bearer.strip():
         return None
-    org_id = cached_organization_id(bearer.strip())
-    return {_ORG_PROPERTY: org_id} if org_id else None
+    org_id, user_id = cached_actor_ids(bearer.strip())
+    ids = {_ORG_PROPERTY: org_id, _USER_PROPERTY: user_id}
+    return {k: v for k, v in ids.items() if v} or None
 
 
 def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
     properties = event.get("properties") or {}
     org_id = properties.get(_ORG_PROPERTY)
+    user_id = properties.get(_USER_PROPERTY)
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
+    if user_id or org_id:
+        event["distinct_id"] = user_id or org_id
     if org_id:
-        event["distinct_id"] = org_id
         event["properties"]["$groups"] = {"organization": org_id}
+    if user_id:
+        # The website identifies the same user id with email and name, so the
+        # event joins that person. Nothing personal is set from here.
+        event["properties"]["$process_person_profile"] = True
     return event
 
 
@@ -96,14 +111,11 @@ class Analytics:
 
 def instrument_analytics(server: Any) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
+    resolve_actor_for_analytics(False)
     token = settings.next_public_posthog_key
-    if not token:
+    if not token or Posthog is None:
         return None
     try:
-        from posthog import Posthog
-        from posthog.mcp import instrument
-        from posthog.mcp.types import MCPAnalyticsOptions
-
         client = Posthog(token, host=settings.next_public_posthog_host or None)
         options = MCPAnalyticsOptions(
             context=False,
@@ -111,10 +123,12 @@ def instrument_analytics(server: Any) -> Analytics | None:
             capture_model=False,
             enable_exception_autocapture=False,
             before_send=_keep_metadata,
-            event_properties=_organization,
+            event_properties=_actor,
             server_build=settings.logfire_service_version or None,
         )
-        return Analytics(client, instrument(server, client, options))
+        handle = instrument(server, client, options)
+        resolve_actor_for_analytics(True)
+        return Analytics(client, handle)
     except Exception:  # analytics must never block startup
         logger.warning("PostHog MCP analytics setup failed", exc_info=True)
         return None

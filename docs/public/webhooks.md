@@ -282,7 +282,9 @@ The CLI has no `webhooks` command group — for the full endpoint list, refer to
 
 ## Chat SDK
 
-Use Hail SMS in a [Vercel Chat SDK](https://chat-sdk.dev) bot:
+The published [Hail adapter](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS to a [Vercel Chat SDK](https://chat-sdk.dev) bot. Hail also supports email and phone calls through its APIs; this adapter currently exposes SMS.
+
+Install the adapter and a Chat SDK state backend:
 
 ```bash
 pnpm add @hail-hq/chat-sdk-adapter chat @chat-adapter/state-memory
@@ -309,9 +311,11 @@ Set `HAIL_API_KEY`, `HAIL_FROM_NUMBER` (your Hail-owned E.164 number), and
 `bot.webhooks.hail(request)`. Set `HAIL_RECIPIENT_CONSENT=true` only when you
 attest to the required consent for all recipients; otherwise sending fails.
 Clear the number's `sms_agent_id` if a Hail text agent would also answer it.
-Use a persistent state adapter in production.
+Memory state needs no external database. Use a shared state adapter, such as Redis or PostgreSQL, for multiple instances or serverless deployments; Redis is not a Hail requirement.
 
 The adapter verifies signatures, isolates conversations by phone pair, and
-supports SMS replies. It requires Node.js 20+ and `chat ^4.44.0`.
+supports SMS replies. It requires Node.js 20+ and `chat >=4.44.0`.
 Refer to the [adapter setup, configuration, and limitations](https://github.com/hail-hq/chat-sdk-adapter)
 and its [Next.js example](https://github.com/hail-hq/chat-sdk-adapter/tree/main/examples/nextjs).
+
+See the [0.1.0 release announcement](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0) for the published package and supported capabilities. Hail maintains the adapter; a Vercel vendor-official listing requires separate acceptance.
