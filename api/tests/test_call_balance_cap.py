@@ -755,3 +755,44 @@ async def test_no_default_limit_still_caps_to_the_balance(
     assert r.status_code == 201, r.text
     call = await async_session.get(Call, uuid.UUID(r.json()["id"]))
     assert call.max_duration_seconds == 710
+
+
+async def test_handover_unknown_price_keeps_the_hold_until_it_can_end(
+    client, async_session, add_phone_number, quote, monkeypatch
+):
+    # The call's own limit ends in 1 minute, but the handover runs to the
+    # agent's 10-minute limit: the hold must count that long.
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
+    quote.price = None
+    soon = datetime.now(timezone.utc) + timedelta(minutes=1)
+    data, call = await _handover(
+        client,
+        async_session,
+        add_phone_number,
+        1_000,
+        timedelta(seconds=30),
+        hold=(Decimal(100), soon),
+        limit=600,
+    )
+    assert data["ok"] is True
+    row = await _hold(async_session, call.id)
+    await async_session.refresh(row)
+    assert row.hold_until >= datetime.now(timezone.utc) + timedelta(seconds=600)
+
+
+async def test_available_reads_ledger_and_holds_in_one_statement(
+    async_session, monkeypatch
+):
+    # Two reads let a debit the rater commits between them be counted in
+    # neither; one statement reads both from the same snapshot.
+    org, _ = await _org(async_session, 500)
+    calls = []
+    real = async_session.execute
+
+    async def spy(*args, **kwargs):
+        calls.append(args[0])
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(async_session, "execute", spy)
+    assert await available_cents(async_session, org) == Decimal(500)
+    assert len(calls) == 1
