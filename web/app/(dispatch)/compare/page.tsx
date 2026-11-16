@@ -5,8 +5,6 @@ import { featuredPairs } from "@/lib/featured";
 import { SITE_ORIGIN } from "@/lib/url";
 import { pageMetadata } from "../../../../shared/site-metadata";
 
-export const dynamic = "force-static";
-
 export const metadata = pageMetadata({
   title: "Compare AI model costs | hail.so",
   description:
