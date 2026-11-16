@@ -1,13 +1,14 @@
 """Optional PostHog MCP analytics for the HTTP server.
 
 Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
-timings, outcomes and client names only. Argument values, results, error
+timings, outcomes, client names and the calling model only. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
 user id (OAuth token or API key owner) becomes ``distinct_id``, the same
 person id the website identifies, and the org id becomes the ``organization``
-group. Both come from the actor cache tool calls fill. Tool schemas and tool results stay
-unchanged, because the SDK options that inject arguments are turned off.
+group. Both come from the actor cache tool calls fill. The only schema change
+is the SDK's optional ``llm_model`` argument, which the SDK removes before the
+tool runs. Tool results stay unchanged.
 Any setup or capture failure logs a warning and the server keeps serving.
 """
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from hailhq.core.config import settings
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 try:
     from posthog import Posthog
     from posthog.mcp import get_request_headers, instrument
-    from posthog.mcp.types import MCPAnalyticsOptions
+    from posthog.mcp.types import MCPAnalyticsModelOptions, MCPAnalyticsOptions
 except ImportError:  # analytics must never block startup
     logger.warning("PostHog SDK import failed; MCP analytics is off", exc_info=True)
     Posthog = None
@@ -49,6 +51,8 @@ _KEPT_PROPERTIES = frozenset(
         "$mcp_tool_name",
         "$mcp_resource_name",
         "$mcp_tool_category",
+        "$mcp_llm_model",
+        "$mcp_llm_model_source",
         "$mcp_listed_tool_names",
         "$mcp_input_keys",
         "$mcp_duration_ms",
@@ -58,6 +62,16 @@ _KEPT_PROPERTIES = frozenset(
     }
 )
 
+
+# Shown on every tool's optional llm_model input. Hail's description rules
+# apply: it states what the field is and gives no instruction.
+_MODEL_DESCRIPTION = (
+    "Model ID of the calling agent. Optional. Recorded for analytics only."
+)
+# The agent types llm_model, so it is free text. Keep it only when it looks
+# like a model ID (has a letter, no spaces or @), never an email or a number.
+_MODEL_ID = re.compile(r"(?=[^@\s]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}")
+_MODEL_PROPERTIES = ("$mcp_llm_model", "$mcp_llm_model_source")
 
 _ORG_PROPERTY = "hail_organization_id"
 _USER_PROPERTY = "hail_user_id"
@@ -79,6 +93,12 @@ def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
     org_id = properties.get(_ORG_PROPERTY)
     user_id = properties.get(_USER_PROPERTY)
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
+    model = event["properties"].get("$mcp_llm_model")
+    if model is not None and not (
+        isinstance(model, str) and _MODEL_ID.fullmatch(model)
+    ):
+        for key in _MODEL_PROPERTIES:
+            event["properties"].pop(key, None)
     if user_id or org_id:
         event["distinct_id"] = user_id or org_id
     if org_id:
@@ -120,8 +140,8 @@ def instrument_analytics(server: Any) -> Analytics | None:
         options = MCPAnalyticsOptions(
             context=False,
             enable_conversation_id=False,
-            capture_model=False,
             enable_exception_autocapture=False,
+            capture_model=MCPAnalyticsModelOptions(description=_MODEL_DESCRIPTION),
             before_send=_keep_metadata,
             event_properties=_actor,
             server_build=settings.logfire_service_version or None,

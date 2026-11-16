@@ -24,6 +24,7 @@ dev = [
     "ruff",
     "mypy",
     "httpx2",
+    "pyyaml>=6",
 ]
 
 [build-system]

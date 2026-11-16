@@ -33,6 +33,7 @@ dev = [
     "mypy",
     "testcontainers[postgres]>=4",
     "psycopg[binary]>=3.2",
+    "pyyaml>=6",
 ]
 
 [build-system]
