@@ -123,6 +123,6 @@ Follow [docs/operations/agent-prompts.md](docs/operations/agent-prompts.md) for 
 - Commit `.env` or `.env.local`.
 - Introduce a dashboard / web UI in v1.
 - Add a dependency without checking license compatibility with AGPLv3.
-- Add env vars without updating `.env.example` in the same commit.
+- Add env vars without updating `.env.example` in the same commit. Exception: a setting with a working code default stays out of `.env` files; document it next to the code and in the ops doc.
 - Duplicate schemas across services (use `core/`).
 - Run destructive git operations unprompted.

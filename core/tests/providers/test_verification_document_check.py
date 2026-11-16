@@ -680,15 +680,16 @@ async def test_reader_skips_a_pdf_over_the_page_limit(
     assert len(calls) == 1
 
 
-async def test_reader_asks_before_it_sends(reader_settings, monkeypatch) -> None:
-    client, calls = _fake_client(_response("{}"))
+async def test_reader_reports_an_answer_only(reader_settings, monkeypatch) -> None:
+    answered: list[int] = []
+    client, _ = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
-
-    async def no() -> bool:
-        return False
-
-    assert await _read(before_send=no) is None
-    assert calls == []
+    await _read(on_answer=lambda: answered.append(1))
+    assert answered == [1]
+    client, _ = _fake_client(error=RuntimeError("boom"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    await _read(on_answer=lambda: answered.append(1))
+    assert answered == [1]
 
 
 async def test_reader_uses_the_document_model_setting(
@@ -885,3 +886,37 @@ async def test_isolated_process_is_killed_at_its_limit() -> None:
             timeout_s=10,
             max_output=1024,
         )
+
+
+def test_decode_scales_a_16_bit_grey_image() -> None:
+    from hailhq.core.providers.llm import document_image
+
+    src = io.BytesIO()
+    Image.new("I;16", (40, 30), 30000).save(src, "PNG")
+    out = Image.open(io.BytesIO(document_image.decode("image/png", src.getvalue())))
+    # Scaled to 8 bits (about 255 for the brightest pixel), not clipped from
+    # a darker grey: here every pixel is the brightest, so white.
+    gradient = io.BytesIO()
+    img = Image.new("I;16", (2, 1))
+    img.putpixel((0, 0), 1000)
+    img.putpixel((1, 0), 30000)
+    img.save(gradient, "PNG")
+    g = Image.open(io.BytesIO(document_image.decode("image/png", gradient.getvalue())))
+    left, right = g.convert("L").getpixel((0, 0)), g.convert("L").getpixel((1, 0))
+    assert left < 40 and right > 200
+    assert out.size == (40, 30)
+
+
+async def test_a_last_name_box_alone_is_compared() -> None:
+    req = _req(fields=(FieldSpec(name="last_name", label="Last Name"),))
+    out = await _check(req=req, fields={"last_name": "Other"})
+    assert [(w.kind, w.field) for w in out.warnings] == [("name", "last_name")]
+
+
+async def test_a_part_with_no_letters_is_not_taken_for_the_name() -> None:
+    req = _req(fields=(FieldSpec(name="x1", label="Email"),), address_required=True)
+    answer = _answer(given_names="-", surnames="SMITH")
+    out = await _check(
+        req=req, address={"customer_name": "John Smith"}, reader=_reader(answer)
+    )
+    assert out.warnings == []

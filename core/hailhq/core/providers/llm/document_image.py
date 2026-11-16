@@ -54,6 +54,11 @@ def decode(content_type: str, data: bytes) -> bytes:
         if image.width * image.height > MAX_PIXELS:
             raise ValueError("image too large")
         image = ImageOps.exif_transpose(image)
+        if image.mode.startswith("I"):
+            # 16- or 32-bit grey (scanner output): scale to 8 bits, never clip.
+            peak = image.getextrema()[1] or 1
+            scale = 255 / peak if peak > 255 else 1
+            image = image.convert("I").point(lambda v: v * scale).convert("L")
         if image.mode in ("RGBA", "LA", "P", "PA"):
             # Transparent pixels on white, as a viewer shows them, not black.
             rgba = image.convert("RGBA")

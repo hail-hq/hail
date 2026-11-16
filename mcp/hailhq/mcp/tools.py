@@ -3508,7 +3508,8 @@ def register_tools(
             title="Read verification documents",
             readOnlyHint=True,
             destructiveHint=False,
-            idempotentHint=True,
+            # Each call uses reads of the workspace's daily quota.
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )

@@ -40,13 +40,16 @@ _ANSWER = {
 
 
 def _fake_reader(monkeypatch, answer=_ANSWER):
+    from hailhq.api.routes import verifications as routes
+
+    monkeypatch.setattr(routes, "document_reader_configured", lambda: True)
     calls: list[dict] = []
 
     async def read(**kwargs):
-        # As the real reader: ask the cap just before sending.
-        if kwargs.get("before_send") and not await kwargs["before_send"]():
-            return None
         calls.append(kwargs)
+        # As the real reader: a read counts once the model answered.
+        if answer is not None and kwargs.get("on_answer"):
+            kwargs["on_answer"]()
         return answer
 
     monkeypatch.setattr(document_check, "read_document", read)
@@ -279,3 +282,28 @@ async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
     )
     assert resp.status_code == 422
     assert resp.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
+
+
+async def test_a_read_without_an_answer_is_given_back(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core.document_reads import document_reads_today
+
+    _fake_reader(monkeypatch, None)
+    org_id, _, key = org_and_key
+    resp = await _post(client, key)
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert await document_reads_today(async_session, org_id) == 0
+
+
+async def test_without_a_reader_nothing_is_counted_or_fetched(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.api.routes import verifications as routes
+    from hailhq.core.document_reads import document_reads_today
+
+    monkeypatch.setattr(routes, "document_reader_configured", lambda: False)
+    org_id, _, key = org_and_key
+    resp = await _post(client, key)
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert await document_reads_today(async_session, org_id) == 0

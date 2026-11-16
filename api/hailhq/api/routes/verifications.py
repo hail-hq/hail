@@ -88,6 +88,7 @@ from hailhq.core.models import (
     NumberOffer,
     PhoneNumber,
 )
+from hailhq.core.providers.llm.document_reader import document_reader_configured
 from hailhq.core.providers.verification import (
     Address,
     DocumentInput,
@@ -1718,6 +1719,13 @@ def _duplicate_detail(subject_type: str, subject_name: str | None) -> str:
     )
 
 
+def _form_422(exc: ValidationError) -> HTTPException:
+    """422 for a form that does not fit its model, naming each field."""
+    return unprocessable(
+        "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()),
+    )
+
+
 def _text_part(form, name: str, default: str = "") -> str:
     raw = form.get(name)
     if raw is None or raw == "":
@@ -1804,11 +1812,7 @@ async def _prepare_submission(
             documents=_json_part(form, "documents", {}),
         )
     except ValidationError as exc:
-        raise unprocessable(
-            "; ".join(
-                f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()
-            ),
-        ) from exc
+        raise _form_422(exc) from exc
 
     if sub.purpose not in PURPOSES:
         raise unprocessable("unknown purpose", loc=["body", "purpose"])
@@ -2400,11 +2404,7 @@ async def check_verification_documents(
             documents=_json_part(form, "documents", {}) or {},
         )
     except ValidationError as exc:
-        raise unprocessable(
-            "; ".join(
-                f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()
-            ),
-        ) from exc
+        raise _form_422(exc) from exc
     if sub.subject_type not in ("person", "business"):
         raise unprocessable(
             "subject_type is required: 'person' (you) or 'business' (your company)",
@@ -2457,9 +2457,23 @@ async def check_verification_documents(
 
     # The daily cap, before any file is fetched or decoded: the reads of
     # this request are reserved in one short transaction of their own. A
-    # slot over the cap is not read. A reserved read whose file never
-    # reaches the model is given back below.
+    # slot over the cap is not read. A reserved read whose file got no
+    # answer from the model (skipped, failed, out of time) is given back
+    # below.
     with_file = [s for s in slots if s in collected.rows or s in collected.parts]
+    if not document_reader_configured():
+        # Nothing could read the files: no read is counted, nothing fetched.
+        return await check_documents(
+            requirements,
+            sub.fields,
+            sub.address,
+            {
+                slot: DocumentInput(option=part.option, fields=part.fields)
+                for slot, part in sub.documents.items()
+            },
+            today=datetime.now(timezone.utc).date(),
+            skipped=with_file,
+        )
     async with session_scope() as counter:
         reserved = await reserve_document_reads(
             counter, principal.organization_id, with_file
@@ -2474,17 +2488,14 @@ async def check_verification_documents(
             for slot, part in sub.documents.items()
         }
 
-        async def mark_sent(slot: str) -> bool:
-            sent.add(slot)
-            return True
-
         return await check_documents(
             requirements,
             sub.fields,
             sub.address,
             documents,
             today=datetime.now(timezone.utc).date(),
-            before_send=mark_sent,
+            # A read counts once the model answered for its file.
+            on_answer=sent.add,
             skipped=[s for s in with_file if s not in reserved],
         )
     finally:

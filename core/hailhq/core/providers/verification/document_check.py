@@ -164,7 +164,7 @@ def _full_name_matches(printed: VerificationPrintedName, full: str) -> bool:
         if not _empty(given) and not _empty(family):
             if _same_name(full, f"{given} {family}"):
                 return True
-        elif _holds(full, given or family):
+        elif _holds(full, family if _empty(given) else given):
             return True
     return _empty(printed.given_names + printed.surnames) and _empty(
         printed.latin_given_names + printed.latin_surnames
@@ -535,13 +535,18 @@ def _name_warnings(
     given_shown = _shown(printed.given_names, printed.latin_given_names)
     family_shown = _shown(printed.surnames, printed.latin_surnames)
     givens = [(g, p, v) for g, r, p, v in boxes if r == "given"]
-    for group, gpath, first in givens:
+    # A group with a last name box and no first name box is compared too.
+    with_given = {g for g, _, _ in givens}
+    pairs = [(g, p, v) for g, p, v in givens] + [
+        (g, "", "") for g, r, _, _ in boxes if r == "family" and g not in with_given
+    ]
+    for group, gpath, first in pairs:
         family = next((b for b in boxes if b[0] == group and b[1] == "family"), None)
         last = family[3] if family else ""
         if (first or last) and not name_matches(printed, first, last):
             warnings.append(
                 VerificationDocumentWarning(
-                    field=gpath if first or family is None else family[2],
+                    field=gpath if gpath and (first or family is None) else family[2],
                     kind="name",
                     message=(
                         f"Your {what} shows {_printed_parts(given_shown, family_shown)}. "
@@ -576,15 +581,15 @@ async def check_documents(
     *,
     today: date,
     reader: Reader | None = None,
-    before_send: Callable[[str], Awaitable[bool]] | None = None,
+    on_answer: Callable[[str], None] | None = None,
     skipped: Collection[str] = (),
 ) -> VerificationDocumentCheckResponse:
     """Read every slot of this request that has a file, at once, within
     ``CHECK_TIMEOUT_S`` in total. A slot without a file here is not read.
     ``documents[slot].option`` is the type the customer chose, or empty when
-    not chosen yet; the warnings then skip the type check. ``before_send``
-    runs with the slot name just before each file goes to the model; False
-    skips that file. ``skipped`` slots had a file the caller did not read
+    not chosen yet; the warnings then skip the type check. ``on_answer``
+    runs with the slot name when the model answered for its file.
+    ``skipped`` slots had a file the caller did not read
     (the daily cap): they come back ``read: false`` with no warning. When
     the caller stops waiting, every read still running is cancelled."""
     slots = [
@@ -607,8 +612,8 @@ async def check_documents(
             schema=_schema(slot, targets),
             # What is left of the request's budget, not a fresh one.
             timeout_s=max(deadline - loop.time(), 0.1),
-            before_send=(
-                (lambda: before_send(slot.name)) if before_send is not None else None
+            on_answer=(
+                (lambda: on_answer(slot.name)) if on_answer is not None else None
             ),
         )
         return _Read(slot, targets, answer) if answer else None
