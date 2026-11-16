@@ -19,6 +19,16 @@ export type FooterBadge = {
   icon: string;
 };
 
+function FooterLinks({ group }: { group: FooterGroup }) {
+  return (
+    <nav aria-label={group.title}>
+      {group.links.map((link) => (
+        <a key={link.href} href={link.href}>{link.label}</a>
+      ))}
+    </nav>
+  );
+}
+
 /** Framework-independent, server-rendered footer. Native anchors cross Next zones safely. */
 export function Footer({
   groups,
@@ -47,19 +57,19 @@ export function Footer({
             <SocialLinks />
           </div>
           {groups.map((group) => (
+            <section key={group.title} className="hail-footer-column hail-footer-desktop-group">
+              <h2>{group.title}</h2>
+              <FooterLinks group={group} />
+            </section>
+          ))}
+          {groups.map((group) => (
             <details
               key={group.title}
-              className="hail-footer-column"
+              className="hail-footer-column hail-footer-mobile-group"
               name="hail-footer-groups"
             >
               <summary><h2>{group.title}</h2><span className="hail-footer-plus" aria-hidden="true" /></summary>
-              <nav aria-label={group.title}>
-                {group.links.map((link) => (
-                  <a key={link.href} href={link.href}>
-                    {link.label}
-                  </a>
-                ))}
-              </nav>
+              <FooterLinks group={group} />
             </details>
           ))}
         </div>

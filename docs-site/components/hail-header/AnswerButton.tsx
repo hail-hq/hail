@@ -234,11 +234,14 @@ export function AnswerButton({
   };
 
   const onLinkClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    // The click that the browser sends after a drag. The drag has already decided.
+    // Suppress only the pointer click after an incomplete drag. Keyboard and
+    // assistive activation have detail 0 and must work if the drag sent no click.
     if (dragged.current) {
       dragged.current = false;
-      event.preventDefault();
-      return;
+      if (event.detail > 0) {
+        event.preventDefault();
+        return;
+      }
     }
     if (loading.current) {
       event.preventDefault();

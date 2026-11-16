@@ -361,15 +361,12 @@
     font-size: 25px;
   }
 }
-@media (max-width: 359px) {
+@media (max-width: 440px) {
   .shell {
-    gap: 5px;
-  }
-  .themeButton {
-    display: none;
+    gap: 3px;
   }
   .navActions {
-    gap: 3px;
+    gap: 2px;
   }
   .logo {
     font-size: 23px;
@@ -377,9 +374,14 @@
   }
   .primary.primary {
     --label-size: 12px;
-    --s-4: 7px;
-    --s-5: 12px;
+    --s-4: 4px;
+    --s-5: 8px;
     font-size: 12px;
+  }
+}
+@media (max-width: 359px) {
+  .themeButton {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
