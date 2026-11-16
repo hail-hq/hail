@@ -28,6 +28,20 @@ Full stack in Docker:
 - Bundled Postgres: `docker compose -f docker-compose.yml -f docker-compose.local.yml up`
 - Managed Postgres (set `DATABASE_URL` to your hosted URL first): `docker compose up`
 
+## Costs website tests
+
+Run these commands from the repository root after `pnpm install --frozen-lockfile`:
+
+```bash
+pnpm --filter @hail-hq/web exec playwright install chromium
+pnpm --filter @hail-hq/web test
+```
+
+The first command installs the browser once. On Linux CI, use
+`playwright install --with-deps chromium` to install its system libraries too.
+The test command builds the site, then checks real pages in Chromium.
+Tests start their own local server and close it when they finish.
+
 ## Database migrations
 
 The schema lives in [`api/migrations/versions/`](https://github.com/hail-hq/hail/tree/main/api/migrations/versions). The Alembic config is in [`api/alembic.ini`](https://github.com/hail-hq/hail/blob/main/api/alembic.ini); `DATABASE_URL` overrides the config default.

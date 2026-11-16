@@ -10,15 +10,19 @@ import {
 } from "./compare-table";
 import { MAX_COMPARE, compareHref } from "@/lib/url";
 import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
+import {
+  comparisonKey,
+  type ComparisonCategory,
+  type ComparisonModel,
+} from "@/lib/comparison-key";
 
 type Props = { llm: LLMRow[]; stt: STTRow[]; tts: TTSRow[] };
 
-function parseIds(raw: string | null, knownIds: Set<string>): string[] {
+function parseIds(raw: string | null, knownIds: Map<string, string>): string[] {
   const filtered = (raw ?? "")
     .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .filter((id) => knownIds.has(id));
+    .map((s) => knownIds.get(s.trim()))
+    .filter((id): id is string => id !== undefined);
   return [...new Set(filtered)].slice(0, MAX_COMPARE);
 }
 
@@ -27,13 +31,37 @@ export function CompareModels({ llm, stt, tts }: Props) {
   // Deep-linked ?m= ids are validated against the real catalog before they
   // ever reach state, so a garbage id can never occupy one of the
   // MAX_COMPARE slots and silently block later adds.
-  const knownIds = useMemo(
-    () => new Set([...llm, ...stt, ...tts].map((m) => m.model_id)),
-    [llm, stt, tts],
-  );
+  const knownIds = useMemo(() => {
+    const known = new Map<string, string>();
+    const groups: [ComparisonCategory, ComparisonModel[]][] = [
+      ["llm", llm],
+      ["stt", stt],
+      ["tts", tts],
+    ];
+    for (const [category, models] of groups)
+      for (const model of models) {
+        const key = comparisonKey(category, model);
+        known.set(key, key);
+        // Existing bare-ID links keep selecting the original first catalog match.
+        if (!known.has(model.model_id)) known.set(model.model_id, key);
+      }
+    return known;
+  }, [llm, stt, tts]);
   const [ids, setIds] = useState<string[]>(() =>
     parseIds(searchParams.get("m"), knownIds),
   );
+
+  const selectedLLM = ids
+    .map((id) => llm.find((m) => comparisonKey("llm", m) === id))
+    .filter(Boolean) as LLMRow[];
+  const selectedSTT = ids
+    .map((id) => stt.find((m) => comparisonKey("stt", m) === id))
+    .filter(Boolean) as STTRow[];
+  const selectedTTS = ids
+    .map((id) => tts.find((m) => comparisonKey("tts", m) === id))
+    .filter(Boolean) as TTSRow[];
+  const total = selectedLLM.length + selectedSTT.length + selectedTTS.length;
+  const currentIds = ids;
 
   // Keep the URL shareable without triggering a navigation or a server render.
   useEffect(() => {
@@ -48,10 +76,13 @@ export function CompareModels({ llm, stt, tts }: Props) {
     if (ids.length === 0) return;
     posthog.capture("compare_viewed", {
       model_count: ids.length,
-      llm_count: ids.filter((id) => llm.some((m) => m.model_id === id)).length,
-      stt_count: ids.filter((id) => stt.some((m) => m.model_id === id)).length,
-      tts_count: ids.filter((id) => tts.some((m) => m.model_id === id)).length,
-      model_ids: ids,
+      llm_count: selectedLLM.length,
+      stt_count: selectedSTT.length,
+      tts_count: selectedTTS.length,
+      model_ids: [...selectedLLM, ...selectedSTT, ...selectedTTS].map(
+        (model) => model.model_id,
+      ),
+      model_keys: ids,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -68,20 +99,6 @@ export function CompareModels({ llm, stt, tts }: Props) {
   }, []);
 
   const today = new Date().toISOString().slice(0, 10);
-
-  const selectedLLM = ids
-    .map((id) => llm.find((m) => m.model_id === id))
-    .filter(Boolean) as LLMRow[];
-  const selectedSTT = ids
-    .map((id) => stt.find((m) => m.model_id === id))
-    .filter(Boolean) as STTRow[];
-  const selectedTTS = ids
-    .map((id) => tts.find((m) => m.model_id === id))
-    .filter(Boolean) as TTSRow[];
-  const total = selectedLLM.length + selectedSTT.length + selectedTTS.length;
-  const currentIds = [...selectedLLM, ...selectedSTT, ...selectedTTS].map(
-    (m) => m.model_id,
-  );
 
   return (
     <>
@@ -233,18 +250,21 @@ export function CompareModels({ llm, stt, tts }: Props) {
             {total === 0 ? "Available models" : "Add another model"}
           </h3>
           <ModelGroup
+            category="llm"
             label="LLMs"
             models={llm}
             currentIds={currentIds}
             onAdd={add}
           />
           <ModelGroup
+            category="stt"
             label="Speech-to-Text"
             models={stt}
             currentIds={currentIds}
             onAdd={add}
           />
           <ModelGroup
+            category="tts"
             label="Text-to-Speech"
             models={tts}
             currentIds={currentIds}
@@ -257,17 +277,21 @@ export function CompareModels({ llm, stt, tts }: Props) {
 }
 
 function ModelGroup({
+  category,
   label,
   models,
   currentIds,
   onAdd,
 }: {
+  category: ComparisonCategory;
   label: string;
-  models: { provider: string; display_name: string; model_id: string }[];
+  models: ComparisonModel[];
   currentIds: string[];
   onAdd: (id: string) => void;
 }) {
-  const available = models.filter((m) => !currentIds.includes(m.model_id));
+  const available = models.filter(
+    (m) => !currentIds.includes(comparisonKey(category, m)),
+  );
   if (available.length === 0) return null;
   return (
     <div style={{ marginBottom: 18 }}>
@@ -285,7 +309,8 @@ function ModelGroup({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {available.map((m) => (
           <button
-            key={m.model_id}
+            key={comparisonKey(category, m)}
+            data-model-key={comparisonKey(category, m)}
             type="button"
             className="add-pill"
             disabled={currentIds.length >= MAX_COMPARE}
@@ -300,7 +325,7 @@ function ModelGroup({
                 provider: m.provider,
                 category: label,
               });
-              onAdd(m.model_id);
+              onAdd(comparisonKey(category, m));
             }}
           >
             <span className="add-pill-plus">+</span>

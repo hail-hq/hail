@@ -1,11 +1,22 @@
-import { compareHref } from '@/lib/url';
+import { compareHref } from "@/lib/url";
+import {
+  comparisonKey,
+  type ComparisonCategory,
+  type ComparisonModel,
+} from "@/lib/comparison-key";
 
-export function CompareLink({ modelId }: { modelId: string }) {
+export function CompareLink({
+  model,
+  category,
+}: {
+  model: ComparisonModel;
+  category: ComparisonCategory;
+}) {
   return (
     <a
-      href={compareHref([modelId])}
+      href={compareHref([comparisonKey(category, model)])}
       className="compare-link"
-      aria-label={`Add ${modelId} to comparison`}
+      aria-label={`Add ${model.display_name} to comparison`}
       title="Add to compare"
     >
       <svg

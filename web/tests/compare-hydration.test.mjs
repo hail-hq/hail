@@ -109,3 +109,112 @@ test("a comparison opened after the build day hydrates without stale date text",
     await page.close();
   }
 });
+
+test("products sharing a provider model ID can be added, shared and removed independently", async () => {
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await page.goto(`${origin}/costs/compare`);
+    const realtime = page.locator(
+      'button.add-pill[data-model-key="stt:AssemblyAI:universal-3-5-pro:streaming-realtime"]',
+    );
+    await realtime.click();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro Realtime"],
+    );
+    assert.match(await page.locator(".compare-table").innerText(), /0\.007500/);
+    assert.equal(await realtime.count(), 0);
+    await page
+      .locator(
+        'button.add-pill[data-model-key="stt:AssemblyAI:universal-3-5-pro:batch-standard"]',
+      )
+      .click();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro Realtime", "Universal-3.5 Pro"],
+    );
+    const shared = page.url();
+    await page.goto(shared);
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro Realtime from comparison",
+        exact: true,
+      })
+      .waitFor();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro Realtime", "Universal-3.5 Pro"],
+    );
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro Realtime from comparison",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro from comparison",
+        exact: true,
+      })
+      .waitFor();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro"],
+    );
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro from comparison",
+        exact: true,
+      })
+      .click();
+    await page.getByText("No models selected", { exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("legacy bare model IDs still select the original product", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/costs/compare?m=universal-3-5-pro`);
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro from comparison",
+        exact: true,
+      })
+      .waitFor();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro"],
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("the costs table comparison link selects the Realtime product", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/costs`);
+    await page
+      .locator(
+        'a.compare-link[href*="universal-3-5-pro"][href*="streaming-realtime"]',
+      )
+      .click();
+    await page
+      .getByRole("link", {
+        name: "Remove Universal-3.5 Pro Realtime from comparison",
+        exact: true,
+      })
+      .waitFor();
+    assert.deepEqual(
+      await page.locator(".compare-model-name").allTextContents(),
+      ["Universal-3.5 Pro Realtime"],
+    );
+  } finally {
+    await page.close();
+  }
+});
