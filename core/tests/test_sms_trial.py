@@ -277,6 +277,20 @@ async def test_confirm_right_code_verifies(async_session):
     assert row.code_attempts == 0
 
 
+async def test_confirm_sets_updated_at(async_session):
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    later = NOW + timedelta(minutes=1)
+    wrong = "000000" if issued.code != "000000" else "111111"
+    with pytest.raises(WrongCode):
+        await confirm_phone(async_session, org, wrong, now=later)
+    row = await get_trial_phone(async_session, org)
+    assert row.updated_at == later
+    latest = NOW + timedelta(minutes=2)
+    row = await confirm_phone(async_session, org, issued.code, now=latest)
+    assert row.updated_at == latest
+
+
 async def test_confirm_without_start_is_no_pending_code(async_session):
     org = await _org(async_session)
     with pytest.raises(NoPendingCode) as e:

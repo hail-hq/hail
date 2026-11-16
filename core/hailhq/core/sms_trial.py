@@ -308,6 +308,7 @@ async def confirm_phone(
     expected = _hash_code(organization_id, row.phone_e164, code.strip())
     if not hmac.compare_digest(expected, row.code_hash):
         row.code_attempts += 1
+        row.updated_at = now
         tries_left = max(MAX_CODE_TRIES - row.code_attempts, 0)
         if tries_left == 0:
             row.code_hash = None
@@ -321,6 +322,7 @@ async def confirm_phone(
             row.code_hash = None
             row.code_expires_at = None
             row.code_attempts = 0
+            row.updated_at = now
             await db.flush()
     except IntegrityError as exc:
         raise PhoneTaken() from exc
