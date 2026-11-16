@@ -1168,9 +1168,10 @@ async def _rate_before_wipe(
 async def _audit_carrier_rejection(
     row: CarrierVerification, raw_reason: str | None
 ) -> None:
-    """The carrier rejected a submitted verification. The row holds Hail's
-    wording for the customer; the carrier's own text is kept in the audit
-    row only (it can quote personal data, so it is not logged)."""
+    """The carrier rejected a submitted verification. The row holds the
+    reason for the customer, which can quote the carrier's text; the
+    carrier's own text alone is kept in the audit row. Neither is logged
+    (they can quote personal data)."""
     logger.warning(
         "carrier %s rejected verification %s (org %s)",
         row.provider,
