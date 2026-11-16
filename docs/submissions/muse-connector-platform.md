@@ -13,6 +13,8 @@ Muse is Meta's assistant. Users can already add Hail without a listing: they ask
 
 ## TODO
 
+- [ ] Re-check the steps below against <https://platform.muse.ai/docs> (it returned HTTP 503 on 2026-11-16)
+- [ ] The guide <https://hail.so/mcp/muse> is live (it ships with the hail-website Muse guide change)
 - [ ] Business verification through Persona (company documents of the legal entity on <https://hail.so/legal>)
 - [ ] Data processing questionnaire answered
 - [ ] Reviewer test account with sample data (calls, texts, email), entered only in the Muse portal

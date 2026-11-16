@@ -14,7 +14,10 @@ OpenAI lists MCP-backed plugins (earlier names: Apps, Connectors) in the ChatGPT
 ## TODO
 
 - [x] Plugin form started on the Plugins page
-- [ ] Demo video recorded and its URL entered (the last missing item, as of 2026-11-16)
+- [ ] Five positive and three negative test cases entered (see **Content**)
+- [ ] Release notes entered
+- [ ] Reviewer credentials entered in "Review details"
+- [ ] Demo video recorded and its URL entered (the owner reports this is the last missing item, as of 2026-11-16)
 - [ ] Submitted
 - [ ] Approved
 - [ ] Published (a separate click after approval)
@@ -36,7 +39,7 @@ An MCP review needs:
 
 - Five positive test cases (each with `tools_triggered` and `expected_behavior`) and three negative cases.
 - Release notes.
-- Reviewer credentials, entered in the dashboard form "Review details", never in the ZIP.
+- Reviewer credentials, entered in the dashboard form "Review details". Never put them in the plugin package (the ZIP file uploaded on the Plugins page). OpenAI rejects a package that contains `test_credentials` or `reviewer_instructions`.
 - `websiteURL`: `https://hail.so`
 - `supportURL`: `https://hail.so/contact`
 - `privacyPolicyURL`: `https://hail.so/legal/privacy`

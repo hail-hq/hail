@@ -33,7 +33,7 @@ Ranked by relevance/impact score, highest first. Update the **Status** column as
 | 27   | OpenTools                                          | mcp-registry  | 3.8   | drafted                                                                                                                       | [opentools.md](./opentools.md)                                                                               |
 | 28   | Futurepedia                                        | ai-directory  | 3.5   | drafted                                                                                                                       | [futurepedia.md](./futurepedia.md)                                                                           |
 | 29   | r/LocalLLaMA                                       | subreddit     | 2     | drafted                                                                                                                       | [r-localllama.md](./r-localllama.md)                                                                         |
-| 30   | Grok custom connectors (xAI)                       | mcp-registry  | 0     | n/a (no public directory; users add the URL at grok.com/connectors)                                                           | —                                                                                                            |
+| 30   | Grok custom connectors (xAI)                       | mcp-registry  | 0     | n/a (no public directory; users add the URL at grok.com/connectors)                                                           | [grok-custom-connectors.md](./grok-custom-connectors.md)                                                     |
 
 ## TODO
 

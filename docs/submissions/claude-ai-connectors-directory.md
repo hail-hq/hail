@@ -13,7 +13,12 @@ Review the live [Directory Policy](https://support.claude.com/en/articles/131453
 
 ## TODO
 
-- [x] Submitted (reported by the owner, before 2026-11-16)
+- [x] Submitted (reported by the owner before 2026-11-16; portal status not checked yet)
+- [ ] Check the portal card says "In review", not "Draft" (steps in **Notes**)
+- [ ] Confirm these steps from the earlier draft were done before submitting:
+  - [ ] Written permission for AI phone calls (Directory Policy 4.B), or a separate connector scope agreed with Anthropic
+  - [ ] Description and MCP telemetry changes deployed and verified
+  - [ ] Review account prepared, and every tool tested through a Claude custom connector
 - [ ] Approved
 - [ ] Published
 
@@ -29,7 +34,7 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 - **Support contact:** hi@hail.so
 - **Server:** `https://mcp.hail.so`, Streamable HTTP at the root path
 - **Authentication:** OAuth with Dynamic Client Registration. Public discovery precedes sign-in for tool execution.
-- **Icon:** the square monogram from the hail-website repo, `public/assets/monogram-512.png`.
+- **Icon:** the square monogram from the hail-website repo, `public/assets/brand/logo/monogram-512.png`.
 
 **Description (2,000 characters or fewer):**
 
@@ -75,7 +80,6 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 9. Compliance: check the acknowledgements below only after reading each against current practice.
 10. Review: fix what the checklist flags, then submit.
 
-Escalate a stuck review to `mcp-review@anthropic.com`.
 
 ## Policy acknowledgements
 
