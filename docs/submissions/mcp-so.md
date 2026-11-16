@@ -20,7 +20,7 @@ status: drafted
 The web form at <https://mcp.so/submit> now charges a one-time $39 fee ("Publish immediately without review"). The free route is a GitHub issue in `chatmcp/mcpso`. Other remote servers use the title "Submit Remote MCP Server: <Name> (<registry name>)".
 
 1. Save the issue body from **Content** below to a file, for example `mcpso-issue.md`.
-2. Open the issue from any folder, signed in to the `gh` CLI:
+2. Open the issue from the folder that holds that file, signed in to the `gh` CLI:
 
 ```bash
 gh issue create \
