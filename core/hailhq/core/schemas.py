@@ -2346,6 +2346,16 @@ class VerificationPrintedName(BaseModel):
 
     given_names: str = Field(description="A person's given names.")
     surnames: str = Field(description="A person's surnames.")
+    latin_given_names: str = Field(
+        default="",
+        description=(
+            "The given names in Latin letters as the document prints them "
+            "(its machine-readable zone or a transliteration), or empty."
+        ),
+    )
+    latin_surnames: str = Field(
+        default="", description="The surnames in Latin letters, the same way."
+    )
     business_name: str = Field(description="A company's name.")
 
 

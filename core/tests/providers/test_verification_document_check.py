@@ -513,25 +513,52 @@ async def test_reader_decodes_a_large_jpeg(reader_settings, monkeypatch) -> None
     assert max(sent.size) == 1568
 
 
-async def test_reader_skips_an_image_when_no_decoder_is_free(
+async def test_reader_drops_a_decode_over_its_limit(
     reader_settings, monkeypatch
 ) -> None:
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
+    import time
 
     client, calls = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
-    busy = ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.05)
+    monkeypatch.setattr(
+        document_reader, "_image_for_model", lambda *a: time.sleep(0.3) or b""
+    )
+    assert await _read() is None
+    assert calls == []
+
+
+async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(
+    reader_settings, monkeypatch
+) -> None:
+    import threading
+
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.5)
     release = threading.Event()
-    busy.submit(release.wait)
-    monkeypatch.setattr(document_reader, "_decoder", busy)
-    monkeypatch.setattr(document_reader, "_DECODE_WAIT_S", 0.05)
-    try:
-        assert await _read() is None
-        assert calls == []
-    finally:
-        release.set()
-        busy.shutdown(wait=True)
+    real = document_reader._image_for_model
+    started = []
+
+    def decode(content_type, data):
+        started.append(1)
+        if len(started) <= 2:
+            release.wait(5)
+        return real(content_type, data)
+
+    monkeypatch.setattr(document_reader, "_image_for_model", decode)
+    first = asyncio.ensure_future(_read())
+    second = asyncio.ensure_future(_read())
+    await asyncio.sleep(0.05)
+    third = asyncio.ensure_future(_read())
+    # The first two pass their limit; their threads stay busy until released.
+    assert await first is None and await second is None
+    await asyncio.sleep(0.3)
+    assert not third.done()
+    release.set()
+    # The third waited over 0.5 s in all, yet its own decode was quick.
+    assert await third == {}
+    assert len(calls) == 1
 
 
 async def test_reader_is_off_without_a_model(reader_settings, monkeypatch) -> None:
@@ -602,3 +629,164 @@ async def test_reader_puts_a_transparent_image_on_white(
         io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
     )
     assert sent.convert("RGB").getpixel((5, 5))[0] > 240
+
+
+# -- names in other scripts and spellings (all made up) ------------------------
+
+
+def test_umlauts_may_be_written_out_or_dropped() -> None:
+    printed = _printed(given="Jürgen", family="Müller")
+    assert name_matches(printed, "Juergen", "Mueller")
+    assert name_matches(printed, "Jurgen", "Muller")
+    assert not name_matches(printed, "Juergen", "Miller")
+
+
+def test_apostrophes_and_hyphens_join_or_split() -> None:
+    printed = _printed(given="Siobhan", family="O'Brien")
+    for typed in ("OBrien", "O Brien", "o'brien", "O-Brien"):
+        assert name_matches(printed, "Siobhan", typed), typed
+
+
+def test_a_greek_id_matches_its_latin_mrz() -> None:
+    printed = VerificationPrintedName(
+        given_names="ΕΛΕΝΗ",
+        surnames="ΠΑΠΑΔΑΚΗ",
+        latin_given_names="ELENI",
+        latin_surnames="PAPADAKI",
+        business_name="",
+    )
+    assert name_matches(printed, "Eleni", "Papadaki")
+    assert not name_matches(printed, "Elena", "Papadaki")
+
+
+def test_a_cyrillic_id_matches_its_latin_form() -> None:
+    printed = VerificationPrintedName(
+        given_names="ИВАН",
+        surnames="ПЕТРОВСКИЙ",
+        latin_given_names="IVAN",
+        latin_surnames="PETROVSKIY",
+        business_name="",
+    )
+    assert name_matches(printed, "Ivan", "Petrovskiy")
+    assert name_matches(printed, "Иван", "Петровский")
+
+
+async def test_the_message_shows_the_latin_form() -> None:
+    answer = _answer(
+        given_names="ΕΛΕΝΗ",
+        surnames="ΠΑΠΑΔΑΚΗ",
+        latin_given_names="ELENI",
+        latin_surnames="PAPADAKI",
+    )
+    out = await _check(
+        fields={"first_name": "Elena", "last_name": "Papadaki"},
+        reader=_reader(answer),
+    )
+    assert "first name ΕΛΕΝΗ (ELENI)" in out.warnings[0].message
+
+
+async def test_a_name_is_compared_with_its_own_slot_only() -> None:
+    req = _req(fields=(FieldSpec(name="email", label="Email"),))
+    other = DocumentSlot(
+        name="director",
+        label="Director",
+        options=(
+            DocumentOption(
+                key="passport",
+                label="Passport",
+                fields=(
+                    FieldSpec(name="first_name", label="First name"),
+                    FieldSpec(name="last_name", label="Last name"),
+                ),
+            ),
+        ),
+    )
+    req = req.model_copy(update={"documents": (*req.documents, other)})
+    docs = {
+        **_docs(),
+        "director": DocumentInput(
+            option="passport", fields={"first_name": "Other", "last_name": "Person"}
+        ),
+    }
+    out = await _check(req=req, docs=docs)
+    assert "name" not in _kinds(out)
+
+
+async def test_the_chosen_type_decides_a_proof_of_address() -> None:
+    req = _req()
+    slot = req.documents[0].model_copy(
+        update={
+            "options": (
+                *req.documents[0].options,
+                DocumentOption(
+                    key="utility_bill", label="Utility bill", needs_address=True
+                ),
+            )
+        }
+    )
+    req = req.model_copy(update={"documents": (slot, *req.documents[1:])})
+    typed = {"first_name": "Elena", "last_name": "Maria"}
+    as_id = await _check(req=req, fields=typed)
+    assert "name" in _kinds(as_id)
+    bill = _answer(option="utility_bill", expiry_date="2024-01-15")
+    as_bill = await _check(req=req, fields=typed, reader=_reader(bill))
+    assert _kinds(as_bill) == ["document_type"]
+
+
+# -- reader limits ---------------------------------------------------------------
+
+
+def _jpeg(size) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, "white").save(out, "JPEG")
+    return out.getvalue()
+
+
+async def test_reader_decodes_a_large_jpeg_at_reduced_scale_first(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    # 12 million pixels in the header; drafted to 1/4 per side for a 500 px
+    # long side, under 1 million. (Real sizes: a 200 million pixel photo
+    # drafts to 12 million for 1568 px.)
+    monkeypatch.setattr(document_reader, "_IMAGE_LONG_SIDE", 500)
+    monkeypatch.setattr(document_reader, "_MAX_PIXELS", 4_000_000)
+    assert await _read(content_type="image/jpeg", data=_jpeg((4000, 3000))) == {}
+    # A PNG has no draft: the same size is skipped.
+    assert await _read(content_type="image/png", data=_png((4000, 3000))) is None
+    assert len(calls) == 1
+
+
+async def test_reader_skips_a_pdf_over_the_page_limit(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    pages = lambda n: b"%PDF-1.7\n" + b"<< /Type /Page >>\n" * n + b"<< /Type /Pages >>"
+    assert await _read(content_type="application/pdf", data=pages(100)) == {}
+    assert await _read(content_type="application/pdf", data=pages(101)) is None
+    monkeypatch.setattr(document_reader, "_MAX_PDF_REQUEST_BYTES", 10)
+    assert await _read(content_type="application/pdf", data=pages(1)) is None
+    assert len(calls) == 1
+
+
+async def test_reader_asks_before_it_sends(reader_settings, monkeypatch) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+
+    async def no() -> bool:
+        return False
+
+    assert await _read(before_send=no) is None
+    assert calls == []
+
+
+async def test_reader_uses_the_document_model_setting(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setattr(settings, "document_reader_model", "claude-sonnet-x")
+    await _read(content_type="application/pdf", data=b"%PDF-1.7")
+    assert calls[0]["model"] == "claude-sonnet-x"

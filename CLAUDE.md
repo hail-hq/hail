@@ -78,7 +78,7 @@ picking up this codebase: read it before making any infra-shaped change.**
 
 Internal runbooks (not published) live in `docs/operations/`:
 [number-order-failures.md](docs/operations/number-order-failures.md) (carrier error references, account restrictions, and safe reconciliation),
-[carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
+[carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules; [Document check (AI read)](docs/operations/carrier-verification.md#document-check-ai-read): model setting, 30 reads/day cap, open pricing decision),
 [number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
 [voice-rate-sync.md](docs/operations/voice-rate-sync.md) (carrier call rates in `costs/voice.json`, weekly sync),
 [call-leg-costs.md](docs/operations/call-leg-costs.md) (what each carrier charged per call leg, the `call_legs` table),

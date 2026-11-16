@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # See docs/operations/voice-llm.md.
     anthropic_model: str = ""
     anthropic_backup_model: str = ""
+    # The model that reads verification documents before submit
+    # (providers/llm/document_reader.py). Empty: ANTHROPIC_BACKUP_MODEL. Not
+    # in .env.example: the code default works. It must take thinking
+    # "disabled" and structured output. See docs/operations/carrier-verification.md.
+    document_reader_model: str = ""
     # Set: the house Anthropic model runs on Amazon Bedrock in this region,
     # signed with the AWS credentials below. Empty: Anthropic's API.
     anthropic_bedrock_region: str = ""

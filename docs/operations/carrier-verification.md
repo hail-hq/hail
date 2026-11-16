@@ -220,14 +220,28 @@ registration does not verify toll-free messaging.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
 
-## Document check
+## Document check (AI read)
 
-`POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads the files of a number verification form with an AI model before submit. The console calls it after each upload. Code: [`document_check.py`](../../core/hailhq/core/providers/verification/document_check.py) (mapping and warnings) and [`document_reader.py`](../../core/hailhq/core/providers/llm/document_reader.py) (the model call).
+`POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads the files of a number verification form with an AI model before submit. The console calls it once per uploaded file. It returns the values each file shows, by the carrier's field names, and warnings: unreadable, turned, expired, another document type, or a typed name that differs from the printed one. Hail words every warning; the model only reads. Code: [`document_check.py`](../../core/hailhq/core/providers/verification/document_check.py), [`document_reader.py`](../../core/hailhq/core/providers/llm/document_reader.py), [`document_reads.py`](../../core/hailhq/core/document_reads.py) (the cap).
 
-- It returns the values each file shows, keyed by the carrier's field names, and warnings: unreadable, upside down or on its side, expired, another document type than the one chosen, or a typed name that differs from the printed one. Hail words every warning; the model only reads.
-- Warnings never block a submit. It fails open: no model, an error, a refusal or more than 15 s in total gives `read: false` and no warning.
-- Model: `ANTHROPIC_BACKUP_MODEL` (Haiku 5.5), on Bedrock when `ANTHROPIC_BEDROCK_REGION` is set, else on Anthropic's API. Same ids and access as [voice-llm.md](voice-llm.md). With neither set, the check reads nothing.
-- The files go to the model provider for this read only. Logs hold counts and exception types, never a value, a name or the answer.
+- **Model:** `DOCUMENT_READER_MODEL`, code default `ANTHROPIC_BACKUP_MODEL` (Haiku 5.5). Not in `.env.example`: set it only to try another model. It must take thinking `disabled` and structured output. Bedrock when `ANTHROPIC_BEDROCK_REGION` is set, else Anthropic's API ([voice-llm.md](voice-llm.md)).
+- **Fails open:** no model, an error, a refusal, a PDF over 20 MB (base64) or 100 pages, or more than 15 s gives `read: false` and no warning. The customer fills the form by hand.
+- **Cap:** 30 reads per workspace per UTC day (`DAILY_DOCUMENT_READS`). A read is one file sent to the model. Past the cap a slot is `read: false` with no error and no warning; the console shows "We could not fill in the form from this file". At most about 30 cents per workspace per day (real reads cost well under 1 cent).
+- **Count:** rows in `agent_send_log` with `channel = 'document_read'` and the slot name as `recipient`. Today's usage for a workspace:
+
+  ```sql
+  SELECT count(*) FROM agent_send_log
+  WHERE organization_id = '<org id>' AND channel = 'document_read'
+    AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+  ```
+
+- **Privacy:** the files go to the model provider for this read only. Logs hold counts and exception types, never a value, a name or the answer.
+
+**Open decision: charge per read or keep free.** Reads are free to customers now; Hail pays the provider. Options:
+
+1. Charge per read from credits. Needs a price in hail-website `lib/private-rates.ts` and a usage row the rater prices.
+2. Keep free, with the daily cap (today).
+3. Free only for workspaces that hold credits; others fill the form by hand.
 
 ## Cancel rules
 

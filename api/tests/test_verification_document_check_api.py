@@ -9,6 +9,9 @@ import logging
 from unittest.mock import AsyncMock
 
 from hailhq.core.models import CarrierVerification
+from hailhq.core.providers.llm.document_reader import (
+    read_document as _real_read_document,
+)
 from hailhq.core.providers.verification import document_check
 from sqlalchemy import func, select
 
@@ -40,6 +43,9 @@ def _fake_reader(monkeypatch, answer=_ANSWER):
     calls: list[dict] = []
 
     async def read(**kwargs):
+        # As the real reader: ask the cap just before sending.
+        if kwargs.get("before_send") and not await kwargs["before_send"]():
+            return None
         calls.append(kwargs)
         return answer
 
@@ -167,3 +173,56 @@ async def test_an_upload_id_is_read_after_the_transaction_ends(
     assert calls[0]["data"] == _JPEG
     # The upload is not used up.
     assert store.fetch_raw.await_count == 1
+
+
+async def test_a_workspace_gets_a_daily_number_of_reads(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core import document_reads
+    from hailhq.core.models import AgentSendLog
+
+    monkeypatch.setattr(document_reads, "DAILY_DOCUMENT_READS", 2)
+    calls = _fake_reader(monkeypatch, {**_ANSWER, "expiry_date": "2031-01-01"})
+    org_id, _, key = org_and_key
+    for _ in range(2):
+        assert (await _post(client, key)).json()["documents"]["proof_of_identity"][
+            "read"
+        ]
+    # The third read of the day is skipped: read false, no error, no warning.
+    resp = await _post(client, key)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["documents"]["proof_of_identity"]["read"] is False
+    assert body["warnings"] == [] and body["fields"] == {}
+    assert len(calls) == 2
+    rows = (
+        await async_session.execute(
+            select(AgentSendLog.recipient).where(
+                AgentSendLog.organization_id == org_id,
+                AgentSendLog.channel == "document_read",
+            )
+        )
+    ).scalars()
+    # One row per read sent, with the slot name only.
+    assert list(rows) == ["proof_of_identity", "proof_of_identity"]
+
+
+async def test_a_read_not_sent_is_not_counted(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core.document_reads import document_reads_today
+
+    _fake_reader(monkeypatch, None)
+    org_id, _, key = org_and_key
+    # A PDF over the page limit never reaches the model.
+    pdf = b"%PDF-1.7\n" + b"<< /Type /Page >>\n" * 101
+    files = {"file.proof_of_identity": ("a.pdf", pdf, "application/pdf")}
+    monkeypatch.setattr(document_check, "read_document", _real_read_document)
+    from hailhq.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "")
+    resp = await _post(client, key, files=files)
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert await document_reads_today(async_session, org_id) == 0

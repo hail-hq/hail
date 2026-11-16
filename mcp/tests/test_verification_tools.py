@@ -2158,6 +2158,8 @@ _DOCUMENT_CHECK_OK = {
             "printed_name": {
                 "given_names": "Testa",
                 "surnames": "Example",
+                "latin_given_names": "",
+                "latin_surnames": "",
                 "business_name": "",
             },
         }

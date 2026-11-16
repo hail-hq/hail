@@ -3538,7 +3538,7 @@ def register_tools(
         type than the chosen one, or a typed name that differs from the printed one.
         Each message names the fix. A submission with warnings is still accepted.
         A file nothing was read from has ``read`` false; an unclear file also has an
-        ``unreadable`` warning.
+        ``unreadable`` warning. A workspace has 30 reads per day (one per file sent).
         Nothing is filed, saved, held or charged, and uploads stay usable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:

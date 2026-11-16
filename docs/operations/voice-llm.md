@@ -52,7 +52,7 @@ tool.
 forced tool (Haiku 5.5 does, Sonnet 5.5 does not, see Forced tools). With
 Sonnet 5.5 there and no other classifier, every check fails with HTTP 400.
 
-`ANTHROPIC_BACKUP_MODEL` also reads verification documents before submit (see [carrier-verification.md](carrier-verification.md#document-check)). A new backup model must read images and PDFs with structured output.
+`ANTHROPIC_BACKUP_MODEL` also reads verification documents before submit, unless `DOCUMENT_READER_MODEL` names another model (see [carrier-verification.md](carrier-verification.md#document-check-ai-read)). That model must read images and PDFs with structured output and take thinking `disabled`.
 
 Each classifier gets one try of at most 3 s
 (`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in `amd.py`), then the next one runs.
