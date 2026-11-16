@@ -282,6 +282,7 @@ def bind(metadata: dict[str, Any]) -> ToolSpec | None:
                         trunk_id=route["trunk_id"],
                         headers=route.get("headers"),
                         name=_spoken(label),
+                        max_seconds=route.get("max_seconds"),
                         on_answered=on_answered,
                     )
                 )

@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import time
+from decimal import Decimal
 from typing import Any
 
 import aiohttp
@@ -162,6 +163,51 @@ async def _lookup_organization_name(organization_id: str) -> str | None:
     if isinstance(name, str) and name.strip():
         return name.strip()
     return None
+
+
+# A cold read of the rate table on hail-website takes up to about 4 s.
+_QUOTE_TIMEOUT_SECONDS = 5.0
+
+
+def quotes_enabled() -> bool:
+    """True when hail-website prices calls. Self-host: False, no caps."""
+    return bool(settings.hail_base_url and settings.hail_internal_secret)
+
+
+async def quote_call_price(
+    organization_id: str, legs: list[dict[str, str]], recording: bool
+) -> tuple[Decimal, Decimal] | None:
+    """What a call with these legs costs, from hail-website's private rater:
+    ``(cents per minute, cents per call)``. Each leg is ``{direction,
+    carrier, number_e164, caller_e164}``. ``None`` on any failure (unset
+    config, timeout, non-200, bad body). Never raises."""
+    parts = _signed_body(
+        {"organization_id": organization_id, "recording": recording, "legs": legs}
+    )
+    if parts is None:
+        return None
+    body, headers = parts
+    url = join_url(settings.hail_base_url, "api/internal/voice-rates/quote")
+    try:
+        async with _get_session().post(
+            url,
+            data=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=_QUOTE_TIMEOUT_SECONDS),
+        ) as resp:
+            if resp.status != 200:
+                logger.warning("[internal_webhook] call quote returned %s", resp.status)
+                return None
+            payload = await resp.json()
+        per_minute = Decimal(str(payload["cents_per_minute"]))
+        per_call = Decimal(str(payload.get("cents_per_call") or 0))
+    except Exception:
+        logger.warning("[internal_webhook] call quote failed", exc_info=True)
+        return None
+    if not per_minute.is_finite() or per_minute <= 0 or per_call < 0:
+        logger.warning("[internal_webhook] call quote out of range: %s", payload)
+        return None
+    return per_minute, per_call
 
 
 def _fire(path: str, payload: dict[str, Any]) -> None:

@@ -235,7 +235,8 @@ class UsageEvent(Base):
     analytics primitive they can query directly.
 
     ``ref`` formats (the rater's parsing contract):
-      * voice: bare call UUID
+      * voice: bare call UUID, or ``{uuid}:recording-v1`` for a recorded
+               call (``billing.RECORDING_USAGE_REF_SUFFIX``)
       * sms:   ``sms:{uuid}:{tier}`` where tier is us/ca/row
                (rows written before the tiered rates shipped are bare
                ``sms:{uuid}``; the rater must treat those as ``us``)
@@ -266,6 +267,13 @@ class UsageEvent(Base):
         CheckConstraint(
             "units >= 0",
             name="usage_events_units_nonneg_check",
+        ),
+        # A call's usage row, for the balance hold check (call_allowance).
+        Index(
+            "usage_events_voice_ref_idx",
+            "organization_id",
+            text("split_part(ref, ':', 1)"),
+            postgresql_where=text("channel = 'voice'"),
         ),
     )
 
@@ -868,6 +876,41 @@ class Call(Base):
     def recording_status(self) -> str:
         value = (self.metadata_ or {}).get("recording_status")
         return value if isinstance(value, str) else "disabled"
+
+
+class CallBalanceHold(Base):
+    """Money a live call sets aside from the balance (migration 0079). One
+    row per call; the amount and the end time only grow. See
+    hailhq.core.call_allowance."""
+
+    __tablename__ = "call_balance_holds"
+
+    call_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), primary_key=True
+    )
+    cents: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
+    hold_until: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # The highest prices held for the call: once it ends, the hold counts
+    # its real minutes at these (hailhq.core.call_allowance). NULL: a line
+    # ran at a price Hail does not know, so the full hold counts.
+    cents_per_minute: Mapped[Decimal | None] = mapped_column(Numeric)
+    cents_per_call: Mapped[Decimal | None] = mapped_column(Numeric)
+    # Handover dials approved for the call; each may bill the second line.
+    dials: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
+        CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
+        CheckConstraint(
+            "cents_per_minute >= 0 AND cents_per_call >= 0"
+            " AND (cents_per_minute IS NULL) = (cents_per_call IS NULL)",
+            name="call_balance_holds_prices_check",
+        ),
+        Index("call_balance_holds_until_idx", "hold_until"),
+    )
 
 
 class CallEvent(Base):

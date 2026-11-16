@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 # pool.CALL_META_FROM_POOL.
 CALL_META_BILLED = "billed"
 
+# A voice usage_events.ref is the call id, plus this for a recorded call
+# (the rater in hail-website parses both).
+RECORDING_USAGE_REF_SUFFIX = ":recording-v1"
+
 # Reason stamped when a forward is skipped because the org has no credit. The
 # ingest check and the forward worker's send-time check both write it.
 INSUFFICIENT_FUNDS = "insufficient_funds"

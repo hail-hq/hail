@@ -388,7 +388,11 @@ paths:
               schema:
                 type: integer
         "402":
-          description: insufficient credits; top up at https://hail.so/console/billing
+          description:
+            insufficient credits; top up at https://hail.so/console/billing.
+            Also returned when the credit left, less what live calls have set aside,
+            pays for less than one minute to this destination. A call's time limit
+            is cut to the minutes the credit pays for.
         "422":
           description: Validation Error
           content:
