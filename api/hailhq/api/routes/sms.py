@@ -79,6 +79,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     claim_trial_send,
     trial_hint_applies,
+    trial_refusal_reason,
 )
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
@@ -441,7 +442,16 @@ async def create_sms(
         )
         if from_number is None:
             if body.from_ is not None:
-                msg = (
+                # ``from`` is the trial number and the claim was refused:
+                # name why, not that the number belongs to someone else.
+                reason = (
+                    await trial_refusal_reason(
+                        db, principal.organization_id, to=body.to
+                    )
+                    if trial_from
+                    else None
+                )
+                msg = reason or (
                     f"phone number {body.from_} is not registered to this "
                     "organization, is not active, or lacks the sms capability"
                 )

@@ -250,6 +250,42 @@ async def test_from_equal_to_trial_number_uses_trial(
     assert await trial_texts_used(async_session, org_id) == 1
 
 
+@pytest.mark.parametrize(
+    "case,msg",
+    [
+        ("cap_used_25", "No trial texts left."),
+        ("not_verified_phone", "Trial texts go only to your verified trial phone."),
+        ("no_trial_phone", "Trial texts go only to your verified trial phone."),
+        ("feature_off", "Trial texting is not available."),
+    ],
+)
+async def test_from_trial_number_refusal_names_the_reason(
+    case, msg, client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """``from`` is the trial number and the claim is refused: the 422 says
+    why, not that the number belongs to another workspace."""
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    payload = _payload(**{"from": TRIAL_E164})
+    if case != "no_trial_phone":
+        await verify_trial_phone(async_session, org_id)
+    if case == "cap_used_25":
+        await seed_trial_texts(async_session, org_id, 25)
+    elif case == "not_verified_phone":
+        payload = _payload(to=OTHER_PHONE, **{"from": TRIAL_E164})
+    elif case == "feature_off":
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    before = await _sms_count(async_session, org_id)
+
+    resp = await client.post("/sms", json=payload, headers=_auth(plaintext))
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "from"]
+    assert _msg(resp) == msg
+    sms_mock.send_sms.assert_not_awaited()
+    assert await _sms_count(async_session, org_id) == before
+
+
 async def test_own_unregistered_number_omits_from_for_trial(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
