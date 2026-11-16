@@ -292,7 +292,7 @@ async def test_an_expired_document_is_flagged() -> None:
     out = await _check(reader=_reader(_answer(expiry_date="2024-01-15")))
     assert _kinds(out) == ["expired"]
     assert out.warnings[0].field == "proof_of_identity"
-    assert "2024-01-15" in out.warnings[0].message
+    assert "expired on 15 January 2024." in out.warnings[0].message
 
 
 async def test_an_upside_down_document_is_flagged() -> None:

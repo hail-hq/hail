@@ -376,7 +376,8 @@ def _document_warnings(
                 field=slot,
                 kind="expired",
                 message=(
-                    f"This document expired on {read.expiry.isoformat()}. "
+                    f"This document expired on {read.expiry.day} "
+                    f"{read.expiry:%B %Y}. "
                     "Upload one that is still valid."
                 ),
             )
