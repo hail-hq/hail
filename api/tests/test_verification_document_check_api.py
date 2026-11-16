@@ -5,6 +5,7 @@ warnings, file and save nothing. The model is a fake; names are made up."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import uuid
@@ -12,19 +13,31 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.api import verification_files
+from hailhq.api.deps import get_s3_mail_optional
+from hailhq.api.main import app
 from hailhq.api.routes import verifications as routes
 from hailhq.api.verification_files import (
     MAX_PARALLEL_FETCHES,
     CollectedFiles,
     fetch_files,
 )
+from hailhq.core import document_reads
+from hailhq.core.config import settings
 from hailhq.core.document_reads import document_reads_today
-from hailhq.core.models import CarrierVerification
+from hailhq.core.models import AgentSendLog, CarrierVerification
+from hailhq.core.providers.llm import document_reader
 from hailhq.core.providers.llm.document_reader import (
     read_document as _real_read_document,
 )
-from hailhq.core.providers.verification import document_check
-from hailhq.core.providers.verification.base import DocumentOption
+from hailhq.core.providers.verification import (
+    DocumentOption,
+    DocumentSlot,
+    FieldSpec,
+    Requirements,
+    document_check,
+)
+from PIL import Image
 from sqlalchemy import func, select
 
 from . import test_verifications_api as base
@@ -34,6 +47,7 @@ from .test_verifications_api import (  # noqa: F401  (fixtures)
     carrier,
     pinned_catalog,
 )
+from .test_verifications_uploads import _JPEG, _upload
 
 _ANSWER = {
     "readable": True,
@@ -52,7 +66,6 @@ _ANSWER = {
 
 
 def _fake_reader(monkeypatch, answer=_ANSWER):
-    from hailhq.api.routes import verifications as routes
 
     monkeypatch.setattr(routes, "document_reader_configured", lambda: True)
     calls: list[dict] = []
@@ -166,10 +179,6 @@ async def test_requires_auth(client) -> None:
 async def test_an_upload_id_is_read_after_the_transaction_ends(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.api.main import app
-
-    from .test_verifications_uploads import _JPEG, _upload
 
     calls = _fake_reader(monkeypatch)
     store = AsyncMock()
@@ -195,8 +204,6 @@ async def test_an_upload_id_is_read_after_the_transaction_ends(
 async def test_a_workspace_gets_a_daily_number_of_reads(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core import document_reads
-    from hailhq.core.models import AgentSendLog
 
     monkeypatch.setattr(document_reads, "DAILY_DOCUMENT_READS", 2)
     calls = _fake_reader(monkeypatch, {**_ANSWER, "expiry_date": "2031-01-01"})
@@ -229,7 +236,6 @@ async def test_a_workspace_gets_a_daily_number_of_reads(
 async def test_a_read_not_sent_is_not_counted(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core.document_reads import document_reads_today
 
     _fake_reader(monkeypatch, None)
     org_id, _, key = org_and_key
@@ -237,7 +243,6 @@ async def test_a_read_not_sent_is_not_counted(
     pdf = b"%PDF-1.7\n" + b"<< /Type /Page >>\n" * 101
     files = {"file.proof_of_identity": ("a.pdf", pdf, "application/pdf")}
     monkeypatch.setattr(document_check, "read_document", _real_read_document)
-    from hailhq.core.config import settings
 
     monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
     monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
@@ -251,13 +256,6 @@ async def test_over_the_cap_no_upload_is_fetched(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
     """The cap is checked before any file is fetched or decoded."""
-    from unittest.mock import AsyncMock
-
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.api.main import app
-    from hailhq.core import document_reads
-
-    from .test_verifications_uploads import _JPEG, _upload
 
     monkeypatch.setattr(document_reads, "DAILY_DOCUMENT_READS", 0)
     calls = _fake_reader(monkeypatch)
@@ -284,7 +282,6 @@ async def test_over_the_cap_no_upload_is_fetched(
 async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-    from hailhq.api import verification_files
 
     async def boom(*_a, **_k):
         raise AssertionError("no file may be read")
@@ -303,10 +300,6 @@ async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
 def _real_reader(monkeypatch, error: Exception | None = None):
     """The real reader with a fake model client: it decodes in the child
     process, then sends to the fake model."""
-    from types import SimpleNamespace
-
-    from hailhq.core.config import settings
-    from hailhq.core.providers.llm import document_reader
 
     monkeypatch.setattr(document_check, "read_document", _real_read_document)
     monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
@@ -329,9 +322,6 @@ def _real_reader(monkeypatch, error: Exception | None = None):
 
 
 def _png_file() -> dict:
-    import io
-
-    from PIL import Image
 
     out = io.BytesIO()
     Image.new("RGB", (60, 40), "white").save(out, "PNG")
@@ -341,7 +331,6 @@ def _png_file() -> dict:
 async def test_a_read_whose_file_cannot_be_decoded_is_given_back(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core.document_reads import document_reads_today
 
     sent = _real_reader(monkeypatch)
     org_id, _, key = org_and_key
@@ -355,7 +344,6 @@ async def test_a_read_whose_file_cannot_be_decoded_is_given_back(
 async def test_a_read_sent_to_the_model_counts_even_when_the_call_fails(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core.document_reads import document_reads_today
 
     sent = _real_reader(monkeypatch, error=TimeoutError())
     org_id, _, key = org_and_key
@@ -371,8 +359,6 @@ async def test_a_read_sent_to_the_model_counts_even_when_the_call_fails(
 async def test_without_a_reader_nothing_is_counted_or_fetched(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.api.routes import verifications as routes
-    from hailhq.core.document_reads import document_reads_today
 
     monkeypatch.setattr(routes, "document_reader_configured", lambda: False)
     org_id, _, key = org_and_key
@@ -384,19 +370,6 @@ async def test_without_a_reader_nothing_is_counted_or_fetched(
 async def test_one_upload_in_two_slots_is_read_once_and_counted_once(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from unittest.mock import AsyncMock
-
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.api.main import app
-    from hailhq.core.document_reads import document_reads_today
-    from hailhq.core.providers.verification import (
-        DocumentOption,
-        DocumentSlot,
-        FieldSpec,
-        Requirements,
-    )
-
-    from .test_verifications_uploads import _JPEG, _upload
 
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
@@ -444,7 +417,6 @@ async def test_one_upload_in_two_slots_is_read_once_and_counted_once(
 async def test_a_failed_give_back_never_hides_the_answer(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-    from hailhq.api.routes import verifications as routes
 
     _fake_reader(monkeypatch, None)
 
@@ -460,18 +432,6 @@ async def test_a_failed_give_back_never_hides_the_answer(
 async def test_a_failed_upload_fetch_leaves_the_file_parts_read(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from unittest.mock import AsyncMock
-
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.api.main import app
-    from hailhq.core.document_reads import document_reads_today
-    from hailhq.core.providers.verification import (
-        DocumentOption,
-        DocumentSlot,
-        Requirements,
-    )
-
-    from .test_verifications_uploads import _upload
 
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
@@ -530,7 +490,6 @@ async def test_wrong_json_types_are_422_and_null_is_empty(
 async def test_a_failed_reservation_reads_nothing_and_still_answers(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-    from hailhq.api.routes import verifications as routes
 
     calls = _fake_reader(monkeypatch)
 
@@ -550,10 +509,6 @@ async def test_a_failed_reservation_reads_nothing_and_still_answers(
 async def test_an_upload_without_a_bucket_is_read_false(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.api.deps import get_s3_mail_optional
-    from hailhq.api.main import app
-
-    from .test_verifications_uploads import _upload
 
     calls = _fake_reader(monkeypatch)
     app.dependency_overrides[get_s3_mail_optional] = lambda: None
@@ -576,12 +531,6 @@ async def test_an_upload_without_a_bucket_is_read_false(
 async def test_a_covering_file_is_sent_once_and_fills_its_slots(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core.document_reads import document_reads_today
-    from hailhq.core.providers.verification import (
-        DocumentOption,
-        DocumentSlot,
-        Requirements,
-    )
 
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
