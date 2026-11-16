@@ -771,6 +771,10 @@ def _application_problems(
         "CANCEL",
         "END",
         "QUIT",
+        "REVOKE",
+        "OPTOUT",
+        "OPT OUT",
+        "OPT-OUT",
         "HELP",
         "INFO",
     }:

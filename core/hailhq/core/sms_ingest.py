@@ -12,6 +12,8 @@ domain-suffix match.
 
 from __future__ import annotations
 
+import re
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -50,8 +52,22 @@ _SMS_SID_UNIQUE = "sms_provider_message_sid_key"
 # ourselves rather than relying solely on Twilio's ``OptOutType`` param,
 # which is only populated when the number sits behind a Messaging Service
 # with Advanced Opt-Out — a config Hail does not require. ``OptOutType``
-# is honored as corroboration when present.
-_STOP_KEYWORDS = frozenset({"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"})
+# is honored as corroboration when present. REVOKE and OPT OUT follow the
+# FCC rule (2025) that any reasonable opt-out word revokes consent.
+_STOP_KEYWORDS = frozenset(
+    {
+        "STOP",
+        "STOPALL",
+        "UNSUBSCRIBE",
+        "CANCEL",
+        "END",
+        "QUIT",
+        "REVOKE",
+        "OPTOUT",
+        "OPT OUT",
+        "OPT-OUT",
+    }
+)
 _START_KEYWORDS = frozenset({"START", "YES", "UNSTOP"})
 _HELP_KEYWORDS = frozenset({"HELP", "INFO"})
 
@@ -65,7 +81,9 @@ class IngestResult:
 def _opt_out_action(body: str, opt_out_type: str | None) -> str | None:
     """Return 'STOP', 'START', 'HELP', or None from the body keyword (with
     Twilio's OptOutType as corroboration)."""
-    keyword = body.strip().upper()
+    # "Stop.", "STOP!" and " stop  " all count: drop punctuation and emoji at
+    # the ends and squeeze inner spaces. Words inside a sentence do not count.
+    keyword = " ".join(re.sub(r"^\W+|\W+$", "", body).upper().split())
     if opt_out_type == "STOP" or keyword in _STOP_KEYWORDS:
         return "STOP"
     if opt_out_type == "START" or keyword in _START_KEYWORDS:
