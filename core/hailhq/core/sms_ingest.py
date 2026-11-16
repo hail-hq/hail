@@ -428,6 +428,9 @@ async def ingest_inbound_sms(
             "from": from_e164,
             "to": to_e164,
             "body": body,
+            # STOP, START or HELP when Hail handled the text as that keyword,
+            # so integrations that answer texts can skip it. Otherwise null.
+            "compliance_keyword": action,
         },
     )
 

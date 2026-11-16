@@ -485,3 +485,54 @@ async def test_browser_quota_still_acknowledges_stop_start_help_once(
     )
     assert sum(bool(row.metadata_.get("browser_compliance")) for row in rows) == 3
     assert len(rows) == 6  # three normal texts plus three deduped control messages
+
+
+async def test_sms_received_payload_names_the_compliance_keyword(async_session) -> None:
+    """STOP, HELP and a START from an opted-out sender carry the keyword.
+    An ordinary text, and a YES from a sender who never opted out, carry null."""
+    org_id = uuid.uuid4()
+    await _seed_number(async_session, org_id)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/hook",
+            secret_encrypted="fake",
+            status="active",
+            event_types=["sms.received"],
+        )
+    )
+    await async_session.commit()
+
+    texts = [
+        ("+14155551234", "hello", None),
+        ("+14155551235", " yes ", None),
+        ("+14155551234", "help", "HELP"),
+        ("+14155551234", "Stop", "STOP"),
+        ("+14155551234", "START", "START"),
+    ]
+    for index, (sender, body, _) in enumerate(texts):
+        await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164=sender,
+            to_e164="+14155559999",
+            body=body,
+            provider_message_sid=f"SM_keyword_{index}",
+            opt_out_type=None,
+        )
+        await async_session.commit()
+
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery)
+                .where(WebhookDelivery.event_type == "sms.received")
+                .order_by(WebhookDelivery.created_at, WebhookDelivery.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_body = {d.payload["data"]["body"]: d.payload["data"] for d in deliveries}
+    for _, body, keyword in texts:
+        assert by_body[body]["compliance_keyword"] == keyword

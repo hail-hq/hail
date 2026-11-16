@@ -208,10 +208,15 @@ shape comes from the event type. Inbound events use [`build_event_data`](https:/
     "id": "sms-uuid",
     "from": "+14155551234",
     "to": "+14155559999",
-    "body": "hello back"
+    "body": "hello back",
+    "compliance_keyword": null
   }
 }
 ```
+
+`compliance_keyword` is `"STOP"`, `"START"` or `"HELP"` when Hail handled the text
+as that keyword, and `null` otherwise. `START` and `YES` count only from a
+sender who opted out. Skip these texts in a bot, so it does not answer them too.
 
 `raw_url` and each attachment `url` are Hail API endpoints that 302-redirect to a
 presigned S3 URL on access. `email.received.suppressed` carries a trimmed `data`
